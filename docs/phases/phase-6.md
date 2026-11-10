@@ -2,7 +2,7 @@
 
 **Objetivo:** operar un viaje vendido sin hojas de cálculo: costes, cupos contratados, cambios, cancelaciones y resultado.
 
-**Referencia:** `docs/modules.md`, módulos 8, 9 y 11; `docs/architecture.md`, sección "Modelo de dominio" (Supplier, Allotment, CostItem, CancellationPolicy, BookingAmendment).
+**Referencia:** `docs/modules.md`, módulos 8, 9 y 11; `docs/plans/phase-0-architecture.md`, §1.6 (bolsas de inventario, que aquí reciben contrato y fecha de liberación) y §1.12.
 
 ## Tareas
 

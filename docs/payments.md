@@ -8,6 +8,8 @@ Es el módulo más delicado junto con el motor de precios. Quiero una capa de pa
 
 **Catálogo de pasarelas: todas instaladas, solo una o dos encendidas**
 
+> Cambiado el 2026-11-10 (`docs/plans/phase-0-architecture.md`, §3.5): solo se escriben adaptadores para pasarelas que acepten la cuenta. El resto aparece en el panel como fichas `planned`.
+
 Quiero que el backend tenga un adaptador para todas las pasarelas relevantes que operan en Australia y para las globales, listas para configurar desde el panel. Al lanzar solo estarán activas dos: **Stripe** (tarjeta, Apple Pay y Google Pay) y **transferencia bancaria con PayID** como método manual. Todas las demás nacen instaladas y apagadas.
 
 | Grupo | Pasarelas |

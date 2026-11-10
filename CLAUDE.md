@@ -12,7 +12,8 @@ Agencia de viajes para corredores, con base en Australia. Monorepo: `apps/web` (
 Lee solo lo que la tarea necesite. No abras los documentos de referencia enteros.
 
 - `docs/STATE.md`: estado actual y siguiente tarea. Léelo al empezar cada sesión.
-- `docs/phases/phase-N.md`: tareas y criterios de aceptación de la fase en curso.
+- `docs/phases/phase-N.md`: tareas y criterios de aceptación de la fase en curso. El orden de ejecución está en `docs/phases/README.md`.
+- `docs/plans/phase-0-architecture.md`: modelo de datos y estructura aprobados. Lee solo la sección que cite la tarea.
 - `docs/orchestration.md`: cómo trabajamos, qué modelo y qué subagente usar.
 - `docs/decisions.md`: decisiones ya tomadas. No las reabras sin motivo.
 - Referencia, por secciones: `docs/brief.md`, `docs/architecture.md`, `docs/payments.md`, `docs/modules.md`, `docs/web.md`.

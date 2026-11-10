@@ -1,6 +1,6 @@
 # Fase 0 · Plan de arquitectura y modelo de datos (tarea 0.1)
 
-> **Estado: propuesta pendiente de aprobación de Oscar.** No hay nada implementado. Cuando lo apruebes, con los cambios que indiques, pasaré las decisiones a `docs/decisions.md` y ajustaré los archivos de fase.
+> **Estado: aprobado por Oscar el 2026-11-10**, con las respuestas de §5 y el orden de §4.2. Las decisiones están en `docs/decisions.md`. Este documento es el modelo de datos vigente.
 >
 > Fecha: 2026-11-10. Los nombres de entidades, campos y enumerados están en inglés australiano, como irán en el código.
 
@@ -13,10 +13,11 @@
    - Los cupos son bolsas de inventario compartidas desde la fase 1.
    - El libro de pagos es de partida doble.
 3. **Las garantías críticas se aplican en la base de datos, no solo en el código.** Los cupos no pueden bajar de cero. Las revisiones de reserva, el libro de pagos y la auditoría no se pueden editar ni borrar. Solo puede haber una versión de precio vigente a la vez.
-4. **Propongo reordenar las fases** (§4.2) con tres objetivos:
-   - Captar demanda pronto, con las alertas en la fase 1.
-   - Hacer la seguridad, las copias de seguridad y el despliegue antes de vender.
-   - Dejar para después del lanzamiento lo que no hace falta para el primer viaje.
+4. **Orden de fases aprobado** (§4.2):
+   - La fase 4 se parte en dos alrededor de la fase 5.
+   - Las alertas suben a la fase 1.
+   - La fase 9 pasa a ser bajo demanda.
+   - Hay un único lanzamiento, al final, con todo construido.
 5. **Propongo reducir el catálogo de pasarelas** a las que de verdad puedas llegar a usar. Cuarenta adaptadores que no podrás verificar son un riesgo, no una protección.
 
 ---
@@ -97,7 +98,7 @@
 | **EventConsumption** | `consumer`, `eventId`, `processedAt` | Único `(consumer, eventId)`: cada suscriptor procesa cada evento una sola vez. |
 | *Trabajos* | Tablas propias de pg-boss en el esquema `pgboss` | Fuera de Prisma. |
 | **FeatureFlag** | `key`, `enabled`, `module`, `description`, `rules?` | Un flag por módulo. Un módulo apagado devuelve 404 en sus rutas e ignora sus eventos. |
-| **Setting** | `key`, `value jsonb`, tipado en código | `businessLegalName`, `abn`, `gstRegistered`, `businessTimeZone`, `defaultCurrency`, `supportEmail`, `maintenanceMode`, plazos de retención… |
+| **Setting** | `key`, `value jsonb`, tipado en código | `businessLegalName`, `abn`, `gstRegistered`, `businessTimeZone`, `defaultCurrency`, `supportEmail`, `maintenanceMode`, plazos de retención de datos, `defaultRequestHoldHours` y `defaultDepositWindowHours`… |
 | **FileObject** | `storageKey`, `mimeType`, `sizeBytes`, `sha256`, `originalName`, `visibility` (`private`, `public`), `purpose`, `uploadedById` | Los archivos privados se sirven con URL firmada de corta duración. |
 | **Attachment** | `fileId`, `entityType`, `entityId`, `label`, `visibleToCustomer` | — |
 | **Note** | `entityType`, `entityId`, `body`, `authorId`, `pinned` | Se trata como dato personal: el borrado de un cliente borra las notas de su ficha y de sus reservas. |
@@ -113,7 +114,7 @@
 
 | Entidad | Campos principales | Reglas |
 |---|---|---|
-| **Race** | `name`, `countryCode` (ISO 3166-1), `region`, `city`, `timeZone`, `raceType` (`road`, `trail`, `ultra`, `track`, `multisport`, `other`), `typicalMonth`, `websiteUrl`, `guide` (traducible: `course`, `climate`, `howToGetEntry`, `travelTips`), `heroMediaId?`, `externalSource?`, `externalId?`, `status` (`active`, `archived`), `isDemo`, `customFields` | Único `(externalSource, externalId)`. El continente sale del país mediante una tabla estática en código. La guía de carrera es un campo estructurado de Race; las guías editoriales de la fase 8 son otra cosa, así que no hay que migrar nada. |
+| **Race** | `name`, `countryCode` (ISO 3166-1), `region`, `city`, `timeZone`, `raceType` (`road`, `trail`, `ultra`, `track`, `multisport`, `other`), `typicalMonth`, `requestHoldHours` (cuánto retiene plaza una solicitud sin revisar), `depositWindowHours` (cuánto tiene el cliente para pagar el depósito tras la aprobación), `websiteUrl`, `guide` (traducible: `course`, `climate`, `howToGetEntry`, `travelTips`), `heroMediaId?`, `externalSource?`, `externalId?`, `status` (`active`, `archived`), `isDemo`, `customFields` | Los dos plazos de retención los fija cada carrera (respuesta 1). Al crear una carrera se rellenan con los valores por defecto de Setting. Único `(externalSource, externalId)`. El continente sale del país mediante una tabla estática en código. La guía de carrera es un campo estructurado de Race; las guías editoriales de la fase 8 son otra cosa, así que no hay que migrar nada. |
 | **RaceDistance** | `raceId`, `category` (`5k`, `10k`, `half_marathon`, `marathon`, `ultra`, `other`), `distanceMetres`, `label` | Para filtrar por distancia aunque no haya edición abierta. |
 | **RaceEdition** | `raceId`, `year`, `startDate`, `endDate`, `dateStatus` (`confirmed`, `provisional`, `to_be_confirmed`), `status` (`planned`, `on_sale`, `completed`, `cancelled`, `postponed`), `isDemo`, `customFields` | La web muestra de forma visible cualquier `dateStatus` distinto de `confirmed`. |
 | **EditionEvent** | `editionId`, `raceDistanceId`, `date`, `startTime?`, `entryNameChangeAllowed`, `entryNameChangeDeadline?` | Cada salida concreta de una edición (el maratón del domingo, el 10K del sábado). Los dorsales son de un evento, no del paquete. |
@@ -573,28 +574,47 @@ Si prefieres el framework, el modelo de §1.4 se adapta.
 | R15 | **Prisma no expresa** CHECK, triggers, índices parciales ni restricciones de exclusión. | Una migración futura podría perderlos sin que nadie lo note. | Escribirlos en SQL dentro de las migraciones, con una prueba que verifica que existen (§1.2). Comprobar en 0.2 que `migrate dev` no los marca como deriva. |
 | R16 | **Minutos de CI.** | Los repositorios privados tienen minutos limitados en GitHub Actions, y una batería de extremo a extremo crece rápido. | Pocos recorridos largos en Playwright, y en CI solo para cambios que tocan la web o la API. |
 
-### 4.2 Orden que propongo
+**Tras tu respuesta del 2026-11-10** (un único lanzamiento al final):
+- R1 se resuelve dejando la preparación del lanzamiento al final de la fase 8.
+- El lanzamiento temprano de R3 se descarta.
+- La fase 7 de R10 ya no puede esperar a operar un viaje real.
 
-| Bloque | Contenido | Cambio respecto al plan actual |
+### 4.2 Orden aprobado
+
+Aprobado el 2026-11-10, con un cambio tuyo: **un único lanzamiento al final, con todo construido**. Eso tiene tres consecuencias:
+
+- **La preparación del lanzamiento vuelve al final de la fase 8** (8.3, 8.5, 8.6 y 8.7). La revisión de seguridad tiene que cubrir todo el código; hecha después de la fase 5, dejaría fuera las fases 4B, 6, 7 y 8.
+- **La fase 7 se hace antes que la 8.** El único motivo para ponerla detrás era esperar a operar un viaje real, y ahora no habrá ninguno antes del lanzamiento. Por eso las fases 7 y 8 quedan en su orden numérico.
+- **Las alertas siguen en la fase 1**, como aprobaste, aunque ya no darán datos de demanda hasta el lanzamiento.
+
+| Orden | Bloque | Contenido |
 |---|---|---|
-| **F0** | 0.1 → 0.2 → **0.7** → 0.3a → 0.3b → 0.4 (+ plantillas) → 0.5a → 0.5b → 0.6 | Investigación antes. Tareas partidas. Base de plantillas y de campos personalizados. |
-| **F1** | Catálogo e inventario en bolsas, estructura de precios, web, SEO, datos demo, **alertas de apertura**, política de privacidad provisional | Las alertas suben desde la 5.3. Precio desde 1.1. |
-| *Opcional* | **Lanzamiento temprano de catálogo y alertas** (despliegas tú) | Nuevo |
-| **F2** | Como está, con la política de cancelación en la revisión de la reserva | — |
-| **F3** | Como está, con ProviderAccount desde el principio y un editor mínimo de condiciones | — |
-| **F4A** | 4.1 cuentas de pasarela, 4.5 reembolsos totales y parciales, 4.6 informe de dinero de clientes y recibos | Partida |
-| **F5** | Como está, sin 5.3 (ya hecha en la F1) | — |
-| **F5L** | **Preparación del lanzamiento**: 8.3 accesibilidad y rendimiento, 8.5 revisión de seguridad, 8.6 copias y restauración, 8.7 guía de despliegue | Sube desde la F8 |
-| | **Lanzamiento** | |
-| **F4B** | 4.2 enrutado avanzado, 4.3 PayPal, 4.4 segunda pasarela de tarjeta, disputas con paquete de pruebas, conciliación automática | Después del lanzamiento |
-| **F6** | Como está | — |
-| **F8** | 8.1 gestor de contenido, 8.2 internacionalización completa, 8.4 claves de API y webhooks salientes | Lo que queda |
-| **F7** | Después de operar al menos un viaje, con el alcance recortado (R10) | Baja |
-| **F9** | Bajo demanda, un adaptador cuando una pasarela te acepte | Deja de ser fase |
+| 1 | F0 | 0.1 → 0.2 → 0.7 → 0.3a → 0.3b → 0.4 → 0.5a → 0.5b → 0.6 |
+| 2 | F1 | Catálogo con inventario en bolsas, estructura de precios, web, SEO, datos demo y alertas de apertura (1.6, antes 5.3) |
+| 3 | F2 | Precios, constructor y reservas. Las solicitudes retienen plaza con plazos por carrera |
+| 4 | F3 | Pagos, núcleo |
+| 5 | F4A | 4.1 cuentas de pasarela, 4.5a reembolsos, 4.6a informe de dinero de clientes y recibos |
+| 6 | F5 | Clientes, documentos y privacidad (sin 5.3) |
+| 7 | F4B | 4.2 enrutado, 4.3 PayPal, 4.4 segunda pasarela de tarjeta, 4.5b disputas, 4.6b conciliación |
+| 8 | F6 | Proveedores, cambios y finanzas |
+| 9 | F7 | Operaciones, automatizaciones e informes |
+| 10 | F8 | Contenido, internacionalización e integraciones; al final, la preparación del lanzamiento |
+| — | **Lanzamiento** | Único, con todo. Lo hace Oscar |
+| — | F9 | Bajo demanda: un adaptador cuando una pasarela acepte la cuenta |
 
 ---
 
 ## 5. Preguntas
+
+### Respuestas (2026-11-10)
+
+- **1.** Las solicitudes retienen plaza. El tiempo lo fija cada carrera, con dos plazos en Race: retención mientras la revisas y plazo para pagar el depósito tras aprobarla.
+- **10.** Orden aprobado, con un único lanzamiento al final que incluye todo (§4.2).
+- **11.** Se da por aprobada con el orden: la fase 9 pasa a ser bajo demanda y el resto del catálogo de pasarelas son fichas `planned`.
+- **15.** Dependencias aprobadas.
+- **2–9, 12–14.** Sin respuesta: se aplica lo propuesto por defecto en cada una. Se puede cambiar antes de la tarea que bloquea. La 8 (cuándo es margen el dinero de un cliente) conviene confirmarla con tu contable antes de 3.1.
+
+### Preguntas originales
 
 Junto a cada pregunta va lo que haré si no me dices otra cosa y qué tarea bloquea.
 
@@ -650,9 +670,9 @@ No propongo librería de dinero: un tipo `Money` propio sobre `bigint` son unas 
 
 ---
 
-## 7. Qué haré cuando lo apruebes
+## 7. Tras la aprobación (hecho el 2026-11-10)
 
-1. Añadiré las decisiones aprobadas a `docs/decisions.md`, cada una en su línea.
-2. Reordenaré y partiré las tareas en `docs/phases/` según lo que apruebes de §4.
-3. Añadiré a la referencia de `docs/architecture.md` una nota de que el modelo de dominio vigente es este documento.
-4. Con eso, la tarea 0.1 queda cerrada y la siguiente es 0.2.
+- Decisiones añadidas a `docs/decisions.md`.
+- Fases reordenadas y partidas en `docs/phases/`. El orden de ejecución está en `docs/phases/README.md`.
+- Nota en `docs/architecture.md` y `docs/payments.md` que remite a este documento.
+- La tarea 0.1 queda cerrada. La siguiente es la 0.2.

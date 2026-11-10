@@ -2,7 +2,7 @@
 
 **Objetivo:** cobrar depósito y saldo en modo de pruebas con Stripe y con transferencia por PayID, sobre un libro de pagos fiable.
 
-**Referencia:** `docs/payments.md`, secciones "Requisitos" y "Cómo llegar a todas"; `docs/research/payment-providers.md`; `.claude/rules/payments.md`.
+**Referencia:** `docs/payments.md`, secciones "Requisitos" y "Cómo llegar a todas"; `docs/plans/phase-0-architecture.md`, §1.9, §1.10 y §3.4; `docs/research/payment-providers.md`; `.claude/rules/payments.md`.
 
 ## Tareas
 
@@ -10,9 +10,9 @@
 |---|---|---|---|
 | 3.1 | Diseño de la capa de pagos: interfaz `PaymentProvider`, libro de pagos, plan de pagos, enrutado, estados de adaptador. Sin código. Plan en `docs/plans/phase-3-payments.md`. | Arquitectura | Opus, esfuerzo alto |
 | 3.2 | Libro de pagos inmutable, claves de idempotencia y plan de depósito y saldo con fechas límite. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
-| 3.3 | Adaptador de Stripe en sandbox: cobro, confirmación, reembolso y webhooks firmados e idempotentes. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
+| 3.3 | Adaptador de Stripe en sandbox: cobro, confirmación, reembolso y webhooks firmados e idempotentes. La cuenta de pasarela ya vive en la base de datos (cargada desde variables de entorno), con su propia URL de webhook. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 | 3.4 | Método manual: transferencia con PayID, referencia única y confirmación manual en el panel. | Medio | `opusplan` |
-| 3.5 | Checkout en la web: métodos activos por país, aceptación de condiciones con versión y fecha. | Medio | `opusplan` |
+| 3.5 | Checkout en la web: métodos activos por país, aceptación de condiciones con versión y fecha, y política de cancelación visible antes de pagar. Editor mínimo de versiones de condiciones en el panel. | Medio | `opusplan` |
 | 3.6 | Batería de pruebas de contrato para adaptadores y simulador de pasarela para CI. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 
 ## Criterios de aceptación

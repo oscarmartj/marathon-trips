@@ -2,6 +2,8 @@
 
 **Objetivo:** tener disponibles en el panel el resto de pasarelas australianas y globales, por la vía decidida en la fase 0.
 
+> **Bajo demanda (decidido el 2026-11-10).** No es una fase del plan. Se escribe un adaptador cuando una pasarela acepta la cuenta, con `docs/adding-a-payment-adapter.md`. Mientras tanto, el resto del catálogo aparece en el panel como fichas `planned`.
+
 **Referencia:** `docs/payments.md`, sección "Catálogo de pasarelas"; `docs/research/payment-providers.md`; `docs/adding-a-payment-adapter.md`.
 
 Antes de empezar, actualiza la investigación de proveedores: las condiciones y las API cambian.

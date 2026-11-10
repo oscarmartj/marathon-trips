@@ -50,6 +50,8 @@ Si alguna de estas piezas existe ya como librería madura y mantenida, úsala en
 
 ## Modelo de dominio (punto de partida, mejóralo)
 
+> El modelo vigente es `docs/plans/phase-0-architecture.md`, §1, aprobado el 2026-11-10. Esta lista se conserva como punto de partida.
+
 - **Race**: nombre, slug, país, ciudad, distancias, tipo (ruta, trail, ultra), mes habitual. Incluye `externalSource` y `externalId` para poder importar carreras desde un catálogo externo más adelante.
 - **RaceEdition**: año, fecha, indicador de fecha confirmada o provisional, estado.
 - **Package**: pertenece a una edición. Tipo (`with_entry`, `own_entry` para quien ya tiene dorsal, `supporter` para acompañantes), noches, fechas de entrada y salida, incluye y no incluye, cupo de dorsales y si ese cupo está confirmado por la carrera, importe del depósito y fecha límite del saldo.
