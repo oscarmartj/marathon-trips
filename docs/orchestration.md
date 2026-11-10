@@ -16,7 +16,7 @@ El objetivo es doble: que cada tarea salga bien a la primera y que no se pague p
 | Riesgo de la tarea | Ejemplos | Sesión principal | Esfuerzo | Revisión |
 |---|---|---|---|---|
 | Bajo | Interfaz, CRUD, contenido, estilos, datos demo | Sonnet | medio | Solo `verifier` |
-| Medio | Flujos con estados, importaciones, CRM, correos | `opusplan` (Opus planifica, Sonnet ejecuta) | medio | `verifier` |
+| Medio | Flujos con estados, importaciones, CRM, correos | `opusplan` (Opus en modo plan, Sonnet al ejecutar) | medio | `verifier` |
 | Alto | Pagos, libro de pagos, motor de precios, autenticación, permisos, datos personales | `opusplan` | alto | `verifier` + `reviewer` + revisión de Oscar |
 | Decisión de arquitectura | Tareas 0.1 y 3.1, elegir orquestador de pagos | Opus (o Fable para la más difícil) | alto | Oscar aprueba el plan |
 
@@ -37,13 +37,18 @@ No se delega la implementación normal a un subagente: no mejora el resultado y 
 
 ## Protocolo de una sesión
 
-1. `/clear`. Elige el modelo según la tabla (`/model sonnet`, `/model opusplan`…) y, si toca, `/effort high`.
-2. Pega el mensaje de `prompts/02-start-task.md` con el número de tarea.
-3. Claude lee `docs/STATE.md`, la tarea en el archivo de fase y solo las secciones de referencia que la tarea cita.
-4. Riesgo medio o alto: modo plan. Oscar corrige y aprueba. El plan se guarda en `docs/plans/`.
-5. Implementación en commits pequeños, con pruebas del área tocada.
-6. Cierre con `prompts/03-close-task.md`: `verifier`, `reviewer` si toca, resumen de lo verificado y actualización de `docs/STATE.md`.
-7. Oscar revisa según el riesgo y hace el merge.
+Los comandos se envían de uno en uno, cada uno en su propio mensaje.
+
+1. Envía `/clear`.
+2. Envía el comando de modelo de la tabla: `/model sonnet`, `/model opusplan` o `/model opus`.
+3. Si la tarea pide esfuerzo alto, envía `/effort high`.
+4. Riesgo medio o alto: entra en modo plan antes de enviar la tarea (`Shift + Tab` hasta que lo indique, o el selector de permisos de la app). `opusplan` solo usa Opus dentro del modo plan; fuera de él, todo corre en Sonnet.
+5. Pega el mensaje de `prompts/02-start-task.md` con el número de tarea.
+6. Claude lee `docs/STATE.md`, la tarea en el archivo de fase y solo las secciones de referencia que la tarea cita.
+7. En modo plan, Oscar corrige y aprueba. El plan se guarda en `docs/plans/`.
+8. Implementación en commits pequeños, con pruebas del área tocada.
+9. Cierre con `prompts/03-close-task.md`: `verifier`, `reviewer` si toca, resumen de lo verificado y actualización de `docs/STATE.md`.
+10. Oscar revisa según el riesgo y hace el merge.
 
 Si algo se tuerce a mitad de tarea, vuelve al modo plan y replanifica en vez de corregir sobre la marcha.
 
