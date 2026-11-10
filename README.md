@@ -19,23 +19,52 @@ Este paquete convierte la especificación en una estructura que Claude Code pued
 
 ## Cómo empezar
 
-1. Crea un repositorio privado vacío y copia dentro todo el contenido de esta carpeta, incluida `.claude/`.
+1. Clona este repositorio, o ábrelo en una sesión en la nube desde claude.ai/code.
 2. Abre Claude Code en esa carpeta y acepta el diálogo de confianza del proyecto.
-3. Ejecuta `/mcp` y desactiva los servidores que este proyecto no necesita.
-4. Ejecuta `/model opus` y `/effort high`, y pega el mensaje de `prompts/01-kickoff.md`.
-5. Lee el plan que te devuelve, responde a sus preguntas y apruébalo.
-6. A partir de ahí, una tarea por sesión con `prompts/02-start-task.md` y `prompts/03-close-task.md`.
+3. Envía `/mcp` y desactiva los servidores que este proyecto no necesita.
+4. Envía `/model opus`. Cuando responda, envía `/effort high`.
+5. Pega el mensaje de `prompts/01-kickoff.md`.
+6. Lee el plan que te devuelve, responde a sus preguntas y apruébalo.
+7. A partir de ahí, una tarea por sesión con `prompts/02-start-task.md` y `prompts/03-close-task.md`.
 
 ## Chuleta de modelos
 
-| Tarea | Antes de empezar |
-|---|---|
-| Riesgo bajo | `/clear`, `/model sonnet` |
-| Riesgo medio | `/clear`, `/model opusplan` |
-| Riesgo alto | `/clear`, `/model opusplan`, `/effort high` |
-| Arquitectura (0.1 y 3.1) | `/clear`, `/model opus`, `/effort high` |
+Cada comando se envía solo, en su propio mensaje: escribe uno, pulsa Enter y espera antes de escribir el siguiente. Si juntas varios en una línea, no funcionan.
 
-Elige el modelo al empezar la sesión y no lo cambies a mitad: cambiarlo obliga a releer toda la conversación sin caché.
+**Riesgo bajo**
+
+1. `/clear`
+2. `/model sonnet`
+3. Pega el mensaje de la tarea.
+
+**Riesgo medio**
+
+1. `/clear`
+2. `/model opusplan`
+3. Entra en modo plan.
+4. Pega el mensaje de la tarea.
+
+**Riesgo alto**
+
+1. `/clear`
+2. `/model opusplan`
+3. `/effort high`
+4. Entra en modo plan.
+5. Pega el mensaje de la tarea.
+
+**Arquitectura (tareas 0.1 y 3.1)**
+
+1. `/clear`
+2. `/model opus`
+3. `/effort high`
+4. Pega el mensaje de la tarea.
+
+Notas:
+
+- **Modo plan:** pulsa `Shift + Tab` hasta que lo indique, o elígelo en el selector de permisos bajo la caja de texto de la app. `opusplan` solo usa Opus dentro del modo plan; fuera de él, todo corre en Sonnet.
+- **Sin comandos:** en la app de escritorio el modelo también se elige en el selector bajo la caja de texto. `/model` sin nada detrás abre la lista de modelos.
+- **Qué hay disponible:** teclea `/` en la caja vacía para ver los comandos de tu instalación.
+- **No cambies de modelo a mitad de sesión:** obliga a releer toda la conversación sin caché.
 
 ## Reglas de avance
 

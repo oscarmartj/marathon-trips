@@ -1,6 +1,6 @@
 # Primer mensaje (tarea 0.1)
 
-Antes de pegarlo: `/model opus` y `/effort high`.
+Antes de pegarlo, envía dos comandos, cada uno en su propio mensaje: primero `/model opus` y, cuando responda, `/effort high`.
 
 ---
 
