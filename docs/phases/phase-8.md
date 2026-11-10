@@ -2,7 +2,9 @@
 
 **Objetivo:** dejar la web lista para abrir: contenido editable, accesible, rápida, revisada en seguridad y con el despliegue documentado.
 
-**Referencia:** `docs/modules.md`, módulo 12; `docs/web.md`; `docs/architecture.md`, secciones "Seguridad y calidad" y "Coste y despliegue"; `docs/research/hosting.md`.
+**Referencia:** `docs/modules.md`, módulo 12; `docs/web.md`; `docs/architecture.md`, secciones "Seguridad y calidad" y "Coste y despliegue"; `docs/research/hosting.md`; `docs/plans/phase-0-architecture.md`, §1.13.
+
+**Orden:** es la última fase antes del lanzamiento único (`docs/phases/README.md`). Las tareas 8.3, 8.5, 8.6 y 8.7 van al final, para que la revisión de seguridad cubra todo el código.
 
 ## Tareas
 

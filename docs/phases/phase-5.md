@@ -10,8 +10,8 @@
 |---|---|---|---|
 | 5.1 | Cuenta de cliente y área privada: reservas, estado, pago de depósito y saldo, recibos y documentos. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 | 5.2 | Datos de viajeros con el mínimo necesario, editables por el cliente hasta una fecha límite. | Medio | `opusplan` |
-| 5.4 | Plantillas editables de correo y de documentos PDF con variables y vista previa. | Bajo | Sonnet |
-| 5.5 | Privacidad: exportar y borrar los datos de un cliente; consentimiento de marketing separado. | Alto | `opusplan`, `reviewer` |
+| 5.4 | Plantillas editables de correo y de documentos PDF con variables y vista previa. El motor de PDF se elige según la memoria del alojamiento, evitando Chromium si no cabe. | Bajo | Sonnet |
+| 5.5 | Privacidad: exportar y borrar los datos de un cliente; consentimiento de marketing separado. Los registros que hay que conservar por obligación fiscal se anonimizan en lugar de borrarse (plazo confirmado por el contable). | Alto | `opusplan`, `reviewer` |
 | 5.6 | Panel de inicio y recordatorios automáticos de saldo. | Bajo | Sonnet |
 | 5.7 | Ensayo general: prueba de extremo a extremo de todo el recorrido y lista de lo que falta para abrir. | Medio | `opusplan` |
 

@@ -2,7 +2,9 @@
 
 **Objetivo:** preparar y ejecutar el viaje desde el panel, y automatizar el trabajo repetitivo.
 
-**Referencia:** `docs/modules.md`, módulos 10, 13 y 14; `docs/architecture.md`, sección "Plataforma".
+**Referencia:** `docs/modules.md`, módulos 10, 13 y 14; `docs/architecture.md`, sección "Plataforma"; `docs/plans/phase-0-architecture.md`, §1.13 y riesgo R10.
+
+**Orden:** va después de la fase 6 y antes de la 8 (`docs/phases/README.md`). Al planificar 7.4 y 7.7, empieza por informes fijos y exportación CSV, y limita las automatizaciones a casos concretos que describa Oscar.
 
 ## Tareas
 

@@ -13,7 +13,7 @@ Claude actualiza este archivo al cerrar cada tarea. Cinco líneas como máximo p
 - Elegir nombre de marca definitivo.
 - Decidir si el lanzamiento es solo con tarjeta (hoy: Stripe + transferencia con PayID).
 - Pedir a Stripe confirmación por escrito de que acepta un operador de viajes.
-- Confirmar con el contable cuándo el dinero de un cliente pasa a ser margen (antes de 3.1).
+- Confirmar con el contable cuándo el dinero de un cliente pasa a ser margen (antes de 3.1) y cuánto tiempo y con qué datos hay que conservar recibos y reservas (antes de 5.5).
 
 ## Hecho
 
