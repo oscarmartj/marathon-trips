@@ -5,7 +5,7 @@ Claude actualiza este archivo al cerrar cada tarea. Cinco líneas como máximo p
 ## Ahora
 
 - **Fase en curso:** 0
-- **Siguiente tarea:** 0.1 (plan general y modelo de datos, sin código)
+- **Siguiente tarea:** 0.1 escrita en `docs/plans/phase-0-architecture.md`, pendiente de aprobación de Oscar (15 preguntas en §5)
 - **Bloqueos:** ninguno
 
 ## Pendiente de Oscar
