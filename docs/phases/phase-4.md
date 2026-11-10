@@ -2,7 +2,7 @@
 
 **Objetivo:** Oscar añade, configura, pausa y retira pasarelas desde el panel, y tiene reembolsos, disputas y conciliación.
 
-La fase se ejecuta en dos partes. **4A** va entre la fase 3 y la fase 5, porque hace falta para vender: las claves reales se introducen desde el panel. **4B** va después de la fase 5. El orden completo está en `docs/phases/README.md`.
+La fase se ejecuta en dos partes. **4A** va entre la fase 3 y la fase 5, porque la fase 5 (área del cliente con pagos de saldo, recibos y documentos) necesita cuentas de pasarela configurables, reembolsos y recibos. **4B** va después de la fase 5. El orden completo está en `docs/phases/README.md`.
 
 **Referencia:** `docs/payments.md`, secciones "Gestión de pasarelas desde el panel", "Catálogo de pasarelas" y "Requisitos"; `docs/plans/phase-0-architecture.md`, §1.9 y §1.10; `docs/plans/phase-3-payments.md`; `.claude/rules/payments.md`.
 
@@ -10,9 +10,9 @@ La fase se ejecuta en dos partes. **4A** va entre la fase 3 y la fase 5, porque 
 
 | # | Tarea | Riesgo | Sesión |
 |---|---|---|---|
-| 4.1 | Cuentas de pasarela en el panel: credenciales cifradas, modo prueba o real, estados (activa, pausada, retirada, archivada), prueba de conexión y avisos. Solo un adaptador `verified` puede pasar a modo real; su estado lo declara el código. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
+| 4.1 | Cuentas de pasarela en el panel: credenciales cifradas, modo prueba o real, estados (activa, pausada, retirada, archivada), prueba de conexión y avisos. Solo un adaptador `verified` puede pasar a modo real: la comprobación lee el registro del código y se repite en cada cobro real. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 | 4.5a | Reembolsos totales y parciales con motivo, también para pagos manuales. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
-| 4.6a | Informe de dinero de clientes y recibos con el ajuste de GST. | Alto | `opusplan`, `reviewer` |
+| 4.6a | Informe de dinero de clientes (retenido por reserva y en total) y recibos en PDF con el ajuste de GST. Aquí se elige el motor de PDF según la memoria del alojamiento. | Alto | `opusplan`, `reviewer` |
 
 ### Criterios de aceptación de 4A
 
@@ -21,7 +21,8 @@ La fase se ejecuta en dos partes. **4A** va entre la fase 3 y la fase 5, porque 
 - Una pasarela retirada no acepta cobros nuevos, pero sí reembolsa pagos antiguos.
 - Una cuenta con historial no se puede borrar.
 - Pausar la última cuenta que atiende un método muestra un aviso.
-- El informe separa lo cobrado y no pagado a proveedores del margen.
+- El informe de dinero de clientes cuadra con el libro, por reserva y en total.
+- Si un adaptador deja de ser `verified`, sus cuentas en modo real no aceptan cobros nuevos.
 - Con el GST desactivado, un recibo no muestra GST ni se llama "tax invoice".
 
 ## 4B: después de la fase 5

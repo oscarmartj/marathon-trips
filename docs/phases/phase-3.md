@@ -12,8 +12,8 @@
 | 3.2 | Libro de pagos inmutable, claves de idempotencia y plan de depósito y saldo con fechas límite. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 | 3.3 | Adaptador de Stripe en sandbox: cobro, confirmación, reembolso y webhooks firmados e idempotentes. La cuenta de pasarela ya vive en la base de datos (cargada desde variables de entorno), con su propia URL de webhook. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 | 3.4 | Método manual: transferencia con PayID, referencia única y confirmación manual en el panel. | Medio | `opusplan` |
-| 3.5 | Checkout en la web: métodos activos por país, aceptación de condiciones con versión y fecha, y política de cancelación visible antes de pagar. Editor mínimo de versiones de condiciones en el panel. | Medio | `opusplan` |
-| 3.6 | Batería de pruebas de contrato para adaptadores y simulador de pasarela para CI. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
+| 3.5 | Checkout en la web: métodos activos por país, aceptación de condiciones con versión y fecha, y política de cancelación visible antes de pagar. Editor mínimo de versiones de condiciones en el panel. Enrutado básico: qué cuenta atiende cada método (4.2 añade límites, prioridad y respaldo). | Medio | `opusplan` |
+| 3.6 | Batería de pruebas de contrato para adaptadores y simulador de pasarela para CI. Ejecución contra el sandbox, programada cada semana en CI cuando haya claves de sandbox (antes 9.4); su registro es lo que permite declarar un adaptador `verified`. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 
 ## Criterios de aceptación
 
@@ -21,7 +21,12 @@
 - Un webhook duplicado no genera dos asientos; uno fuera de orden no deja la reserva en un estado incorrecto.
 - Repetir una operación con la misma clave de idempotencia no cobra dos veces.
 - Los asientos del libro no se pueden editar ni borrar por la API.
-- La suma del libro de una reserva coincide con lo cobrado menos lo reembolsado.
+- Para cada reserva, lo cobrado menos lo reembolsado coincide con el saldo de `customer_funds_held` más las penalizaciones retenidas (hasta la fase 6 no hay costes ni margen reconocido).
+- No se puede añadir un apunte a un asiento ya confirmado, ni crear un asiento con un solo apunte o con importe 0.
+- Dos intentos de pago simultáneos del mismo plazo (enlace de pago y área privada): solo uno puede cobrar.
+- Una reserva con un pago en curso (tarjeta pendiente o transferencia PayID dentro del plazo de gracia) no caduca.
+- Un cobro confirmado para una reserva caducada vuelve a asignar la plaza si la hay; si no, se reembolsa entero con sus asientos.
+- Un reembolso que haría superar lo cobrado se rechaza, también si llegan dos a la vez.
 - Con todas las pasarelas apagadas, el flujo termina en solicitud sin cobro y sin errores.
 - Prueba de extremo a extremo: pagar un depósito con la tarjeta de prueba de Stripe y ver la reserva confirmada.
 - Las claves de sandbox están en variables de entorno, no en el repositorio.

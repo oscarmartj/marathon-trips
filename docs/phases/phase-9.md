@@ -24,7 +24,7 @@ Una pasarela por sesión. Orden: las que acepten a un sole trader de viajes y de
 | 9.1 | B: resto de australianas de tarjeta, cuenta a cuenta (PayTo, PayID, BECS) y especialistas en viajes. | Alto | `opusplan`, `reviewer` |
 | 9.2 | C: globales para empresa grande y pasarelas de bancos. | Alto | `opusplan`, `reviewer` |
 | 9.3 | D: pago aplazado y otros métodos. | Alto | `opusplan`, `reviewer` |
-| 9.4 | Prueba semanal programada de contrato para los adaptadores `verified`. | Bajo | Sonnet |
+| 9.4 | Hecha en 3.6: prueba semanal programada de contrato para los adaptadores `verified`. | — | — |
 
 ## Criterios de aceptación
 

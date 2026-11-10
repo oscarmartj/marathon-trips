@@ -25,6 +25,8 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 | 2026-11-10 | Adaptadores de pasarela solo para las que acepten la cuenta; fase 9 bajo demanda | Un adaptador sin cuenta real no se puede verificar |
 | 2026-11-10 | Dependencias de §6 del plan aprobadas | Respuesta de Oscar |
 | 2026-11-10 | Preguntas 2–9 y 12–14 del plan: se aplica lo propuesto por defecto | Sin respuesta; se puede cambiar antes de la tarea que bloquean |
+| 2026-11-10 | Correcciones de la revisión independiente de 0.1 aplicadas al plan (§8) | Tres hallazgos graves: borrado frente a tablas inmutables, caducidad con pago en curso y doble cobro de un plazo |
+| 2026-11-10 | Las tareas 1.1 y 1.6 pasan a riesgo alto con `reviewer` | Tocan cupos y datos personales (CLAUDE.md). Pendiente de confirmar por Oscar |
 
 ## Abiertas
 
@@ -32,3 +34,6 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 - Proveedor de alojamiento: se decide con `docs/research/hosting.md`.
 - Lanzar solo con tarjeta o también con transferencia.
 - Cuándo pasa el dinero de un cliente a ser margen (pregunta 8 del plan). Confirmar con el contable antes de la tarea 3.1.
+- Auditoría con valores personales, redactados al borrar un cliente. Sustituiría a la línea "Auditoría con triggers en la base de datos, sin valores de campos personales". Aplicado en el plan como propuesta (§8); falta confirmación antes de 0.3b.
+- Retención provisional de 30 minutos hasta que el cliente confirma su correo (plan §8). Antes de 2.4.
+- Pago confirmado tras la caducidad: reasignar la plaza o, si no la hay, reembolsar entero (plan §8). Antes de 2.4.
