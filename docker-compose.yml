@@ -37,7 +37,11 @@ services:
       MIGRATION_DATABASE_URL: postgresql://mt_owner:mt_owner_dev@db:5432/marathon_trips
       SMTP_HOST: mail
       SMTP_PORT: "1025"
-    ports: ["4000:4000"]
+      WEB_ORIGIN: http://localhost:3000
+      # The web container is the only proxy in front of the API (private network address).
+      TRUST_PROXY: uniquelocal
+    # Not published: the browser reaches the API only through the web app's /api proxy, so nobody can bypass it with
+    # a forged X-Forwarded-For. Use `docker compose exec api ...` to reach it directly.
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s

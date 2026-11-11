@@ -15,6 +15,8 @@ export interface Model {
   fields: Field[];
   uniques: string[][]; // @@unique and @@id column sets
   file: string;
+  doc: string; // `///` lines just above `model`, such as /// @appendOnly
+  table: string; // @@map name, or the model name
 }
 
 const listOf = (s: string): string[] => s.split(',').map((x) => x.trim()).filter(Boolean);
@@ -25,15 +27,22 @@ export function parseSchema(files: Array<{ name: string; text: string }>): Model
     let current: Model | null = null;
     let inModel = false;
     let doc: string[] = [];
+    let modelDoc: string[] = [];
     for (const raw of file.text.split('\n')) {
       const line = raw.trim();
       const open = /^model\s+(\w+)\s*\{/.exec(line);
       if (open && !inModel) {
-        current = { name: open[1]!, fields: [], uniques: [], file: file.name };
+        current = { name: open[1]!, fields: [], uniques: [], file: file.name, doc: modelDoc.join(' '), table: open[1]! };
         inModel = true;
         doc = [];
+        modelDoc = [];
         continue;
       }
+      if (!inModel && line.startsWith('///')) {
+        modelDoc.push(line);
+        continue;
+      }
+      if (!inModel && line) modelDoc = [];
       if (/^(enum|generator|datasource)\s+\w+\s*\{/.test(line)) {
         inModel = false;
         current = null;
@@ -59,6 +68,8 @@ export function parseSchema(files: Array<{ name: string; text: string }>): Model
         doc = [];
         continue;
       }
+      const map = /^@@map\(\s*"([^"]+)"/.exec(line);
+      if (map) current.table = map[1]!;
       if (line.startsWith('@@')) {
         doc = [];
         continue;
@@ -145,6 +156,18 @@ export function checkConventions(
           }
         }
       }
+    }
+  }
+
+  // Append-only models (plan 4.9): a trigger in the migrations rejects UPDATE/DELETE and TRUNCATE, and their foreign
+  // keys only point at rows that are never physically deleted, which here means other append-only models.
+  for (const m of models.filter((x) => /@appendOnly\b/.test(x.doc))) {
+    const t = m.table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`CREATE TRIGGER \\w+ BEFORE UPDATE OR DELETE ON "${t}"`).test(migrationsSql)) errors.push(`${m.name}: @appendOnly without an UPDATE/DELETE trigger in migrations`);
+    if (!new RegExp(`CREATE TRIGGER \\w+ BEFORE TRUNCATE ON "${t}"`).test(migrationsSql)) errors.push(`${m.name}: @appendOnly without a TRUNCATE trigger in migrations`);
+    for (const f of m.fields.filter((x) => x.relation && x.relation.fields.length > 0)) {
+      const target = byName.get(f.type);
+      if (!target || !/@appendOnly\b/.test(target.doc)) errors.push(`${where(m, f)}: an @appendOnly model may only reference rows that are never deleted (@appendOnly)`);
     }
   }
 

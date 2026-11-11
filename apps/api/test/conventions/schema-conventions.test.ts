@@ -40,6 +40,9 @@ const cases: Array<[string, string, string, RegExp]> = [
   ['relation_cascade', 'model P {\n id String @id @db.Uuid\n cs C[]\n}\nmodel C {\n id String @id @db.Uuid\n pId String @db.Uuid\n p P @relation(fields: [pId], references: [id], onDelete: Cascade, onUpdate: Restrict)\n}', '', /onDelete: Restrict/],
   ['composite_fk_without_unique', 'model P {\n id String @id @db.Uuid\n cur String @db.Char(3) /// @nopii code\n cs C[]\n}\nmodel C {\n id String @id @db.Uuid\n pId String @db.Uuid\n cur String @db.Char(3) /// @nopii code\n p P @relation(fields: [pId, cur], references: [id, cur], onDelete: Restrict, onUpdate: Restrict)\n}', '', /composite foreign key/],
   ['sql_cascade', 'model A {\n id String @id @db.Uuid\n}', 'ALTER TABLE x ADD FOREIGN KEY (a) REFERENCES y(id) ON DELETE CASCADE;', /CASCADE/],
+  ['append_only_without_trigger', '/// @appendOnly\nmodel A {\n id String @id @db.Uuid\n @@map("as")\n}', '', /without an UPDATE\/DELETE trigger/],
+  ['append_only_without_truncate_trigger', '/// @appendOnly\nmodel A {\n id String @id @db.Uuid\n @@map("as")\n}', 'CREATE TRIGGER t BEFORE UPDATE OR DELETE ON "as"', /without a TRUNCATE trigger/],
+  ['append_only_fk_to_deletable_row', 'model P {\n id String @id @db.Uuid\n cs A[]\n}\n/// @appendOnly\nmodel A {\n id String @id @db.Uuid\n pId String @db.Uuid\n p P @relation(fields: [pId], references: [id], onDelete: Restrict, onUpdate: Restrict)\n @@map("as")\n}', 'CREATE TRIGGER t BEFORE UPDATE OR DELETE ON "as"\nCREATE TRIGGER u BEFORE TRUNCATE ON "as"', /never deleted/],
   ['sql_set_null', 'model A {\n id String @id @db.Uuid\n}', 'ALTER TABLE x ADD FOREIGN KEY (a) REFERENCES y(id) ON UPDATE SET NULL;', /SET NULL/],
 ];
 
@@ -54,6 +57,7 @@ const good: Array<[string, string, string]> = [
   ['signed_amount_needs_no_check', 'model A {\n id String @id @db.Uuid\n /// @signed\n amountMinor BigInt\n currency String /// @nopii code\n}', ''],
   ['declared_fk_exception', 'model P {\n id String @id @db.Uuid\n cs C[]\n}\nmodel C {\n id String @id @db.Uuid\n pId String @db.Uuid\n /// @fkException child is purged with its parent by design\n p P @relation(fields: [pId], references: [id], onDelete: Cascade, onUpdate: Restrict)\n}', ''],
   ['composite_fk_with_unique', 'model P {\n id String @id @db.Uuid\n cur String @db.Char(3) /// @nopii code\n cs C[]\n @@unique([id, cur])\n}\nmodel C {\n id String @id @db.Uuid\n pId String @db.Uuid\n cur String @db.Char(3) /// @nopii code\n p P @relation(fields: [pId, cur], references: [id, cur], onDelete: Restrict, onUpdate: Restrict)\n}', ''],
+  ['append_only_with_triggers', '/// @appendOnly\nmodel A {\n id String @id @db.Uuid\n @@map("as")\n}', 'CREATE TRIGGER t BEFORE UPDATE OR DELETE ON "as"\nCREATE TRIGGER u BEFORE TRUNCATE ON "as"'],
   ['sql_exception_comment', 'model A {\n id String @id @db.Uuid\n}', 'ALTER TABLE x ADD FOREIGN KEY (a) REFERENCES y(id) ON DELETE CASCADE; -- @fkException purge by design'],
 ];
 

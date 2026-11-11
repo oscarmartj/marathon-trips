@@ -1,0 +1,262 @@
+// ---- Task 0.3: users, sessions, sign-in tokens, roles and permissions, audit log ----
+// Plan: docs/plans/0.3-auth-roles-audit.md. Extra CHECKs, triggers and grants live in migration 0004.
+
+enum UserKind {
+  staff
+  customer
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum LoginTokenPurpose {
+  magic_link
+  staff_mfa
+  staff_enrolment
+}
+
+enum AuditActorType {
+  staff
+  customer
+  system
+  automation
+  api_key
+}
+
+model User {
+  id                   String         @id @default(uuid(7)) @db.Uuid
+  /// @nopii staff or customer
+  kind                 UserKind
+  /// @pii sign-in address
+  email                String         @db.Citext
+  /// @nopii when the address was proved by a magic link or set up by staff enrolment
+  emailVerifiedAt      DateTime?      @db.Timestamptz(3)
+  /// @nopii active or disabled
+  status               UserStatus     @default(active)
+  /// @secret argon2id hash; staff only (CHECK)
+  passwordHash         String?
+  /// @secret AES-256-GCM ciphertext of the TOTP secret; pending while totpEnabledAt is NULL; staff only (CHECK)
+  totpSecretCiphertext String?
+  /// @nopii version of APP_ENCRYPTION_KEY that encrypted the TOTP secret
+  totpKeyVersion       Int?
+  /// @nopii when TOTP enrolment was confirmed with a valid code
+  totpEnabledAt        DateTime?      @db.Timestamptz(3)
+  /// @nopii last accepted TOTP time step; a code is never accepted twice
+  totpLastUsedStep     BigInt?
+  /// @nopii consecutive failed password, TOTP or step-up attempts
+  failedLoginCount     Int            @default(0)
+  /// @nopii last counted attempt; the count starts again after an hour without attempts (same as unknown addresses)
+  lastFailedLoginAt    DateTime?      @db.Timestamptz(3)
+  /// @nopii progressive delay: no attempt is checked before this instant
+  nextLoginAllowedAt   DateTime?      @db.Timestamptz(3)
+  /// @nopii last successful sign-in
+  lastLoginAt          DateTime?      @db.Timestamptz(3)
+  /// @nopii set when privacy erasure anonymised the row (task 5.5)
+  anonymisedAt         DateTime?      @db.Timestamptz(3)
+  /// @nopii optimistic lock for the admin panel
+  version              Int            @default(0)
+  /// @nopii
+  createdAt            DateTime       @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  updatedAt            DateTime       @updatedAt @db.Timestamptz(3)
+  sessions             Session[]
+  recoveryCodes        RecoveryCode[]
+  loginTokens          LoginToken[]
+  roles                UserRole[]
+
+  @@unique([kind, email])
+  @@unique([id, kind])
+  @@map("users")
+}
+
+model RecoveryCode {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @secret HMAC-SHA256 of the code with AUTH_HMAC_KEY
+  codeHash  String    @unique
+  /// @nopii when the code was used (single use)
+  usedAt    DateTime? @db.Timestamptz(3)
+  /// @nopii
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("recovery_codes")
+}
+
+model Session {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  userId         String    @db.Uuid
+  /// @nopii copied from the user; the composite foreign key keeps it equal
+  kind           UserKind
+  user           User      @relation(fields: [userId, kind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  /// @secret SHA-256 of the session token; the token itself lives only in the cookie
+  tokenHash      String    @unique
+  /// @nopii
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  /// @nopii absolute expiry
+  expiresAt      DateTime  @db.Timestamptz(3)
+  /// @nopii idle expiry, pushed forward on use
+  idleExpiresAt  DateTime  @db.Timestamptz(3)
+  /// @nopii
+  lastSeenAt     DateTime  @default(now()) @db.Timestamptz(3)
+  /// @nopii last TOTP check (sign-in or step-up)
+  mfaVerifiedAt  DateTime? @db.Timestamptz(3)
+  /// @nopii consecutive failed step-up codes; the fifth revokes the session
+  stepUpFailures Int       @default(0)
+  /// @pii browser user agent, truncated
+  userAgent      String?
+  /// @pii IP address truncated to /24 or /48
+  ipPrefix       String?
+  /// @nopii
+  revokedAt      DateTime? @db.Timestamptz(3)
+  /// @nopii code such as sign_out, user_disabled, enrolment_reset, step_up_failures
+  revokeReason   String?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model LoginToken {
+  id         String            @id @default(uuid(7)) @db.Uuid
+  /// @nopii magic_link, staff_mfa or staff_enrolment
+  purpose    LoginTokenPurpose
+  /// @pii address the token was issued for
+  email      String            @db.Citext
+  userId     String?           @db.Uuid
+  user       User?             @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @secret SHA-256 of the token; NULL until a magic link is sent (minted in the send step)
+  tokenHash  String?           @unique
+  /// @nopii
+  expiresAt  DateTime          @db.Timestamptz(3)
+  /// @nopii single use
+  consumedAt DateTime?         @db.Timestamptz(3)
+  /// @nopii wrong codes entered against this token (staff_mfa, staff_enrolment); five at most
+  attempts   Int               @default(0)
+  /// @nopii
+  createdAt  DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("login_tokens")
+}
+
+model Role {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  /// @nopii lower-case key validated by a pattern, such as owner or operations
+  key         String           @unique
+  /// @pii free text typed by staff
+  name        String
+  /// @pii free text typed by staff
+  description String           @default("")
+  /// @nopii system roles (owner) cannot be edited
+  isSystem    Boolean          @default(false)
+  /// @nopii optimistic lock for the admin panel
+  version     Int              @default(0)
+  /// @nopii
+  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  updatedAt   DateTime         @updatedAt @db.Timestamptz(3)
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  /// @nopii <module>.<resource>.<action>, declared in code
+  key            String           @unique
+  /// @nopii module that declares it
+  module         String
+  /// @nopii developer-written description
+  description    String           @default("")
+  /// @nopii a recent TOTP check is required to use it
+  requiresStepUp Boolean          @default(false)
+  /// @nopii
+  updatedAt      DateTime         @updatedAt @db.Timestamptz(3)
+  roles          RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId        String     @db.Uuid
+  role          Role       @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii permission key declared in code
+  permissionKey String
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii
+  createdAt     DateTime   @default(now()) @db.Timestamptz(3)
+
+  @@id([roleId, permissionKey])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId      String   @db.Uuid
+  /// @nopii always staff (CHECK): customers never hold roles
+  userKind    UserKind @default(staff)
+  user        User     @relation(fields: [userId, userKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  roleId      String   @db.Uuid
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii optional scope of identifiers; CHECK (scope IS NULL) until scoped access exists (plan 4.3)
+  scope       Json?
+  /// @nopii
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  createdById String?  @db.Uuid
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+/// @appendOnly
+model AuditLog {
+  id         String          @id @default(uuid(7)) @db.Uuid
+  /// @nopii
+  occurredAt DateTime        @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  actorType  AuditActorType
+  actorId    String?         @db.Uuid
+  /// @nopii action code such as platform.flag.updated
+  action     String
+  /// @nopii entity type chosen by developers
+  entityType String
+  entityId   String          @db.Uuid
+  /// @nopii { field: { before, after } } for @nopii fields only; "[pii]" and "[changed]" markers otherwise
+  changes    Json            @default("{}")
+  /// @nopii random request id
+  requestId  String?
+  sessionId  String?         @db.Uuid
+  piiValues  AuditPiiValue[]
+
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorId, occurredAt])
+  @@map("audit_logs")
+}
+
+/// @appendOnly
+model AuditPiiValue {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  auditLogId        String   @db.Uuid
+  auditLog          AuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii field name, or _reason for the staff member's reason
+  field             String
+  /// @pii
+  before            Json?
+  /// @pii
+  after             Json?
+  subjectCustomerId String?  @db.Uuid
+  subjectUserId     String?  @db.Uuid
+  /// @nopii
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([auditLogId])
+  @@index([subjectCustomerId])
+  @@index([subjectUserId])
+  @@map("audit_pii_values")
+}

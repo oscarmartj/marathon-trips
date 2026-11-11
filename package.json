@@ -18,7 +18,8 @@
     "db:seed": "turbo run build --filter=@mt/shared && pnpm --filter @mt/api db:seed",
     "check:deps-table": "node scripts/check-dependency-table.mjs",
     "check:all": "pnpm lint && pnpm typecheck && pnpm test",
-    "check:no-skipped": "node scripts/check-no-skipped.mjs"
+    "check:no-skipped": "node scripts/check-no-skipped.mjs",
+    "api:cli": "pnpm --filter @mt/api cli"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

@@ -1,9 +1,11 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import type { HealthResponse } from '@mt/shared';
+import { Public } from '../access/access.decorators';
 import { AppConfig } from '../config/config';
 import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 
 @Controller('health')
+@Public('liveness: status, APP_ENV and whether the database answers')
 export class HealthController {
   constructor(
     // Explicit tokens: tsx (pnpm dev) does not emit decorator metadata, so never rely on type-based injection.

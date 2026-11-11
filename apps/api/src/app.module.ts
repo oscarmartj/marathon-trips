@@ -1,10 +1,26 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { AccessGuard } from './platform/access/access.guard';
+import { AuthModule } from './platform/auth/auth.module';
+import { RequiresFlagGuard } from './platform/flags/requires-flag.guard';
+import { RequiresModuleGuard } from './platform/flags/requires-module.guard';
 import { HealthController } from './platform/health/health.controller';
+import { CsrfGuard } from './platform/http/csrf.guard';
+import { AuthRateLimitGuard } from './platform/http/rate-limit.guard';
 import { PlatformModule } from './platform/platform.module';
 
 // Platform pieces load through PlatformModule; business modules are added to modules.registry.ts (see plan 0.1, section 2).
+// Global guards run in this order: a switched-off module or flag is a 404 for everyone, then CSRF, then the auth rate
+// limit, then access marks (sessions, permissions, step-up).
 @Module({
-  imports: [PlatformModule],
+  imports: [PlatformModule, AuthModule],
   controllers: [HealthController],
+  providers: [
+    { provide: APP_GUARD, useExisting: RequiresModuleGuard },
+    { provide: APP_GUARD, useExisting: RequiresFlagGuard },
+    { provide: APP_GUARD, useExisting: CsrfGuard },
+    { provide: APP_GUARD, useExisting: AuthRateLimitGuard },
+    { provide: APP_GUARD, useExisting: AccessGuard },
+  ],
 })
 export class AppModule {}
