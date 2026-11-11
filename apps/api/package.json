@@ -6,12 +6,13 @@
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "dev": "prisma generate && tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "lint": "eslint src test prisma",
+    "lint": "eslint src test prisma scripts",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "test": "prisma generate && vitest run --config vitest.config.mts --reporter=default --reporter=json --outputFile=test-results/vitest.json",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
-    "db:seed": "tsx prisma/seed/seed.ts"
+    "db:seed": "tsx prisma/seed/seed.ts",
+    "gen:field-classes": "tsx scripts/gen-field-classes.ts"
   },
   "dependencies": {
     "@mt/shared": "workspace:*",
