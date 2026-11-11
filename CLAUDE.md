@@ -26,7 +26,7 @@ Node 22 (`.nvmrc`) y pnpm 10 (`corepack enable`). Desde la raíz del repositorio
 | Qué | Comando |
 |---|---|
 | Instalar | `pnpm install` |
-| PostgreSQL local sin Docker | `service postgresql start`, luego una vez `su postgres -c "bash scripts/db-init.sh"` (crea `mt_owner`, `mt_app`, `mt_privacy` y la base `marathon_trips`) |
+| PostgreSQL local sin Docker | `service postgresql start`, luego una vez `su postgres -c "bash scripts/db-init.sh"` (crea `mt_owner`, `mt_app`, `mt_privacy` y la base `marathon_trips`; vuelve a ejecutarlo, o `docker compose down -v`, en bases creadas antes de 0.3) |
 | Variables de entorno | `cp .env.example .env` y `export $(grep -v '^#' .env \| xargs)` (la API no arranca sin `APP_ENV`) |
 | Migraciones (como `mt_owner`) | `pnpm db:migrate` (`pnpm --filter @mt/api db:migrate:dev` para crear una) |
 | Datos demo (idempotente, se niega en `production`) | `pnpm db:seed` |
@@ -36,7 +36,8 @@ Node 22 (`.nvmrc`) y pnpm 10 (`corepack enable`). Desde la raíz del repositorio
 | Tipos | `pnpm typecheck` |
 | Pruebas (unitarias, convenciones del esquema, base de datos) | `pnpm test`, y después `pnpm check:no-skipped` |
 | Un solo archivo de pruebas | `pnpm test:file test/conventions/schema-conventions.test.ts` (ruta relativa a `apps/api`) |
-| Pruebas de extremo a extremo | `pnpm test:e2e` (todavía vacío: Playwright llega con el primer flujo de usuario, 0.3) |
+| Pruebas de extremo a extremo | `pnpm test:e2e` (Playwright arranca API y web; necesita la base migrada y `pnpm --filter @mt/web build`; sin navegador descargado, `PW_CHANNEL=chrome`) |
+| Personal: alta o reinicio por consola | `pnpm api:cli staff:create --email <correo> [--owner]` y `pnpm api:cli staff:reset --email <correo>` (imprimen un enlace de alta de un solo uso) |
 | Todo lo anterior | `pnpm check:all` |
 
 Las pruebas de base de datos necesitan `DATABASE_URL` y `MIGRATION_DATABASE_URL` y fallan, no se saltan, si no hay base. En un entorno sin acceso a `binaries.prisma.sh`, `prisma generate` funciona con `PRISMA_SCHEMA_ENGINE_BINARY=/bin/true` y las migraciones se aplican con `psql -f` como `mt_owner`; CI sí usa `prisma migrate deploy`.
