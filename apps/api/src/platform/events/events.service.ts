@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { Prisma } from '../../generated/prisma/client';
 import { bossDb } from '../database/boss-db';
 import { PrismaService } from '../database/prisma.service';
 import { AppError, formatSafeError, safeError } from '../errors/safe-error';

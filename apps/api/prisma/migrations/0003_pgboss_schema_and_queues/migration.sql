@@ -1,6 +1,6 @@
 -- pg-boss schema, created here as mt_owner so the API (mt_app) never needs CREATE (plan 0.1, section 4.5).
 -- The SQL below is pg-boss 12.38.2's own getConstructionPlans('pgboss') output with its transaction wrapper removed
--- (schema version 46). To upgrade pg-boss, add a new migration from getMigrationPlans; never edit this one.
+-- (schema version 46) with `-- @fkException` marks on its two internal cascading keys (third-party tables, not ours). To upgrade pg-boss, add a new migration from getMigrationPlans; never edit this one.
 -- The API starts pg-boss with migrate: false and createSchema: false.
 
 CREATE SCHEMA IF NOT EXISTS pgboss;
@@ -78,7 +78,7 @@ CREATE SCHEMA IF NOT EXISTS pgboss;
   ;
 
     CREATE TABLE pgboss.schedule (
-      name text REFERENCES pgboss.queue ON DELETE CASCADE,
+      name text REFERENCES pgboss.queue ON DELETE CASCADE, -- @fkException pg-boss-internal-table
       key text not null DEFAULT '',
       kind text not null DEFAULT 'cron' CHECK (kind IN ('cron', 'rrule')),
       cron text not null,
@@ -94,7 +94,7 @@ CREATE SCHEMA IF NOT EXISTS pgboss;
 
     CREATE TABLE pgboss.subscription (
       event text not null,
-      name text not null REFERENCES pgboss.queue ON DELETE CASCADE,
+      name text not null REFERENCES pgboss.queue ON DELETE CASCADE, -- @fkException pg-boss-internal-table
       created_on timestamp with time zone not null default now(),
       updated_on timestamp with time zone not null default now(),
       PRIMARY KEY(event, name)
