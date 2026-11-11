@@ -126,7 +126,7 @@ export class AuditService {
       select: { id: true },
     });
     if (pii.length > 0) {
-      const subject = await this.subject(tx, input.entityType, input.entityId, (after ?? before ?? {}) as Record<string, unknown>);
+      const subject = await this.subjectOf(tx, input.entityType, input.entityId, (after ?? before ?? {}) as Record<string, unknown>);
       await tx.auditPiiValue.createMany({
         data: pii.map((p) => ({
           auditLogId: log.id, field: p.field,
@@ -138,7 +138,8 @@ export class AuditService {
     return log.id;
   }
 
-  private async subject(tx: Prisma.TransactionClient, entityType: string, entityId: string, row: Record<string, unknown>): Promise<AuditSubject> {
+  /** The data subject of a record, from a registered resolver or the entity's customerLink. */
+  async subjectOf(tx: Prisma.TransactionClient, entityType: string, entityId: string, row: Record<string, unknown>): Promise<AuditSubject> {
     const resolver = this.resolvers.get(entityType);
     if (resolver) return resolver(tx, entityId, row);
     const def = this.entities.get(entityType);

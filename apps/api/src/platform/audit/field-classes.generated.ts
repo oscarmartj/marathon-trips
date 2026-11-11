@@ -30,21 +30,21 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     entityType: 'nopii',
     action: 'nopii',
     entityIds: 'nopii',
-    status: 'pii',
+    status: 'nopii',
     results: 'nopii',
     createdById: 'nopii',
-    createdAt: 'pii'
+    createdAt: 'nopii'
   },
   CsvJob: {
     id: 'nopii',
     entityType: 'nopii',
-    kind: 'pii',
-    status: 'pii',
+    kind: 'nopii',
+    status: 'nopii',
     stats: 'nopii',
     errors: 'nopii',
     createdById: 'nopii',
-    createdAt: 'pii',
-    updatedAt: 'pii'
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   EmailSuppression: {
     id: 'nopii',
@@ -104,12 +104,12 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     entityId: 'nopii',
     body: 'pii',
     authorId: 'nopii',
-    pinned: 'pii',
-    version: 'pii',
-    deletedAt: 'pii',
+    pinned: 'nopii',
+    version: 'nopii',
+    deletedAt: 'nopii',
     deletedById: 'nopii',
-    createdAt: 'pii',
-    updatedAt: 'pii'
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   NumberSequence: {
     id: 'nopii',
@@ -190,10 +190,10 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     filters: 'pii',
     columns: 'nopii',
     sort: 'nopii',
-    shared: 'pii',
-    version: 'pii',
-    createdAt: 'pii',
-    updatedAt: 'pii'
+    shared: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   SearchDocument: {
     id: 'nopii',
@@ -203,7 +203,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     subtitle: 'pii',
     searchVector: 'nopii',
     permissionKey: 'nopii',
-    updatedAt: 'pii'
+    updatedAt: 'nopii'
   },
   SeedRun: {
     id: 'nopii',
@@ -251,8 +251,8 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     name: 'nopii',
     colour: 'nopii',
     entityTypes: 'nopii',
-    createdAt: 'pii',
-    updatedAt: 'pii'
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   Tagging: {
     id: 'nopii',
@@ -260,7 +260,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     entityType: 'nopii',
     entityId: 'nopii',
     createdById: 'nopii',
-    createdAt: 'pii'
+    createdAt: 'nopii'
   },
   Task: {
     id: 'nopii',
@@ -268,17 +268,17 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     description: 'pii',
     entityType: 'nopii',
     entityId: 'nopii',
-    dueAt: 'pii',
+    dueAt: 'nopii',
     assigneeId: 'nopii',
-    status: 'pii',
-    source: 'pii',
+    status: 'nopii',
+    source: 'nopii',
     sourceRef: 'nopii',
     createdById: 'nopii',
-    version: 'pii',
-    deletedAt: 'pii',
+    version: 'nopii',
+    deletedAt: 'nopii',
     deletedById: 'nopii',
-    createdAt: 'pii',
-    updatedAt: 'pii'
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   User: {
     id: 'nopii',

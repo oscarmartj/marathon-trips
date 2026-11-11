@@ -39,7 +39,9 @@ model Tag {
   colour      String
   /// @nopii entity types the tag may be used on; empty means all
   entityTypes String[]
+  /// @nopii
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  /// @nopii
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
   taggings    Tagging[]
 
@@ -54,6 +56,7 @@ model Tagging {
   entityType  String
   entityId    String   @db.Uuid
   createdById String?  @db.Uuid
+  /// @nopii
   createdAt   DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([tagId, entityType, entityId])
@@ -69,11 +72,16 @@ model Note {
   /// @pii free text written by staff
   body        String
   authorId    String    @db.Uuid
+  /// @nopii
   pinned      Boolean   @default(false)
+  /// @nopii
   version     Int       @default(0)
+  /// @nopii
   deletedAt   DateTime? @db.Timestamptz(3)
   deletedById String?   @db.Uuid
+  /// @nopii
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  /// @nopii
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
 
   @@index([entityType, entityId, deletedAt])
@@ -89,17 +97,24 @@ model Task {
   /// @nopii entity type the task is about, chosen by developers
   entityType  String?
   entityId    String?    @db.Uuid
+  /// @nopii
   dueAt       DateTime?  @db.Timestamptz(3)
   assigneeId  String?    @db.Uuid
+  /// @nopii
   status      TaskStatus @default(open)
+  /// @nopii
   source      TaskSource @default(manual)
   /// @nopii reference to the rule or process that created the task
   sourceRef   String?
   createdById String?    @db.Uuid
+  /// @nopii
   version     Int        @default(0)
+  /// @nopii
   deletedAt   DateTime?  @db.Timestamptz(3)
   deletedById String?    @db.Uuid
+  /// @nopii
   createdAt   DateTime   @default(now()) @db.Timestamptz(3)
+  /// @nopii
   updatedAt   DateTime   @updatedAt @db.Timestamptz(3)
 
   @@index([status, dueAt])
@@ -120,9 +135,13 @@ model SavedView {
   columns    Json     @default("[]")
   /// @nopii sort keys from the table's whitelist
   sort       Json     @default("[]")
+  /// @nopii
   shared     Boolean  @default(false)
+  /// @nopii
   version    Int      @default(0)
+  /// @nopii
   createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  /// @nopii
   updatedAt  DateTime @updatedAt @db.Timestamptz(3)
 
   @@unique([ownerId, entityType, name])
@@ -143,6 +162,7 @@ model SearchDocument {
   searchVector  Unsupported("tsvector")?
   /// @nopii permission a caller needs to see the result
   permissionKey String
+  /// @nopii
   updatedAt     DateTime                 @updatedAt @db.Timestamptz(3)
 
   @@unique([entityType, entityId])
@@ -154,14 +174,18 @@ model CsvJob {
   id          String       @id @default(uuid(7)) @db.Uuid
   /// @nopii entity type chosen by developers
   entityType  String
+  /// @nopii
   kind        CsvJobKind
+  /// @nopii
   status      CsvJobStatus
   /// @nopii counts only
   stats       Json         @default("{}")
   /// @nopii row number, column key and error code; never values
   errors      Json         @default("[]")
   createdById String       @db.Uuid
+  /// @nopii
   createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  /// @nopii
   updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
 
   @@index([createdAt])
@@ -175,10 +199,12 @@ model BulkOperation {
   /// @nopii action key chosen by developers
   action      String
   entityIds   String[]            @db.Uuid
+  /// @nopii
   status      BulkOperationStatus
   /// @nopii per element: id, ok and a result code
   results     Json                @default("[]")
   createdById String              @db.Uuid
+  /// @nopii
   createdAt   DateTime            @default(now()) @db.Timestamptz(3)
 
   @@map("bulk_operations")

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
+import type { TableDef } from '../common/table-def';
 import { AppError } from '../errors/safe-error';
 
 /**
@@ -27,6 +28,8 @@ export interface EntityDef {
   customerLink?: CustomerLink;
   /** Required when customerLink is present. */
   handlers?: EntityHandlers;
+  /** Panel table capabilities (task 0.5): search, filters, views, bulk actions, CSV, tags, notes, history, soft delete. */
+  table?: TableDef;
 }
 
 @Injectable()
