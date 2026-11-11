@@ -4,6 +4,7 @@ import { AccessGuard } from './platform/access/access.guard';
 import { AuthModule } from './platform/auth/auth.module';
 import { RequiresFlagGuard } from './platform/flags/requires-flag.guard';
 import { RequiresModuleGuard } from './platform/flags/requires-module.guard';
+import { MODULES } from './modules.registry';
 import { HealthController } from './platform/health/health.controller';
 import { CsrfGuard } from './platform/http/csrf.guard';
 import { AuthRateLimitGuard } from './platform/http/rate-limit.guard';
@@ -13,7 +14,7 @@ import { PlatformModule } from './platform/platform.module';
 // Global guards run in this order: a switched-off module or flag is a 404 for everyone, then CSRF, then the auth rate
 // limit, then access marks (sessions, permissions, step-up).
 @Module({
-  imports: [PlatformModule, AuthModule],
+  imports: [PlatformModule, AuthModule, ...MODULES],
   controllers: [HealthController],
   providers: [
     { provide: APP_GUARD, useExisting: RequiresModuleGuard },
