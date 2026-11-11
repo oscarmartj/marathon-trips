@@ -1,21 +1,12 @@
-# Secrets
-.env
-.env.*
-!.env.example
-secrets/
-
-# Dependencies and builds
 node_modules/
 dist/
-build/
 .next/
 .turbo/
 coverage/
-
-# Local Claude Code settings
-.claude/settings.local.json
-CLAUDE.local.md
-
-# OS and editors
-.DS_Store
-*.log
+*.tsbuildinfo
+.env
+.env.local
+.env.production
+apps/api/src/generated/
+test-results/
+playwright-report/

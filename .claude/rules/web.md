@@ -1,6 +1,6 @@
 # Web app
 
-Applies to any change under `apps/web`.
+Applies to any change under `apps/web/` (pages in `apps/web/src/app/`, copy in `apps/web/messages/en-AU.json`, brand in `packages/shared/src/brand/brand.config.ts`).
 
 - All user-facing copy is Australian English. No hard-coded strings: use the translation layer.
 - No claim of "official partner", "guaranteed entry" or any accreditation unless the API flags it for that race.

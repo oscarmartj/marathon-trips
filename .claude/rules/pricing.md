@@ -1,6 +1,6 @@
 # Pricing and bookings
 
-Applies to any change under the pricing or bookings modules of `apps/api`.
+Applies to any change under `apps/api/src/modules/pricing/` or `apps/api/src/modules/bookings/`, to `apps/api/prisma/schema/pricing.prisma` and `bookings.prisma`, and to their migrations.
 
 - The pricing engine is the only place a total is computed. The web app displays what the API returns.
 - Prices are per person by room occupancy, in integer minor units. State the rounding rule once and test it.

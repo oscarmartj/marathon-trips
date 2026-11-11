@@ -1,0 +1,25 @@
+{
+  "name": "@mt/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "eslint src",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run --reporter=default --reporter=json --outputFile=test-results/vitest.json",
+    "test:e2e": "echo 'No end-to-end tests yet: Playwright arrives with the first user flow (0.3).' && exit 0"
+  },
+  "dependencies": {
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "vitest": "4.1.12"
+  }
+}

@@ -1,0 +1,9 @@
+/// Records which named seed steps have run, so `db:seed` is idempotent (task 0.2).
+model SeedRun {
+  id    String   @id @default(uuid(7)) @db.Uuid
+  /// @nopii step name chosen by developers, never user input
+  name  String   @unique
+  ranAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@map("seed_runs")
+}

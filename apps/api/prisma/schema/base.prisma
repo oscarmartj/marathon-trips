@@ -1,0 +1,11 @@
+// Generator, datasource and enums shared by every module. One .prisma file per module
+// (plan 0.1, section 5.10); each later task adds only its own file.
+generator client {
+  provider     = "prisma-client"
+  output       = "../../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
