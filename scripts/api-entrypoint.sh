@@ -4,4 +4,4 @@ set -euo pipefail
 cd /app/apps/api
 pnpm exec prisma migrate deploy
 if [ "${APP_ENV:-}" != "production" ]; then pnpm exec tsx prisma/seed/seed.ts; fi
-exec node_modules/.bin/tsx src/main.ts
+exec node dist/main.js

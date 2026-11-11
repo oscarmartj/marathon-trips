@@ -6,7 +6,8 @@ import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 @Controller('health')
 export class HealthController {
   constructor(
-    private readonly prisma: PrismaService,
+    // Explicit tokens: tsx (pnpm dev) does not emit decorator metadata, so never rely on type-based injection.
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 

@@ -20,6 +20,6 @@ describe('GET /health', () => {
   it('reports ok with the database up, matching the shared schema', async () => {
     const res = await request(app.getHttpServer()).get('/health').expect(200);
     const body = healthResponseSchema.parse(res.body);
-    expect(body).toEqual({ status: 'ok', appEnv: 'test', database: 'up' });
+    expect(body).toEqual({ status: 'ok', appEnv: process.env.APP_ENV, database: 'up' });
   });
 });

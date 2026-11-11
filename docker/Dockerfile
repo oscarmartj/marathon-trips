@@ -10,7 +10,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 # APP_ENV and DATABASE_URL are not needed to build; prisma generate only reads the schema.
 RUN pnpm --filter @mt/shared build && pnpm --filter @mt/api exec prisma generate
-RUN pnpm --filter @mt/web build
+RUN pnpm --filter @mt/api exec tsc -p tsconfig.build.json && pnpm --filter @mt/web build
 
 FROM base AS api
 CMD ["bash", "scripts/api-entrypoint.sh"]
