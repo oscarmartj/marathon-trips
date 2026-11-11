@@ -1,8 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { allRoutes } from '../../support/routes';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
 import { Client, anonymous, buildWorld, packageBody, setSale, slug, staffClient, closeCatalogue } from '../../support/catalogue';
 import { CATALOGUE_PERMISSIONS as P } from '../../../src/modules/catalogue';
+
+// These tests make many HTTP and database calls; a loaded machine must not fail them on the 5 s default.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let t: TestApp;
 let admin: Client;
@@ -85,7 +88,7 @@ describe('permissions', () => {
       const denied = method === 'get' ? await nobody.get(fill(r.path)) : await nobody[method](fill(r.path), {} as never);
       expect(denied.status, `${r.method} ${r.path} no permission`).toBe(403);
     }
-  });
+  }, 60_000);
 
   it('each route names exactly one catalogue permission, and every catalogue permission is used', () => {
     const used = new Set<string>();

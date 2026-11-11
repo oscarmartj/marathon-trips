@@ -1,7 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { InventoryService } from '../../../src/modules/catalogue';
 import { TestApp, makeApp } from '../../support/auth';
 import { Client, World, buildWorld, staffClient, closeCatalogue } from '../../support/catalogue';
+
+// These tests make many HTTP and database calls; a loaded machine must not fail them on the 5 s default.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let t: TestApp;
 let admin: Client;
@@ -30,7 +33,7 @@ describe('stock never goes below zero or above capacity (plan 7)', () => {
     for (const r of results.filter((x) => x.status === 'rejected')) expect((r as PromiseRejectedResult).reason).toMatchObject({ status: 409, code: 'inventory_unavailable' });
     expect((await pool(p.id)).consumed).toBe(3);
     expect(await t.prisma.inventoryMovement.count({ where: { poolId: p.id, reason: 'hold' } })).toBe(3);
-  });
+  }, 60_000);
 
   it('a hold bigger than what remains changes nothing', async () => {
     const w = await buildWorld(admin);

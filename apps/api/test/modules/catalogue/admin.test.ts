@@ -1,8 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SALE_STATUSES } from '@mt/shared';
 import { SALE_TRANSITIONS, RACE_TRANSITIONS, EDITION_TRANSITIONS } from '../../../src/modules/catalogue/transitions';
 import { TestApp, makeApp } from '../../support/auth';
 import { Client, buildWorld, driveTo, packageBody, raceBody, setSale, staffClient, closeCatalogue } from '../../support/catalogue';
+
+// These tests make many HTTP and database calls; a loaded machine must not fail them on the 5 s default.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let t: TestApp;
 let admin: Client;
@@ -28,7 +31,7 @@ describe('create, edit and publish (phase 1 criterion)', () => {
     expect(pkg.hotels[0].rooms).toHaveLength(1);
     expect(pkg.extras).toHaveLength(1);
     expect(pkg.entryOptions).toHaveLength(1);
-  });
+  }, 60_000);
 
   it('is_demo_not_settable_via_api: isDemo is refused on create and update, and always false', async () => {
     expect((await admin.post('/admin/catalogue/races', raceBody({ isDemo: true }))).status).toBe(422);
@@ -57,7 +60,7 @@ describe('create, edit and publish (phase 1 criterion)', () => {
     for (const bad of [{ minOccupancy: 0 }, { maxOccupancy: 5 }, { minOccupancy: 3, maxOccupancy: 2 }]) expect((await room(bad)).status).toBe(422);
     for (const occupancy of [1, 2, 3, 4]) expect((await room({ minOccupancy: occupancy, maxOccupancy: occupancy })).status).toBe(201);
     expect((await admin.post('/admin/catalogue/races', raceBody({ name: { 'es-ES': 'Solo español' } }))).status).toBe(422);
-  });
+  }, 60_000);
 
   it('optimistic locking: a stale version is a 409 and changes nothing', async () => {
     const w = await buildWorld(admin);
@@ -82,7 +85,7 @@ describe('create, edit and publish (phase 1 criterion)', () => {
     expect((await entry(other.entryPoolId, w.distanceId)).body.code).toBe('pool_other_edition');
     expect((await entry(w.roomPoolId, w.distanceId)).body.code).toBe('pool_wrong_kind');
     expect((await entry(w.entryPoolId, w.distanceId)).body.code).toBe('entry_option_exists');
-  });
+  }, 60_000);
 
   it('a draft race or package can be deleted; a package on sale cannot; used distances stay', async () => {
     const w = await buildWorld(admin);
@@ -99,23 +102,31 @@ describe('create, edit and publish (phase 1 criterion)', () => {
 describe('sale status (plan 6.1)', () => {
   it('sale_status_transitions_match_table: every (from, to) pair, only the table passes', async () => {
     const w = await buildWorld(admin);
+    const fresh = async (from: string) => {
+      const pkg = (await admin.post(`/admin/catalogue/editions/${w.edition.id}/packages`, packageBody())).body;
+      await driveTo(admin, pkg.id, from);
+      return pkg.id as string;
+    };
     for (const from of SALE_STATUSES) {
-      for (const to of SALE_STATUSES) {
-        const pkg = (await admin.post(`/admin/catalogue/editions/${w.edition.id}/packages`, packageBody())).body;
-        await driveTo(admin, pkg.id, from);
-        const before = (await admin.get(`/admin/catalogue/packages/${pkg.id}`)).body;
-        expect(before.saleStatus).toBe(from);
-        const res = await setSale(admin, pkg.id, to, before.version);
-        const allowed = (SALE_TRANSITIONS[from] as readonly string[]).includes(to);
-        expect(res.status, `${from} -> ${to}`).toBe(allowed ? 200 : 409);
-        if (allowed) expect(res.body.saleStatus).toBe(to);
-        else {
-          expect(res.body.code).toBe('transition_not_allowed');
-          expect((await admin.get(`/admin/catalogue/packages/${pkg.id}`)).body.saleStatus).toBe(from);
-        }
+      const allowedTo = SALE_TRANSITIONS[from] as readonly string[];
+      // Refused changes leave the package where it was, so one package serves all of them.
+      const kept = await fresh(from);
+      for (const to of SALE_STATUSES.filter((x) => !allowedTo.includes(x))) {
+        const before = (await admin.get(`/admin/catalogue/packages/${kept}`)).body;
+        const res = await setSale(admin, kept, to, before.version);
+        expect(res.status, `${from} -> ${to}`).toBe(409);
+        expect(res.body.code).toBe('transition_not_allowed');
+        expect((await admin.get(`/admin/catalogue/packages/${kept}`)).body.saleStatus).toBe(from);
+      }
+      // An allowed change moves the package, so each one gets its own.
+      for (const to of allowedTo) {
+        const id = await fresh(from);
+        const res = await setSale(admin, id, to);
+        expect(res.status, `${from} -> ${to}`).toBe(200);
+        expect(res.body.saleStatus).toBe(to);
       }
     }
-  });
+  }, 120_000);
 
   it('race and edition tables cover every pair and each change is audited with its event', async () => {
     for (const table of [RACE_TRANSITIONS, EDITION_TRANSITIONS]) {

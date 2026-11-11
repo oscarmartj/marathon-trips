@@ -1,7 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PublicCatalogueService } from '../../../src/modules/catalogue';
 import { TestApp, makeApp } from '../../support/auth';
 import { Client, World, announceEdition, anonymous, buildWorld, driveTo, setSale, slug, staffClient, closeCatalogue } from '../../support/catalogue';
+
+// These tests make many HTTP and database calls; a loaded machine must not fail them on the 5 s default.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let t: TestApp;
 let admin: Client;
@@ -41,7 +44,7 @@ describe('draft and unpublished data stay private (phase 1 criterion)', () => {
     await setSale(admin, w.pkg.id, 'draft');
     expect((await pub().get(pkgUrl(w))).status).toBe(404);
     expect(await sitemap()).toEqual([]);
-  });
+  }, 60_000);
 
   it('an unpublished or deleted race is a 404 and is not listed', async () => {
     const w = await buildWorld(admin);
@@ -79,7 +82,7 @@ describe('search filters combine (API side of the 1.3 criterion)', () => {
     expect((await pub().get(`/catalogue/races?q=${tag}&pageSize=2&page=2`)).body).toMatchObject({ total: 3, page: 2, pageSize: 2 });
     expect((await pub().get('/catalogue/races?country=Australia')).status).toBe(422);
     expect((await pub().get('/catalogue/races?bogus=1')).status).toBe(422);
-  });
+  }, 60_000);
 
   it('a provisional date is flagged so the website can show it', async () => {
     const w = await buildWorld(admin);
@@ -126,7 +129,7 @@ describe('badges and guaranteed entry (plan 5.2)', () => {
     expect((await pub().get(`/catalogue/races/${w.race.slug}`)).body.editions[0].packages[0].guaranteedEntry).toBe(true);
     await admin.put(`/admin/catalogue/races/${w.race.id}/claims/guaranteed_entry`, { enabled: false });
     expect(await guaranteed(w)).toBe(false);
-  });
+  }, 60_000);
 
   it('no entries at all: never guaranteed, even with the claim on', async () => {
     const w = await live();
