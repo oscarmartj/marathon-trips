@@ -17,3 +17,16 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...base, APP_ENV: 'test' })).toMatchObject({ APP_ENV: 'test', API_PORT: 4000 });
   });
 });
+
+describe('loadConfig platform settings', () => {
+  it('uses development keys only in development, test and ci', () => {
+    expect(loadConfig({ ...base, APP_ENV: 'ci' }).EMAIL_HASH_KEY.length).toBeGreaterThanOrEqual(32);
+    expect(() => loadConfig({ ...base, APP_ENV: 'production' })).toThrow(/EMAIL_HASH_KEY, FILE_SIGNING_KEY/);
+    expect(() => loadConfig({ ...base, APP_ENV: 'staging' })).toThrow(/EMAIL_HASH_KEY/);
+  });
+  it('accepts real keys in production and keeps mail on a dev mailbox by default', () => {
+    const key = 'k'.repeat(40);
+    const c = loadConfig({ ...base, APP_ENV: 'production', EMAIL_HASH_KEY: key, FILE_SIGNING_KEY: key });
+    expect(c).toMatchObject({ MAIL_MODE: 'catch', SMTP_PORT: 1025, JOBS_WORKERS: 'on' });
+  });
+});
