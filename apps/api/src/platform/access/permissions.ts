@@ -23,6 +23,7 @@ export const PERMISSIONS = {
   settingRead: 'platform.setting.read',
   settingManage: 'platform.setting.manage',
   settingManageFinancial: 'platform.setting.manageFinancial',
+  systemRead: 'platform.system.read',
 } as const;
 
 /** The platform's own permissions (task 0.3). Business modules declare theirs in their manifest. */
@@ -37,6 +38,7 @@ export const PLATFORM_PERMISSIONS: readonly PermissionDef[] = [
   { key: PERMISSIONS.settingRead, module: 'platform', description: 'See business settings' },
   { key: PERMISSIONS.settingManage, module: 'platform', description: 'Change business settings' },
   { key: PERMISSIONS.settingManageFinancial, module: 'platform', description: 'Change settings that affect money (currency, GST)', requiresStepUp: true },
+  { key: PERMISSIONS.systemRead, module: 'platform', description: 'See the system monitor: queues, mail, events, backups (counts and ages, no personal data)' },
 ];
 
 /** Every permission declared in code; synchronised to the Permission table at start-up. */

@@ -7,6 +7,9 @@ import { SYSTEM_ACTOR, AuditService } from './platform/audit/audit.service';
 import { StaffAuthService } from './platform/auth/staff-auth.service';
 import { loadConfig } from './platform/config/config';
 import { PrismaService } from './platform/database/prisma.service';
+import { FLAGS } from './platform/flags/flag-registry';
+import { FlagsAdminService } from './platform/flags/flags-admin.service';
+import { FeatureFlagService } from './platform/flags/flags.service';
 
 /**
  * Console commands for the people who run the server (plan 4.2): the first owner is created here, and an owner who lost
@@ -14,6 +17,9 @@ import { PrismaService } from './platform/database/prisma.service';
  *
  *   pnpm api:cli staff:create --email someone@example.com [--owner]
  *   pnpm api:cli staff:reset --email someone@example.com
+ *   pnpm api:cli maintenance:on | maintenance:off | maintenance:status
+ *
+ * The maintenance commands exist for the moment nobody can sign in to the panel (task 8.6); they are audited as "system".
  */
 export async function runCli(argv: string[], print: (line: string) => void = console.log): Promise<number> {
   const [command, ...rest] = argv;
@@ -22,8 +28,9 @@ export async function runCli(argv: string[], print: (line: string) => void = con
     const i = rest.indexOf(`--${name}`);
     return i >= 0 ? rest[i + 1] : undefined;
   };
+  if (command === 'maintenance:on' || command === 'maintenance:off' || command === 'maintenance:status') return runMaintenance(command, print);
   if (command !== 'staff:create' && command !== 'staff:reset') {
-    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address>');
+    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status');
     return 2;
   }
   const email = emailSchema.safeParse(value('email'));
@@ -60,6 +67,25 @@ export async function runCli(argv: string[], print: (line: string) => void = con
     });
     print(`Set-up link (single use, expires ${link.expiresAt.toISOString()}). Send it to the person over a channel you trust:`);
     print(link.url);
+    return 0;
+  } catch (e) {
+    print(e instanceof Error ? e.message : 'Failed');
+    return 1;
+  } finally {
+    await app.close();
+  }
+}
+
+async function runMaintenance(command: 'maintenance:on' | 'maintenance:off' | 'maintenance:status', print: (line: string) => void): Promise<number> {
+  process.env.JOBS_WORKERS = 'off';
+  loadConfig();
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
+  try {
+    const flags = app.get(FeatureFlagService);
+    if (command !== 'maintenance:status') {
+      await app.get(FlagsAdminService).setFlag(SYSTEM_ACTOR, FLAGS.maintenance, command === 'maintenance:on', 'Set from the command line');
+    }
+    print(`Maintenance mode is ${(await flags.isEnabled(FLAGS.maintenance)) ? 'ON' : 'off'}`);
     return 0;
   } catch (e) {
     print(e instanceof Error ? e.message : 'Failed');

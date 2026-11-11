@@ -36,3 +36,14 @@ test('non-production mode, insecure cookies, dev passwords and floating tags fai
 test('Caddy proxying to the API fails', () => {
   assert.match(problems(compose, 'x {\n reverse_proxy api:4000\n}'), /Caddyfile/);
 });
+
+test('task 8.6: the backup service must be opt-in, read uploads read-only, stay encrypted and never be published', () => {
+  assert.match(problems(compose.replace(/ {4}profiles: \["tools"\]\n/, '')), /"tools" profile/);
+  assert.match(problems(compose.replace('filedata:/data/files:ro', 'filedata:/data/files')), /read-only/);
+  assert.match(problems(compose.replace(/(backup:[\s\S]*?)APP_ENV: production/, '$1APP_ENV: staging')), /backup" APP_ENV/);
+  assert.match(problems(compose.replace('BACKUP_DIR: /backups', 'BACKUP_DIR: /backups\n      BACKUP_ALLOW_LOCAL_ONLY: "yes"')), /local-only/);
+  assert.match(problems(compose.replace('      BACKUP_PASSPHRASE_FILE: /run/backup-passphrase\n', '')), /BACKUP_PASSPHRASE_FILE/);
+  assert.match(problems(compose.replace('    entrypoint: ["bash", "/scripts/backup/backup.sh"]', '    entrypoint: ["bash", "/scripts/backup/backup.sh"]\n    ports: ["5000:5000"]')), /publishes ports/);
+  assert.match(problems(compose.replace('backups:/backups:ro', 'backups:/backups')), /backups volume read-only/);
+  assert.match(problems(compose.replace(/ {2}backup:\n[\s\S]*?\nvolumes:/, 'volumes:')), /"backup" is missing/);
+});

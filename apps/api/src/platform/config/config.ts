@@ -42,6 +42,9 @@ const configSchema = z.object({
   // Requests per minute and IP on sign-in, code and magic-link routes.
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
 
+  // Task 8.6: file written by scripts/backup/backup.sh after each good backup; the system monitor reads it. Optional.
+  BACKUP_STATUS_FILE: z.string().min(1).optional(),
+
   // Jobs: the API runs pg-boss workers unless this is "off" (used by tests and one-off scripts).
   JOBS_WORKERS: z.enum(['on', 'off']).default('on'),
   EVENTS_POLL_MS: z.coerce.number().int().min(100).default(2000),

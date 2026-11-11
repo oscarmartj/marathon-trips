@@ -15,6 +15,8 @@ import { FeatureFlagService, SettingsService } from './flags/flags.service';
 import { FlagRegistry } from './flags/flag-registry';
 import { RequiresFlagGuard } from './flags/requires-flag.guard';
 import { RequiresModuleGuard } from './flags/requires-module.guard';
+import { MaintenanceGuard } from './http/maintenance.guard';
+import { SystemMonitorService } from './monitor/system-monitor.service';
 import { CsrfGuard } from './http/csrf.guard';
 import { AuthRateLimitGuard } from './http/rate-limit.guard';
 import { IdempotencyService } from './idempotency/idempotency.service';
@@ -74,7 +76,7 @@ class PlatformLifecycle implements OnApplicationBootstrap, OnModuleDestroy {
     ConsumerRegistry, OutboxService, EventsService, FeatureFlagService, SettingsService, RequiresModuleGuard,
     IdempotencyService, NumberSequenceService, EntityRegistry, MailTemplateRegistry, MailService, StoredFileService,
     AuditService, PermissionRegistry, AccessService, SessionService, FlagRegistry,
-    RequiresFlagGuard, CsrfGuard, AuthRateLimitGuard, AccessGuard,
+    RequiresFlagGuard, CsrfGuard, AuthRateLimitGuard, AccessGuard, MaintenanceGuard, SystemMonitorService,
     {
       provide: FILE_STORAGE,
       useFactory: (c: AppConfig): FileStorage =>
@@ -87,7 +89,7 @@ class PlatformLifecycle implements OnApplicationBootstrap, OnModuleDestroy {
   exports: [
     APP_CONFIG, PrismaService, JobsService, ConsumerRegistry, OutboxService, EventsService, FeatureFlagService, SettingsService,
     RequiresModuleGuard, IdempotencyService, NumberSequenceService, EntityRegistry, MailTemplateRegistry, MailService, StoredFileService, FILE_STORAGE,
-    AuditService, PermissionRegistry, AccessService, SessionService, FlagRegistry, RequiresFlagGuard, CsrfGuard, AuthRateLimitGuard, AccessGuard,
+    AuditService, PermissionRegistry, AccessService, SessionService, FlagRegistry, RequiresFlagGuard, CsrfGuard, AuthRateLimitGuard, AccessGuard, MaintenanceGuard, SystemMonitorService,
   ],
 })
 export class PlatformModule {}
