@@ -9,7 +9,7 @@
 | # | Tarea | Riesgo | Sesión |
 |---|---|---|---|
 | 0.1 | Plan general y modelo de datos completo, incluidos los módulos futuros. Decisiones que tomarías distinto y preguntas. Sin código. Guarda el resultado en `docs/plans/phase-0-architecture.md`. | Arquitectura | Opus, esfuerzo alto |
-| 0.2 | Monorepo, herramientas, CI, `docker-compose`, `.env.example`. Rellena "Comandos" en `CLAUDE.md`, ajusta los `paths` de `.claude/rules/` a la estructura real y propón un hook que bloquee el cierre con lint o tipos en rojo. | Bajo | Sonnet |
+| 0.2 | Monorepo, herramientas, CI, `docker-compose`, `.env.example`. Rellena "Comandos" en `CLAUDE.md` y ajusta las rutas que nombran las reglas de `.claude/rules/` a la estructura real, sin añadirles `paths` (así se cargan también en la nube). CI ejecuta lint, tipos y pruebas en cada PR, cancela las ejecuciones antiguas del mismo PR y falla si hay pruebas saltadas. Esquema de Prisma dividido en un archivo por módulo. | Bajo | Sonnet |
 | 0.3 | Autenticación (enlace mágico para clientes; contraseña y TOTP para administrador), roles y permisos, registro de auditoría, feature flags. | Alto | `opusplan`, esfuerzo alto, `reviewer` |
 | 0.4 | Eventos de dominio con outbox, cola de tareas sobre PostgreSQL, almacenamiento de archivos y correo detrás de interfaces. | Medio | `opusplan` |
 | 0.5 | Capacidades comunes de las tablas del panel: búsqueda, filtros, vistas guardadas, acciones en lote, CSV, etiquetas, notas, historial y borrado lógico. Como piezas reutilizables. | Medio | `opusplan` |
@@ -32,4 +32,4 @@ Catálogo, precios, reservas y pagos. Ningún despliegue.
 
 ## Revisión de Oscar
 
-Aprobar el plan de 0.1 antes de seguir. Leer el informe del `reviewer` de 0.3. Decidir orquestador de pagos y alojamiento con la investigación de 0.7.
+En modo manual, aprobar el plan de 0.1 antes de seguir; en modo autónomo lo revisa el subagente revisor y conviene leerlo después. Leer el informe del `reviewer` de 0.3. Decidir orquestador de pagos y alojamiento con la investigación de 0.7.

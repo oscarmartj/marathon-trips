@@ -1,11 +1,6 @@
----
-paths:
-  - "apps/api/src/payments/**"
-  - "apps/api/src/ledger/**"
-  - "apps/api/src/webhooks/**"
----
-
 # Payments and ledger
+
+Applies to any change under the payments, ledger or webhooks modules of `apps/api`.
 
 - Amounts are integers in minor units with an explicit currency. No floats anywhere near money.
 - Ledger entries are append-only. A correction is a new entry that references the original.

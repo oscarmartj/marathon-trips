@@ -14,6 +14,8 @@ Lee solo lo que la tarea necesite. No abras los documentos de referencia enteros
 - `docs/STATE.md`: estado actual y siguiente tarea. Léelo al empezar cada sesión.
 - `docs/phases/phase-N.md`: tareas y criterios de aceptación de la fase en curso.
 - `docs/orchestration.md`: cómo trabajamos, qué modelo y qué subagente usar.
+- `docs/autonomous.md`: modo autónomo. Manda sobre este archivo dentro de un proyecto de Claude Code.
+- `docs/done/N.M.md`: constancia de cada tarea hecha en modo autónomo.
 - `docs/decisions.md`: decisiones ya tomadas. No las reabras sin motivo.
 - Referencia, por secciones: `docs/brief.md`, `docs/architecture.md`, `docs/payments.md`, `docs/modules.md`, `docs/web.md`.
 
@@ -31,6 +33,16 @@ Rellena esta sección en la tarea 0.2 con los comandos exactos de: instalar, arr
 - En rutas de riesgo alto (pagos, precios, autenticación, permisos, datos personales), pasa el subagente `reviewer` antes de cerrar.
 - No uses otros subagentes ni trabajo en paralelo salvo que yo lo pida: gastan uso sin mejorar el resultado.
 - Al cerrar, actualiza `docs/STATE.md` en cinco líneas como máximo.
+
+## Modo autónomo
+
+Si trabajas dentro de un proyecto de Claude Code (las instrucciones del proyecto dicen "MODO AUTÓNOMO"), lee `docs/autonomous.md` antes de nada. Allí:
+
+- No se espera el visto bueno de Oscar: los planes y los cambios de riesgo alto los revisa un subagente revisor independiente.
+- Hay trabajo en paralelo y cada hilo fusiona su PR cuando CI, el verificador y el revisor lo permiten.
+- Lo que necesite a Oscar se anota y no detiene el trabajo.
+
+Los límites de abajo valen en los dos modos, salvo el aviso de dependencias, que en modo autónomo se da en el PR.
 
 ## Límites
 

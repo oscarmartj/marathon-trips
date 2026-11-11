@@ -1,10 +1,6 @@
----
-paths:
-  - "apps/api/src/pricing/**"
-  - "apps/api/src/bookings/**"
----
-
 # Pricing and bookings
+
+Applies to any change under the pricing or bookings modules of `apps/api`.
 
 - The pricing engine is the only place a total is computed. The web app displays what the API returns.
 - Prices are per person by room occupancy, in integer minor units. State the rounding rule once and test it.
