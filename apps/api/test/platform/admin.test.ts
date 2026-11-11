@@ -156,8 +156,51 @@ describe('who may act on whom (G1, T9)', () => {
     const strong = await t.prisma.role.create({ data: { key: strongKey, name: 'Strong' } });
     await t.prisma.rolePermission.create({ data: { roleId: strong.id, permissionKey: PERMISSIONS.roleManage } });
     await t.prisma.userRole.create({ data: { userId: target.id, roleId: strong.id } });
-    expect((await m.patch(`/admin/staff/${target.id}/roles`, { roleKeys: [] })).status).toBe(403);
+    // Over HTTP the first barrier answers: the target holds more than the actor.
+    expect((await m.patch(`/admin/staff/${target.id}/roles`, { roleKeys: [] })).body.code).toBe('target_has_more_permissions');
+    // The removal check itself refuses to take away a role with permissions the actor lacks.
+    const { AccessService } = await import('../../src/platform/access/access.service');
+    const access = t.app.get(AccessService);
+    const code = await t.prisma.$transaction(async (tx) => {
+      const actorEff = await access.effective(tx, actor.id);
+      return access.assertCanHandleRoles(tx, actorEff, [strong.id]).then(() => 'ok', (e: { code?: string }) => e.code);
+    });
+    expect(code).toBe('role_has_more_permissions');
     expect((await m.patch(`/admin/staff/${actor.id}/roles`, { roleKeys: [] })).body.code).toBe('cannot_act_on_self');
+  });
+
+  it('shared_role_edit_respects_holders (G1): a non-owner cannot change a role held by someone with more permissions', async () => {
+    const actor = await createStaff(t, { permissions: [PERMISSIONS.roleRead, PERMISSIONS.roleManage, PERMISSIONS.flagRead] });
+    const api = await as(actor);
+    const key = `h${Date.now().toString(36)}`;
+    const shared = await t.prisma.role.create({ data: { key, name: 'Shared' } });
+    const holder = await createStaff(t, { permissions: [PERMISSIONS.flagManage] }); // more than the actor, via another role
+    await t.prisma.userRole.create({ data: { userId: holder.id, roleId: shared.id } });
+    const res = await api.put(`/admin/roles/${key}/permissions`, { permissionKeys: [PERMISSIONS.flagRead], version: 0 });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('role_holder_has_more_permissions');
+    const owner = await as(await createStaff(t, { owner: true }));
+    expect((await owner.put(`/admin/roles/${key}/permissions`, { permissionKeys: [PERMISSIONS.flagRead], version: 0 })).status).toBe(200);
+    await t.prisma.userRole.deleteMany({ where: { userId: holder.id, roleId: shared.id } });
+    expect((await api.put(`/admin/roles/${key}/permissions`, { permissionKeys: [], version: 1 })).status).toBe(200);
+  });
+
+  it('actor_rechecked_under_lock: three owners disabling each other at once never deadlock and leave one owner', async () => {
+    const others = await t.prisma.user.findMany({ where: { status: 'active', roles: { some: { role: { key: OWNER_ROLE } } } }, select: { id: true } });
+    await t.prisma.user.updateMany({ where: { id: { in: others.map((o) => o.id) } }, data: { status: 'disabled' } });
+    try {
+      const owners = [await createStaff(t, { owner: true }), await createStaff(t, { owner: true }), await createStaff(t, { owner: true })];
+      const apis = [await as(owners[0]!), await as(owners[1]!), await as(owners[2]!)];
+      // A disables B, B disables C, C disables A: a cycle that deadlocks without a single lock order.
+      const results = await Promise.all(apis.map((api, i) => api.post(`/admin/staff/${owners[(i + 1) % 3]!.id}/disable`)));
+      for (const r of results) expect([200, 403, 409]).toContain(r.status);
+      const active = await t.prisma.user.count({ where: { id: { in: owners.map((o) => o.id) }, status: 'active' } });
+      expect(active).toBeGreaterThanOrEqual(1);
+      // Whoever was disabled could not act afterwards: every success came from an owner still active at that moment.
+      expect(results.filter((r) => r.status === 200).length).toBe(3 - active);
+    } finally {
+      await t.prisma.user.updateMany({ where: { id: { in: others.map((o) => o.id) } }, data: { status: 'active' } });
+    }
   });
 
   it('disable_user_revokes_sessions; enable restores sign-in', async () => {

@@ -31,7 +31,7 @@ export async function seed(prisma: PrismaClient, appEnv: string, given?: AppConf
         const owner = await createEnrolledOwner(prisma, config, DEMO_OWNER_EMAIL);
         if (appEnv === 'development') {
           console.log(['Demo owner (development only):', `  email:    ${owner.email}`, `  password: ${owner.password}`,
-            `  TOTP:     ${owner.secret}`, `  otpauth:  ${owner.uri}`, `  recovery: ${owner.recoveryCodes.join(' ')}`].join('\n'));
+            `  TOTP:     ${owner.secret}`, `  otpauth:  ${owner.uri}`].join('\n'));
         }
       },
     });

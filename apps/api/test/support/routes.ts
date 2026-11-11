@@ -6,6 +6,7 @@ import { marksOf } from '../../src/platform/access/access.guard';
 
 export interface RouteInfo {
   controller: string;
+  controllerClass: new (...a: never[]) => object;
   handler: string;
   method: string;
   path: string;
@@ -31,7 +32,7 @@ export function allRoutes(app: INestApplication): RouteInfo[] {
         const path = Reflect.getMetadata(PATH_METADATA, fn);
         if (path === undefined) continue;
         const method = METHODS[Number(Reflect.getMetadata(METHOD_METADATA, fn))] ?? 'GET';
-        routes.push({ controller: ctrl.name, handler: name, method, path: join(base, String(path)), marks: marksOf(reflector, fn, ctrl) });
+        routes.push({ controller: ctrl.name, controllerClass: ctrl, handler: name, method, path: join(base, String(path)), marks: marksOf(reflector, fn, ctrl) });
       }
     }
   }

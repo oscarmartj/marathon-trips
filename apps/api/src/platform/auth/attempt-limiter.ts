@@ -5,6 +5,9 @@ import { tooManyRequests } from '../http/api-error';
 type Db = Prisma.TransactionClient | PrismaService;
 
 /** Progressive delay (M2): after the n-th failure, n >= 3, wait min(2^(n-3), 900) seconds. Never a permanent lock-out. */
+/** Counts of failures start again after this long without an attempt, for known and unknown addresses alike. */
+export const COUNT_WINDOW_SECONDS = 3600;
+
 export function delaySeconds(failures: number): number {
   return failures >= 3 ? Math.min(2 ** (Math.min(failures, 20) - 3), 900) : 0;
 }
@@ -47,13 +50,20 @@ export class Lru<V> {
  * checked at once. A correct password or step-up code gives its own count back; a new session resets the count to 0.
  */
 export async function claimAccountAttempt(db: Db, userId: string, now: Date = new Date()): Promise<void> {
+  // An hour without attempts starts the count again, exactly like the in-memory counter for unknown addresses (T2).
   const claimed = await db.$queryRaw<Array<{ id: string }>>`
-    UPDATE users SET "failedLoginCount" = "failedLoginCount" + 1,
-      "nextLoginAllowedAt" = CASE WHEN "failedLoginCount" + 1 >= 3
-        THEN ${now}::timestamptz + make_interval(secs => LEAST(power(2, LEAST("failedLoginCount" + 1, 20) - 3), 900))
+    WITH c AS (
+      SELECT id, CASE WHEN "lastFailedLoginAt" IS NULL OR "lastFailedLoginAt" <= ${now}::timestamptz - ${COUNT_WINDOW_SECONDS} * interval '1 second'
+        THEN 1 ELSE "failedLoginCount" + 1 END AS n
+      FROM users WHERE id = ${userId}::uuid AND ("nextLoginAllowedAt" IS NULL OR "nextLoginAllowedAt" <= ${now}::timestamptz)
+      FOR UPDATE
+    )
+    UPDATE users u SET "failedLoginCount" = c.n, "lastFailedLoginAt" = ${now}::timestamptz,
+      "nextLoginAllowedAt" = CASE WHEN c.n >= 3
+        THEN ${now}::timestamptz + make_interval(secs => LEAST(power(2, LEAST(c.n, 20) - 3), 900))
         ELSE NULL END
-    WHERE id = ${userId}::uuid AND ("nextLoginAllowedAt" IS NULL OR "nextLoginAllowedAt" <= ${now}::timestamptz)
-    RETURNING id`;
+    FROM c WHERE u.id = c.id
+    RETURNING u.id`;
   if (claimed.length > 0) return;
   const row = await db.user.findUnique({ where: { id: userId }, select: { nextLoginAllowedAt: true } });
   throw tooManyRequests(row?.nextLoginAllowedAt ? (row.nextLoginAllowedAt.getTime() - now.getTime()) / 1000 : 1);
@@ -72,7 +82,7 @@ export async function refundAccountAttempt(db: Db, userId: string): Promise<void
 
 /** The same schedule for addresses with no account, kept in memory so the two cases look alike (T2). */
 export class UnknownAccountDelay {
-  private readonly entries = new Lru<{ failures: number; nextAllowedAt: number }>(10_000, 3600_000);
+  private readonly entries = new Lru<{ failures: number; nextAllowedAt: number }>(100_000, COUNT_WINDOW_SECONDS * 1000);
 
   claim(key: string, now: number = Date.now()): void {
     const e = this.entries.get(key, now) ?? { failures: 0, nextAllowedAt: 0 };

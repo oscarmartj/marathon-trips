@@ -30,7 +30,7 @@ Node 22 (`.nvmrc`) y pnpm 10 (`corepack enable`). Desde la raíz del repositorio
 | Variables de entorno | `cp .env.example .env` y `export $(grep -v '^#' .env \| xargs)` (la API no arranca sin `APP_ENV`) |
 | Migraciones (como `mt_owner`) | `pnpm db:migrate` (`pnpm --filter @mt/api db:migrate:dev` para crear una) |
 | Datos demo (idempotente, se niega en `production`) | `pnpm db:seed` |
-| Arrancar todo en local | `docker compose up --build` (API :4000, web :3000, Mailpit :8025) |
+| Arrancar todo en local | `docker compose up --build` (web :3000 con la API detrás en `/api`, Mailpit :8025; la API no se publica) |
 | Arrancar sin Docker | `pnpm dev` |
 | Lint (incluye `scripts/check-dependency-table.mjs`) | `pnpm lint` |
 | Tipos | `pnpm typecheck` |

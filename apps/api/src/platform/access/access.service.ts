@@ -93,22 +93,72 @@ export class AccessService implements OnApplicationBootstrap {
   }
 
   /**
-   * G1: an actor may only act on another staff account whose permissions are all within the actor's own, and only an
-   * owner acts on an owner. Never on oneself. Locks the target user row first.
+   * Locks staff user rows in one order (by id) so concurrent admin changes never deadlock; user rows are always locked
+   * before the owner role row (assertAnotherOwnerRemains).
    */
-  async assertCanActOn(tx: Prisma.TransactionClient, actorUserId: string, targetUserId: string): Promise<{ actor: Effective; target: Effective }> {
-    if (actorUserId === targetUserId) throw forbidden('cannot_act_on_self', 'You cannot do this to your own account');
-    const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM users WHERE id = ${targetUserId}::uuid AND kind = 'staff' FOR UPDATE`;
-    if (locked.length === 0) throw notFound();
+  async lockUsers(tx: Prisma.TransactionClient, ids: readonly string[]): Promise<string[]> {
+    const unique = [...new Set(ids)].sort();
+    if (unique.length === 0) return [];
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM users WHERE id = ANY(${unique}::uuid[]) ORDER BY id FOR UPDATE`;
+    return rows.map((r) => r.id);
+  }
+
+  /** Under the actor's lock: the actor is still active staff and still holds `key` (it may have changed since the guard). */
+  async lockedActor(tx: Prisma.TransactionClient, actorUserId: string, key: string): Promise<Effective> {
     const actor = await this.effective(tx, actorUserId);
+    if (!actor.keys.has(key)) throw forbidden();
+    return actor;
+  }
+
+  /**
+   * G1: an actor may only act on another staff account whose permissions are all within the actor's own, and only an
+   * owner acts on an owner. Never on oneself. Locks actor and target (in id order) and re-reads both under the lock.
+   */
+  async assertCanActOn(tx: Prisma.TransactionClient, actorUserId: string, targetUserId: string, key: string): Promise<{ actor: Effective; target: Effective }> {
+    if (actorUserId === targetUserId) throw forbidden('cannot_act_on_self', 'You cannot do this to your own account');
+    const locked = await this.lockUsers(tx, [actorUserId, targetUserId]);
+    const target = await tx.user.findUnique({ where: { id: targetUserId }, select: { kind: true } });
+    if (!locked.includes(targetUserId) || target?.kind !== 'staff') throw notFound();
+    const actor = await this.lockedActor(tx, actorUserId, key);
+    const targetEff = await this.rolesEffective(tx, targetUserId);
+    this.assertCovers(actor, targetEff, 'target');
+    return { actor, target: targetEff };
+  }
+
+  /** Effective permissions from role rows, whatever the user's status (for targets and role holders). */
+  async rolesEffective(tx: Prisma.TransactionClient, userId: string): Promise<Effective> {
     const rows = await tx.userRole.findMany({
-      where: { userId: targetUserId },
+      where: { userId },
       select: { scope: true, role: { select: { key: true, permissions: { select: { permissionKey: true } } } } },
     });
-    const target = computeEffective(rows, this.declaredKeys());
-    if (target.isOwner && !actor.isOwner) throw forbidden('target_is_owner', 'Only an owner can do this to an owner');
-    for (const k of target.keys) if (!actor.keys.has(k)) throw forbidden('target_has_more_permissions', 'This account has permissions you do not have');
-    return { actor, target };
+    return computeEffective(rows, this.declaredKeys());
+  }
+
+  private assertCovers(actor: Effective, other: Effective, who: 'target' | 'holder'): void {
+    if (other.isOwner && !actor.isOwner) {
+      throw who === 'target' ? forbidden('target_is_owner', 'Only an owner can do this to an owner') : forbidden('role_holder_is_owner', 'An owner holds this role');
+    }
+    for (const k of other.keys) {
+      if (!actor.keys.has(k)) {
+        throw who === 'target'
+          ? forbidden('target_has_more_permissions', 'This account has permissions you do not have')
+          : forbidden('role_holder_has_more_permissions', 'Someone with this role has permissions you do not have');
+      }
+    }
+  }
+
+  /**
+   * G1 for a shared role (point 6 of the code review): a non-owner may change a role only if every user holding it has
+   * nothing beyond the actor's own permissions. Locks the actor and the holders in id order.
+   */
+  async assertCanEditRole(tx: Prisma.TransactionClient, actorUserId: string, roleId: string, key: string): Promise<Effective> {
+    const holders = await tx.userRole.findMany({ where: { roleId }, select: { userId: true } });
+    await this.lockUsers(tx, [actorUserId, ...holders.map((h) => h.userId)]);
+    const actor = await this.lockedActor(tx, actorUserId, key);
+    if (actor.isOwner) return actor;
+    const again = await tx.userRole.findMany({ where: { roleId }, select: { userId: true } });
+    for (const h of again) if (h.userId !== actorUserId) this.assertCovers(actor, await this.rolesEffective(tx, h.userId), 'holder');
+    return actor;
   }
 
   /** G1, T9: an actor can only grant or remove roles whose permissions it holds; only an owner touches the owner role. */

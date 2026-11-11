@@ -47,6 +47,8 @@ model User {
   totpLastUsedStep     BigInt?
   /// @nopii consecutive failed password, TOTP or step-up attempts
   failedLoginCount     Int            @default(0)
+  /// @nopii last counted attempt; the count starts again after an hour without attempts (same as unknown addresses)
+  lastFailedLoginAt    DateTime?      @db.Timestamptz(3)
   /// @nopii progressive delay: no attempt is checked before this instant
   nextLoginAllowedAt   DateTime?      @db.Timestamptz(3)
   /// @nopii last successful sign-in

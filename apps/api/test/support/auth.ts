@@ -27,7 +27,7 @@ export class CapturingMailSender implements MailSender {
 }
 
 /** The whole API, as main.ts builds it, with a capturing mail sender. Rate limit high unless a test asks otherwise. */
-export async function makeApp(env: Record<string, string> = {}, opts: { allLogs?: boolean } = {}) {
+export async function makeApp(env: Record<string, string> = {}, opts: { allLogs?: boolean; controllers?: Array<new (...a: never[]) => object> } = {}) {
   const saved: Record<string, string | undefined> = {};
   const all = { AUTH_RATE_LIMIT_PER_MINUTE: '10000', WEB_ORIGIN, ...env };
   for (const [k, v] of Object.entries(all)) {
@@ -36,7 +36,7 @@ export async function makeApp(env: Record<string, string> = {}, opts: { allLogs?
   }
   const mail = new CapturingMailSender();
   try {
-    const mod = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(MAIL_SENDER).useValue(mail).compile();
+    const mod = await Test.createTestingModule({ imports: [AppModule], controllers: opts.controllers ?? [] }).overrideProvider(MAIL_SENDER).useValue(mail).compile();
     const app = mod.createNestApplication({ logger: opts.allLogs ? ['error', 'warn', 'log', 'debug', 'verbose'] : ['error'] });
     const config = app.get<AppConfig>(APP_CONFIG);
     configureApp(app, config);

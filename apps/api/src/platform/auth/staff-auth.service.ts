@@ -104,7 +104,8 @@ export class StaffAuthService {
       const user = await tx.user.findUnique({ where: { id: userId }, select: { status: true, totpEnabledAt: true } });
       if (!user || user.status !== 'active' || !user.totpEnabledAt) throw mfaExpired();
       await tx.user.update({ where: { id: userId }, data: { failedLoginCount: 0, nextLoginAllowedAt: null, lastLoginAt: now } });
-      const session = await this.sessions.create(tx, { userId, kind: 'staff', mfaVerifiedAt: now, meta, now });
+      // A recovery code signs in but never counts as a fresh TOTP check: step-up stays closed until a real code.
+      const session = await this.sessions.create(tx, { userId, kind: 'staff', mfaVerifiedAt: method === 'totp' ? now : null, meta, now });
       const actor: AuditActor = { type: 'staff', id: userId, sessionId: session.sessionId, requestId: requestId ?? null };
       await this.audit.record(tx, { actor, action: 'auth.staff.signedIn', entityType: 'User', entityId: userId, context: { method } });
       await this.outbox.publish(tx, { type: 'auth.user.logged_in', aggregateType: 'User', aggregateId: userId, actorType: 'staff', actorId: userId, payload: { userId, sessionId: session.sessionId } });

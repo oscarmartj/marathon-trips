@@ -28,6 +28,7 @@ CREATE TABLE "users" (
     "totpEnabledAt" TIMESTAMPTZ(3),
     "totpLastUsedStep" BIGINT,
     "failedLoginCount" INTEGER NOT NULL DEFAULT 0,
+    "lastFailedLoginAt" TIMESTAMPTZ(3),
     "nextLoginAllowedAt" TIMESTAMPTZ(3),
     "lastLoginAt" TIMESTAMPTZ(3),
     "anonymisedAt" TIMESTAMPTZ(3),
@@ -258,7 +259,8 @@ ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_scope_null_check" CHECK ("sc
 ALTER TABLE "roles" ADD CONSTRAINT "roles_key_format_check" CHECK ("key" ~ '^[a-z][a-z0-9_]{1,39}$');
 
 -- Append-only tables (plan 4.9): a trigger rejects UPDATE, DELETE and TRUNCATE for every role, the owner included.
--- audit_pii_values allows DELETE only inside mt_privacy's SECURITY DEFINER functions (current_user = 'mt_privacy').
+-- audit_pii_values allows DELETE only when current_user = 'mt_privacy': inside its SECURITY DEFINER functions, or
+-- by mt_owner after SET ROLE mt_privacy (mt_owner runs migrations only and could drop the triggers anyway; accepted).
 CREATE FUNCTION public.mt_reject_modification() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, public, pg_temp

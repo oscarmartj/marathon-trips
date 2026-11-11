@@ -5,7 +5,7 @@ import { PrismaService } from '../database/prisma.service';
 import { OutboxService } from '../events/outbox.service';
 import { conflict, forbidden, notFound, unprocessable } from '../http/api-error';
 import { AccessService, OWNER_ROLE } from './access.service';
-import { PermissionRegistry } from './permissions';
+import { PERMISSIONS, PermissionRegistry } from './permissions';
 
 const PERMISSION_KEYS_CLASS = { permissionKeys: 'nopii' } as const;
 
@@ -60,7 +60,7 @@ export class RolesAdminService {
       const current = role.permissions.map((p) => p.permissionKey).sort();
       const added = wanted.filter((k) => !current.includes(k));
       const removed = current.filter((k) => !wanted.includes(k));
-      const actorEff = await this.access.effective(tx, actor.id);
+      const actorEff = await this.access.assertCanEditRole(tx, actor.id, role.id, PERMISSIONS.roleManage);
       // T9: you can only hand out, or take away, what you hold yourself.
       for (const k of [...added, ...removed]) if (this.registry.get(k) && !actorEff.keys.has(k)) throw forbidden('cannot_grant_permission_actor_lacks', 'You can only change permissions you have');
       const bumped = await tx.role.updateMany({ where: { id: role.id, version: input.version }, data: { version: { increment: 1 } } });

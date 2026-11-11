@@ -201,6 +201,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     totpEnabledAt: 'nopii',
     totpLastUsedStep: 'nopii',
     failedLoginCount: 'nopii',
+    lastFailedLoginAt: 'nopii',
     nextLoginAllowedAt: 'nopii',
     lastLoginAt: 'nopii',
     anonymisedAt: 'nopii',

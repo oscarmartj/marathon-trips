@@ -7,6 +7,7 @@ import { PrismaService } from '../database/prisma.service';
 import { OutboxService } from '../events/outbox.service';
 import { conflict, notFound, unprocessable } from '../http/api-error';
 import { AccessService, OWNER_ROLE } from './access.service';
+import { PERMISSIONS } from './permissions';
 
 const ROLE_KEYS_CLASS = { roleKeys: 'nopii' } as const;
 
@@ -57,7 +58,8 @@ export class StaffAdminService {
   async create(actor: AuditActor & { id: string }, input: { email: string; roleKeys: string[]; reason?: string }) {
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const actorEff = await this.access.effective(tx, actor.id);
+        await this.access.lockUsers(tx, [actor.id]);
+        const actorEff = await this.access.lockedActor(tx, actor.id, PERMISSIONS.userManage);
         const roles = await this.rolesByKey(tx, input.roleKeys);
         await this.access.assertCanHandleRoles(tx, actorEff, roles.map((r) => r.id));
         const user = await tx.user.create({ data: { kind: 'staff', email: input.email }, select: { id: true, email: true, kind: true, status: true } });
@@ -79,7 +81,7 @@ export class StaffAdminService {
   async setRoles(actor: AuditActor & { id: string }, targetId: string, input: { roleKeys: string[]; scope?: unknown; reason?: string }): Promise<void> {
     if (input.scope !== undefined && input.scope !== null) throw unprocessable('role_scope_not_supported', 'Scoped roles are not available yet');
     await this.prisma.$transaction(async (tx) => {
-      const { actor: actorEff } = await this.access.assertCanActOn(tx, actor.id, targetId);
+      const { actor: actorEff } = await this.access.assertCanActOn(tx, actor.id, targetId, PERMISSIONS.userManage);
       const current = await tx.userRole.findMany({ where: { userId: targetId }, select: { roleId: true, role: { select: { key: true } } } });
       const wanted = await this.rolesByKey(tx, input.roleKeys);
       const added = wanted.filter((w) => !current.some((c) => c.roleId === w.id));
@@ -100,7 +102,7 @@ export class StaffAdminService {
 
   async setStatus(actor: AuditActor & { id: string }, targetId: string, status: 'active' | 'disabled', reason?: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      const { target } = await this.access.assertCanActOn(tx, actor.id, targetId);
+      const { target } = await this.access.assertCanActOn(tx, actor.id, targetId, PERMISSIONS.userManage);
       const before = await tx.user.findUniqueOrThrow({ where: { id: targetId }, select: { status: true } });
       if (before.status === status) return;
       if (status === 'disabled' && target.isOwner) await this.access.assertAnotherOwnerRemains(tx, targetId);
@@ -112,7 +114,7 @@ export class StaffAdminService {
 
   async resetEnrolment(actor: AuditActor & { id: string }, targetId: string, reason?: string) {
     return this.prisma.$transaction(async (tx) => {
-      await this.access.assertCanActOn(tx, actor.id, targetId);
+      await this.access.assertCanActOn(tx, actor.id, targetId, PERMISSIONS.userManage);
       const r = await this.staffAuth.resetCredentials(tx, targetId, actor, reason);
       return { enrolmentUrl: r.url, enrolmentExpiresAt: r.expiresAt.toISOString() };
     });

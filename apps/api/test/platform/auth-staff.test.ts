@@ -155,6 +155,41 @@ describe('staff sign-in', () => {
     expect(await t.prisma.recoveryCode.count({ where: { userId: s.id, usedAt: { not: null } } })).toBe(1);
   });
 
+  it('recovery_code_sign_in_does_not_open_step_up: a sensitive action right after still asks for a TOTP code', async () => {
+    const s = await createStaff(t, { owner: true });
+    const target = await createStaff(t, { permissions: [] });
+    const res = await secondFactor(await mfaCookie(s), { recoveryCode: s.recoveryCodes[1] });
+    expect(res.status).toBe(200);
+    const cookie = `mt_staff_session=${cookieFrom(res, 'mt_staff_session')}`;
+    const session = await t.prisma.session.findFirstOrThrow({ where: { userId: s.id, revokedAt: null } });
+    expect(session.mfaVerifiedAt).toBeNull();
+    const reset = await t.http().post(`/admin/staff/${target.id}/reset-enrolment`).set(STATE_HEADERS).set('Cookie', cookie).send({});
+    expect(reset.status).toBe(403);
+    expect(reset.body.code).toBe('step_up_required');
+    expect((await t.http().get('/auth/staff/session').set('Cookie', cookie)).body.stepUpValidUntil).toBeNull();
+  });
+
+  it('failure_count_window_symmetric: known and unknown addresses start again after an hour without attempts', async () => {
+    const s = await createStaff(t);
+    // A known account with old failures behaves like an unknown address whose memory entry expired: two free tries.
+    await t.prisma.user.update({ where: { id: s.id }, data: { failedLoginCount: 9, lastFailedLoginAt: new Date(Date.now() - 3601_000), nextLoginAllowedAt: null } });
+    const ghost = uniqueEmail('nobody');
+    for (const email of [s.email, ghost]) {
+      const statuses: number[] = [];
+      for (let i = 0; i < 4; i++) statuses.push((await passwordStep({ email, password: 'definitely-wrong-password' })).status);
+      expect(statuses, email).toEqual([401, 401, 401, 429]);
+    }
+    expect((await t.prisma.user.findUniqueOrThrow({ where: { id: s.id } })).failedLoginCount).toBe(3);
+    const { UnknownAccountDelay } = await import('../../src/platform/auth/attempt-limiter');
+    const d = new UnknownAccountDelay();
+    const t0 = 1_000_000;
+    for (let i = 0; i < 3; i++) d.claim('k', t0 + i);
+    expect(() => d.claim('k', t0 + 10)).toThrow();
+    // an hour after the last attempt the count starts again
+    expect(() => d.claim('k', t0 + 2 + 3600_000)).not.toThrow();
+    expect(() => d.claim('k', t0 + 3 + 3600_000)).not.toThrow();
+  });
+
   it('disabled_during_mfa_step_gets_no_session (G2)', async () => {
     const s = await createStaff(t);
     const mfa = await mfaCookie(s);

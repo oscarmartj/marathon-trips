@@ -1,9 +1,11 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { z } from 'zod';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Public, RequirePermission } from '../../src/platform/access/access.decorators';
+import { OwnedBy, Public, RequirePermission } from '../../src/platform/access/access.decorators';
+import { ZodPipe } from '../../src/platform/http/zod.pipe';
 import { AccessGuard } from '../../src/platform/access/access.guard';
 import { AccessService, OWNER_ROLE, computeEffective } from '../../src/platform/access/access.service';
 import { PERMISSIONS, PermissionRegistry } from '../../src/platform/access/permissions';
@@ -12,6 +14,7 @@ import { APP_CONFIG, PrismaService } from '../../src/platform/database/prisma.se
 import { configureApp } from '../../src/platform/http/configure-app';
 import { STATE_HEADERS, TestApp, createStaff, makeApp, signInCustomer, signInStaff, freshCode, uniqueEmail } from '../support/auth';
 import { OWNED_ROUTE_FIXTURES } from '../support/owned-route-fixtures';
+import { checkOwnedRoutes } from '../support/owned-routes';
 import { allRoutes } from '../support/routes';
 
 let t: TestApp;
@@ -56,23 +59,64 @@ describe('access marks (plan 4.1)', () => {
     }
   });
 
-  it('every_owned_route_rejects_other_customer, and self_routes_take_no_resource_ids', async () => {
-    const owned = allRoutes(t.app).filter((r) => r.marks[0]?.type === 'owned');
-    expect(owned.length).toBeGreaterThan(0);
+  it('every_owned_route_rejects_other_customer and self_routes_take_no_resource_ids (path, query and body)', async () => {
     const a = await signInCustomer(t);
     const b = await signInCustomer(t);
-    for (const r of owned) {
-      const mark = r.marks[0]!;
-      if (mark.type !== 'owned') continue;
-      if ('owns' in mark.spec) {
-        expect(OWNED_ROUTE_FIXTURES, `${r.method} ${r.path} needs a fixture`).toHaveProperty(mark.spec.fixture);
-        continue;
-      }
-      expect(r.path, `${r.method} ${r.path}`).not.toMatch(/:/);
+    const { problems, checked } = await checkOwnedRoutes(t, OWNED_ROUTE_FIXTURES, a, b);
+    expect(problems).toEqual([]);
+    expect(checked).toBeGreaterThanOrEqual(5);
+  });
+
+  it('the owned-route harness catches a leaky route, a missing fixture and self routes that take ids', async () => {
+    let db: TestApp['prisma'] | null = null;
+    const ownsSession = async ({ userId, params }: { userId: string; params: Record<string, string> }) =>
+      !!(await db!.session.findFirst({ where: { id: params.id, userId } }));
+    @Controller('probe')
+    class Probe {
+      @Get('sessions/:id') @OwnedBy({ kind: 'customer', resource: 'session', fixture: 'probeSession', owns: ownsSession }) good() { return { ok: true }; }
+      @Get('leaky/:id') @OwnedBy({ kind: 'customer', resource: 'session', fixture: 'probeLeaky', owns: async () => true }) leaky() { return { ok: true }; }
+      @Get('unfixtured/:id') @OwnedBy({ kind: 'customer', resource: 'session', fixture: 'nobodyWroteThis', owns: ownsSession }) unfixtured() { return { ok: true }; }
+      @Post('self-body') @OwnedBy({ kind: 'customer', resource: 'self' }) selfBody(@Body(new ZodPipe(z.strictObject({ bookingId: z.string() }))) _b: unknown) { return {}; }
+      @Get('self-query') @OwnedBy({ kind: 'customer', resource: 'self' }) selfQuery(@Query('id') _id: string) { return {}; }
     }
-    // A self route answers about the caller only.
-    expect((await t.http().get('/auth/customer/session').set('Cookie', a.cookie)).body.userId).toBe(a.userId);
-    expect((await t.http().get('/auth/customer/session').set('Cookie', b.cookie)).body.userId).toBe(b.userId);
+    const probe = await makeApp({}, { controllers: [Probe] });
+    db = probe.prisma;
+    try {
+      const a = await signInCustomer(probe);
+      const b = await signInCustomer(probe);
+      const sessionOf = async (c: { userId: string }) => (await probe.prisma.session.findFirstOrThrow({ where: { userId: c.userId, revokedAt: null } })).id;
+      const fixture = (path: string) => ({
+        create: async (tt: TestApp, owner: typeof a, other: typeof b) => {
+          const id = await sessionOf(owner);
+          return { asOwner: () => tt.http().get(`/probe/${path}/${id}`).set('Cookie', owner.cookie), asOther: () => tt.http().get(`/probe/${path}/${id}`).set('Cookie', other.cookie) };
+        },
+      });
+      const { problems } = await checkOwnedRoutes(probe, { probeSession: fixture('sessions'), probeLeaky: fixture('leaky') }, a, b);
+      expect(problems.sort()).toEqual([
+        'GET /probe/leaky/:id: other customer got 200, expected 404',
+        'GET /probe/self-query: self route reads the query',
+        'GET /probe/unfixtured/:id: no fixture "nobodyWroteThis"',
+        'POST /probe/self-body: self route takes bookingId in the body',
+      ]);
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('a handler mark never hides a controller mark: two marks at any level are denied and reported', async () => {
+    @Controller('probe2')
+    @RequirePermission(PERMISSIONS.flagManage)
+    class Mixed {
+      @Get('open') @Public('looks public but the controller needs a permission') open() { return { ok: true }; }
+    }
+    const probe = await makeApp({}, { controllers: [Mixed] });
+    try {
+      expect((await probe.http().get('/probe2/open')).body.code).toBe('route_not_marked');
+      const bad = allRoutes(probe.app).filter((r) => r.marks.length !== 1).map((r) => r.path);
+      expect(bad).toEqual(['/probe2/open']);
+    } finally {
+      await probe.close();
+    }
   });
 });
 

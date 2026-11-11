@@ -8,11 +8,13 @@ import type { ApiRequest } from '../http/request-context';
 import { ACCESS_MARK_KEYS, AccessMark } from './access.decorators';
 import { AccessService } from './access.service';
 
-/** The marks on a route: the handler's if it has any, otherwise the controller's. */
+/**
+ * Every mark on a route, on the handler and on its controller together: a handler mark never hides a controller mark,
+ * so two marks at any level make the route invalid (denied, and caught by every_route_has_exactly_one_access_mark).
+ */
 export function marksOf(reflector: Reflector, handler: object, controller: object): AccessMark[] {
   const read = (target: object) => ACCESS_MARK_KEYS.map((k) => reflector.get<AccessMark | undefined>(k, target as never)).filter((m): m is AccessMark => !!m);
-  const own = read(handler);
-  return own.length > 0 ? own : read(controller);
+  return [...read(handler), ...read(controller)];
 }
 
 /**
