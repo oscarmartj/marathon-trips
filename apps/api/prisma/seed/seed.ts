@@ -35,6 +35,27 @@ export async function seed(prisma: PrismaClient, appEnv: string, given?: AppConf
         }
       },
     });
+  // 0.5: the example table's demo tasks and tags (the table of every shared capability).
+  steps.push({
+    name: 'demo-tasks',
+    run: async () => {
+      const tags = await Promise.all([['Follow up', '#b45309'], ['Travel', '#0369a1'], ['Admin', '#4d7c0f']].map(([name, colour]) => prisma.tag.upsert({ where: { name: name! }, create: { name: name!, colour: colour! }, update: {} })));
+      const day = 86_400_000;
+      const demo = [
+        { title: 'Confirm hotel block for the sample marathon', status: 'open' as const, due: 7, tag: 1 },
+        { title: 'Reply to the organiser about entry numbers', status: 'open' as const, due: 2, tag: 0 },
+        { title: 'Update the airport transfer notes', status: 'open' as const, due: null, tag: 1 },
+        { title: 'Review the draft terms of booking', status: 'done' as const, due: -3, tag: 2 },
+        { title: 'Renew the domain name', status: 'cancelled' as const, due: null, tag: 2 },
+        { title: 'Check last month\'s supplier invoices', status: 'open' as const, due: 14, tag: 2 },
+      ];
+      for (const d of demo) {
+        const task = await prisma.task.create({ data: { title: d.title, status: d.status, dueAt: d.due === null ? null : new Date(Date.now() + d.due * day) } });
+        await prisma.tagging.create({ data: { tagId: tags[d.tag]!.id, entityType: 'Task', entityId: task.id } });
+        await prisma.searchDocument.create({ data: { entityType: 'Task', entityId: task.id, title: task.title, subtitle: task.status, permissionKey: 'common.task.read' } });
+      }
+    },
+  });
   }
   for (const step of steps) {
     const done = await prisma.seedRun.findUnique({ where: { name: step.name } });

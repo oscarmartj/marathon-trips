@@ -8,4 +8,5 @@ export default function globalSetup(): void {
     execFileSync('pnpm', ['exec', 'tsx', 'scripts/e2e-staff.ts'], { cwd: apiDir, env: { ...process.env, APP_ENV: process.env.APP_ENV ?? 'test' }, encoding: 'utf8' });
   process.env.E2E_STAFF = create();
   process.env.E2E_STAFF_2 = create();
+  process.env.E2E_STAFF_3 = create();
 }
