@@ -2,12 +2,21 @@ import { Global, Inject, Injectable, Module, OnApplicationBootstrap, OnModuleDes
 import { loadConfig } from './config/config';
 import type { AppConfig } from './config/config';
 import { APP_CONFIG, PrismaService } from './database/prisma.service';
+import { AccessGuard } from './access/access.guard';
+import { AccessService } from './access/access.service';
+import { PermissionRegistry } from './access/permissions';
+import { AuditService } from './audit/audit.service';
+import { SessionService } from './auth/session.service';
 import { ConsumerRegistry } from './events/consumers';
 import { EventsService } from './events/events.service';
 import { OutboxService } from './events/outbox.service';
 import { EntityRegistry } from './entities/entity-registry';
 import { FeatureFlagService, SettingsService } from './flags/flags.service';
+import { FlagRegistry } from './flags/flag-registry';
+import { RequiresFlagGuard } from './flags/requires-flag.guard';
 import { RequiresModuleGuard } from './flags/requires-module.guard';
+import { CsrfGuard } from './http/csrf.guard';
+import { AuthRateLimitGuard } from './http/rate-limit.guard';
 import { IdempotencyService } from './idempotency/idempotency.service';
 import { JobsService } from './jobs/jobs.service';
 import { QUEUES, QUEUE_LIST } from './jobs/queues';
@@ -64,6 +73,8 @@ class PlatformLifecycle implements OnApplicationBootstrap, OnModuleDestroy {
     { provide: JobsService, useFactory: (c: AppConfig, q: typeof QUEUE_LIST) => new JobsService(c, q), inject: [APP_CONFIG, QUEUE_DEFS] },
     ConsumerRegistry, OutboxService, EventsService, FeatureFlagService, SettingsService, RequiresModuleGuard,
     IdempotencyService, NumberSequenceService, EntityRegistry, MailTemplateRegistry, MailService, StoredFileService,
+    AuditService, PermissionRegistry, AccessService, SessionService, FlagRegistry,
+    RequiresFlagGuard, CsrfGuard, AuthRateLimitGuard, AccessGuard,
     {
       provide: FILE_STORAGE,
       useFactory: (c: AppConfig): FileStorage =>
@@ -76,6 +87,7 @@ class PlatformLifecycle implements OnApplicationBootstrap, OnModuleDestroy {
   exports: [
     APP_CONFIG, PrismaService, JobsService, ConsumerRegistry, OutboxService, EventsService, FeatureFlagService, SettingsService,
     RequiresModuleGuard, IdempotencyService, NumberSequenceService, EntityRegistry, MailTemplateRegistry, MailService, StoredFileService, FILE_STORAGE,
+    AuditService, PermissionRegistry, AccessService, SessionService, FlagRegistry, RequiresFlagGuard, CsrfGuard, AuthRateLimitGuard, AccessGuard,
   ],
 })
 export class PlatformModule {}

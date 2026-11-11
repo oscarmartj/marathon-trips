@@ -34,6 +34,8 @@ export interface AuditRecordInput {
   before?: Record<string, unknown> | null;
   /** Row after the change (null or absent on deletion). */
   after?: Record<string, unknown> | null;
+  /** Classes for fields that are not columns of `model` (such as roleKeys); a column's annotation always wins. */
+  fieldClasses?: Record<string, FieldClass>;
   /** The staff member's reason, always treated as personal data (plan 4.4). */
   reason?: string | null;
   context?: AuditContext;
@@ -95,7 +97,7 @@ export class AuditService {
       const b = before?.[f];
       const a = after?.[f];
       if (before && after && same(b, a)) continue;
-      const cls = this.classify(model, f);
+      const cls = FIELD_CLASSES[model]?.[f] ?? input.fieldClasses?.[f] ?? 'pii';
       if (cls === 'secret') changes[f] = '[changed]';
       else if (cls === 'nopii') changes[f] = { before: plain(b), after: plain(a) } as Prisma.InputJsonValue;
       else {
