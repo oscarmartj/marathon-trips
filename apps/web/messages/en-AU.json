@@ -37,7 +37,10 @@
     "contact": "Contact",
     "terms": "Terms of booking",
     "privacy": "Privacy policy",
-    "complaints": "Complaints"
+    "complaints": "Complaints",
+    "account": "Your account",
+    "signIn": "Sign in",
+    "verifySignIn": "Finish signing in"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -87,9 +90,15 @@
   },
   "legalPages": {
     "intro": "The full text will be published here before launch.",
-    "terms": { "title": "Terms of booking" },
-    "privacy": { "title": "Privacy policy" },
-    "complaints": { "title": "Complaints" }
+    "terms": {
+      "title": "Terms of booking"
+    },
+    "privacy": {
+      "title": "Privacy policy"
+    },
+    "complaints": {
+      "title": "Complaints"
+    }
   },
   "admin": {
     "title": "{brand} admin",
@@ -100,14 +109,154 @@
       "packages": "Packages",
       "bookings": "Bookings",
       "customers": "Customers",
-      "settings": "Settings"
+      "settings": "Settings",
+      "flags": "Feature flags",
+      "staff": "Staff",
+      "roles": "Roles",
+      "signIn": "Staff sign-in",
+      "enrol": "Set up your account",
+      "signOut": "Sign out"
     },
-    "placeholder": "This admin page is a placeholder. Sign-in and permissions arrive with authentication.",
-    "dashboard": { "title": "Dashboard", "intro": "Today's bookings, payments needing attention and upcoming races will appear here." },
-    "races": { "title": "Races", "intro": "Manage races and editions." },
-    "packages": { "title": "Packages", "intro": "Manage hotels, rooms, allotments and prices." },
-    "bookings": { "title": "Bookings", "intro": "Search and manage customer bookings." },
-    "customers": { "title": "Customers", "intro": "Customer records and their trips." },
-    "settings": { "title": "Settings", "intro": "Brand, payment methods and site settings." }
+    "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
+    "dashboard": {
+      "title": "Dashboard",
+      "intro": "Today's bookings, payments needing attention and upcoming races will appear here."
+    },
+    "races": {
+      "title": "Races",
+      "intro": "Manage races and editions."
+    },
+    "packages": {
+      "title": "Packages",
+      "intro": "Manage hotels, rooms, allotments and prices."
+    },
+    "bookings": {
+      "title": "Bookings",
+      "intro": "Search and manage customer bookings."
+    },
+    "customers": {
+      "title": "Customers",
+      "intro": "Customer records and their trips."
+    },
+    "settings": {
+      "title": "Settings",
+      "intro": "Brand, payment methods and site settings."
+    },
+    "flags": {
+      "title": "Feature flags",
+      "intro": "Switch features on and off. Every change is recorded in the audit log.",
+      "key": "Flag",
+      "description": "What it does",
+      "state": "State",
+      "on": "On",
+      "off": "Off",
+      "turnOn": "Turn on",
+      "turnOff": "Turn off"
+    },
+    "staff": {
+      "title": "Staff",
+      "intro": "Staff accounts, their roles and their sign-in set-up.",
+      "email": "Email",
+      "roles": "Roles",
+      "status": "Status",
+      "setUp": "Set-up",
+      "enrolled": "Set up",
+      "notEnrolled": "Waiting for set-up",
+      "active": "Active",
+      "disabled": "Disabled",
+      "actions": "Actions",
+      "add": "Add a staff member",
+      "addButton": "Add and create a set-up link",
+      "rolesHelp": "Role keys, separated by commas",
+      "linkCreated": "Send this set-up link to the person over a channel you trust. It works once, expires in 24 hours and is not shown again.",
+      "disable": "Disable",
+      "enable": "Enable",
+      "reset": "Reset sign-in",
+      "saveRoles": "Save roles",
+      "none": "No staff yet."
+    },
+    "roles": {
+      "title": "Roles",
+      "intro": "Which permissions each role has. You can only give or take away permissions you have yourself.",
+      "create": "Create a role",
+      "key": "Key (lower case, no spaces)",
+      "name": "Name",
+      "createButton": "Create role",
+      "permission": "Permission",
+      "save": "Save {role}",
+      "saved": "Saved.",
+      "ownerNote": "The owner role has every permission and cannot be edited.",
+      "stepUp": "Needs a fresh authenticator code"
+    },
+    "common": {
+      "loading": "Loading…",
+      "forbidden": "You do not have permission to see this.",
+      "error": "Something went wrong. Try again.",
+      "conflict": "Someone else changed this. Reload and try again.",
+      "reason": "Reason (optional, kept in the audit log)"
+    }
+  },
+  "auth": {
+    "staff": {
+      "signInTitle": "Staff sign-in",
+      "signInIntro": "Sign in with your email, password and authenticator app.",
+      "email": "Email",
+      "password": "Password",
+      "continue": "Continue",
+      "codeIntro": "Enter the 6-digit code from your authenticator app.",
+      "codeLabel": "Authenticator code",
+      "useRecovery": "Use a recovery code instead",
+      "useCode": "Use your authenticator code instead",
+      "recoveryLabel": "Recovery code",
+      "signIn": "Sign in",
+      "invalidCredentials": "The email or password is not right.",
+      "invalidCode": "That code is not right.",
+      "rateLimited": "Too many attempts. Wait a moment and try again.",
+      "expired": "Your sign-in step has expired. Start again.",
+      "error": "Something went wrong. Try again."
+    },
+    "enrol": {
+      "title": "Set up your staff account",
+      "intro": "Choose a password and connect an authenticator app. You need this link once; it then stops working.",
+      "missingLink": "This set-up link is missing, used or expired. Ask an owner for a new one.",
+      "start": "Start set-up",
+      "accountFor": "Account: {email}",
+      "secretLabel": "Authenticator key",
+      "secretHelp": "Add this key to an authenticator app, or open the link below on your phone, then enter the 6-digit code it shows.",
+      "openInApp": "Open in an authenticator app",
+      "passwordLabel": "Password (at least 12 characters)",
+      "codeLabel": "Code from the app",
+      "finish": "Finish set-up",
+      "invalidCode": "That code is not right. Check the time on your phone and try again.",
+      "recoveryTitle": "Your recovery codes",
+      "recoveryHelp": "Each code works once if you lose your phone. Keep them somewhere safe: they will not be shown again.",
+      "goToSignIn": "Go to staff sign-in"
+    },
+    "stepUp": {
+      "title": "Confirm it's you",
+      "help": "This action needs a fresh code from your authenticator app.",
+      "codeLabel": "Authenticator code",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "revoked": "Too many wrong codes. Sign in again."
+    },
+    "customer": {
+      "signInTitle": "Sign in",
+      "signInIntro": "Enter your email and we'll send you a link to sign in. No password needed.",
+      "email": "Email",
+      "send": "Email me a sign-in link",
+      "sent": "If that address can sign in, a link is on its way. It works once and expires in 15 minutes.",
+      "verifyTitle": "Finish signing in",
+      "checking": "Checking your link…",
+      "continueAs": "Continue as {email}",
+      "invalidLink": "This sign-in link has expired or has already been used.",
+      "requestNew": "Ask for a new link",
+      "accountTitle": "Your account",
+      "signedInAs": "Signed in as {email}",
+      "notSignedIn": "You're not signed in.",
+      "signInLink": "Sign in",
+      "signOut": "Sign out",
+      "error": "Something went wrong. Try again."
+    }
   }
 }

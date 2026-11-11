@@ -56,6 +56,54 @@ jobs:
       - name: Fail on skipped or todo tests
         run: pnpm check:no-skipped
 
+  # Staff sign-in with password and TOTP through the real web app and API (task 0.3, phase 0 criterion).
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      APP_ENV: ci
+      CI: "true"
+      DATABASE_URL: postgresql://mt_app:mt_app_dev@localhost:5432/marathon_trips
+      MIGRATION_DATABASE_URL: postgresql://mt_owner:mt_owner_dev@localhost:5432/marathon_trips
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create roles and database
+        run: bash scripts/db-init.sh
+      - name: Generate Prisma client and apply migrations
+        run: |
+          pnpm --filter @mt/api exec prisma generate
+          pnpm db:migrate
+      - name: Build shared package and web app
+        run: pnpm --filter @mt/shared build && pnpm --filter @mt/web build
+      - name: Install Chromium for Playwright
+        run: pnpm --filter @mt/web exec playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: pnpm test:e2e
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
+
   compose-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25

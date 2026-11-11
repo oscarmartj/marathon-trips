@@ -27,7 +27,7 @@ describe('page content', () => {
   });
 
   it('marks the current admin page with aria-current', async () => {
-    expect(await render('admin/bookings/page.tsx')).toMatch(/aria-current="page" href="\/admin\/bookings"/);
+    expect(await render('admin/(panel)/bookings/page.tsx')).toMatch(/aria-current="page" href="\/admin\/bookings"/);
   });
 
   it('makes no accreditation or guaranteed-entry claims', async () => {

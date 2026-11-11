@@ -9,7 +9,7 @@
     "lint": "eslint src",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run --reporter=default --reporter=json --outputFile=test-results/vitest.json",
-    "test:e2e": "echo 'No end-to-end tests yet: Playwright arrives with the first user flow (0.3).' && exit 0"
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@mt/shared": "workspace:*",
@@ -18,9 +18,11 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "otpauth": "^9.6.0",
     "vitest": "4.1.12"
   }
 }
