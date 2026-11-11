@@ -163,7 +163,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 8.4 | 0.3, 0.4 | Alto |
 | 8.6 | 0.4 | Medio |
 | 8.7 | 0.7 | Bajo |
-| 8.5 | fase 0 cerrada, fase 1 cerrada, fase 2 cerrada, fase 3 cerrada, fase 4 cerrada, fase 5 cerrada, fase 6 cerrada, fase 7 cerrada, 8.1, 8.2, 8.3, 8.4, 8.6 | Alto |
+| 8.5 | fase 0 cerrada, fase 1 cerrada, fase 2 cerrada, fase 3 cerrada, fase 4 cerrada, fase 5 cerrada, fase 6 cerrada, fase 7 cerrada, 8.1, 8.2, 8.3, 8.4, 8.6, 8.7 | Alto |
 | 9.1 | fase 4 cerrada, 8.5 | Alto |
 | 9.2 | 9.1 | Alto |
 | 9.3 | 9.2 | Alto |
