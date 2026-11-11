@@ -1,0 +1,185 @@
+// ---- Task 0.5: shared capabilities of panel tables (plan docs/plans/0.5-table-capabilities.md) ----
+// Tag, Tagging, Note, Task, SavedView, SearchDocument, CsvJob, BulkOperation. Staff user ids are plain UUIDs without
+// a foreign key (like audit actors): staff accounts are disabled, never deleted. Extra CHECKs and triggers: migration 0005.
+
+enum TaskStatus {
+  open
+  done
+  cancelled
+}
+
+enum TaskSource {
+  manual
+  automation
+  system
+}
+
+enum CsvJobKind {
+  import
+  export
+}
+
+enum CsvJobStatus {
+  previewed
+  completed
+  failed
+}
+
+enum BulkOperationStatus {
+  completed
+  partial
+  failed
+}
+
+model Tag {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  /// @nopii label chosen by staff for filing records, never customer data
+  name        String    @unique @db.Citext
+  /// @nopii hex colour such as #1f6feb
+  colour      String
+  /// @nopii entity types the tag may be used on; empty means all
+  entityTypes String[]
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+  taggings    Tagging[]
+
+  @@map("tags")
+}
+
+model Tagging {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  tagId       String   @db.Uuid
+  tag         Tag      @relation(fields: [tagId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii entity type chosen by developers
+  entityType  String
+  entityId    String   @db.Uuid
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([tagId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("taggings")
+}
+
+model Note {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  /// @nopii entity type chosen by developers
+  entityType  String
+  entityId    String    @db.Uuid
+  /// @pii free text written by staff
+  body        String
+  authorId    String    @db.Uuid
+  pinned      Boolean   @default(false)
+  version     Int       @default(0)
+  deletedAt   DateTime? @db.Timestamptz(3)
+  deletedById String?   @db.Uuid
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([entityType, entityId, deletedAt])
+  @@map("notes")
+}
+
+model Task {
+  id          String     @id @default(uuid(7)) @db.Uuid
+  /// @pii free text written by staff
+  title       String
+  /// @pii free text written by staff
+  description String?
+  /// @nopii entity type the task is about, chosen by developers
+  entityType  String?
+  entityId    String?    @db.Uuid
+  dueAt       DateTime?  @db.Timestamptz(3)
+  assigneeId  String?    @db.Uuid
+  status      TaskStatus @default(open)
+  source      TaskSource @default(manual)
+  /// @nopii reference to the rule or process that created the task
+  sourceRef   String?
+  createdById String?    @db.Uuid
+  version     Int        @default(0)
+  deletedAt   DateTime?  @db.Timestamptz(3)
+  deletedById String?    @db.Uuid
+  createdAt   DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime   @updatedAt @db.Timestamptz(3)
+
+  @@index([status, dueAt])
+  @@index([deletedAt])
+  @@map("tasks")
+}
+
+model SavedView {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  /// @nopii entity type chosen by developers
+  entityType String
+  ownerId    String   @db.Uuid
+  /// @pii free text typed by staff
+  name       String
+  /// @pii may hold a search word typed by staff
+  filters    Json     @default("{}")
+  /// @nopii column keys from the table's whitelist
+  columns    Json     @default("[]")
+  /// @nopii sort keys from the table's whitelist
+  sort       Json     @default("[]")
+  shared     Boolean  @default(false)
+  version    Int      @default(0)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@unique([ownerId, entityType, name])
+  @@index([entityType, shared])
+  @@map("saved_views")
+}
+
+model SearchDocument {
+  id            String                   @id @default(uuid(7)) @db.Uuid
+  /// @nopii entity type chosen by developers
+  entityType    String
+  entityId      String                   @db.Uuid
+  /// @pii may hold a customer name once tables of customers are indexed
+  title         String
+  /// @pii as the title
+  subtitle      String?
+  /// @nopii maintained by a database trigger from title and subtitle
+  searchVector  Unsupported("tsvector")?
+  /// @nopii permission a caller needs to see the result
+  permissionKey String
+  updatedAt     DateTime                 @updatedAt @db.Timestamptz(3)
+
+  @@unique([entityType, entityId])
+  @@index([searchVector], type: Gin)
+  @@map("search_documents")
+}
+
+model CsvJob {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  /// @nopii entity type chosen by developers
+  entityType  String
+  kind        CsvJobKind
+  status      CsvJobStatus
+  /// @nopii counts only
+  stats       Json         @default("{}")
+  /// @nopii row number, column key and error code; never values
+  errors      Json         @default("[]")
+  createdById String       @db.Uuid
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@map("csv_jobs")
+}
+
+model BulkOperation {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  /// @nopii entity type chosen by developers
+  entityType  String
+  /// @nopii action key chosen by developers
+  action      String
+  entityIds   String[]            @db.Uuid
+  status      BulkOperationStatus
+  /// @nopii per element: id, ok and a result code
+  results     Json                @default("[]")
+  createdById String              @db.Uuid
+  createdAt   DateTime            @default(now()) @db.Timestamptz(3)
+
+  @@map("bulk_operations")
+}

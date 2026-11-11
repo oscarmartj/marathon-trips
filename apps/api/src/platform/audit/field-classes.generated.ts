@@ -25,6 +25,27 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     subjectUserId: 'nopii',
     createdAt: 'nopii'
   },
+  BulkOperation: {
+    id: 'nopii',
+    entityType: 'nopii',
+    action: 'nopii',
+    entityIds: 'nopii',
+    status: 'pii',
+    results: 'nopii',
+    createdById: 'nopii',
+    createdAt: 'pii'
+  },
+  CsvJob: {
+    id: 'nopii',
+    entityType: 'nopii',
+    kind: 'pii',
+    status: 'pii',
+    stats: 'nopii',
+    errors: 'nopii',
+    createdById: 'nopii',
+    createdAt: 'pii',
+    updatedAt: 'pii'
+  },
   EmailSuppression: {
     id: 'nopii',
     emailHash: 'secret',
@@ -76,6 +97,19 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     consumedAt: 'nopii',
     attempts: 'nopii',
     createdAt: 'nopii'
+  },
+  Note: {
+    id: 'nopii',
+    entityType: 'nopii',
+    entityId: 'nopii',
+    body: 'pii',
+    authorId: 'nopii',
+    pinned: 'pii',
+    version: 'pii',
+    deletedAt: 'pii',
+    deletedById: 'nopii',
+    createdAt: 'pii',
+    updatedAt: 'pii'
   },
   NumberSequence: {
     id: 'nopii',
@@ -148,6 +182,29 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     permissionKey: 'nopii',
     createdAt: 'nopii'
   },
+  SavedView: {
+    id: 'nopii',
+    entityType: 'nopii',
+    ownerId: 'nopii',
+    name: 'pii',
+    filters: 'pii',
+    columns: 'nopii',
+    sort: 'nopii',
+    shared: 'pii',
+    version: 'pii',
+    createdAt: 'pii',
+    updatedAt: 'pii'
+  },
+  SearchDocument: {
+    id: 'nopii',
+    entityType: 'nopii',
+    entityId: 'nopii',
+    title: 'pii',
+    subtitle: 'pii',
+    searchVector: 'nopii',
+    permissionKey: 'nopii',
+    updatedAt: 'pii'
+  },
   SeedRun: {
     id: 'nopii',
     name: 'nopii',
@@ -188,6 +245,40 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     purpose: 'nopii',
     uploadedById: 'nopii',
     createdAt: 'pii'
+  },
+  Tag: {
+    id: 'nopii',
+    name: 'nopii',
+    colour: 'nopii',
+    entityTypes: 'nopii',
+    createdAt: 'pii',
+    updatedAt: 'pii'
+  },
+  Tagging: {
+    id: 'nopii',
+    tagId: 'nopii',
+    entityType: 'nopii',
+    entityId: 'nopii',
+    createdById: 'nopii',
+    createdAt: 'pii'
+  },
+  Task: {
+    id: 'nopii',
+    title: 'pii',
+    description: 'pii',
+    entityType: 'nopii',
+    entityId: 'nopii',
+    dueAt: 'pii',
+    assigneeId: 'nopii',
+    status: 'pii',
+    source: 'pii',
+    sourceRef: 'nopii',
+    createdById: 'nopii',
+    version: 'pii',
+    deletedAt: 'pii',
+    deletedById: 'nopii',
+    createdAt: 'pii',
+    updatedAt: 'pii'
   },
   User: {
     id: 'nopii',
