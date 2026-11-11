@@ -223,9 +223,9 @@ describe('csv', () => {
     for (const x of ['=1+1', '+SUM(1)', '-2 pears', '@ref']) ids.push((await c.post('/admin/tasks', { title: x, description: marker })).body.id);
     const res = await c.post('/admin/tables/Task/export', { query: { q: marker, filters: [], sort: [{ field: 'title', dir: 'asc' }] } });
     const table = parseCsv(res.text);
-    const cells = table.slice(1).map((r) => r[0]);
+    const cells = table.slice(1).map((r) => r[0]!).sort(); // row order depends on the database collation
     expect(cells).toEqual(["'+SUM(1)", "'-2 pears", "'=1+1", "'@ref"]);
-    expect(cells.map((x) => unguardCell(x!))).toEqual(['+SUM(1)', '-2 pears', '=1+1', '@ref']);
+    expect(cells.map((x) => unguardCell(x)).sort()).toEqual(['+SUM(1)', '-2 pears', '=1+1', '@ref']);
     await t.prisma.task.deleteMany({ where: { id: { in: ids } } });
     await t.prisma.searchDocument.deleteMany({ where: { entityId: { in: ids } } });
   });

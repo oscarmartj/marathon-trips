@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
@@ -51,15 +51,20 @@ export function DataTable({ entityType, prefix, editor }: Props) {
     })();
   }, [entityType]);
 
+  // Always reload with the latest query and page, and ignore a response that a newer request has overtaken.
+  const latest = useRef({ query, page });
+  latest.current = { query, page };
+  const sequence = useRef(0);
   const load = useCallback(async () => {
-    const r = await api<Result>(`/admin/tables/${entityType}/rows?${queryParams(query, page, PAGE_SIZE)}`);
-    if (r.status === 200) {
-      setResult(r.body as unknown as Result);
-    } else setMessage({ text: errText(r), tone: 'error' });
-  }, [entityType, query, page]);
+    const mine = ++sequence.current;
+    const r = await api<Result>(`/admin/tables/${entityType}/rows?${queryParams(latest.current.query, latest.current.page, PAGE_SIZE)}`);
+    if (mine !== sequence.current) return;
+    if (r.status === 200) setResult(r.body as unknown as Result);
+    else setMessage({ text: errText(r), tone: 'error' });
+  }, [entityType]);
   useEffect(() => {
     if (meta) void load();
-  }, [meta, load]);
+  }, [meta, load, query, page]);
 
   if (!meta) return message ? <Status message={message.text} /> : <p role="status">{t('admin.common.loading')}</p>;
 
