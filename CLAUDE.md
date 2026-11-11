@@ -36,6 +36,7 @@ Node 22 (`.nvmrc`) y pnpm 10 (`corepack enable`). Desde la raíz del repositorio
 | Tipos | `pnpm typecheck` |
 | Pruebas (unitarias, convenciones del esquema, base de datos) | `pnpm test`, y después `pnpm check:no-skipped` |
 | Un solo archivo de pruebas | `pnpm test:file test/conventions/schema-conventions.test.ts` (ruta relativa a `apps/api`) |
+| Copias y restauración (8.6) | `pnpm test:file test/ops/backup.test.ts`; necesita `PGHOST`/`PGUSER`/`PGPASSWORD` de un superusuario (CI ya los pone; en local, p. ej. `PGHOST=localhost PGUSER=postgres PGPASSWORD=...`). Scripts en `scripts/backup/`, guía en `docs/deploy/guide.md` |
 | Pruebas de extremo a extremo | `pnpm test:e2e` (Playwright arranca API y web; necesita la base migrada y `pnpm --filter @mt/web build`; sin navegador descargado, `PW_CHANNEL=chrome`) |
 | Personal: alta o reinicio por consola | `pnpm api:cli staff:create --email <correo> [--owner]` y `pnpm api:cli staff:reset --email <correo>` (imprimen un enlace de alta de un solo uso) |
 | Todo lo anterior | `pnpm check:all` |

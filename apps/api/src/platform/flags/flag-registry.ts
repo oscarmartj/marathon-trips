@@ -11,11 +11,17 @@ export interface FlagDef {
 
 export const FLAGS = {
   customerSignIn: 'auth.customer_sign_in',
+  maintenance: 'platform.maintenance',
 } as const;
 
 /** The platform's own flags. Business modules add `module.<key>` through the module registry. */
 export const PLATFORM_FLAGS: readonly FlagDef[] = [
   { key: FLAGS.customerSignIn, description: 'Customers can ask for a sign-in link and sign in', seedEnabled: true },
+  {
+    key: FLAGS.maintenance,
+    description: 'Maintenance mode: everything except the health check, staff sign-in and the admin API answers 503',
+    seedEnabled: false,
+  },
 ];
 
 /** Flags declared in code; only these can be changed through the admin API (M12). */
