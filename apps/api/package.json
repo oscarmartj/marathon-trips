@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed/seed.ts",
-    "gen:field-classes": "tsx scripts/gen-field-classes.ts"
+    "gen:field-classes": "tsx scripts/gen-field-classes.ts",
+    "cli": "tsx src/cli.ts",
+    "e2e:staff": "tsx scripts/e2e-staff.ts"
   },
   "dependencies": {
     "@mt/shared": "workspace:*",
