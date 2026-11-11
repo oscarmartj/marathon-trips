@@ -443,7 +443,7 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 | **SupplierContract** (SD) | `supplierId`, `editionId?`, `reference`, `signedAt?`, `validFrom?`, `validTo?`, `terms`, `attachmentId?` | | 6.1 |
 | **Allotment** | `contractId`, `poolId`, `kind` room/entry, `quantity`, `releaseDate @db.Date?`, `unitCostMinor`, `currency`, `status` held/released | contratado al proveedor; alimenta la capacidad del `InventoryPool` | 6.1 |
 | **CostItem** | `supplierId`, `contractId?`, `packageId?`, `bookingId?`, `description`, `basis` per_person/per_room/per_booking/fixed, `quantity`, `unitAmountMinor`, `amountMinor`, `currency`, `dueDate?`, `status` planned/due/paid/cancelled | coste en su moneda | 6.1 |
-| **SupplierPayment** | `supplierId`, `amountMinor`, `currency`, `paidAt`, `reference`, `costItemIds String[]`, `fxRateE9?`, `amountAudMinor?` | genera asiento en el libro | 6.2 |
+| **SupplierPayment** | `supplierId`, `amountMinor`, `currency`, `paidAt`, `reference`, `costItemIds String[]`, `fxRateE9?`, `baseAmountMinor?`, `baseCurrency?` | genera asiento en el libro; el importe convertido lleva su propia moneda | 6.2 |
 | **AccountingExport** | `periodFrom`, `periodTo`, `format`, `storedFileId`, `createdById` | | 6.6 |
 
 "Viaje", para operaciones y resultado económico, **es un `Package`** (una salida). El resultado por edición o carrera suma sus paquetes.
@@ -506,7 +506,7 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 
 - `coming_soon` solo admite alertas. `open` admite solicitudes. `waitlist` y `sold_out` admiten lista de espera.
 - Un paquete con `isDemo` heredado no puede salir de `draft` salvo con `APP_ENV` `development` o `test`. La API pública filtra `isDemo` siempre que `APP_ENV=production`, y el seed se niega a ejecutarse en producción.
-- Pasar a `open` exige al menos una versión de precio publicada y vigente.
+- Pasar a `open` exige al menos una versión de precio publicada y vigente, y un depósito configurado.
 
 ### 6.2 Reserva (2.4; se mantienen los estados pedidos)
 
@@ -661,7 +661,7 @@ Cada uno es la opción más conservadora y fácil de cambiar; casi todos son un 
 13. Se guardan IP y navegador al aceptar condiciones, como prueba ante disputas.
 14. Sesiones: personal 12 h (2 h de inactividad); cliente 30 días (7 de inactividad). Enlace mágico: 15 minutos.
 15. El primer usuario `owner` se crea por consola con el correo que Oscar ponga en una variable de entorno.
-16. Una reserva confirmada solo pasa a `completed` tras la fecha de salida del paquete.
+16. Una reserva pagada (`balance_paid`) solo pasa a `completed` tras la fecha de salida del paquete.
 
 ---
 
