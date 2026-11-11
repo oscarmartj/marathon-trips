@@ -1,0 +1,29 @@
+{
+  "name": "marathon-trips",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint && node scripts/check-dependency-table.mjs",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:unit": "pnpm --filter @mt/api test:unit && pnpm --filter @mt/shared test && pnpm --filter @mt/web test",
+    "test:file": "vitest run --root apps/api",
+    "test:e2e": "pnpm --filter @mt/web test:e2e",
+    "db:init": "bash scripts/db-init.sh",
+    "db:migrate": "pnpm --filter @mt/api db:migrate",
+    "db:seed": "pnpm --filter @mt/api db:seed",
+    "check:deps-table": "node scripts/check-dependency-table.mjs",
+    "check:all": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "globals": "^16.0.0",
+    "turbo": "2.11.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.2"
+  }
+}
