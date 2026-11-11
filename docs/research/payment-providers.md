@@ -1,0 +1,119 @@
+# Investigación de proveedores de pago
+
+Fecha de la investigación: 2026-11-11 (hilo 0.7). Entrada de la decisión de la tarea 3.1 (orquestador frente a adaptadores propios). Negocio de referencia: sole trader australiano con ABN que vende paquetes de viaje para corredores.
+
+Reglas de lectura: cada fila lleva la URL oficial y la fecha en que se miró. "sin confirmar" significa que la página oficial no lo dice, no se pudo abrir (el sitio devolvió error al cliente automático) o solo lo dice una fuente de terceros. No hay estimaciones. Ningún proveedor ha confirmado por escrito que acepta el negocio: eso lo pide Oscar.
+
+## 1. Resumen
+
+- Recomendación: **adaptadores propios tras la interfaz `PaymentProvider`**. Es el desempate que fija `docs/autonomous.md`, y además aquí no hay empate: el orquestador no cubre la mayoría de las pasarelas australianas del catálogo (sección 3) y añade un servicio más que operar.
+- Los datos de tarjeta nunca tocan nuestros servidores en ninguna de las dos vías (campos alojados o checkout de la pasarela).
+- Riesgo principal para el alta: Stripe lista "travel reservation services and clubs" como categoría **restringida** (requiere diligencia adicional), no prohibida. Hay que solicitar la cuenta describiendo el negocio con exactitud y esperar la respuesta por escrito antes de planificar el lanzamiento en torno a ella.
+- Cambio regulatorio relevante: desde el **1 de octubre de 2026** no se pueden cobrar recargos (surcharges) en tarjetas eftpos, Mastercard y Visa en Australia. El coste de la pasarela se absorbe en el precio. Esto refuerza que el pago aplazado nazca apagado.
+
+## 2. Tabla de pasarelas
+
+Comisiones sin GST salvo que se indique. "Viajes" = qué dice la política oficial sobre operadores de viaje.
+
+| Pasarela | Viajes (política oficial) | Sole trader con ABN | Cuota mensual / mínimos | Comisión | Liquidación | Retención / reserva | Sandbox | Fuente (fecha) |
+|---|---|---|---|---|---|---|---|---|
+| Stripe | "Travel reservation services and clubs": restringida, requiere diligencia adicional; aerolíneas comerciales y cruceros: prohibidos | sin confirmar | Ninguna ("No setup fees, monthly fees") | Tarjeta AU 1,65 % + A$0,30; internacional 3,5 % + A$0,30; +2 % si hay conversión. PayTo y BECS: 1 % + A$0,30, tope A$3,50. Rebaja de tarjeta desde 1 abr 2027. PayID: sin confirmar | 2 días hábiles; primer pago de cuenta nueva en 7 a 14 días (depende del riesgo) | sin confirmar | Sí, gratuito, desde el panel (Sandboxes). Si hace falta activar la cuenta antes: sin confirmar | https://stripe.com/en-au/pricing ; https://stripe.com/en-au/legal/restricted-businesses ; https://docs.stripe.com/payouts ; https://docs.stripe.com/testing (2026-11-11) |
+| PayPal | La política de uso aceptable no menciona agencias de viaje ni operadores; exige aprobación previa a aerolíneas y charters. Prohíbe vender algo antes de tener su control ("prepayment for future delivery"): sin confirmar cómo se aplica a paquetes de viaje, consultar | sin confirmar | Ninguna en cuenta estándar; A$25/mes (con GST) solo para Website Payments Pro | 2,90 % + A$0,30 nacional; +1 % internacional; contracargo A$15 | sin confirmar | sin confirmar | sin confirmar | https://www.paypal.com/au/business/paypal-business-fees ; https://www.paypal.com/au/webapps/mpp/ua/acceptableuse-full (2026-11-11) |
+| Pin Payments | sin confirmar (la página de actividades prohibidas no se pudo abrir) | sin confirmar | Ninguna ("No ongoing monthly fees or setup costs") | 1,6 % + A$0,30 nacional; 3,4 % + A$0,30 internacional; contracargo perdido A$25 | sin confirmar | sin confirmar | sin confirmar en la página de precios | https://pinpayments.com/pricing (2026-11-11) |
+| eWAY | sin confirmar (página de actividades prohibidas no abrió) | sin confirmar | Sin cuota mensual ni alta; programa opcional Merchant Trust Initiative con dos cifras contradictorias en la misma página (A$178 + A$142/año, o A$149,95 + A$9,95/mes anual): confirmar con eWAY | 1,5 % + A$0,25 Visa/MC/Amex; +1,99 % tarjeta internacional | 1 a 3 días hábiles, sujeto a aprobación | sin confirmar | Sí, enlazado desde el menú Developers; condiciones sin confirmar | https://www.eway.com.au/pricing/ (2026-11-11) |
+| Westpac OnlinePay / PayWay | sin confirmar | Sí: "sole traders ... can apply online"; ABN no mencionado | Sin cuotas de alta ni mensuales en OnlinePay; exige cuenta de empresa Westpac | OnlinePay 1,25 % plano eftpos/Visa/MC (revisable en abril y octubre). PayWay: sin confirmar | Aprobación en unos 2 días hábiles; liquidación sin confirmar | sin confirmar | sin confirmar | https://www.westpac.com.au/business-banking/merchants-and-payments/online-payments/onlinepay/ (2026-11-11) |
+| Airwallex | sin confirmar | sin confirmar | Sin cuota mensual indicada para cobros | Tarjeta nacional 1,65 %; internacional 3,45 % (clientes desde 26 ago 2026); pasarela A$0,30 por intento; reembolso A$0,30; contracargo A$25 | sin confirmar | sin confirmar | sin confirmar | https://www.airwallex.com/terms/fee-schedule-au (2026-11-11) |
+| Adyen | Criterios de elegibilidad propios, sin detalle australiano | sin confirmar | Sin cuotas mensuales ni de alta, pero **factura mínima** según sector (importe no publicado) | Procesamiento fijo 0,13 + comisión del método; EFTPOS Australia 0,13 + Interchange++ + 0,60 %; Afterpay 4,99 % + 0,30; Klarna 4,29 % + 0,30; Zip Pay 3,50 % + 0,30; Zip Money 3,89 % + 0,30 | sin confirmar | sin confirmar | sin confirmar | https://www.adyen.com/pricing (2026-11-11) |
+| Square | sin confirmar | sin confirmar | Plan gratuito A$0; Plus desde A$40/mes | 2,2 % online/factura | "Desde el día siguiente" | sin confirmar | sin confirmar | https://squareup.com/au/en/pricing (2026-11-11) |
+| Checkout.com | Lista "travel" entre sus sectores | sin confirmar | Sin cuotas de alta ni mantenimiento; precios a medida | A medida (plano o Interchange++); Australia no mencionada en la página | sin confirmar | sin confirmar | sin confirmar | https://www.checkout.com/pricing (2026-11-11) |
+| Windcave | sin confirmar | sin confirmar | Mínimo mensual de pasarela A$30; alta A$99 | Transacción A$0,30; Visa/MC según adquirente; Account2Account 1,20 % (tope A$3); Alipay 1,75 % | sin confirmar | sin confirmar | sin confirmar | https://windcave.com/e-commerce-transaction-pricing-au (2026-11-11) |
+| Fat Zebra | sin confirmar | "Gateway Only" exige tener ya servicios de comercio (adquirente); "All-in-One" sin criterios publicados | Gateway Only desde A$250/mes + A$0,30 por transacción; "pueden aplicar mínimos mensuales"; 3DS 2.0: alta A$395 | All-in-One a medida; 3DS 2.0 A$0,10 por transacción; contracargo A$27,50; payout A$0,25 | sin confirmar | sin confirmar | sin confirmar | https://www.fatzebra.com/pricing (2026-11-11) |
+| Merchant Warrior | sin confirmar | sin confirmar | La página no publica cifras ("Pricing varies depending on industry and processing volume"); cada producto lleva una cuota por transacción y una cuota anual, sin importes | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.merchantwarrior.com/pricing (2026-11-11) |
+| SecurePay (Australia Post) | sin confirmar | sin confirmar | sin confirmar (la página de precios oficial no abrió) | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://securepay.com.au/internet-payment-solutions-processing-services/ : la página consultada habla de Fat Zebra y deriva el alta a una página de Fat Zebra; relación exacta SecurePay/Fat Zebra: sin confirmar (2026-11-11) |
+| GoCardless (BECS, PayTo) | sin confirmar | sin confirmar | Sin cuota de alta ni mensual para la mayoría; extras opcionales A$100 y A$250/mes | BECS estándar 1 % + A$0,40, tope A$4; avanzado 1,25 % + A$0,40, tope A$5. PayTo: sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://gocardless.com/en-au/pricing/ (2026-11-11) |
+| Zai (antes Assembly) | Orientada a marketplaces y plataformas; sin dato de viajes | sin confirmar | sin confirmar (precios no publicados en la página consultada) | sin confirmar | sin confirmar | sin confirmar | Sí, "Sandbox and Production Environments"; acceso dentro del proceso de alta con Zai | https://www.hellozai.com/payment-gateway (2026-11-11). La exención de comisiones de PayTo de 2022 caducó: no cuenta |
+| Azupay (PayID, PayTo) | sin confirmar | sin confirmar | Sin cuotas de alta indicadas; precios solo con presupuesto | sin confirmar (sin cifras publicadas) | sin confirmar | sin confirmar | Hay portal para desarrolladores; contenido sin confirmar | https://www.azupay.com.au/pricing (2026-11-11) |
+| Afterpay | sin confirmar (la página de viajes y la de precios no devolvieron datos) | sin confirmar | sin confirmar | Vía Adyen: 4,99 % + A$0,30 (ver fila Adyen) | sin confirmar | sin confirmar | sin confirmar | https://www.adyen.com/pricing (2026-11-11) |
+| Zip | Sin mención a viajes; "algunos negocios no se pueden atender por sus productos o servicios" | Solicitud para negocios australianos con ABN; evalúan antigüedad, facturación y sector | Sin alta, cuotas ni permanencia | Se confirma tras el alta | sin confirmar | sin confirmar | sin confirmar | https://zip.co/au/business (2026-11-11) |
+| Klarna | sin confirmar | sin confirmar | sin confirmar | Vía Adyen: 4,29 % + A$0,30. Cobro "por adelantado y en su totalidad" para el comercio | sin confirmar | sin confirmar | sin confirmar | https://www.klarna.com/au/business/ ; https://www.adyen.com/pricing (2026-11-11) |
+| Rapyd | Afirma dar soporte a "online travel" (dato del propio proveedor, sin contrastar) | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.rapyd.net/blog/payment-gateway-for-travel-agency/ (2026-11-11) |
+| Tyro | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.tyro.com/online-payments/ (2026-11-11; consultada, la página devolvió error) |
+| Till Payments | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.tillpayments.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Bambora Asia-Pacific | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.bambora.com/en/au/ (2026-11-11; consultada: redirige a https://worldline.com/sv-se/home; posible integración en Worldline, sin confirmar) |
+| NAB Transact | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.nab.com.au/business/payments-and-merchants (2026-11-11; sitio oficial de referencia, no consultada) |
+| CommBank BPOINT | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.commbank.com.au/business/merchant-services.html (2026-11-11; sitio oficial de referencia, no consultada) |
+| TravelPay | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.travelpay.com.au/ (2026-11-11; sitio de referencia, no consultada) |
+| Mint Payments | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.mintpayments.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Monoova | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.monoova.com/pricing (2026-11-11; consultada, la página devolvió error) |
+| Zepto | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.zepto.com.au/pricing (2026-11-11; consultada, la página devolvió error) |
+| Ezidebit | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.ezidebit.com/en-au/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Hello Clever | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://helloclever.co/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Braintree | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.paypal.com/au/business/braintree-pricing (2026-11-11; consultada, la página devolvió error) |
+| Worldpay | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.worldpay.com/ (2026-11-11; sitio oficial de referencia, no consultada (Hyperswitch sí tiene conector, ver sección 3)) |
+| Nuvei | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.nuvei.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Worldline | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://worldline.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Global Payments | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.globalpayments.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Mastercard Payment Gateway Services | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.mastercard.com.au/en-au/business/merchants/payment-gateway.html (2026-11-11; sitio de referencia, no consultada) |
+| BPAY | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.bpay.com.au/ (2026-11-11; sitio oficial de referencia, no consultada) |
+
+### Revisión del catálogo de `docs/payments.md`
+
+- Confirmado por la regulación: POLi sigue fuera (cerró en 2023, dato del propio documento; no se volvió a comprobar).
+- Posible cambio de nombre: Bambora Asia-Pacific (ver arriba). Mantener en el catálogo como `planned` hasta confirmarlo.
+- Zai es el nombre actual de Assembly Payments (fuente: https://www.hellozai.com/payment-gateway).
+- No se añaden pasarelas nuevas: no hay evidencia oficial para ninguna candidata.
+
+## 3. Hyperswitch (orquestador de código abierto)
+
+Comprobado el 2026-11-11.
+
+| Punto | Hallazgo | Fuente | Fecha |
+|---|---|---|---|
+| Licencia | Apache 2.0 | https://github.com/juspay/hyperswitch | 2026-11-11 |
+| Mantenimiento | Activo: el changelog tiene entradas fechadas 2026.11.06, .09, .10 y .11 (varias por semana). Unos 43,6 mil estrellas, 816 PR abiertos | https://raw.githubusercontent.com/juspay/hyperswitch/main/CHANGELOG.md ; página de GitHub | 2026-11-11 |
+| Conectores | "100+" según el README (otra sección dice "120+"). Código de la rama principal (`connector_enums.rs`) | https://raw.githubusercontent.com/juspay/hyperswitch/main/crates/common_enums/src/connector_enums.rs | 2026-11-11 |
+| Cobertura de nuestro catálogo | **Sí:** Stripe, PayPal, Braintree, Adyen, Checkout.com, Worldpay, Airwallex, Square, Rapyd, Nuvei, Worldline, Global Payments, GoCardless, Klarna, y un conector `Bamboraapac`. **No aparecen:** eWAY, Pin Payments, SecurePay, Fat Zebra, Windcave, Tyro, Till, Zai, Merchant Warrior, NAB Transact, Westpac PayWay, BPOINT, Azupay, Monoova, Zepto, Ezidebit, Hello Clever, TravelPay, Mint, Afterpay, Zip, BPAY | misma fuente | 2026-11-11 |
+| Métodos australianos | El enum de métodos de pago incluye BECS. PayTo y PayID: no aparecen en el código consultado. Que cada conector australiano los exponga: sin confirmar | https://raw.githubusercontent.com/juspay/hyperswitch/main/crates/common_enums/src/enums.rs | 2026-11-11 |
+| Versión autoalojada | Servidor en Rust; scripts Docker/Podman (perfiles Standard, Full, Minimal) y Helm. Postgres y Redis como requisitos: el README consultado no lo lista; confirmar en la guía de instalación | página de GitHub | 2026-11-11 |
+| Versión gestionada (Cloud) | Precio no publicado: "Contact Us". Alojamiento incluido solo en Cloud | https://hyperswitch.io/pricing | 2026-11-11 |
+| Coste autoalojado | Edición Community "Start Building for Free" (sin cuota de licencia). El coste de infraestructura propia (servidor Rust, Postgres, Redis, panel de control) no se calculó: sin confirmar | https://hyperswitch.io/pricing | 2026-11-11 |
+| PCI | En Community, "self-managed". En Cloud, "available as out-of-the-box service". La página no aclara quién responde de qué. Nosotros evitaríamos PCI con campos alojados de la pasarela de todos modos | https://hyperswitch.io/pricing | 2026-11-11 |
+
+### Lectura para la decisión de 3.1
+
+1. **El valor del orquestador está en las globales, y esas ya las cubrimos con un adaptador cada una.** Para lanzar solo hacen falta Stripe y transferencia manual (oleada A), y PayPal y Pin Payments o eWAY (también oleada A). De ellas, Hyperswitch cubre Stripe y PayPal; **no cubre las australianas de tarjeta**, que son justo las que `docs/payments.md` prioriza para un sole trader.
+2. **Un servicio más que operar y que puede perder webhooks.** `docs/architecture.md` exige comprobar el caso de una API que se duerme y pierde webhooks de pago. Con un orquestador hay dos servicios en esa cadena.
+3. **Estado `verified`.** Nuestros adaptadores deben pasar la batería de contrato contra el sandbox real de cada proveedor; con el orquestador, la prueba sería contra el sandbox del orquestador, no del proveedor, y la regla del proyecto no queda cubierta.
+4. **Reversible.** Con la interfaz `PaymentProvider`, un adaptador "Hyperswitch" se puede añadir más adelante (tarea 9.1 de la variante con orquestador) sin tocar el resto, si algún día hacen falta muchas globales.
+
+**Recomendación:** adaptadores propios. Revisar si cambia la conclusión solo si, tras el lanzamiento, Oscar necesita más de unas cinco pasarelas globales a la vez.
+
+## 4. Orden de alta recomendado (lo pide Oscar)
+
+1. **Transferencia manual con PayID** (sin proveedor, sin trámite). Disponible desde el primer día.
+2. **Stripe** (tarjeta, Apple Pay y Google Pay, PayTo, BECS). Solicitar la cuenta ya: la categoría "travel reservation services" es restringida y la revisión puede tardar. Pedir confirmación escrita de que aceptan el modelo (paquetes de viaje prepagados, depósito y saldo). Para desarrollo basta el sandbox.
+3. **Pin Payments** (sin cuotas mensuales, 1,6 % + A$0,30; el alta de SecurePay también pasa por ellos) y **eWAY** (1,5 % + A$0,25; sandbox enlazado). Pedir la política de viajes y si aceptan sole trader con ABN: la web no lo dice.
+4. **PayPal**, tras confirmar con ellos el encaje de "prepayment for future delivery" con paquetes de viaje.
+5. **Westpac OnlinePay** solo si Oscar ya tiene cuenta de empresa Westpac: 1,25 % plano, sole traders pueden solicitarlo en línea.
+6. **GoCardless** o **Azupay** para cuenta a cuenta si la transferencia manual resulta incómoda. Azupay solo da precio con presupuesto.
+7. Resto (oleadas C y D): no antes de tener volumen. Fat Zebra parte de A$250/mes en el plan de pasarela sola, lo contrario de "sin cuota mensual".
+
+### Sandbox que Oscar debe pedir
+
+- Stripe: sandbox gratuito desde el panel.
+- eWAY: sandbox enlazado desde la sección de desarrolladores; condiciones sin confirmar.
+- Zai: sandbox incluido en el proceso de alta con ellos.
+- Resto (Pin Payments, PayPal, Westpac, GoCardless, Azupay, Windcave, etc.): no figura en las páginas consultadas; preguntar al pedir la cuenta.
+- Mientras tanto, cada adaptador queda `experimental` y se construye contra el simulador, según `docs/autonomous.md`.
+
+## 5. Pendiente de confirmar
+
+- Política de viajes de Pin Payments, eWAY, Airwallex, Square, Westpac, Windcave y GoCardless.
+- Aceptación de sole trader con ABN en casi todos.
+- Plazos de liquidación y retenciones (reserves) en casi todos.
+- PayID como método de cobro en Stripe, y PayTo en GoCardless y Azupay.
+- Páginas de Tyro, Till, NAB Transact, BPOINT, TravelPay, Mint, Monoova, Zepto, Ezidebit, Hello Clever, Braintree, Worldpay, Nuvei, Worldline, Global Payments y Mastercard PGS: sin consultar o sin abrir.
+
+## 6. Regulación citada
+
+- Prohibición de recargos en tarjetas eftpos, Mastercard y Visa desde el 1 de octubre de 2026; tope de interchange nacional más bajo desde la misma fecha; tope para tarjetas extranjeras desde el 1 de abril de 2027. Fuente: https://rba.gov.au/media-releases/2026/mr-26-10.html (publicada 2026-03-31; consultada 2026-11-11).
