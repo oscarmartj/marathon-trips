@@ -1,6 +1,113 @@
 {
   "home": {
-    "title": "Marathon Trips",
-    "tagline": "Race travel for runners, based in Australia."
+    "title": "{brand}",
+    "tagline": "Race travel for runners, based in Australia.",
+    "heroHeading": "Run the world. We sort the travel.",
+    "heroBody": "Entries, hotels and logistics for marathons and half marathons, so all you need to think about is the start line.",
+    "heroCta": "Find a race",
+    "stepsHeading": "How it works",
+    "step1Title": "Pick your race",
+    "step1Body": "Search by distance, month and country.",
+    "step2Title": "Build your trip",
+    "step2Body": "Choose your hotel, room and nights, and see the full price straight away.",
+    "step3Title": "Race day ready",
+    "step3Body": "Everything in one place before you fly.",
+    "imageAlt": "Placeholder image of runners at a race start"
+  },
+  "common": {
+    "skipToContent": "Skip to main content",
+    "mainNavigation": "Main navigation",
+    "footerNavigation": "Footer navigation",
+    "company": "Company",
+    "legal": "Legal",
+    "comingSoon": "This page is a placeholder and will be built out soon.",
+    "legalPending": "Provisional content, pending legal review.",
+    "backToRaces": "Back to races",
+    "logoLabel": "{brand} home",
+    "placeholderImage": "Placeholder image"
+  },
+  "nav": {
+    "home": "Home",
+    "races": "Races",
+    "race": "Race",
+    "build": "Build your package",
+    "checkout": "Checkout",
+    "about": "About",
+    "faq": "FAQ",
+    "contact": "Contact",
+    "terms": "Terms of booking",
+    "privacy": "Privacy policy",
+    "complaints": "Complaints"
+  },
+  "footer": {
+    "rights": "{brand}. All rights reserved.",
+    "note": "Placeholder footer. Company details are added before launch."
+  },
+  "races": {
+    "title": "Find a race",
+    "intro": "Filter by distance, month, country, price and status. Filters will be kept in the web address so you can share a search.",
+    "filtersHeading": "Filters",
+    "filterDistance": "Distance",
+    "filterMonth": "Month",
+    "filterCountry": "Country or continent",
+    "filterPrice": "Price range",
+    "filterEntry": "Entry type",
+    "filterStatus": "Status",
+    "sampleHeading": "Sample race",
+    "sampleLink": "View the sample race",
+    "detail": {
+      "title": "{name}",
+      "sampleName": "Sample Marathon",
+      "intro": "The race guide, editions and available packages appear here.",
+      "guideHeading": "Race guide",
+      "editionsHeading": "Editions and packages",
+      "buildCta": "Build a package",
+      "imageAlt": "Placeholder image of a race course"
+    },
+    "build": {
+      "title": "Build your package",
+      "intro": "Choose your hotel, room occupancy, nights, travelling companions and extras. The total, deposit and breakdown shown here always come from our pricing service."
+    }
+  },
+  "checkout": {
+    "title": "Checkout",
+    "intro": "Review your booking and accept the booking terms before you pay. Only payment methods available in your country are shown."
+  },
+  "about": {
+    "title": "About {brand}",
+    "intro": "We are a small team of runners who arrange race travel for runners."
+  },
+  "faqPage": {
+    "title": "Frequently asked questions",
+    "intro": "Answers to common questions about entries, packages and payments."
+  },
+  "contact": {
+    "title": "Contact us",
+    "intro": "Questions about a race or a booking? Our contact details and form will appear here."
+  },
+  "legalPages": {
+    "intro": "The full text will be published here before launch.",
+    "terms": { "title": "Terms of booking" },
+    "privacy": { "title": "Privacy policy" },
+    "complaints": { "title": "Complaints" }
+  },
+  "admin": {
+    "title": "{brand} admin",
+    "nav": {
+      "label": "Admin navigation",
+      "dashboard": "Dashboard",
+      "races": "Races",
+      "packages": "Packages",
+      "bookings": "Bookings",
+      "customers": "Customers",
+      "settings": "Settings"
+    },
+    "placeholder": "This admin page is a placeholder. Sign-in and permissions arrive with authentication.",
+    "dashboard": { "title": "Dashboard", "intro": "Today's bookings, payments needing attention and upcoming races will appear here." },
+    "races": { "title": "Races", "intro": "Manage races and editions." },
+    "packages": { "title": "Packages", "intro": "Manage hotels, rooms, allotments and prices." },
+    "bookings": { "title": "Bookings", "intro": "Search and manage customer bookings." },
+    "customers": { "title": "Customers", "intro": "Customer records and their trips." },
+    "settings": { "title": "Settings", "intro": "Brand, payment methods and site settings." }
   }
 }

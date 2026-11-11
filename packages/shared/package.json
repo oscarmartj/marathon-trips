@@ -10,6 +10,21 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --reporter=default --reporter=json --outputFile=test-results/vitest.json"
   },
-  "dependencies": { "zod": "^4.6.7" },
-  "devDependencies": { "vitest": "4.1.12", "@types/node": "^22.0.0" }
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "vitest": "4.1.12",
+    "@types/node": "^22.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./brand": {
+      "types": "./dist/brand/index.d.ts",
+      "default": "./dist/brand/index.js"
+    }
+  }
 }
