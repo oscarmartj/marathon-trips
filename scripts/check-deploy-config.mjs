@@ -42,6 +42,18 @@ export function checkDeployConfig(compose, caddyfile) {
   if (!/80:80/.test(s.caddy) || !/443:443/.test(s.caddy)) errors.push('caddy must publish 80 and 443');
   if (/4000/.test(s.caddy)) errors.push('caddy must not reach the API directly');
 
+  // Task 8.6: the backup service exists, is opt-in (profile), reads uploads read-only and requires encryption; the API sees the
+  // backup status read-only and the backups volume is never writable from the API or published.
+  if (!s.backup) errors.push('service "backup" is missing (task 8.6)');
+  else {
+    if (!/profiles:\s*\[\s*"tools"\s*\]/.test(s.backup)) errors.push('service "backup" must be in the "tools" profile so "up" never runs it');
+    if (!/filedata:\/data\/files:ro\b/.test(s.backup)) errors.push('service "backup" must mount filedata read-only');
+    if (value(s.backup, 'APP_ENV') !== 'production') errors.push('service "backup" APP_ENV must be production (production backups must be encrypted)');
+    if (!/^\s+BACKUP_PASSPHRASE_FILE:\s/m.test(s.backup)) errors.push('service "backup" must set BACKUP_PASSPHRASE_FILE');
+    if (value(s.backup, 'BACKUP_ALLOW_LOCAL_ONLY') || value(s.backup, 'BACKUP_ALLOW_UNENCRYPTED')) errors.push('service "backup" must not allow local-only or unencrypted backups');
+  }
+  if (!/backups:\/backups:ro\b/.test(s.api)) errors.push('api must mount the backups volume read-only');
+  if (/filedata:\/data\/files:ro/.test(s.api)) errors.push('api must be able to write uploaded files');
   if (value(s.api, 'APP_ENV') !== 'production') errors.push('api APP_ENV must be production');
   const trust = value(s.api, 'TRUST_PROXY');
   if (!trust || trust === 'false' || trust === 'true') errors.push('api TRUST_PROXY must name the web container\'s network (not unset, false or true)');

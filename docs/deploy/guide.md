@@ -2,7 +2,7 @@
 
 Para Oscar. Sigue la combinación B de `docs/research/hosting.md` (recomendada en la tarea 0.7): un servidor Linux en AWS Lightsail, región Sídney, con Docker Compose y Caddy. **Esta guía no despliega nada; nadie la ha ejecutado todavía.** Precios y límites: ver la investigación (Lightsail 2 GB, US$12/mes, precio de lista de 2026-11-11, sin convertir a AUD). Alternativa sin servidor propio: combinación A de la investigación; esta guía no la cubre.
 
-Archivos: `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/production.env.example`, `deploy/db-init-prod.sql`. `pnpm lint` ejecuta `scripts/check-deploy-config.mjs`, que falla si alguien publica el puerto de la API o quita `TRUST_PROXY`/`WEB_TRUSTED_PROXY_HOPS`.
+Archivos: `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/production.env.example`, `deploy/db-init-prod.sql`, `scripts/backup/` (copias y restauración, tarea 8.6). `pnpm lint` ejecuta `scripts/check-deploy-config.mjs`, que falla si alguien publica el puerto de la API o quita `TRUST_PROXY`/`WEB_TRUSTED_PROXY_HOPS`.
 
 ## Antes de empezar
 
@@ -25,6 +25,7 @@ Archivos: `deploy/docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/producti
    Es repetible sin riesgo.
 7. **Arrancar todo.** `docker compose --env-file deploy/production.env -f deploy/docker-compose.prod.yml up -d --build`. La API aplica las migraciones como `mt_owner` al arrancar y **no** carga datos de demostración con `APP_ENV=production`.
 8. **Comprobar.** `docker compose ... ps` con todos los servicios `healthy`; `https://<dominio>/` responde con certificado válido; `http://` redirige a `https://`.
+9. **Antes de abrir al público:** prepara las copias, haz una copia a mano y **prueba la restauración** (sección siguiente). Sin una restauración probada en este servidor, no abras la web.
 
 ## Obligatorio: IP real del cliente y puerto 4000 (de `docs/done/0.3.md`)
 
@@ -40,14 +41,58 @@ Sin esto, el límite de intentos de entrada cuenta a todo el sitio junto (la API
 
 El primer acceso se crea por la línea de comandos de la tarea 0.3 (alta de personal por enlace de un solo uso); consulta `docs/done/0.3.md`. El seed de demostración no se ejecuta en producción.
 
-## Copias de seguridad y actualizaciones
+## Copias de seguridad y restauración (tarea 8.6)
 
-- **Copias:** las diseña y prueba la tarea 8.6 (copia fuera del servidor y restauración probada). Hasta que 8.6 esté fusionada, no abras la web al público. Los datos están en los volúmenes `dbdata` (PostgreSQL) y `filedata` (archivos subidos).
-- **Actualizar:** `git fetch && git checkout <nueva etiqueta>`, y de nuevo el paso 7. Si falla, `git checkout` de la etiqueta anterior y paso 7 (las migraciones no se deshacen solas: lee las notas de cada versión).
+**Qué se copia:** la base de datos (una instantánea coherente con `pg_dump`, aunque la web esté recibiendo escrituras) y los archivos subidos (volumen `filedata`). **No** se copian los certificados de Caddy (se vuelven a emitir solos) ni `deploy/production.env` ni la contraseña de las copias: esos secretos los guardas tú en un gestor de contraseñas. Un paquete cifrado sin su contraseña no se puede abrir, y sin `APP_ENCRYPTION_KEY` los secretos TOTP restaurados no se leen.
+
+**Cómo es una copia:** un solo archivo `mt-backup-<fecha>.tar.enc` (AES-256) con la base, los archivos y un `MANIFEST` con sumas de comprobación y el número de filas de cada tabla. Se guarda en el volumen `backups`, se sube fuera del servidor y deja `last-backup.json`, que lee el monitor. Si cualquier paso falla, el script termina con error y **no** actualiza ese archivo (el monitor avisará a las 26 horas). Se conservan 14 copias en el servidor; cuántas se conservan fuera lo decide la regla de ciclo de vida del almacén.
+
+### Preparar (una vez, lo haces tú)
+
+1. **Almacén externo.** Cualquier servicio compatible con `rclone` (Backblaze B2, cualquier S3...). Crea un depósito privado y una clave de aplicación **solo para ese depósito**, que pueda escribir y listar y, si el servicio lo permite, no borrar. En el depósito, activa una regla de ciclo de vida (por ejemplo, conservar 60 días). La cuenta y el depósito los crea Oscar; el repositorio solo trae marcadores (`b2:example-bucket/marathon-trips`).
+2. **Configuración de rclone** en el servidor, fuera del repositorio: `rclone config` en tu ordenador, y copia el archivo a `/opt/mt-secrets/rclone.conf` (`chmod 600`). Debe tener un remoto llamado como el de `BACKUP_REMOTE_TARGET`.
+3. **Contraseña de las copias:** `mkdir -p /opt/mt-secrets && openssl rand -base64 32 > /opt/mt-secrets/backup-passphrase && chmod 600 /opt/mt-secrets/backup-passphrase`. **Guarda una copia fuera del servidor ahora.**
+4. En `deploy/production.env` rellena `BACKUP_PASSPHRASE_FILE`, `RCLONE_CONFIG_FILE`, `BACKUP_REMOTE_KIND=rclone` y `BACKUP_REMOTE_TARGET` (ver `deploy/production.env.example`).
+5. Construye la imagen de herramientas: `docker compose --env-file deploy/production.env -f deploy/docker-compose.prod.yml --profile tools build backup`.
+
+### Copia
+
+- **A mano:** `docker compose --env-file deploy/production.env -f deploy/docker-compose.prod.yml --profile tools run --rm backup`. Termina con `backup: ok: mt-backup-...tar.enc (... offsite=true, encrypted=true)`. Comprueba que el archivo aparece en el depósito.
+- **Cada día** (cron del servidor, `sudo crontab -e`): `30 3 * * * cd /opt/marathon-trips && docker compose --env-file deploy/production.env -f deploy/docker-compose.prod.yml --profile tools run --rm -T backup >> /var/log/mt-backup.log 2>&1`.
+- **Antes de actualizar** el código (sección siguiente), haz una copia a mano.
+- Pérdida máxima de datos: hasta 24 horas (la copia diaria). No hay recuperación a un instante exacto (WAL); si el negocio la necesita, es una mejora aparte.
+
+### Probar la restauración (antes de abrir al público, y una vez al mes)
+
+Restaura la última copia del depósito en una base y un directorio **desechables** y compara. No toca la web:
+
+1. Trae la copia: `rclone copyto b2:example-bucket/marathon-trips/<paquete>.tar.enc /tmp/<paquete>.tar.enc` (y su `.sha256` al lado, si quieres la comprobación extra) o usa la del volumen `backups`.
+2. `docker compose --env-file deploy/production.env -f deploy/docker-compose.prod.yml --profile tools run --rm --entrypoint bash -e PGUSER=postgres -e PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" -v /tmp:/restore backup /scripts/backup/verify-restore.sh /restore/<paquete>.tar.enc`
+3. Debe terminar con `verify-restore: ok`. Si termina con error, **la copia no vale**: no la borres, investiga y haz otra.
+
+Registro de la prueba hecha en la tarea 8.6 (en este repositorio, con PostgreSQL 16 local): `docs/done/8.6.md`. Las pruebas automáticas `apps/api/test/ops/backup.test.ts` repiten una restauración real en cada `pnpm test`.
+
+### Restaurar de verdad (desastre o error grave)
+
+1. Pon la web en modo mantenimiento si la API todavía responde (sección siguiente) y para el tráfico: `docker compose ... stop web api`.
+2. Restaura **en una base nueva**, sin tocar la actual: igual que el paso 2 anterior pero con `restore.sh <paquete> --database marathon_trips_restored --files-dir /restore/files`. Termina con `restore ok ... row counts match`.
+3. Cuando lo comprobado te convenza: renombra bases (`ALTER DATABASE marathon_trips RENAME TO marathon_trips_old; ALTER DATABASE marathon_trips_restored RENAME TO marathon_trips;` como `postgres`, con la API parada), copia `/restore/files` dentro del volumen `filedata` y `docker compose ... up -d`.
+4. Si la base destino es la viva, el script exige además `--replace --i-know-this-replaces-live-data`: úsalo solo si has comprobado el paquete en otra base antes.
+5. Cambia las claves o contraseñas que pudieran haberse filtrado si el motivo del desastre fue una intrusión, y anota lo ocurrido.
+
+## Monitor del sistema y modo mantenimiento (tarea 8.6)
+
+- **Monitor:** `GET /admin/system/status` (permiso `platform.system.read`; el rol de propietario lo tiene). Devuelve el estado de la base, cada cola de tareas (esperando, activas, fallidas en 24 h, antigüedad de la más antigua), eventos pendientes y fallidos, correos en cola y fallidos, y la última copia (`ok`, `stale` si pasa de 26 h, `unknown` si no hay archivo). `status` es `ok` o `attention`, con `reasons` en códigos fijos (`queue_backlog:mail.send`, `mail_failed`, `backup_stale`...). Solo cuentas, edades y nombres de cola: nunca direcciones ni datos de trabajos. Aún no hay pantalla en el panel; hasta entonces, con la sesión del panel abierta, se consulta en el navegador `https://<dominio>/api/admin/system/status`. Para avisos externos, un servicio de vigilancia gratuito puede comprobar `https://<dominio>/` (solo dice que la web responde: el monitor exige sesión, y `/api/health` de la web tampoco mira la base).
+- **Modo mantenimiento:** con el interruptor `platform.maintenance` encendido (panel de interruptores, auditado, o por línea de comandos), todo responde `503` con `Retry-After: 120`, salvo `GET /health`, el inicio de sesión del personal y la API del panel (`/admin/*`), para que el personal pueda ver el monitor y apagarlo. Las tareas en segundo plano siguen funcionando. Si nadie puede entrar al panel: `docker compose --env-file deploy/production.env -f deploy/docker-compose.prod.yml exec api pnpm api:cli maintenance:on` (también `maintenance:off` y `maintenance:status`). La web pública todavía no tiene una página propia de mantenimiento: los visitantes verán su pantalla de error genérica mientras dure; para un aviso bonito, la mejora es una página estática en Caddy.
+
+## Actualizaciones
+
+- **Actualizar:** haz una copia a mano, activa el modo mantenimiento, `git fetch && git checkout <nueva etiqueta>`, y de nuevo el paso 7. Si falla, `git checkout` de la etiqueta anterior y paso 7 (las migraciones no se deshacen solas: lee las notas de cada versión; si una migración dañó datos, restaura la copia de antes). Apaga el modo mantenimiento al comprobar que todo está `healthy`.
 - **Sistema:** `sudo apt full-upgrade` cada mes y reinicio si lo pide el kernel.
 
 ## Lo que sigue sin hacer (queda para Oscar y para otras tareas)
 
 - Crear cuenta, servidor y dominio; el correo real y su dominio; el modo real de las pasarelas (no existe todavía y requiere sandbox verificado).
 - Revisión de seguridad completa y comprobación del proxy real: tarea 8.5.
-- Cortafuegos de aplicación, monitor y modo mantenimiento: tarea 8.6.
+- Cortafuegos de aplicación: no existe; la tarea 8.5 revisa si hace falta.
+- Pantalla del monitor en el panel y página pública de mantenimiento: pendientes (ver `docs/done/8.6.md`).

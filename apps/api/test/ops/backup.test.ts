@@ -86,7 +86,7 @@ describe('backup and restore (task 8.6)', () => {
   it('backup_writes_bundle_checksum_offsite_copy_and_status', () => {
     const r = backup();
     expect(r.code, r.err).toBe(0);
-    [bundle] = bundles();
+    bundle = bundles()[0]!;
     expect(bundle).toMatch(/^mt-backup-\d{8}T\d{6}Z\.tar$/);
     expect(existsSync(join(outDir, `${bundle}.sha256`))).toBe(true);
     expect(sha(join(remoteDir, bundle))).toBe(sha(join(outDir, bundle)));
