@@ -28,7 +28,8 @@ const configSchema = z.object({
   FILE_MAX_BYTES: z.coerce.number().int().min(1).default(10 * 1024 * 1024),
 
   // Auth (task 0.3). The browser talks only to the web app, which proxies /api; WEB_ORIGIN is the only accepted Origin.
-  WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
+  // Required outside development, test and ci (no default that could point at the wrong site).
+  WEB_ORIGIN: z.string().url().optional(),
   // AES-256-GCM key for secrets at rest (TOTP secrets now, gateway credentials later): base64 of 32 bytes.
   APP_ENCRYPTION_KEY: z.string().optional(),
   APP_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).default(1),
@@ -47,7 +48,8 @@ const configSchema = z.object({
 });
 
 type ParsedConfig = z.infer<typeof configSchema>;
-export type AppConfig = Omit<ParsedConfig, 'EMAIL_HASH_KEY' | 'FILE_SIGNING_KEY' | 'APP_ENCRYPTION_KEY' | 'AUTH_HMAC_KEY' | 'COOKIE_SECURE' | 'TRUST_PROXY'> & {
+export type AppConfig = Omit<ParsedConfig, 'EMAIL_HASH_KEY' | 'FILE_SIGNING_KEY' | 'APP_ENCRYPTION_KEY' | 'AUTH_HMAC_KEY' | 'COOKIE_SECURE' | 'TRUST_PROXY' | 'WEB_ORIGIN'> & {
+  WEB_ORIGIN: string;
   EMAIL_HASH_KEY: string;
   FILE_SIGNING_KEY: string;
   APP_ENCRYPTION_KEY: Buffer;
@@ -89,6 +91,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!data.FILE_SIGNING_KEY && !dev) missing.push('FILE_SIGNING_KEY');
   if (!data.APP_ENCRYPTION_KEY && !dev) missing.push('APP_ENCRYPTION_KEY');
   if (!data.AUTH_HMAC_KEY && !dev) missing.push('AUTH_HMAC_KEY');
+  if (!data.WEB_ORIGIN && !dev) missing.push('WEB_ORIGIN');
   const encKey = encryptionKey(data.APP_ENCRYPTION_KEY ?? DEV_ENCRYPTION_KEY);
   if (!encKey) missing.push('APP_ENCRYPTION_KEY');
   // Cookies without Secure only where everything runs on http://localhost (plan 4.1).
@@ -100,6 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     FILE_SIGNING_KEY: data.FILE_SIGNING_KEY ?? DEV_FILE_SIGNING_KEY,
     APP_ENCRYPTION_KEY: encKey!,
     AUTH_HMAC_KEY: data.AUTH_HMAC_KEY ?? DEV_AUTH_HMAC_KEY,
+    WEB_ORIGIN: data.WEB_ORIGIN ?? 'http://localhost:3000',
     COOKIE_SECURE: data.COOKIE_SECURE ? data.COOKIE_SECURE === 'true' : !dev,
     TRUST_PROXY: trustProxy(data.TRUST_PROXY),
   };
