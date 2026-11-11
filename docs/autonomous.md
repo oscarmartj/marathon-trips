@@ -110,7 +110,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 0.1 | — | Arquitectura |
 | 0.7 | — | Bajo |
 | 0.2 | 0.1 | Bajo |
-| 0.3 | 0.2 | Alto |
+| 0.3 | 0.2, 0.4 | Alto |
 | 0.4 | 0.2 | Medio |
 | 0.6 | 0.2 | Bajo |
 | 0.5 | 0.3, 0.6 | Medio |
@@ -123,36 +123,36 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 2.2 | 2.1 | Alto |
 | 2.3 | 2.1, 1.3 | Medio |
 | 2.4 | 2.2 | Alto |
-| 2.5 | 2.4, 0.5 | Medio |
+| 2.5 | 2.4, 2.3, 0.5 | Medio |
 | 2.6 | 2.4 | Bajo |
-| 3.1 | 2.4, 0.7 | Arquitectura |
-| 3.2 | 3.1 | Alto |
+| 3.1 | 2.4, 0.7 | Arquitectura · parcial: interfaz `PaymentProvider`, estados de adaptador y plan de pagos contra el simulador; sin libro contable real |
+| 3.2 | 3.1 | Alto · parcial: plan de depósito y saldo, idempotencia y registro de cobros del simulador; sin libro contable real |
 | 3.6 | 3.2 | Alto |
-| 3.3 | 3.2, 3.6 | Alto |
-| 3.4 | 3.2 | Medio |
-| 3.5 | 3.3, 3.4, 2.3 | Medio |
-| 4.1 | 3.3 | Alto |
-| 4.2 | 4.1 | Alto |
-| 4.3 | 4.1, 3.6 | Alto |
-| 4.4 | 4.1, 3.6 | Alto |
-| 4.5 | 4.1 | Alto |
-| 4.6 | 4.5 | Alto |
-| 5.1 | 3.5 | Alto |
+| 3.3 | 3.2, 3.6 | Alto · aparcada (dinero) |
+| 3.4 | 3.2 | Medio · aparcada (dinero) |
+| 3.5 | 3.2, 3.6, 2.3 | Medio · parcial: checkout y condiciones completos, cobrando solo contra el simulador |
+| 4.1 | 3.3 | Alto · aparcada (dinero) |
+| 4.2 | 4.1 | Alto · aparcada (dinero) |
+| 4.3 | 4.1, 3.6 | Alto · aparcada (dinero) |
+| 4.4 | 4.1, 3.6 | Alto · aparcada (dinero) |
+| 4.5 | 4.1 | Alto · aparcada (dinero) |
+| 4.6 | 4.5 | Alto · aparcada (dinero) |
+| 5.1 | 3.5, 5.4 | Alto · parcial: área del cliente completa, pagos contra el simulador; sin recibos (4.6) |
 | 5.2 | 5.1 | Medio |
 | 5.3 | 1.3, 0.4 | Medio |
 | 5.4 | 2.5 | Bajo |
 | 5.5 | 5.1 | Alto |
 | 5.6 | 5.1, 2.5 | Bajo |
-| 5.7 | resto de la fase 5, fase 4 cerrada | Medio |
+| 5.7 | 5.1, 5.2, 5.3, 5.4, 5.5, 5.6 | Medio · parcial: ensayo completo pagando contra el simulador |
 | 6.1 | 1.2 | Medio |
-| 6.2 | 6.1, 4.6 | Alto |
-| 6.3 | 4.5, 5.1 | Alto |
-| 6.4 | 4.5 | Alto |
-| 6.5 | 2.6, 6.4 | Medio |
-| 6.6 | 6.2, 6.4 | Medio |
+| 6.2 | 6.1, 4.6 | Alto · aparcada (dinero) |
+| 6.3 | 5.1 | Alto · parcial: cambio con instantánea nueva y diferencia calculada por la API; cobro de la diferencia contra el simulador, sin reembolsos |
+| 6.4 | 4.5 | Alto · aparcada (dinero) |
+| 6.5 | 2.6 | Medio |
+| 6.6 | 6.2, 6.4 | Medio · aparcada (dinero) |
 | 7.1 | 5.2 | Bajo |
 | 7.2 | 5.2 | Medio |
-| 7.3 | 1.2, 0.4 | Bajo |
+| 7.3 | 1.2, 0.4, 3.2, 6.1 | Bajo |
 | 7.4 | 2.5, 5.4 | Alto |
 | 7.5 | 1.2 | Medio |
 | 7.6 | 2.5 | Bajo |
@@ -163,8 +163,17 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 8.4 | 0.3, 0.4 | Alto |
 | 8.6 | 0.4 | Medio |
 | 8.7 | 0.7 | Bajo |
-| 8.5 | fases 0 a 7 cerradas, 8.4 | Alto |
-| 9.x | fase 4 cerrada, 8.5 | Alto |
+| 8.5 | fase 0 cerrada, fase 1 cerrada, fase 2 cerrada, fase 3 cerrada, fase 4 cerrada, fase 5 cerrada, fase 6 cerrada, fase 7 cerrada, 8.1, 8.2, 8.3, 8.4, 8.6, 8.7 | Alto |
+| 9.1 | fase 4 cerrada, 8.5 | Alto · aparcada (dinero) |
+| 9.2 | 9.1 | Alto · aparcada (dinero) |
+| 9.3 | 9.2 | Alto · aparcada (dinero) |
+| 9.4 | 9.1 | Bajo · aparcada (dinero) |
+
+**Fase N cerrada** significa: todas las tareas de la fase N tienen su `docs/done/N.M.md` en `main` y el PR del hilo de cierre de esa fase está fusionado.
+
+**Dinero aparcado** (decisión de Oscar, 2026-11-12; sección "Aparcado: dinero" de `docs/plans/phase-0-architecture.md`). Una tarea **aparcada** no se arranca, no bloquea a nadie y no cuenta para "fase N cerrada" (una fase cuyas tareas están todas aparcadas cuenta como cerrada). Una tarea **parcial** hace solo lo que dice su fila, contra el simulador y sin modo real, y cuenta como hecha al fusionarse esa parte. Ninguna tarea no aparcada depende de una aparcada (lo comprueba `scripts/check-dependency-table.mjs`). Para retomar el dinero, Oscar quita la etiqueta y se reabren las partes aparcadas.
+
+Las filas 9.1 a 9.4 siguen la numeración de `docs/phases/phase-9.md`. Si se eligió el orquestador, solo existen 9.1 y 9.2; si se eligieron adaptadores propios, existen las cuatro.
 
 La fase 9 va la última. Sin sandbox de cada proveedor, sus adaptadores se escriben contra la documentación y la batería de contrato, y se quedan en `experimental` hasta que Oscar consiga las claves de prueba.
 
