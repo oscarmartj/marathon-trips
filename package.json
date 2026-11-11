@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
-    "lint": "turbo run lint && node scripts/check-dependency-table.mjs",
+    "lint": "turbo run lint && node scripts/check-dependency-table.mjs && node scripts/check-deploy-config.mjs && node --test scripts/check-deploy-config.test.mjs",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:file": "pnpm --filter @mt/api exec vitest run --config vitest.config.mts",

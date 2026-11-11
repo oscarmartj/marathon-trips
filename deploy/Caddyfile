@@ -1,0 +1,10 @@
+# TLS certificates are issued and renewed automatically (Let's Encrypt) once the domain points at this server.
+# Caddy replaces any X-Forwarded-For sent by the browser with the real client address, so the web app trusts one hop.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy web:3000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
