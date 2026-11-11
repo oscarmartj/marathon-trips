@@ -30,15 +30,15 @@ Estas reglas se aplican desde la primera migración. Varias se pueden comprobar 
 
 ### 1.1 Dinero
 
-- Todo importe es un entero en unidades menores, en una columna con sufijo `Minor` (`totalMinor`, `amountMinor`), tipo `Int` de PostgreSQL (`integer`).
+- Todo importe es un entero en unidades menores, en una columna con sufijo `Minor` (`totalMinor`, `amountMinor`), tipo `BigInt` de Prisma (`bigint` de PostgreSQL) **desde la primera migración**. Motivo: con `integer` (máximo 2 147 483 647) no caben importes de otras monedas (45 000 000 IDR con los 2 decimales de ISO 4217 son 4 500 000 000 unidades menores).
 - **Toda fila que tiene una columna `*Minor` tiene su propia columna de moneda** (`Char(3)`, ISO 4217). Regla de emparejado: `fooMinor` usa `fooCurrency` si existe, y si no `currency` (por ejemplo `baseAmountMinor` usa `baseCurrency`). La prueba de convenciones (0.2) rechaza un `*Minor` sin su moneda emparejada.
-- **La moneda de una fila hija no puede diferir de la de su padre.** Se impone con clave ajena compuesta `(parentId, currency)` hacia `@@unique([id, currency])` del padre: `RoomRate`, `ParticipationRate`, `ExtraRate` → `PriceVersion`; `PriceVersion` → `Package`; `PaymentSchedule` → `Booking`; `PaymentScheduleItem` → `PaymentSchedule`; `Payment` → `PaymentScheduleItem` (si lo tiene) y `Booking`; `Refund` → `Payment`; `LedgerEntry` → `LedgerAccount`. Donde no hay padre natural (por ejemplo `CostItem`), la moneda es libre y cualquier suma agrupa por moneda. El motor de precios rechaza entradas con monedas distintas.
-- Límite: `integer` llega a 2 147 483 647 unidades menores (A$21,4 millones). Ningún importe individual (línea, pago, asiento) puede acercarse; la API rechaza importes por encima de A$1 000 000 por línea. Las sumas en SQL devuelven `bigint` y se convierten con comprobación. Pasar a `BigInt` más adelante es una migración que solo ensancha la columna.
+- **La moneda de una fila hija no puede diferir de la de su padre.** Se impone con clave ajena compuesta `(parentId, currency)` hacia `@@unique([id, currency])` del padre: `RoomRate`, `ParticipationRate`, `ExtraRate` → `PriceVersion`; `PriceVersion` → `Package`; `PaymentSchedule` → `Booking`; `PaymentScheduleItem` → `PaymentSchedule`; `Payment` y `PaymentAllocation` → `Booking` y `PaymentScheduleItem`; `Refund` → `Payment`; `LedgerEntry` → `LedgerAccount`. Donde no hay padre natural (por ejemplo `CostItem`), la moneda es libre y cualquier suma agrupa por moneda. El motor de precios rechaza entradas con monedas distintas.
+- En la API, los importes son `bigint` de JavaScript en todo el cálculo (nunca `number`). **En JSON viajan como cadena de dígitos** (`"123450"`), porque `bigint` no se serializa y un `number` pierde precisión por encima de 2⁵³. La API sigue rechazando importes absurdos (por encima de A$1 000 000 por línea, o su equivalente fijado por moneda en `Setting`), pero eso es validación de negocio, no un límite del tipo.
 - Porcentajes en **puntos básicos** enteros, columnas con sufijo `Bps` (1000 = 10 %).
 - Tipos de cambio (solo para costes de proveedor en otra moneda y finanzas): entero escalado `rateE9 BigInt` (tipo × 10⁹). No es dinero, pero así **el esquema no tiene ni una columna `Float` ni `Decimal`**, y eso se puede comprobar con una prueba.
 - Coordenadas geográficas, si se guardan, como `latitudeE7 Int` y `longitudeE7 Int` (grados × 10⁷), por la misma regla.
 - Regla de redondeo (la fija y prueba 2.1, este plan la propone): las reglas porcentuales se calculan en aritmética entera sobre puntos básicos y se redondean **a la unidad menor, mitad hacia arriba sobre el valor absoluto, línea a línea**; el total es la suma de líneas ya redondeadas. Nunca se redondea el total por separado.
-- En TypeScript, el tipo compartido es `Money = { amountMinor: number; currency: CurrencyCode }`, validado con `z.number().int()`. `packages/shared` solo tiene utilidades para **formatear** dinero, nunca para calcular totales.
+- En TypeScript, el tipo compartido es `Money = { amountMinor: bigint; currency: CurrencyCode }`; en los esquemas zod compartidos por API, `packages/shared` y web, `amountMinor` es `z.string().regex(/^-?\d+$/)` transformado a `bigint`, y la salida lo serializa como cadena. La web nunca hace aritmética con importes: los formatea. `packages/shared` solo tiene utilidades para **formatear** dinero, nunca para calcular totales.
 
 ### 1.2 Identificadores, tiempo y concurrencia
 
@@ -300,7 +300,8 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 - Cada campo personal lleva `/// @pii` en el esquema. Un script genera el registro de campos personales que usan el logger, la auditoría y la privacidad.
 - Cada módulo con datos personales registra un manejador `export(customerId)` y `anonymise(customerId)`. Una prueba (5.5) falla si un modelo con campos `@pii` no tiene manejador.
 - Lo que no lleva datos personales a propósito: asientos del libro (`LedgerTransaction.description` se genera desde un código y referencias, sin texto libre), instantáneas de reserva (los viajeros aparecen como "plaza 1, corredor con dorsal"), eventos del outbox, enlaces de pago, `AuditLog.changes` (los campos `@pii` van a `AuditPiiValue`).
-- **Tablas inmutables con datos personales.** Los disparadores anti-modificación tienen una única excepción: dentro de una transacción con la variable de sesión `app.privacy_erasure = 'on'` (solo la pone el servicio de privacidad, y queda auditado) se permiten exactamente estas operaciones. Decisión por tabla:
+- **Roles de base de datos (0.2 los crea, 0.3 añade los disparadores).** Tres roles: `mt_owner` es dueño de todas las tablas y solo lo usan las migraciones; `mt_app` es el único que usa la API en ejecución, con `SELECT`, `INSERT`, `UPDATE` y `DELETE` concedidos tabla a tabla, sin ser dueño de nada, así que no puede desactivar disparadores, alterar tablas ni hacer `TRUNCATE` (no se le concede); `mt_privacy` es un rol `NOLOGIN`, dueño de la función `privacy_erase_customer(customerId)`, declarada `SECURITY DEFINER`. `docker-compose` y las pruebas crean los tres; alojamiento debe admitir varios roles (lo anota 8.7).
+- **Tablas inmutables con datos personales.** Los disparadores anti-modificación (`AuditLog`, `AuditPiiValue`, `TermsAcceptance`, `ConsentRecord`, `ComplaintEvent`, `BookingSnapshot`, `LedgerTransaction`, `LedgerEntry`, `PaymentAllocation`, `InventoryMovement`) rechazan `UPDATE` y `DELETE` por fila y `TRUNCATE` por sentencia. Su única excepción es `current_user = 'mt_privacy'`, que solo se da dentro de `privacy_erase_customer`: `mt_app` puede ejecutarla, pero no fijar ese usuario de otra forma, y la función solo aplica las operaciones de esta tabla, queda auditada y no recibe columnas ni SQL como parámetro. **No se usa una variable de sesión** como salida de emergencia: `mt_app` podría fijarla. Decisión por tabla:
 
 | Tabla | Qué se conserva y por qué | Qué hace el borrado |
 |---|---|---|
@@ -311,7 +312,26 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 | `ComplaintEvent` | fila, tipo y fecha: procedimiento de reclamaciones demostrable (7 años) | `body` (`@pii`) se sustituye por `[redacted]` |
 | `BookingSnapshot`, `LedgerTransaction`, `LedgerEntry` | todo: no tienen datos personales | nada |
 
-- **Lista completa de lo que hace el borrado de un cliente (5.5):** anonimiza `Customer`, `Traveller`, `User`; borra `Session` y `LoginToken`; anonimiza `OutboundEmail.to`; borra `AuditPiiValue`; vacía `WebhookEvent.rawBody` de sus pagos; aplica la tabla de arriba a `TermsAcceptance`, `ConsentRecord` y `ComplaintEvent`; anonimiza `Complaint`; borra `AlertSubscription` y `WaitlistEntry`; redacta `Note.body` (`@pii`) de las notas sobre sus registros; `EmailSuppression` ya guarda solo un HMAC y se conserva para no volver a escribirle. `SupplierContact` no es dato de clientes: tiene su propio manejador (borrar un contacto de proveedor). Se conservan libro, instantáneas, recibos y reservas (con el cliente anonimizado).
+- **Lista completa de lo que hace el borrado de un cliente (5.5):**
+
+| Dónde | Qué hace |
+|---|---|
+| `Customer`, `Traveller`, `User` | anonimiza los campos `@pii` |
+| `Session`, `LoginToken`, `AlertSubscription`, `WaitlistEntry` | borra |
+| `OutboundEmail` | anonimiza `to` y `subject` |
+| `AuditPiiValue` | borra |
+| `WebhookEvent` | vacía `rawBody` de sus pagos |
+| `TermsAcceptance`, `ConsentRecord`, `ComplaintEvent` | según la tabla de arriba |
+| `Complaint` | anonimiza `description` y `resolution` (`@pii`); conserva fechas, estado y categoría |
+| `Note`, `Task` | redacta `Note.body` y `Task.description` (`@pii`) de los registros enlazados al cliente o a sus reservas |
+| `Booking` | redacta `statusReason` (`@pii`, texto libre); conserva la reserva |
+| `SearchDocument` | reindexa sus documentos desde los datos ya anonimizados; borra los de entidades borradas |
+| `GeneratedDocument` + `StoredFile` | borra los archivos de confirmaciones, itinerarios y bonos. **Conserva los recibos** (registro económico, 7 años) y los paquetes de pruebas de disputas abiertas, con esa base legal anotada en `PrivacyRequest` |
+| `CsvJob`, `ReportRun` (archivos de salida) | borra **todos** los archivos de exportación e informes existentes (se pueden regenerar). Además, se purgan solos a los 7 días |
+| `IdempotencyRecord` | borra los del actor cliente (su `responseBody` puede tener datos personales). Además caducan a las 24 h |
+| `EmailSuppression` | se conserva: solo guarda un HMAC |
+
+`SupplierContact` no es dato de clientes: tiene su propio manejador (borrar un contacto de proveedor). Se conservan libro, instantáneas, recibos y reservas (con el cliente anonimizado).
 - No se recogen pasaporte ni datos médicos; nunca datos de tarjeta.
 
 ---
@@ -338,7 +358,7 @@ Notación: **SD** = borrado lógico; **CF** = campos personalizados; **Ap** = so
 | **Setting** | `key` único, `value Json`, `schemaVersion` | validado por esquema del código; administración en 0.3 | 0.4 |
 | **OutboxEvent** | `type`, `schemaVersion`, `aggregateType`, `aggregateId`, `aggregateVersion?`, `payload Json`, `actorType`, `actorId?`, `occurredAt`, `dispatchedAt?` | índice parcial sobre pendientes | 0.4 |
 | **EventDelivery** | `eventId`, `consumer`, `status` pending/done/failed/skipped, `attempts`, `lastError?`, `processedAt?` | `@@unique([eventId, consumer])` | 0.4 |
-| **IdempotencyRecord** | `scope`, `key`, `requestHash`, `status` in_progress/completed, `responseStatus?`, `responseBody Json?`, `resourceType?`, `resourceId?`, `lockedUntil?`, `expiresAt` | `@@unique([scope, key])`; misma clave con otro cuerpo → 422. **Nunca guarda secretos**: las rutas que devuelven uno (clave de API recién creada, `client_secret` de una pasarela) guardan solo `resourceId`; al repetir, la respuesta se reconstruye (el `client_secret` se vuelve a pedir a la pasarela) o, si el secreto se enseña una sola vez, responde 409 | 0.4 |
+| **IdempotencyRecord** (pii posible) | `scope` (= `actorType:actorId:route`), `actorType`, `actorId`, `key`, `requestHash`, `status` in_progress/completed, `responseStatus?`, `responseBody Json?`, `resourceType?`, `resourceId?`, `lockedUntil?`, `expiresAt` | `@@unique([scope, key])`: la misma clave enviada por otro actor u otra ruta es otra operación; misma clave, mismo actor y ruta con otro cuerpo → 422. Caduca a las 24 h; entra en la lista de borrado. **Nunca guarda secretos**: las rutas que devuelven uno (clave de API recién creada, `client_secret` de una pasarela) guardan solo `resourceId`; al repetir, la respuesta se reconstruye (el `client_secret` se vuelve a pedir a la pasarela) o, si el secreto se enseña una sola vez, responde 409 | 0.4 |
 | **StoredFile** | `storageKey` único, `contentType`, `sizeBytes`, `checksumSha256`, `originalName?`, `visibility` private/public, `purpose`, `uploadedById?` | | 0.4 |
 | **OutboundEmail** (pii) | `to`, `templateKey`, `locale`, `subject`, `status` queued/sent/failed/suppressed, `providerMessageId?`, `customerId?`, `relatedEntityType?`, `relatedEntityId?`, `error?`, `sentAt?` | se anonimiza al borrar un cliente | 0.4 |
 | **EmailSuppression** | `emailHash` único (HMAC), `reason` unsubscribed/bounced/complaint, `scope` marketing/all | | 0.4 |
@@ -347,10 +367,10 @@ Notación: **SD** = borrado lógico; **CF** = campos personalizados; **Ap** = so
 | **Tagging** | `tagId`, `entityType`, `entityId` | `@@unique([tagId, entityType, entityId])` | 0.5 |
 | **Note** (pii) | `entityType`, `entityId`, `body` (`@pii`), `authorId`, `pinned` | SD; sus cambios van a `AuditPiiValue` | 0.5 |
 | **Attachment** | `entityType`, `entityId`, `storedFileId`, `title` | SD | 0.5 |
-| **Task** | `title`, `description?`, `entityType?`, `entityId?`, `dueAt?`, `assigneeId?`, `status` open/done/cancelled, `source` manual/automation/system, `sourceRef?` | SD | 0.5 |
+| **Task** | `title`, `description?` (`@pii`, texto libre), `entityType?`, `entityId?`, `dueAt?`, `assigneeId?`, `status` open/done/cancelled, `source` manual/automation/system, `sourceRef?` | SD | 0.5 |
 | **SavedView** | `entityType`, `ownerId`, `name`, `filters Json`, `columns Json`, `sort Json`, `shared` | | 0.5 |
-| **SearchDocument** | `entityType`, `entityId`, `title`, `subtitle?`, `searchVector tsvector`, `permissionKey` | `@@unique([entityType, entityId])`, GIN; mantenido por eventos | 0.5 |
-| **CsvJob** | `entityType`, `kind` import/export, `status`, `inputFileId?`, `outputFileId?`, `stats Json`, `errors Json`, `createdById` | importación con vista previa y validación | 0.5 |
+| **SearchDocument** | `entityType`, `entityId`, `title` (`@pii` posible), `subtitle?` (`@pii` posible), `searchVector tsvector`, `permissionKey` | `@@unique([entityType, entityId])`, GIN; mantenido por eventos | 0.5 |
+| **CsvJob** | `entityType`, `kind` import/export, `status`, `inputFileId?`, `outputFileId?`, `stats Json`, `errors Json`, `createdById` | importación con vista previa y validación; los archivos de salida se purgan a los 7 días | 0.5 |
 | **BulkOperation** | `entityType`, `action`, `entityIds String[]`, `status`, `results Json`, `createdById` | cada elemento pasa por la misma lógica y permiso que su acción individual | 0.5 |
 | **CustomFieldDefinition** | `entityType`, `key`, `label LocalizedText`, `type` text/number/date/boolean/select/multiselect, `options Json?`, `validation Json?`, `required`, `visibleToCustomer`, `editableByCustomer`, `displayOrder`, `archivedAt?` | `@@unique([entityType, key])`; archivar, nunca borrar | 7.5 |
 
@@ -360,7 +380,7 @@ Notación: **SD** = borrado lógico; **CF** = campos personalizados; **Ap** = so
 |---|---|---|
 | **Race** (SD, CF, demo) | `slug` único, `name LocalizedText`, `countryCode Char(2)`, `city`, `timeZone`, `raceType` road/trail/ultra/other, `typicalMonth Int?` (1–12), `summary LocalizedText`, `websiteUrl?`, `latitudeE7?`, `longitudeE7?`, `heroMediaId?`, `seo Json`, `status` draft/published/archived, `externalSource?`, `externalId?` | `@@unique([externalSource, externalId])` |
 | **RaceDistance** | `raceId`, `kind` marathon/half/ten_k/five_k/ultra/other, `distanceMetres Int`, `name LocalizedText` | |
-| **RaceClaim** | `raceId`, `kind` official_partner/accredited_agent/other, `enabled`, `evidenceNote`, `evidenceAttachmentId?`, `enabledById?`, `enabledAt?` | **única fuente** de cualquier distintivo de acreditación en la web; auditado |
+| **RaceClaim** | `raceId`, `kind` official_partner/accredited_agent/guaranteed_entry/other, `enabled`, `evidenceNote`, `evidenceAttachmentId?`, `enabledById?`, `enabledAt?` | **única fuente** de cualquier distintivo en la web; auditado. `guaranteed_entry` además exige cupo confirmado: la API calcula por paquete `guaranteedEntry = RaceClaim(guaranteed_entry).enabled ∧ todos los cupos de dorsales del paquete tienen confirmedBySupplier`, y la web solo pinta las marcas que devuelve la API (`claims` de la carrera y `guaranteedEntry` del paquete), nunca las deduce |
 | **RaceEdition** | `raceId`, `year`, `startDate @db.Date?`, `endDate?`, `dateStatus` provisional/confirmed, `status` draft/announced/active/completed/cancelled, `notes LocalizedText` | `@@unique([raceId, year])` |
 | **Package** (SD, CF) | `editionId`, `slug`, `name LocalizedText`, `saleStatus`, `checkInDate`, `checkOutDate`, `includes LocalizedText`, `excludes LocalizedText`, `instantBooking`, `autoConfirmOnDeposit`, `depositMode` per_person/per_booking/percent, `depositAmountMinor?`, `depositBps?`, `balanceDueDate @db.Date`, `minTravellers`, `maxTravellers`, `maxExtraNightsBefore`, `maxExtraNightsAfter`, `currency`, `cancellationPolicyId?`, `seo Json`, `publishedAt?` | `@@unique([editionId, slug])`; check `checkOutDate > checkInDate`; `isDemo` se hereda de la carrera |
 | **PackageParticipationOption** | `packageId`, `type` runner_with_entry/runner_own_entry/supporter, `enabled` | qué tipos de viajero admite el paquete (ver decisión 9.1) |
@@ -369,7 +389,7 @@ Notación: **SD** = borrado lógico; **CF** = campos personalizados; **Ap** = so
 | **PackageHotel** | `packageId`, `hotelId`, `displayOrder` | `@@unique([packageId, hotelId])` |
 | **RoomOption** | `packageHotelId`, `roomType` single/twin/double/triple/quad/other, `name LocalizedText`, `minOccupancy`, `maxOccupancy`, `roomPoolId` | check `1 ≤ min ≤ max ≤ 4` |
 | **Extra** (SD) | `packageId`, `kind` excursion/transfer/meal/merchandise/other, `name LocalizedText`, `description LocalizedText`, `pricingUnit` per_person/per_booking, `availableTo` all/runners/supporters, `mandatory`, `maxPerBooking?`, `poolId?`, `schedule Json?` (traslados: salida, origen, destino) | un extra `mandatory` siempre entra en el total |
-| **InventoryPool** | `kind` entry/room/extra, `label`, `capacity Int`, `consumed Int`, `lowStockThreshold Int?`, `confirmedBySupplier Boolean`, `confirmationNote?` | check `0 ≤ consumed ≤ capacity`; `confirmedBySupplier` en un cupo de dorsales es la condición para cualquier texto de "entrada garantizada" |
+| **InventoryPool** | `kind` entry/room/extra, `label`, `capacity Int`, `consumed Int`, `lowStockThreshold Int?`, `confirmedBySupplier Boolean`, `confirmationNote?` | check `0 ≤ consumed ≤ capacity`; `confirmedBySupplier` en un cupo de dorsales es condición necesaria, pero no suficiente, para "entrada garantizada": además hace falta el `RaceClaim` `guaranteed_entry` activado para la carrera |
 | **InventoryMovement** (Ap) | `poolId`, `delta Int`, `reason` hold/release/capacity_change/adjustment, `bookingId?`, `actorType`, `actorId?`, `note?` | historia del cupo |
 | **ItineraryDay** | `packageId`, `dayNumber`, `title LocalizedText`, `description LocalizedText` | `@@unique([packageId, dayNumber])`; 7.1 |
 | **OrganiserExportFormat** | `raceId`, `name`, `columns Json` (campo origen → cabecera), `fileFormat` csv | 7.2 |
@@ -403,7 +423,7 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 |---|---|---|---|
 | **Customer** (pii, SD, CF, demo) | `userId?` único, `email` citext único, `givenName`, `familyName`, `phone?`, `countryOfResidence Char(2)`, `preferredLocale`, `source`, `anonymisedAt?` | uno por correo | 2.4 (mínimo), 2.5 |
 | **Traveller** (pii, CF) | `customerId` (dueño), `givenName`, `familyName` (como en el documento), `dateOfBirth @db.Date?`, `email?`, `phone?`, `emergencyContactName?`, `emergencyContactPhone?`, `estimatedFinishSeconds Int?`, `anonymisedAt?` | sin pasaporte ni datos médicos | 2.4 (mínimo), 5.2 |
-| **Booking** (CF, demo) | `reference` único, `customerId`, `kind` catalogue/bespoke, `packageId?`, `editionId?`, `status`, `currentSnapshotVersion`, `currency`, `totalMinor`, `depositMinor`, `balanceDueDate`, `residenceCountry`, `requestedAt`, `approvedAt?`, `approvalExpiresAt?`, `requestExpiresAt?`, `depositPaidAt?`, `confirmedAt?`, `balancePaidAt?`, `completedAt?`, `cancelledAt?`, `statusReason?`, `quoteId?`, `groupId?`, `partnerId?`, `sourceChannel`, `version` | check `kind = catalogue ⇒ packageId no nulo`; sin borrado: se cancela | 2.4 |
+| **Booking** (CF, demo) | `reference` único, `customerId`, `kind` catalogue/bespoke, `packageId?`, `editionId?`, `status`, `currentSnapshotVersion`, `currency`, `totalMinor`, `depositMinor`, `balanceDueDate`, `residenceCountry`, `requestedAt`, `approvedAt?`, `approvalExpiresAt?`, `requestExpiresAt?`, `depositPaidAt?`, `confirmedAt?`, `balancePaidAt?`, `completedAt?`, `cancelledAt?`, `statusReason?` (`@pii`, texto libre), `quoteId?`, `groupId?`, `partnerId?`, `sourceChannel`, `version` | check `kind = catalogue ⇒ packageId no nulo`; sin borrado: se cancela | 2.4 |
 | **BookingSnapshot** (Ap) | `bookingId`, `version`, `kind` original/amendment, `configuration Json`, `priceBreakdown Json`, `cancellationPolicy Json?`, `termsVersionId?`, `totalMinor`, `currency`, `priceVersionId?`, `engineVersion` | `@@unique([bookingId, version])`; disparador anti-modificación; **sin datos personales** | 2.4 |
 | **BookingTraveller** | `bookingId`, `slot Int`, `participationType`, `raceDistanceId?`, `travellerId?`, `isLead`, `addedInVersion`, `removedInVersion?` | la plaza existe desde la solicitud; los datos personales llegan en 5.2 | 2.4 |
 | **BookingRoom** | `bookingId`, `roomOptionId`, `occupancy`, `travellerSlots Int[]` | configuración vigente (operativa) | 2.4 |
@@ -422,19 +442,21 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 
 | Entidad | Campos principales | Restricciones y notas | Tarea |
 |---|---|---|---|
-| **ProviderAccount** | `adapterKey`, `displayName`, `mode` test/live, `status` active/paused/retired/archived, `credentialsCiphertext Bytes`, `credentialsKeyVersion`, `webhookSecretCiphertext?`, `webhookPathToken` único, `lastConnectionTestAt?`, `lastConnectionTestResult?`, `createdById` | sin borrado físico si tiene historial (sin ruta DELETE y FK restrictivas); `mode=live` solo si el adaptador es `verified` | 3.3 (mínimo), 4.1 |
+| **ProviderAccount** | `adapterKey`, `displayName`, `mode` test/live, `status` active/paused/retired/archived, `credentialsCiphertext Bytes`, `credentialsKeyVersion`, `webhookSecretCiphertext?`, `webhookPathToken` único, `lastConnectionTestAt?`, `lastConnectionTestResult?`, `createdById` | sin borrado físico si tiene historial (sin ruta DELETE y FK restrictivas); `mode=live` solo si el adaptador es `verified`. **Guarda de entorno:** al arrancar con `APP_ENV` distinto de `production`, todas las cuentas `live` se pausan y se audita (cubre una copia de producción restaurada en staging, 8.6); en `production`, el enrutado no ofrece cuentas `test` | 3.3 (mínimo), 4.1 |
 | **PaymentMethodConfig** | `method` card/apple_pay/google_pay/payto/becs/payid_transfer/bpay/bnpl/manual_other, `enabled`, `countries String[]`, `displayOrder`, `instructions LocalizedText?` | bnpl nace apagado | 3.4, 4.2 |
 | **RoutingRule** | `method`, `providerAccountId`, `countries String[]`, `currencies String[]`, `minAmountMinor?`, `maxAmountMinor?`, `currency?`, `priority`, `fallbackForRuleId?`, `enabled` | | 4.2 |
 | **PaymentSchedule** | `bookingId` único, `currency` | FK compuesta `(bookingId, currency)` | 3.2 |
-| **PaymentScheduleItem** | `scheduleId`, `kind` deposit/balance/instalment/adjustment, `sequence`, `amountMinor`, `currency`, `dueDate @db.Date`, `status` pending/paid/overdue/waived/superseded | importes calculados por la API | 3.2 |
-| **PaymentLink** | `bookingId`, `scheduleItemId?`, `tokenHash` único, `expiresAt`, `status` active/used/expired/revoked, `createdById?` | **no guarda importe**: se calcula al usarlo | 3.2 |
-| **Payment** | `bookingId`, `scheduleItemId?`, `payerCustomerId?`, `providerAccountId`, `adapterKey`, `method`, `amountMinor`, `currency`, `status` created/pending/requires_action/succeeded/failed/cancelled, `idempotencyKey` único, `providerPaymentRef?`, `failureCode?`, `pendingExpiresAt?`, `succeededAt?` | `@@unique([providerAccountId, providerPaymentRef])`. **Índice único parcial** sobre `scheduleItemId` donde `status IN (created, pending, requires_action, succeeded)`: un plazo no puede tener dos cobros vivos ni volver a cobrarse una vez pagado. Al crear el cobro se comprueba, en la misma transacción, que el adaptador sigue `verified` si la cuenta está en `live` | 3.2 |
+| **PaymentScheduleItem** | `scheduleId`, `kind` deposit/balance/instalment/adjustment, `sequence`, `amountMinor`, `currency`, `dueDate @db.Date`, `state` active/waived/superseded | importes calculados por la API. **Lo pagado y lo pendiente no se guardan**: se derivan de `PaymentAllocation` (pagado, pendiente, vencido) | 3.2 |
+| **PaymentLink** | `bookingId`, `targetScheduleItemId?`, `tokenHash` único, `expiresAt`, `status` active/used/expired/revoked, `createdById?` | **no guarda importe**: al usarlo, importe = `min(pendiente acumulado hasta el plazo objetivo, pendiente de la reserva)`; si es 0, el enlace dice que no hay nada que pagar | 3.2 |
+| **Payment** | `bookingId`, `origin` collection/manual_intent/inbound, `targetScheduleItemId?`, `payerCustomerId?`, `providerAccountId`, `adapterKey`, `method`, `mode` test/live, `amountMinor`, `currency`, `status` created/pending/requires_action/succeeded/failed/cancelled/expired, `idempotencyKey` único, `providerPaymentRef?`, `failureCode?`, `pendingExpiresAt?`, `succeededAt?` | `@@unique([providerAccountId, providerPaymentRef])`. `collection` = cobro que iniciamos (tarjeta, PayTo, BECS); `manual_intent` = instrucciones de transferencia/PayID dadas al cliente; `inbound` = dinero recibido que no iniciamos (transferencia que Oscar confirma, reembolso de una disputa ganada). **Índice único parcial** sobre `bookingId` donde `origin = collection` y `status IN (created, pending, requires_action)`: **una sola cobranza viva por reserva**. Otro índice parcial: un solo `manual_intent` en `pending` por reserva. `inbound` no entra en esos índices. **Todo pago no terminal tiene `pendingExpiresAt`** (por defecto: `created` 1 h, `requires_action` 24 h, débito bancario y `manual_intent` 5 días hábiles); una tarea los pasa a `expired` y pide la cancelación a la pasarela. Al crear el cobro se comprueba, en la misma transacción, que el adaptador sigue `verified` si la cuenta está en `live` | 3.2 |
+| **PaymentAllocation** (Ap) | `paymentId`, `scheduleItemId?`, `amountMinor`, `currency`, `kind` schedule/overpayment | reparto de un pago que ha entrado (ver regla abajo) | 3.2 |
 | **Refund** | `paymentId`, `amountMinor`, `currency`, `reason`, `status` requested/pending/succeeded/failed, `idempotencyKey` único, `providerRefundRef?`, `requestedById`, `cancellationId?` | suma de reembolsos ≤ pago (comprobado en transacción) | 3.2, 4.5 |
 | **Dispute** | `paymentId`, `providerDisputeRef`, `amountMinor`, `currency`, `reason`, `status` open/evidence_submitted/won/lost/closed, `evidenceDueBy?`, `evidenceDocumentId?` | | 4.5 |
 | **LedgerAccount** | `code` (p. ej. `customer_funds`, `customer_overpayments`, `provider_clearing:<accountId>`, `payment_fees`, `supplier_payable`, `revenue`, `refunds_payable`), `kind` asset/liability/revenue/expense, `currency` | `@@unique([code, currency])`: una cuenta por código y moneda | 3.2 |
-| **LedgerTransaction** (Ap) | `occurredAt`, `kind` payment/refund/fee/chargeback/supplier_payment/adjustment/reversal, `bookingId?`, `paymentId?`, `refundId?`, `disputeId?`, `supplierPaymentId?`, `reversesTransactionId?`, `idempotencyKey` único, `description` | una corrección es una transacción nueva que referencia la original | 3.2 |
+| **LedgerTransaction** (Ap) | `occurredAt`, `kind` payment/refund/fee/chargeback/supplier_payment/adjustment/reversal, `bookingId?`, `paymentId?`, `refundId?`, `disputeId?`, `supplierPaymentId?`, `reversesTransactionId?`, `mode` test/live, `idempotencyKey` único, `description` | una corrección es una transacción nueva que referencia la original | 3.2 |
 | **LedgerEntry** (Ap) | `transactionId`, `accountCode`, `amountMinor` (con signo: débito +, crédito −), `currency`, `bookingId?` | FK compuesta `(accountCode, currency)` → `LedgerAccount`: la moneda del asiento es la de su cuenta. Disparador diferido: cada transacción suma 0 por moneda; anti-modificación | 3.2 |
-| **WebhookEvent** (pii posible) | `providerAccountId`, `providerEventId`, `type`, `signatureValid`, `rawBody Bytes?`, `headers Json` (saneadas), `receivedAt`, `status` received/processed/ignored/failed, `attempts`, `processedAt?`, `error?` | `@@unique([providerAccountId, providerEventId])`; el cuerpo crudo se vacía a los 180 días o al anonimizar | 3.3 |
+| **WebhookEvent** (pii posible) | `providerAccountId`, `providerEventId`, `type`, `rawBody Bytes?`, `headers Json` (saneadas), `receivedAt`, `status` received/processed/ignored/failed, `attempts`, `processedAt?`, `error?` | **solo eventos con firma válida**; `@@unique([providerAccountId, providerEventId])`; el cuerpo crudo se vacía a los 180 días o al anonimizar | 3.3 |
+| **WebhookRejection** | `providerAccountId?`, `receivedAt`, `reason` bad_signature/too_large/unknown_account, `bodySha256`, `sizeBytes`, `claimedEventId?`, `headers Json` (saneadas) | sin cuerpo; no bloquea el reintento válido; visible en el monitor (muchas firmas malas = secreto mal configurado). Límite de 256 KB al cuerpo no autenticado | 3.3 |
 | **Settlement** | `providerAccountId`, `providerSettlementRef`, `payoutDate`, `grossMinor`, `feesMinor`, `netMinor`, `currency` | | 4.6 |
 | **SettlementLine** | `settlementId`, `paymentId?`, `refundId?`, `kind`, `amountMinor`, `feeMinor`, `currency` | | 4.6 |
 | **ReconciliationRun** | `providerAccountId`, `forDate`, `status` matched/mismatch/failed, `differences Json`, `createdAt` | alerta si no cuadra | 4.6 |
@@ -442,7 +464,15 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 
 **Estado del adaptador** (`verified`, `experimental`, `planned`) **no está en la base de datos**: lo declara el manifiesto del adaptador en código, junto con métodos, monedas, países y capacidades. Cambiarlo exige un PR con pruebas; el panel no puede modificarlo. Así no hay forma de saltarse "solo `verified` pasa a real" desde el panel. Se comprueba en tres momentos: al pasar una cuenta a `live`, **al crear cada cobro** de una cuenta `live`, y **al arrancar la API**: si una cuenta `live` usa un adaptador que ya no es `verified` (por ejemplo, tras un PR que lo rebajó), se pausa automáticamente, se audita y se avisa a Oscar.
 
-**Sobrepago.** Si entra más dinero del pendiente (dos transferencias PayID, pago sobre una reserva cancelada o caducada), el exceso se asienta en `customer_overpayments` (pasivo, nunca margen) y se crea una tarea de reembolso para Oscar. Nunca se pierde ni se ignora.
+**Pendiente, reparto y sobrepago (lo detalla 3.1, sin salirse de esto).**
+
+- Lo pendiente de cada plazo y de la reserva **se deriva del libro** (asientos de cobro, reembolso y contracargo) y de `PaymentAllocation`; no hay columna "pagado".
+- **Importe de un cobro o enlace** = `min(pendiente acumulado hasta el plazo objetivo, pendiente de la reserva)`, calculado en el servidor con la reserva bloqueada (abajo). Nunca viene del navegador.
+- **Reparto:** cuando un pago entra (`succeeded` o `inbound`), se reparte entre los plazos activos por orden de `sequence` (el más antiguo primero) hasta cubrirlos; un depósito puede pagarse en dos partes y un solo pago puede cubrir depósito y saldo. Lo que sobra tras cubrir el total de la reserva es **sobrepago**.
+- **Sobrepago** (dos transferencias PayID, un intento cancelado que la pasarela cobró igualmente, pago sobre una reserva `cancelled`, `expired` o `declined`): asignación `overpayment`, asiento en `customer_overpayments` (pasivo, nunca margen) y tarea de reembolso para Oscar. Nunca se pierde ni se ignora.
+- **Cambio de pasarela tras un fallo o una pasarela caída:** en la misma transacción (con la reserva bloqueada) el intento anterior pasa a `cancelled` y se crea el nuevo con la siguiente regla de enrutado; después, una tarea pide la cancelación a la pasarela anterior. Si esa pasarela confirma el cobro de todos modos, el estado pasa a `succeeded` (el dinero real manda), se reparte y lo que sobre es sobrepago.
+- **Crear cobro frente a caducar.** Crear un cobro, confirmar uno manual y la tarea de caducidad empiezan con `SELECT … FOR UPDATE` sobre la `Booking`. Crear un cobro exige un estado que admita cobro (`approved`, `deposit_paid`, `confirmed`) y pendiente > 0.
+- **Modo:** `Payment.mode` y `LedgerTransaction.mode` copian el de la cuenta. El estado de cobro de una reserva y todos los informes solo cuentan el modo del entorno (`live` en `production`, `test` en los demás).
 
 **Estado de cobro de una reserva**: se deriva del libro y del plan de pagos (pendiente, depósito cobrado, pagada, con reembolso parcial, reembolsada), no se guarda a mano.
 
@@ -452,7 +482,7 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 |---|---|---|---|
 | **EmailTemplate** | `key`, `locale`, `version`, `status` draft/active/archived, `subject`, `body`, `variablesSchema Json` | `@@unique([key, locale, version])`; vista previa con datos de ejemplo | 5.4 |
 | **DocumentTemplate** | `key` confirmation/itinerary/voucher/receipt/evidence_pack, `locale`, `version`, `status`, `body`, `variablesSchema Json` | | 5.4 |
-| **GeneratedDocument** | `bookingId?`, `kind`, `templateId`, `templateVersion`, `storedFileId`, `createdAt` | Ap | 5.4 |
+| **GeneratedDocument** (pii) | `bookingId?`, `kind`, `templateId`, `templateVersion`, `storedFileId`, `createdAt`, `deletedForPrivacyAt?` | el archivo contiene datos personales; tratamiento al borrar en 4.9 | 5.4 |
 | **AlertSubscription** (pii) | `email` citext, `customerId?`, `raceId`, `editionId?`, `status` pending/confirmed/unsubscribed, `confirmTokenHash?`, `confirmedAt?`, `unsubscribeTokenHash` único, `lastNotifiedAt?` | `@@unique([email, raceId])` | 5.3 |
 | **PrivacyRequest** | `customerId`, `kind` export/erasure, `status` received/completed/rejected, `requestedAt`, `completedAt?`, `resultFileId?`, `notes` | | 5.5 |
 
@@ -481,7 +511,7 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 | **AutomationRun** | `ruleId`, `ruleVersion`, `triggerEventId?`, `testMode`, `status`, `steps Json`, `startedAt`, `finishedAt?` | | 7.4 |
 | **ReportDefinition** | `name`, `entityType`, `columns Json`, `filters Json`, `groupBy Json`, `ownerId`, `shared` | usa el registro de entidades | 7.7 |
 | **ReportSchedule** | `reportId`, `cron`, `recipients String[]`, `format`, `enabled` | | 7.7 |
-| **ReportRun** | `reportId`, `status`, `storedFileId?`, `startedAt`, `finishedAt?` | | 7.7 |
+| **ReportRun** | `reportId`, `status`, `storedFileId?`, `startedAt`, `finishedAt?` | el archivo se purga a los 7 días | 7.7 |
 | **AnalyticsEvent** | `anonymousId`, `type` page_view/builder_started/builder_changed/request_submitted/…, `raceId?`, `packageId?`, `occurredAt` | sin datos personales, sin IP; purga a 13 meses | 7.7 |
 | **FunnelDailyStat** | `date`, `raceId`, `packageId?`, `views`, `builderStarts`, `requests`, `deposits` | agregado diario | 7.7 |
 | **MediaAsset** | `storedFileId`, `alt LocalizedText`, `credit?`, `width`, `height`, `isPlaceholder` | | 1.1 o 8.1 |
@@ -503,7 +533,7 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 | **Segment**, **Campaign**, **CampaignRecipient** | definición de segmento en `Json`; campaña con plantilla, estado, fecha; destinatario solo con consentimiento vigente | `ConsentRecord`, `EmailSuppression` |
 | **Survey**, **SurveyResponse** | encuesta por edición; respuesta ligada a una reserva `completed`, `moderationStatus` | `Booking.status = completed` |
 | Viajes a medida | sin tablas nuevas: `Booking.kind = bespoke`, `Quote.kind = bespoke` y `QuoteLine` | |
-| Más monedas y países | sin cambiar el esquema: `Setting.salesCountries`, `PriceVersion.currency`, moneda en cada fila con importe. Sí hace falta crear **filas** nuevas: las cuentas del libro de cada moneda (`LedgerAccount` por código y moneda) y el enrutado de pagos para esa moneda | |
+| Más monedas y países | sin cambiar el esquema: `Setting.salesCountries`, `PriceVersion.currency`, moneda en cada fila con importe. Sí hace falta crear **filas** nuevas: las cuentas del libro de cada moneda (`LedgerAccount` por código y moneda) y el enrutado de pagos para esa moneda. Los importes ya son `BigInt`, así que monedas con muchas unidades menores caben sin migración | |
 
 ### 5.10 Archivos de esquema
 
@@ -541,7 +571,7 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 | requested | expired | tarea: `requestExpiresAt` vencido sin revisar |
 | requested | cancelled | el cliente la retira |
 | approved | deposit_paid | evento de pago: depósito cubierto según el libro (si el pago cubre el total, sigue la cadena permitida en la misma transacción) |
-| approved | expired | tarea: `approvalExpiresAt` vencido sin depósito y **sin ningún `Payment` en `pending` o `requires_action`** |
+| approved | expired | tarea: `approvalExpiresAt` vencido sin depósito y **sin ningún `Payment` en `created`, `pending` o `requires_action`** (con la excepción de un solo aplazamiento manual, abajo) |
 | approved | cancelled | cliente u Oscar |
 | deposit_paid | confirmed | automático si `autoConfirmOnDeposit`; si no, Oscar; y el total aún no está cubierto |
 | deposit_paid | balance_paid | se confirma (automático u Oscar) y el total ya está cubierto: `balance_paid` implica confirmada |
@@ -555,7 +585,7 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 
 - **El cupo se retiene al solicitar** (`InventoryClaim` en estado `held`) y se libera al pasar a `declined`, `expired` o `cancelled`. Por eso la solicitud caduca si nadie la revisa (supuesto 11.4). La liberación es `UPDATE inventory_claim SET status = 'released' WHERE booking_id = $1 AND status = 'held' RETURNING pool_id, quantity`, y solo lo que devuelve esa sentencia se resta de `InventoryPool.consumed`, en la misma transacción que la transición: aunque dos procesos lo intenten, el cupo se libera una sola vez.
 - Los estados de cobro (`deposit_paid`, `balance_paid`) **solo** los provoca el módulo de pagos según el libro; ningún endpoint los fija a mano.
-- **Caducidad con pago en curso.** BECS, PayTo y PayID tardan días. La tarea de caducidad no caduca una reserva `approved` mientras tenga un `Payment` en `pending` o `requires_action`. Esos pagos tienen su propio vencimiento (`pendingExpiresAt`, por defecto 5 días hábiles para los manuales); al vencer pasan a `cancelled` y la siguiente pasada de la tarea ya puede caducar la reserva.
+- **Caducidad con pago en curso.** BECS, PayTo y PayID tardan días. La tarea de caducidad (con la reserva bloqueada, ver 5.5) no caduca una reserva `approved` mientras tenga un `Payment` en `created`, `pending` o `requires_action`. Todos tienen `pendingExpiresAt`; al vencer pasan a `expired` y la siguiente pasada ya puede caducar la reserva. **Un `manual_intent` suspende la caducidad una sola vez por reserva**: un segundo intento manual se puede crear, pero ya no la frena, así que no se pueden encadenar transferencias "en camino" para retener el cupo. Si el dinero llega después de caducar, va a sobrepago.
 - **Pago sobre una reserva `expired`, `declined` o `cancelled`:** no la reactiva. El dinero se asienta (sobrepago, sección 5.5), se marca para revisión y se crea una tarea para Oscar (reembolsar o, si aún hay cupo, reactivar con una acción explícita y auditada).
 - **Contracargo perdido:** asiento de contracargo en el libro; si la reserva estaba `balance_paid`, vuelve a `confirmed` (hay importe pendiente); nunca se cancela sola. Tarea para Oscar.
 - **Pago del saldo antes de confirmar** (`autoConfirmOnDeposit = false`): la reserva sigue en `deposit_paid` con el estado de cobro "pagada"; cuando Oscar confirma, pasa directamente a `balance_paid`.
@@ -578,9 +608,13 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 |---|---|---|
 | Dos solicitudes por la última plaza a la vez | `UPDATE` condicional del cupo en la transacción y `CHECK`; la segunda falla con 409 | 2.4 |
 | Caducidad y cancelación (o aprobación y caducidad) a la vez | transición condicional `WHERE status = $from`; liberación del cupo condicional `WHERE status = 'held'`, en la misma transacción | 2.4 |
-| Dos cobros del mismo plazo (doble clic, dos pasarelas) | índice único parcial en `Payment.scheduleItemId` para cobros vivos o cobrados | 3.2 |
+| Dos cobros a la vez (doble clic, dos pasarelas) | una sola cobranza viva por reserva (índice único parcial); importe calculado con la reserva bloqueada desde lo pendiente según el libro | 3.2 |
+| Depósito en dos partes, o un pago que cubre varios plazos | pendiente derivado del libro y reparto por orden de plazos; el enlace del saldo calcula 0 si ya está cubierto | 3.2 |
+| Tarjeta abandonada en `created` o `requires_action` | `pendingExpiresAt` en todo pago no terminal; al vencer, `expired` y se libera la cobranza viva | 3.2 |
+| Cobro creado mientras la reserva caduca | `SELECT … FOR UPDATE` sobre la reserva en las dos operaciones; la caducidad cuenta también los `created` | 3.2 |
+| Un pago de prueba cuenta como dinero real, o una cuenta `live` cobra desde staging | `mode` en `Payment` y `LedgerTransaction`; solo cuenta el modo del entorno; fuera de producción las cuentas `live` se pausan al arrancar | 3.3, 4.1 |
 | Entra más dinero del debido | asiento en `customer_overpayments` y tarea de reembolso | 3.2 |
-| Reserva caduca mientras una transferencia está en camino | la caducidad espera a que no haya `Payment` en `pending` o `requires_action` | 3.2 |
+| Reserva caduca mientras una transferencia está en camino | la caducidad espera a los pagos no terminales; un aplazamiento manual por reserva | 3.2 |
 | Mezcla de monedas | FK compuestas con la moneda del padre; cuenta del libro por moneda; el motor rechaza monedas distintas | 2.1, 3.2 |
 | Un módulo apagado pierde eventos de dinero | módulos de dinero sin flag; consumidores de eventos de dinero con `hold` | 0.4 |
 | Un adaptador deja de ser `verified` con cuentas en `live` | comprobación al crear cada cobro y al arrancar; pausa automática | 3.3, 4.1 |
@@ -593,12 +627,12 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 | Cambia un precio después de una solicitud | la reserva usa su `BookingSnapshot`; nada la recalcula | 2.4 |
 | Webhook duplicado | `@@unique([providerAccountId, providerEventId])` y asiento con clave de idempotencia | 3.3 |
 | Webhook fuera de orden | el estado del pago solo avanza; se consulta a la pasarela el estado real si hay duda | 3.3 |
-| Webhook con firma inválida | se guarda como `signatureValid=false`, no se procesa, responde 400 | 3.3 |
+| Webhook con firma inválida (por ejemplo, secreto mal pegado) | no entra en `WebhookEvent`: va a `WebhookRejection` sin cuerpo y responde 400; el reintento válido con el mismo id se procesa. Cuerpo limitado a 256 KB antes de verificar (413) | 3.3 |
 | Reintento de cobro con la misma clave | `IdempotencyRecord` devuelve la misma respuesta; misma clave con otro cuerpo → 422 | 3.2 |
 | Reembolsos que superan lo cobrado | comprobación en transacción con bloqueo del pago | 4.5 |
-| Pasarela caída en el checkout | el enrutado salta a la siguiente regla; si no queda ninguna, la reserva sigue como solicitud sin cobro | 4.2, 3.5 |
+| Pasarela caída en el checkout | se cancela el intento anterior en la misma transacción y se crea uno con la siguiente regla (5.5); si no queda ninguna, la reserva sigue como solicitud sin cobro | 4.2, 3.5 |
 | Pausar la última cuenta de un método o país | el panel avisa antes de confirmar | 4.1 |
-| Corrección de un asiento | transacción de reversión que referencia la original; disparador impide `UPDATE` y `DELETE` | 3.2 |
+| Corrección de un asiento | transacción de reversión que referencia la original; disparador impide `UPDATE`, `TRUNCATE` y `DELETE` | 3.2 |
 | Fallo a mitad de un cambio con evento | outbox en la misma transacción: o están los dos o ninguno | 0.4 |
 | Consumidor procesa dos veces un evento | `EventDelivery` único por consumidor y evento | 0.4 |
 | Un hilo envía correo a una persona real | guarda de desarrollo con lista permitida; `MAIL_MODE=live` solo lo pone Oscar | 0.4 |
@@ -611,7 +645,7 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 | CSV con fórmulas maliciosas (`=`, `+`, `-`, `@`) | se escapan al exportar | 0.5 |
 | Importación CSV a medias | se valida entera antes de escribir; se escribe en una transacción o no se escribe | 0.5 |
 | Fecha límite en el cambio de día | fechas de calendario y zona del negocio; pruebas en el día exacto de cada tramo | 3.2, 6.4 |
-| Desbordamiento de enteros en sumas | sumas en `bigint` con comprobación al convertir | 4.6, 6.6 |
+| Desbordamiento de enteros en sumas | importes en `bigint`; `SUM` de PostgreSQL devuelve `numeric`, que se convierte a `bigint` con comprobación | 4.6, 6.6 |
 | Migraciones en paralelo que chocan | un archivo de esquema por módulo; regenerar la migración propia encima de `main` | todas |
 | Webhook saliente hacia una IP interna | validación de URL y resolución DNS contra rangos privados | 8.4 |
 | Automatización que mueve dinero o permisos | la lista de acciones no las incluye; prueba que intentar registrarlas falla | 7.4 |
@@ -623,16 +657,17 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 
 Esta tarea no tiene código. Estas son las pruebas que fijan los invariantes del plan; cada tarea las escribe antes de implementar.
 
-- **0.2:** prueba de convenciones del esquema: ninguna columna `Float` ni `Decimal`; toda columna `*Minor` es `Int` y tiene su moneda emparejada (`fooCurrency` o `currency`); toda columna `*Bps` es `Int`. `docker compose up` arranca `db`, `mail`, `api` y `web` (comprobación de salud de los cuatro). La API no arranca sin `APP_ENV`. CI falla si hay pruebas saltadas.
+- **0.2:** prueba de convenciones del esquema: ninguna columna `Float` ni `Decimal`; toda columna `*Minor` es `BigInt` y tiene su moneda emparejada (`fooCurrency` o `currency`); toda columna `*Bps` es `Int`. `docker compose up` arranca `db`, `mail`, `api` y `web` (comprobación de salud de los cuatro). La API no arranca sin `APP_ENV`. La API se conecta como `mt_app` y las migraciones como `mt_owner`; una prueba comprueba que `mt_app` no es dueño de ninguna tabla ni tiene `TRUNCATE`. CI falla si hay pruebas saltadas.
 - **0.3:** 403 para un rol sin permiso; todas las rutas del panel declaran permiso; todas las rutas del cliente declaran `@OwnedBy`; auditoría con valor anterior y nuevo; campo `@pii` va a `AuditPiiValue`; disparador impide modificar `AuditLog`; enlace mágico de un solo uso y caducado; respuesta idéntica para correo inexistente; sesión de cliente no accede al panel aunque el correo coincida; intentos fallidos aplican retraso y nunca bloqueo definitivo; cambiar un flag desde el panel queda auditado; e2e de entrada con contraseña y TOTP.
 - **0.4:** transacción deshecha no deja evento; evento entregado dos veces se procesa una; consumidor `skip` con flag apagado marca `skipped`; **consumidor `hold` con flag apagado deja el evento `pending` y lo procesa al encender**; ningún consumidor de `payments.*`, `bookings.*` o `changes.*` declara `skip`; repetir una ruta idempotente que devuelve un secreto no lo lee de `IdempotencyRecord`; guarda de correo rechaza destinatario fuera de la lista; batería de contrato de `FileStorage`.
 - **0.5:** sobre la **tabla de ejemplo de la fase 0, que es la lista de `Task` del panel** (tareas con fecha, responsable, estado y entidad enlazada): búsqueda global encuentra una tarea por su título; filtros combinados (estado + responsable + vencimiento) y orden; vista guardada por usuario; acción en lote (completar) respeta el permiso de cada elemento; CSV exportado escapa fórmulas; importación con un error no escribe nada; etiquetar y quitar etiqueta; añadir nota; historial muestra cambios con valor anterior y nuevo; borrado lógico oculta y restaura.
-- **1.1:** transiciones de estado de venta; cupo no baja de cero; paquete en `draft` no sale por la API pública; **un paquete demo no pasa a `open` ni una carrera demo a `published`, con cualquier `APP_ENV`**; `isDemo` no se puede cambiar por la API.
+- **1.1:** transiciones de estado de venta; `guaranteedEntry` es falso si falta el `RaceClaim` o algún cupo de dorsales no está confirmado; cupo no baja de cero; paquete en `draft` no sale por la API pública; **un paquete demo no pasa a `open` ni una carrera demo a `published`, con cualquier `APP_ENV`**; `isDemo` no se puede cambiar por la API.
 - **2.1/2.2:** tabla de ocupación 1 a 4, noches extra, acompañantes, códigos, combinaciones de reglas, fechas límite y regla de redondeo; **entradas con monedas distintas se rechazan**.
 - **2.4:** dos solicitudes concurrentes por la última plaza; **caducidad y cancelación concurrentes liberan el cupo una sola vez; aprobar y caducar a la vez: solo gana una**; transición no permitida rechazada; cambio de precio no altera la instantánea; importe del cliente ignorado.
-- **3.2:** `double_charge_same_schedule_item_rejected` (índice único parcial); `overpayment_posts_liability_and_creates_refund_task`; `approval_expiry_skipped_while_payment_pending`; `payment_on_cancelled_booking_does_not_reactivate`; `ledger_entry_currency_must_match_account`; asiento duplicado imposible; suma por reserva = cobrado − reembolsado; idempotencia.
-- **3.3/3.6:** webhooks duplicados, fuera de orden y con firma mala; cobro rechazado si la cuenta `live` usa un adaptador no `verified`; al arrancar, una cuenta así queda pausada.
-- **5.5:** todo modelo con `@pii` tiene manejador de privacidad; borrado conserva el libro; las excepciones de los disparadores solo funcionan con `app.privacy_erasure` y solo sobre las columnas de la tabla de la sección 4.9.
+- **3.2:** `second_live_collection_for_booking_rejected` (índice único parcial); `deposit_paid_in_two_parts`; `single_payment_covers_deposit_and_balance` (el enlace del saldo calcula 0); `provider_switch_after_failure_cancels_previous_attempt`; `late_success_of_cancelled_attempt_becomes_overpayment`; `abandoned_requires_action_expires_and_unblocks`; `create_charge_vs_expire_concurrent` (solo gana una); `manual_intent_suspends_expiry_only_once`; `overpayment_posts_liability_and_creates_refund_task`; `approval_expiry_skipped_while_payment_pending`; `payment_on_cancelled_booking_does_not_reactivate`; `ledger_entry_currency_must_match_account`; asiento duplicado imposible; suma por reserva = cobrado − reembolsado; idempotencia.
+- **3.3/3.6:** webhooks duplicados, fuera de orden y con firma mala; `invalid_then_valid_same_event_id_processed_once`; cuerpo de más de 256 KB → 413; cobro rechazado si la cuenta `live` usa un adaptador no `verified`; al arrancar, una cuenta así queda pausada; `test_mode_payment_not_counted_in_production`.
+- **4.1:** `non_production_start_pauses_live_accounts`; en `production` el enrutado no ofrece cuentas `test`.
+- **5.5:** todo modelo con `@pii` tiene manejador de privacidad; borrado conserva el libro; **prueba de barrido**: se crea un cliente con un marcador único en nombre y correo, se generan datos en todas las tablas y archivos de la lista de 4.9 (incluidos documentos, exportaciones, informes, índice de búsqueda, idempotencia y texto libre), se borra y se recorren **todas las columnas de texto, `Json` y `Bytes` de todas las tablas y todos los archivos guardados**: el marcador solo puede quedar en los recibos conservados; `mt_app` no puede modificar las tablas inmutables ni con `UPDATE` ni con `TRUNCATE`, y solo `privacy_erase_customer` aplica las excepciones.
 - **8.4:** una clave de API pierde un permiso cuando su dueño lo pierde; clave de un dueño desactivado → 401.
 
 ---
@@ -654,6 +689,9 @@ Cada una con su motivo y cómo deshacerla. Ninguna cambia lo que Oscar pidió qu
 11. **Sin Redis**, coherente con `docs/architecture.md`.
 12. **Módulos de dinero sin feature flag** (`catalogue`, `pricing`, `bookings`, `payments`): apagarlos dejaría reservas y pagos a medias. Deshacer: añadir el flag con consumidores `hold`.
 13. **Los datos demo nunca se publican**, ni en desarrollo; para verlos en local hay una vista previa marcada como "DEMO". Deshacer: permitir publicar demo en `development`.
+14. **Importes en `BigInt` desde el principio y como cadena en JSON.** Deshacer: imposible sin migración; por eso se elige ya el tipo ancho.
+15. **Pendiente derivado del libro y una sola cobranza viva por reserva**, en lugar de cobros atados a un plazo. Admite pagos parciales, pagos que cubren varios plazos y cambio de pasarela sin dobles cobros.
+16. **Roles de base de datos separados** (`mt_owner`, `mt_app`, `mt_privacy`): la API no es dueña de las tablas.
 
 ---
 
