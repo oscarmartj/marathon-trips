@@ -185,6 +185,23 @@ describe('who may act on whom (G1, T9)', () => {
     expect((await api.put(`/admin/roles/${key}/permissions`, { permissionKeys: [], version: 1 })).status).toBe(200);
   });
 
+  it('role_holder_is_owner: a non-owner cannot edit a custom role that an owner also holds', async () => {
+    const actor = await createStaff(t, { permissions: [PERMISSIONS.roleRead, PERMISSIONS.roleManage, PERMISSIONS.flagRead] });
+    const api = await as(actor);
+    const key = `o${Date.now().toString(36)}`;
+    const custom = await t.prisma.role.create({ data: { key, name: 'Custom' } });
+    const holder = await createStaff(t, { owner: true }); // an owner who also holds the custom role
+    await t.prisma.userRole.create({ data: { userId: holder.id, roleId: custom.id } });
+    const res = await api.put(`/admin/roles/${key}/permissions`, { permissionKeys: [PERMISSIONS.flagRead], version: 0 });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('role_holder_is_owner');
+    // An owner can still edit it, and once the owner stops holding it the non-owner can too.
+    const owner = await as(await createStaff(t, { owner: true }));
+    expect((await owner.put(`/admin/roles/${key}/permissions`, { permissionKeys: [PERMISSIONS.flagRead], version: 0 })).status).toBe(200);
+    await t.prisma.userRole.deleteMany({ where: { userId: holder.id, roleId: custom.id } });
+    expect((await api.put(`/admin/roles/${key}/permissions`, { permissionKeys: [], version: 1 })).status).toBe(200);
+  });
+
   it('actor_rechecked_under_lock: three owners disabling each other at once never deadlock and leave one owner', async () => {
     const others = await t.prisma.user.findMany({ where: { status: 'active', roles: { some: { role: { key: OWNER_ROLE } } } }, select: { id: true } });
     await t.prisma.user.updateMany({ where: { id: { in: others.map((o) => o.id) } }, data: { status: 'disabled' } });
@@ -193,9 +210,16 @@ describe('who may act on whom (G1, T9)', () => {
       const apis = [await as(owners[0]!), await as(owners[1]!), await as(owners[2]!)];
       // A disables B, B disables C, C disables A: a cycle that deadlocks without a single lock order.
       const results = await Promise.all(apis.map((api, i) => api.post(`/admin/staff/${owners[(i + 1) % 3]!.id}/disable`)));
-      for (const r of results) expect([200, 403, 409]).toContain(r.status);
+      // A request that reaches the guard after "its actor was disabled" is answered 401 (the session no longer
+      // authenticates): a correct outcome of losing the race, so 401 is accepted alongside 200, 403 and 409.
+      for (const r of results) expect([200, 401, 403, 409]).toContain(r.status);
       const active = await t.prisma.user.count({ where: { id: { in: owners.map((o) => o.id) }, status: 'active' } });
       expect(active).toBeGreaterThanOrEqual(1);
+      // A 401 can only come from an actor that ended up disabled.
+      const states = await t.prisma.user.findMany({ where: { id: { in: owners.map((o) => o.id) } }, select: { id: true, status: true } });
+      results.forEach((r, i) => {
+        if (r.status === 401) expect(states.find((s) => s.id === owners[i]!.id)?.status).toBe('disabled');
+      });
       // Whoever was disabled could not act afterwards: every success came from an owner still active at that moment.
       expect(results.filter((r) => r.status === 200).length).toBe(3 - active);
     } finally {
