@@ -1,6 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
+    "allow": [
+      "Bash(gh api repos/oscarmartj/marathon-trips/pulls/*/merge *)",
+      "Bash(gh api -X PUT repos/oscarmartj/marathon-trips/pulls/*/merge*)",
+      "mcp__github__merge_pull_request"
+    ],
     "ask": [
       "Bash(git push *)"
     ],
