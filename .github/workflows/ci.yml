@@ -1,0 +1,76 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer run on the same PR cancels the older one (free minutes are limited on private repos).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      APP_ENV: ci
+      DATABASE_URL: postgresql://mt_app:mt_app_dev@localhost:5432/marathon_trips
+      MIGRATION_DATABASE_URL: postgresql://mt_owner:mt_owner_dev@localhost:5432/marathon_trips
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create roles and database
+        run: bash scripts/db-init.sh
+      - name: Generate Prisma client and apply migrations
+        run: |
+          pnpm --filter @mt/api exec prisma generate
+          pnpm db:migrate
+      - name: Migrations match the schema files
+        run: pnpm --filter @mt/api exec prisma migrate diff --from-config-datasource --to-schema prisma/schema --exit-code
+      - name: Lint (includes the dependency-table check)
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Tests (database, convention and unit tests)
+        run: pnpm test
+      - name: Fail on skipped or todo tests
+        run: pnpm check:no-skipped
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose up (db, mail, api and web must become healthy)
+        run: docker compose up --build --wait --wait-timeout 600
+      - name: Show service state and API health
+        if: always()
+        run: |
+          docker compose ps
+          curl -fsS http://localhost:4000/health || true
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - name: Stop
+        if: always()
+        run: docker compose down -v

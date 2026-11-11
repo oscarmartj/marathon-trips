@@ -8,8 +8,7 @@
     "start": "node dist/main.js",
     "lint": "eslint src test prisma",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
-    "test": "prisma generate && vitest run --config vitest.config.mts",
-    "test:unit": "prisma generate && vitest run --config vitest.config.mts",
+    "test": "prisma generate && vitest run --config vitest.config.mts --reporter=default --reporter=json --outputFile=test-results/vitest.json",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed/seed.ts"

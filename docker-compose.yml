@@ -1,0 +1,61 @@
+# Local development stack. `docker compose up` migrates, seeds demo data and starts everything.
+# Passwords here are development-only and not secrets.
+name: marathon-trips
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres_dev
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./docker/db/init:/docker-entrypoint-initdb.d:ro
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d marathon_trips"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  mail:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: { context: ., dockerfile: docker/Dockerfile, target: api }
+    depends_on:
+      db: { condition: service_healthy }
+      mail: { condition: service_healthy }
+    environment:
+      APP_ENV: development
+      API_PORT: "4000"
+      DATABASE_URL: postgresql://mt_app:mt_app_dev@db:5432/marathon_trips
+      MIGRATION_DATABASE_URL: postgresql://mt_owner:mt_owner_dev@db:5432/marathon_trips
+    ports: ["4000:4000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  web:
+    build: { context: ., dockerfile: docker/Dockerfile, target: web }
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      API_BASE_URL: http://api:4000
+    ports: ["3000:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  dbdata:
