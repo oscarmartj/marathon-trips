@@ -110,7 +110,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 0.1 | — | Arquitectura |
 | 0.7 | — | Bajo |
 | 0.2 | 0.1 | Bajo |
-| 0.3 | 0.2 | Alto |
+| 0.3 | 0.2, 0.4 | Alto |
 | 0.4 | 0.2 | Medio |
 | 0.6 | 0.2 | Bajo |
 | 0.5 | 0.3, 0.6 | Medio |
@@ -123,7 +123,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 2.2 | 2.1 | Alto |
 | 2.3 | 2.1, 1.3 | Medio |
 | 2.4 | 2.2 | Alto |
-| 2.5 | 2.4, 0.5 | Medio |
+| 2.5 | 2.4, 2.3, 0.5 | Medio |
 | 2.6 | 2.4 | Bajo |
 | 3.1 | 2.4, 0.7 | Arquitectura |
 | 3.2 | 3.1 | Alto |
@@ -137,7 +137,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 4.4 | 4.1, 3.6 | Alto |
 | 4.5 | 4.1 | Alto |
 | 4.6 | 4.5 | Alto |
-| 5.1 | 3.5 | Alto |
+| 5.1 | 3.5, 4.6, 5.4 | Alto |
 | 5.2 | 5.1 | Medio |
 | 5.3 | 1.3, 0.4 | Medio |
 | 5.4 | 2.5 | Bajo |
@@ -152,7 +152,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 6.6 | 6.2, 6.4 | Medio |
 | 7.1 | 5.2 | Bajo |
 | 7.2 | 5.2 | Medio |
-| 7.3 | 1.2, 0.4 | Bajo |
+| 7.3 | 1.2, 0.4, 3.2, 6.1 | Bajo |
 | 7.4 | 2.5, 5.4 | Alto |
 | 7.5 | 1.2 | Medio |
 | 7.6 | 2.5 | Bajo |
@@ -163,7 +163,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 8.4 | 0.3, 0.4 | Alto |
 | 8.6 | 0.4 | Medio |
 | 8.7 | 0.7 | Bajo |
-| 8.5 | fases 0 a 7 cerradas, 8.4 | Alto |
+| 8.5 | fases 0 a 7 cerradas, 8.1, 8.2, 8.3, 8.4, 8.6 | Alto |
 | 9.x | fase 4 cerrada, 8.5 | Alto |
 
 La fase 9 va la última. Sin sandbox de cada proveedor, sus adaptadores se escriben contra la documentación y la batería de contrato, y se quedan en `experimental` hasta que Oscar consiga las claves de prueba.
