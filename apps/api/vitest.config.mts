@@ -9,6 +9,6 @@ export default defineConfig({
     fileParallelism: false,
     // Skipped or todo tests fail the run (CI also checks the JSON report).
     allowOnly: false,
-    env: { APP_ENV: process.env.APP_ENV ?? 'test' },
+    env: { APP_ENV: process.env.APP_ENV ?? 'test', JOBS_WORKERS: 'off' },
   },
 });

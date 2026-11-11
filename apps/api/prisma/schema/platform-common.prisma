@@ -7,3 +7,217 @@ model SeedRun {
 
   @@map("seed_runs")
 }
+
+// ---- Task 0.4: flags, settings, events (outbox), idempotency, files, mail, sequences ----
+
+enum EventDeliveryStatus {
+  pending
+  done
+  failed
+  skipped
+}
+
+enum IdempotencyStatus {
+  in_progress
+  completed
+}
+
+enum FileVisibility {
+  private
+  public
+}
+
+enum OutboundEmailStatus {
+  queued
+  sent
+  failed
+  suppressed
+}
+
+enum MailCategory {
+  transactional
+  marketing
+}
+
+enum EmailSuppressionReason {
+  unsubscribed
+  bounced
+  complaint
+}
+
+enum EmailSuppressionScope {
+  marketing
+  all
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  /// @nopii flag key chosen by developers, such as module.crm
+  key         String   @unique
+  enabled     Boolean  @default(false)
+  /// @nopii developer-written description
+  description String   @default("")
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("feature_flags")
+}
+
+model Setting {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  /// @nopii setting key chosen by developers
+  key           String   @unique
+  /// @nopii configuration validated by a schema in code; never customer data
+  value         Json
+  schemaVersion Int      @default(1)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("settings")
+}
+
+model OutboxEvent {
+  id               String          @id @default(uuid(7)) @db.Uuid
+  /// @nopii event type such as bookings.approved
+  type             String
+  schemaVersion    Int             @default(1)
+  /// @nopii aggregate name chosen by developers
+  aggregateType    String
+  aggregateId      String          @db.Uuid
+  aggregateVersion Int?
+  /// @nopii identifiers only; the publisher rejects personal-data keys
+  payload          Json
+  /// @nopii staff, customer, system, automation or api_key
+  actorType        String
+  actorId          String?         @db.Uuid
+  occurredAt       DateTime        @default(now()) @db.Timestamptz(3)
+  dispatchedAt     DateTime?       @db.Timestamptz(3)
+  deliveries       EventDelivery[]
+
+  @@index([dispatchedAt, occurredAt])
+  @@index([aggregateType, aggregateId, aggregateVersion])
+  @@map("outbox_events")
+}
+
+model EventDelivery {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  eventId     String              @db.Uuid
+  event       OutboxEvent         @relation(fields: [eventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii consumer name chosen by developers
+  consumer    String
+  status      EventDeliveryStatus @default(pending)
+  attempts    Int                 @default(0)
+  /// @nopii a code and a fixed message from a known error class (safeError), never a value
+  lastError   String?
+  processedAt DateTime?           @db.Timestamptz(3)
+  createdAt   DateTime            @default(now()) @db.Timestamptz(3)
+
+  @@unique([eventId, consumer])
+  @@index([status, consumer])
+  @@map("event_deliveries")
+}
+
+model IdempotencyRecord {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  /// @nopii actorType:actorId:route
+  scope          String
+  /// @nopii actor kind: staff, customer, api_key or token
+  actorType      String
+  /// @nopii an id, or the hash of a token for token routes
+  actorId        String
+  /// @nopii client-chosen random key
+  key            String
+  /// @secret SHA-256 of the canonical request body
+  requestHash    String
+  status         IdempotencyStatus @default(in_progress)
+  responseStatus Int?
+  /// @nopii error code from a known class
+  errorCode      String?
+  /// @nopii entity type chosen by developers
+  resourceType   String?
+  resourceId     String?           @db.Uuid
+  lockedUntil    DateTime?         @db.Timestamptz(3)
+  expiresAt      DateTime          @db.Timestamptz(3)
+  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@unique([scope, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+model StoredFile {
+  id             String         @id @default(uuid(7)) @db.Uuid
+  /// @nopii generated key, never derived from a file name
+  storageKey     String         @unique
+  /// @nopii MIME type
+  contentType    String
+  sizeBytes      Int
+  /// @nopii SHA-256 of the content
+  checksumSha256 String
+  /// @pii the name the uploader gave the file
+  originalName   String?
+  visibility     FileVisibility @default(private)
+  /// @nopii purpose code chosen by developers
+  purpose        String
+  uploadedById   String?        @db.Uuid
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@map("stored_files")
+}
+
+model OutboundEmail {
+  id                String              @id @default(uuid(7)) @db.Uuid
+  /// @pii recipient address
+  to                String
+  /// @nopii template key
+  templateKey       String
+  templateVersion   Int
+  /// @nopii locale code
+  locale            String
+  /// @pii empty until the template is rendered at send time
+  subject           String              @default("")
+  /// @nopii fingerprint of the rendered body; the body itself is never stored
+  bodySha256        String?
+  /// @nopii derived from the fact that caused the email, such as booking:<id>:approved
+  dedupeKey         String              @unique
+  category          MailCategory        @default(transactional)
+  status            OutboundEmailStatus @default(queued)
+  attempts          Int                 @default(0)
+  /// @nopii id returned by the mail server
+  providerMessageId String?
+  customerId        String?             @db.Uuid
+  /// @nopii entity type chosen by developers
+  relatedEntityType String?
+  relatedEntityId   String?             @db.Uuid
+  /// @pii a bounce can quote the address; only error codes are written
+  error             String?
+  sentAt            DateTime?           @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+
+  @@index([status, createdAt])
+  @@index([relatedEntityType, relatedEntityId])
+  @@map("outbound_emails")
+}
+
+model EmailSuppression {
+  id                  String                 @id @default(uuid(7)) @db.Uuid
+  /// @secret HMAC of the address with a server key; the address itself is never kept
+  emailHash           String                 @unique
+  emailHashKeyVersion Int                    @default(1)
+  reason              EmailSuppressionReason
+  scope               EmailSuppressionScope
+  createdAt           DateTime               @default(now()) @db.Timestamptz(3)
+
+  @@map("email_suppressions")
+}
+
+model NumberSequence {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  /// @nopii sequence key such as booking
+  key       String   @unique
+  /// @nopii fixed prefix such as MT-
+  prefix    String   @default("")
+  nextValue BigInt   @default(1)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("number_sequences")
+}
