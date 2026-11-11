@@ -5,6 +5,7 @@ import { AuthModule } from './platform/auth/auth.module';
 import { CommonModule } from './platform/common/common.module';
 import { RequiresFlagGuard } from './platform/flags/requires-flag.guard';
 import { RequiresModuleGuard } from './platform/flags/requires-module.guard';
+import { MODULES } from './modules.registry';
 import { HealthController } from './platform/health/health.controller';
 import { CsrfGuard } from './platform/http/csrf.guard';
 import { AuthRateLimitGuard } from './platform/http/rate-limit.guard';
@@ -17,7 +18,7 @@ import { PlatformModule } from './platform/platform.module';
 // then a switched-off module or flag is a 404 for everyone, then CSRF, then the auth rate
 // limit, then access marks (sessions, permissions, step-up).
 @Module({
-  imports: [PlatformModule, AuthModule, CommonModule],
+  imports: [PlatformModule, AuthModule, CommonModule, ...MODULES],
   controllers: [HealthController, SystemController],
   providers: [
     { provide: APP_GUARD, useExisting: MaintenanceGuard },

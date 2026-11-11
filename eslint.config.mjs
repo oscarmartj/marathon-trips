@@ -1,8 +1,10 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import boundaries from './scripts/eslint-rules/module-boundaries.mjs';
 
-// Shared flat config. Module-boundary rules arrive with the first business module (1.1).
+// Shared flat config. Module boundaries (task 1.1): a module imports another only through its index.ts, and platform
+// code never imports from modules; the rule lives in scripts/eslint-rules/module-boundaries.mjs.
 export default tseslint.config(
   { ignores: ['**/dist/**', '**/.next/**', '**/node_modules/**', '**/generated/**', '**/.turbo/**', 'apps/web/next-env.d.ts'] },
   js.configs.recommended,
@@ -18,6 +20,11 @@ export default tseslint.config(
         { selector: "CallExpression[callee.object.name=/^(it|test|describe)$/][callee.property.name='only']", message: 'Focused tests are not allowed.' },
       ],
     },
+  },
+  {
+    files: ['apps/api/src/**/*.ts'],
+    plugins: { mt: boundaries },
+    rules: { 'mt/module-boundaries': 'error' },
   },
   { files: ['**/*.mjs', '**/*.cjs'], languageOptions: { sourceType: 'module' } },
 );

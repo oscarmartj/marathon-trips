@@ -1,0 +1,499 @@
+// ---- Task 1.1: catalogue (races, editions, packages, hotels, rooms, extras, inventory) ----
+// Plan: docs/plans/1.1-catalogue-api.md. CHECKs and triggers live in migration 0006.
+
+enum RaceType {
+  road
+  trail
+  ultra
+  other
+}
+
+enum RaceStatus {
+  draft
+  published
+  archived
+}
+
+enum DistanceKind {
+  marathon
+  half
+  ten_k
+  five_k
+  ultra
+  other
+}
+
+enum RaceClaimKind {
+  official_partner
+  accredited_agent
+  guaranteed_entry
+  other
+}
+
+enum DateStatus {
+  provisional
+  confirmed
+}
+
+enum EditionStatus {
+  draft
+  announced
+  active
+  completed
+  cancelled
+}
+
+enum SaleStatus {
+  draft
+  coming_soon
+  open
+  waitlist
+  sold_out
+  closed
+}
+
+enum DepositMode {
+  per_person
+  per_booking
+  percent
+}
+
+enum ParticipationType {
+  runner_with_entry
+  runner_own_entry
+  supporter
+}
+
+enum RoomType {
+  single
+  twin
+  double
+  triple
+  quad
+  other
+}
+
+enum ExtraKind {
+  excursion
+  transfer
+  meal
+  merchandise
+  other
+}
+
+enum PricingUnit {
+  per_person
+  per_booking
+}
+
+enum ExtraAudience {
+  all
+  runners
+  supporters
+}
+
+enum PoolKind {
+  entry
+  room
+  extra
+}
+
+enum InventoryReason {
+  hold
+  release
+  capacity_change
+  adjustment
+}
+
+model Race {
+  id             String         @id @default(uuid(7)) @db.Uuid
+  /// @nopii public URL slug
+  slug           String         @unique
+  /// @nopii LocalizedText
+  name           Json
+  /// @nopii ISO 3166 alpha-2
+  countryCode    String         @db.Char(2)
+  /// @nopii catalogue data
+  city           String
+  /// @nopii IANA zone of the race
+  timeZone       String
+  /// @nopii catalogue data
+  raceType       RaceType
+  /// @nopii 1 to 12
+  typicalMonth   Int?
+  /// @nopii LocalizedText
+  summary        Json
+  /// @nopii catalogue data
+  websiteUrl     String?
+  /// @nopii degrees x 10^7
+  latitudeE7     Int?
+  /// @nopii degrees x 10^7
+  longitudeE7    Int?
+  /// @nopii catalogue data
+  seo            Json           @default("{}")
+  /// @nopii catalogue data
+  status         RaceStatus     @default(draft)
+  /// @nopii timestamp
+  publishedAt    DateTime?      @db.Timestamptz(3)
+  /// @nopii source system of an import
+  externalSource String?
+  /// @nopii id in the source system
+  externalId     String?
+  /// @pii custom fields are free text
+  customFields   Json           @default("{}")
+  /// @nopii demo data can never be published
+  isDemo         Boolean        @default(false)
+  /// @nopii optimistic lock for the admin panel
+  version        Int            @default(0)
+  /// @nopii soft delete
+  deletedAt      DateTime?      @db.Timestamptz(3)
+  deletedById    String?        @db.Uuid
+  /// @nopii timestamp
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(3)
+  distances      RaceDistance[]
+  claims         RaceClaim[]
+  editions       RaceEdition[]
+
+  @@unique([externalSource, externalId])
+  @@index([status])
+  @@map("races")
+}
+
+model RaceDistance {
+  id             String               @id @default(uuid(7)) @db.Uuid
+  raceId         String               @db.Uuid
+  race           Race                 @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  kind           DistanceKind
+  /// @nopii catalogue data
+  distanceMetres Int
+  /// @nopii LocalizedText
+  name           Json
+  /// @nopii timestamp
+  createdAt      DateTime             @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt      DateTime             @updatedAt @db.Timestamptz(3)
+  entryOptions   PackageEntryOption[]
+
+  @@index([raceId])
+  @@map("race_distances")
+}
+
+model RaceClaim {
+  id           String        @id @default(uuid(7)) @db.Uuid
+  raceId       String        @db.Uuid
+  race         Race          @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  kind         RaceClaimKind
+  /// @nopii the only source of any badge on the website
+  enabled      Boolean       @default(false)
+  /// @pii evidence for the claim, written by staff
+  evidenceNote String        @default("")
+  enabledById  String?       @db.Uuid
+  /// @nopii timestamp
+  enabledAt    DateTime?     @db.Timestamptz(3)
+  /// @nopii timestamp
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@unique([raceId, kind])
+  @@map("race_claims")
+}
+
+model RaceEdition {
+  id         String          @id @default(uuid(7)) @db.Uuid
+  raceId     String          @db.Uuid
+  race       Race            @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  year       Int
+  /// @nopii calendar date
+  startDate  DateTime?       @db.Date
+  /// @nopii calendar date
+  endDate    DateTime?       @db.Date
+  /// @nopii catalogue data
+  dateStatus DateStatus      @default(provisional)
+  /// @nopii catalogue data
+  status     EditionStatus   @default(draft)
+  /// @nopii LocalizedText
+  notes      Json            @default("{}")
+  /// @nopii optimistic lock for the admin panel
+  version    Int             @default(0)
+  /// @nopii timestamp
+  createdAt  DateTime        @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt  DateTime        @updatedAt @db.Timestamptz(3)
+  packages   Package[]
+  pools      InventoryPool[]
+
+  @@unique([raceId, year])
+  @@index([status])
+  @@map("race_editions")
+}
+
+model Package {
+  id                   String                       @id @default(uuid(7)) @db.Uuid
+  editionId            String                       @db.Uuid
+  edition              RaceEdition                  @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  slug                 String
+  /// @nopii LocalizedText
+  name                 Json
+  /// @nopii catalogue data
+  saleStatus           SaleStatus                   @default(draft)
+  /// @nopii calendar date
+  checkInDate          DateTime                     @db.Date
+  /// @nopii calendar date
+  checkOutDate         DateTime                     @db.Date
+  /// @nopii LocalizedText
+  includes             Json
+  /// @nopii LocalizedText
+  excludes             Json
+  /// @nopii catalogue data
+  instantBooking       Boolean                      @default(false)
+  /// @nopii catalogue data
+  autoConfirmOnDeposit Boolean                      @default(true)
+  /// @nopii unset until the deposit is configured
+  depositMode          DepositMode?
+  /// @nopii minor units, in `currency`
+  depositAmountMinor   BigInt?
+  /// @nopii basis points
+  depositBps           Int?
+  /// @nopii calendar date
+  balanceDueDate       DateTime                     @db.Date
+  /// @nopii catalogue data
+  minTravellers        Int                          @default(1)
+  /// @nopii catalogue data
+  maxTravellers        Int
+  /// @nopii catalogue data
+  maxExtraNightsBefore Int                          @default(0)
+  /// @nopii catalogue data
+  maxExtraNightsAfter  Int                          @default(0)
+  /// @nopii ISO 4217
+  currency             String                       @default("AUD") @db.Char(3)
+  /// @nopii catalogue data
+  seo                  Json                         @default("{}")
+  /// @nopii timestamp
+  publishedAt          DateTime?                    @db.Timestamptz(3)
+  /// @pii custom fields are free text
+  customFields         Json                         @default("{}")
+  /// @nopii optimistic lock for the admin panel
+  version              Int                          @default(0)
+  /// @nopii soft delete
+  deletedAt            DateTime?                    @db.Timestamptz(3)
+  deletedById          String?                      @db.Uuid
+  /// @nopii timestamp
+  createdAt            DateTime                     @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt            DateTime                     @updatedAt @db.Timestamptz(3)
+  participationOptions PackageParticipationOption[]
+  entryOptions         PackageEntryOption[]
+  hotels               PackageHotel[]
+  extras               Extra[]
+
+  @@unique([editionId, slug])
+  @@unique([id, currency])
+  @@index([saleStatus])
+  @@map("packages")
+}
+
+model PackageParticipationOption {
+  id        String            @id @default(uuid(7)) @db.Uuid
+  packageId String            @db.Uuid
+  package   Package           @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  type      ParticipationType
+  /// @nopii catalogue data
+  enabled   Boolean           @default(true)
+  /// @nopii timestamp
+  createdAt DateTime          @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt DateTime          @updatedAt @db.Timestamptz(3)
+
+  @@unique([packageId, type])
+  @@map("package_participation_options")
+}
+
+model PackageEntryOption {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  packageId      String        @db.Uuid
+  package        Package       @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  raceDistanceId String        @db.Uuid
+  raceDistance   RaceDistance  @relation(fields: [raceDistanceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  entryPoolId    String        @db.Uuid
+  entryPool      InventoryPool @relation(fields: [entryPoolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii timestamp
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@unique([packageId, raceDistanceId])
+  @@index([entryPoolId])
+  @@map("package_entry_options")
+}
+
+model Hotel {
+  id            String         @id @default(uuid(7)) @db.Uuid
+  /// @nopii catalogue data
+  name          String
+  /// @nopii catalogue data
+  address       String
+  /// @nopii catalogue data
+  city          String
+  /// @nopii ISO 3166 alpha-2
+  countryCode   String         @db.Char(2)
+  /// @nopii catalogue data
+  starRating    Int?
+  /// @nopii LocalizedText
+  description   Json
+  supplierId    String?        @db.Uuid
+  /// @nopii degrees x 10^7
+  latitudeE7    Int?
+  /// @nopii degrees x 10^7
+  longitudeE7   Int?
+  /// @nopii demo data can never be published
+  isDemo        Boolean        @default(false)
+  /// @nopii optimistic lock for the admin panel
+  version       Int            @default(0)
+  /// @nopii soft delete
+  deletedAt     DateTime?      @db.Timestamptz(3)
+  deletedById   String?        @db.Uuid
+  /// @nopii timestamp
+  createdAt     DateTime       @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(3)
+  packageHotels PackageHotel[]
+
+  @@map("hotels")
+}
+
+model PackageHotel {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  packageId    String       @db.Uuid
+  package      Package      @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  hotelId      String       @db.Uuid
+  hotel        Hotel        @relation(fields: [hotelId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  displayOrder Int          @default(0)
+  /// @nopii timestamp
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  rooms        RoomOption[]
+
+  @@unique([packageId, hotelId])
+  @@index([hotelId])
+  @@map("package_hotels")
+}
+
+model RoomOption {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  packageHotelId String        @db.Uuid
+  packageHotel   PackageHotel  @relation(fields: [packageHotelId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  roomType       RoomType
+  /// @nopii LocalizedText
+  name           Json
+  /// @nopii catalogue data
+  minOccupancy   Int
+  /// @nopii catalogue data
+  maxOccupancy   Int
+  roomPoolId     String        @db.Uuid
+  roomPool       InventoryPool @relation(fields: [roomPoolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii timestamp
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@index([packageHotelId])
+  @@index([roomPoolId])
+  @@map("room_options")
+}
+
+model Extra {
+  id            String         @id @default(uuid(7)) @db.Uuid
+  packageId     String         @db.Uuid
+  package       Package        @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  kind          ExtraKind
+  /// @nopii LocalizedText
+  name          Json
+  /// @nopii LocalizedText
+  description   Json
+  /// @nopii catalogue data
+  pricingUnit   PricingUnit
+  /// @nopii catalogue data
+  availableTo   ExtraAudience  @default(all)
+  /// @nopii a mandatory extra always counts in the total
+  mandatory     Boolean        @default(false)
+  /// @nopii catalogue data
+  maxPerBooking Int?
+  poolId        String?        @db.Uuid
+  pool          InventoryPool? @relation(fields: [poolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii transfer departure, origin and destination
+  schedule      Json?
+  /// @nopii optimistic lock for the admin panel
+  version       Int            @default(0)
+  /// @nopii soft delete
+  deletedAt     DateTime?      @db.Timestamptz(3)
+  deletedById   String?        @db.Uuid
+  /// @nopii timestamp
+  createdAt     DateTime       @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(3)
+
+  @@index([packageId])
+  @@index([poolId])
+  @@map("extras")
+}
+
+model InventoryPool {
+  id                  String               @id @default(uuid(7)) @db.Uuid
+  editionId           String               @db.Uuid
+  edition             RaceEdition          @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  kind                PoolKind
+  /// @nopii staff label, never personal data
+  label               String
+  /// @nopii catalogue data
+  capacity            Int
+  /// @nopii catalogue data
+  consumed            Int                  @default(0)
+  /// @nopii catalogue data
+  lowStockThreshold   Int?
+  /// @nopii needed, but not enough, for guaranteed entry
+  confirmedBySupplier Boolean              @default(false)
+  /// @pii supplier confirmation note written by staff
+  confirmationNote    String?
+  /// @nopii optimistic lock for the admin panel
+  version             Int                  @default(0)
+  /// @nopii timestamp
+  createdAt           DateTime             @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt           DateTime             @updatedAt @db.Timestamptz(3)
+  entryOptions        PackageEntryOption[]
+  roomOptions         RoomOption[]
+  extras              Extra[]
+  movements           InventoryMovement[]
+
+  @@index([editionId])
+  @@map("inventory_pools")
+}
+
+model InventoryMovement {
+  id         String          @id @default(uuid(7)) @db.Uuid
+  poolId     String          @db.Uuid
+  pool       InventoryPool   @relation(fields: [poolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii hold or release: the change in consumed (positive holds places); capacity_change: the change in capacity
+  delta      Int
+  /// @nopii catalogue data
+  reason     InventoryReason
+  bookingId  String?         @db.Uuid
+  /// @nopii catalogue data
+  actorType  AuditActorType
+  actorId    String?         @db.Uuid
+  auditLogId String?         @db.Uuid
+  /// @nopii timestamp
+  createdAt  DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@index([poolId, createdAt])
+  @@map("inventory_movements")
+}
