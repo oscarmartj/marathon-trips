@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Logo } from './logo';
 import { NavLinks } from './nav-links';
 import { SignOutButton } from './admin/sign-out-button';
+import { GlobalSearch } from './admin/global-search';
 import { adminRoutes } from '@/lib/routes';
 import { t } from '@/lib/i18n';
 
@@ -18,6 +19,7 @@ export function AdminPage({ current, title, intro, placeholder = true, children 
         <nav aria-label={t('admin.nav.label')}>
           <NavLinks routes={adminRoutes.filter((r) => r.nav)} current={current} />
         </nav>
+        <GlobalSearch />
         <SignOutButton />
       </aside>
       <main id="main" className="admin__main stack">

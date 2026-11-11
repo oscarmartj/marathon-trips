@@ -1,4 +1,4 @@
-import { MAX_EXPORT_ROWS, type TableQuery } from '@mt/shared';
+import { FILTER_OPS_BY_TYPE, MAX_EXPORT_ROWS, type TableQuery } from '@mt/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { notFound, unprocessable } from '../http/api-error';
@@ -33,7 +33,7 @@ export class TablesService {
     const [write, del, exp, imp, annotate] = await Promise.all([can('write'), def.permissions.delete ? can('delete') : false, def.permissions.export ? can('export') : false, def.permissions.import && def.import ? can('import') : false, can('annotate')]);
     return {
       entityType: def.entityType,
-      columns: def.columns.map((c) => ({ key: c.key, type: c.type, sortable: !!c.sortable, filterable: !!c.filterable, searchable: !!c.searchable, exportable: !!c.exportable, values: c.values ?? null })),
+      columns: def.columns.map((c) => ({ key: c.key, type: c.type, sortable: !!c.sortable, filterable: !!c.filterable, ops: c.filterable ? FILTER_OPS_BY_TYPE[c.type] : [], searchable: !!c.searchable, exportable: !!c.exportable, values: c.values ?? null })),
       softDelete: def.softDelete, taggable: def.taggable, notes: def.notes,
       bulkActions: (def.bulkActions ?? []).map((a) => a.key),
       importColumns: def.import ? [...def.import.columns] : [],
