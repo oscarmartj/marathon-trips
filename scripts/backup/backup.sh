@@ -47,6 +47,7 @@ name="mt-backup-$ts"
 # One psql session holds a REPEATABLE READ snapshot open while the counts are taken and pg_dump runs against the same
 # snapshot, so the counts in MANIFEST describe exactly the data in the dump even while the site is taking writes.
 coproc PSQL { psql -X -q -A -t -v ON_ERROR_STOP=1 -d "${PGDATABASE:-postgres}" 2>&1; }
+psql_pid="$PSQL_PID" # bash forgets PSQL_PID as soon as the process ends, so keep our own copy
 SENTINEL="__mt_done_$$"
 ANSWER=""
 ask() { # run SQL in the session; the answer lines go to $ANSWER (no command substitution: subshells cannot use the coproc)
@@ -70,7 +71,7 @@ counts="$(printf '%s' "$ANSWER" | LC_ALL=C sort)"
 [ -n "$counts" ] || die "no table counts; is this the right database?"
 pg_dump --format=custom --snapshot="$snapshot" --no-password --file="$work/db.dump" || die "pg_dump failed"
 printf 'COMMIT;\n\\q\n' >&"${PSQL[1]}" || true
-wait "$PSQL_PID" 2>/dev/null || true
+wait "$psql_pid" 2>/dev/null || true
 
 # Files after the dump: a file a dumped row points to is already stored (files are written once and never changed).
 tar --create --file="$work/files.tar" --directory="$FILES_DIR" . || die "could not archive $FILES_DIR"

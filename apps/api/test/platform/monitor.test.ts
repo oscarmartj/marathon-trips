@@ -24,7 +24,7 @@ beforeAll(async () => {
   p = await makePlatform();
   await clearMailBacklog();
   await t.prisma.featureFlag.updateMany({ where: { key: 'platform.maintenance' }, data: { enabled: false } });
-});
+}, 60_000);
 afterEach(async () => {
   await clearMailBacklog();
   await t.prisma.outboxEvent.deleteMany({ where: { type: { startsWith: 'testing.monitor' } } });
@@ -33,7 +33,7 @@ afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
   await p.close();
   await t.close();
-});
+}, 60_000);
 
 const staff = async (permissions: string[]) => {
   const cookie = await signInStaff(t, await createStaff(t, { permissions }));

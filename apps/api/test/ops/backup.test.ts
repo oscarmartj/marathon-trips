@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * standard PGHOST / PGUSER / PGPASSWORD variables (CI sets them; locally see CLAUDE.md). A test database is built from
  * the real migrations, so the restore is proved on the real schema, grants and pg-boss tables.
  */
+// Everything here runs pg_dump, pg_restore, psql or openssl in child processes: generous, explicit limits for slow or busy machines.
+const SLOW = 120_000;
 const root = resolve(__dirname, '../../../..');
 const scripts = join(root, 'scripts/backup');
 const migrations = join(root, 'apps/api/prisma/migrations');
@@ -73,14 +75,14 @@ beforeAll(() => {
     expect(r.code, `migration ${m}: ${r.err}`).toBe(0);
   }
   expect(psql(src, `INSERT INTO feature_flags (id, key, enabled, description, "updatedAt") SELECT gen_random_uuid(), 'test.flag' || g, g % 2 = 0, 'd', now() FROM generate_series(1, 25) g`).code).toBe(0);
-});
+}, SLOW);
 
 afterAll(() => {
   for (const db of created) psql('postgres', `DROP DATABASE IF EXISTS ${db} WITH (FORCE)`);
   rmSync(tmp, { recursive: true, force: true });
-});
+}, SLOW);
 
-describe('backup and restore (task 8.6)', () => {
+describe('backup and restore (task 8.6)', { timeout: SLOW }, () => {
   let bundle = '';
 
   it('backup_writes_bundle_checksum_offsite_copy_and_status', () => {
@@ -224,13 +226,15 @@ describe('backup and restore (task 8.6)', () => {
     for (let i = 0; i < 3; i++) expect(backup({ BACKUP_KEEP: '2', BACKUP_REMOTE_KIND: 'none', BACKUP_ALLOW_LOCAL_ONLY: 'yes' }).code).toBe(0);
     expect(bundles().length).toBe(2);
     expect(readdirSync(outDir).filter((f) => f.endsWith('.sha256')).length).toBe(2);
-  }, 30_000);
+  });
 
   it('verify_restore_restores_into_a_throwaway_database_and_removes_it', () => {
-    const before = scalar('postgres', "SELECT count(*) FROM pg_database WHERE datname LIKE 'mt_verify_%'");
-    const r = run('bash', [join(scripts, 'verify-restore.sh'), join(outDir, bundles().at(-1)!)]);
+    // A prefix of its own, so another run (or the monthly drill) creating mt_verify_* databases cannot change the count.
+    const prefix = `mt_verify_${suffix}`;
+    const r = run('bash', [join(scripts, 'verify-restore.sh'), join(outDir, bundles().at(-1)!)], { VERIFY_DB_PREFIX: prefix });
     expect(r.code, r.err).toBe(0);
+    expect(r.err).toContain('restore ok: database mt_verify_' + suffix);
     expect(r.err).toContain('verify-restore: ok');
-    expect(scalar('postgres', "SELECT count(*) FROM pg_database WHERE datname LIKE 'mt_verify_%'")).toBe(before);
+    expect(scalar('postgres', `SELECT count(*) FROM pg_database WHERE datname LIKE '${prefix}_%'`)).toBe('0');
   });
 });

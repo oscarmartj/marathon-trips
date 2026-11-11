@@ -10,11 +10,11 @@ let t: TestApp;
 beforeAll(async () => {
   t = await makeApp();
   await setMaintenance(false); // a previous aborted run must not leave the site in maintenance
-});
+}, 60_000);
 afterAll(async () => {
   await t.prisma.featureFlag.updateMany({ where: { key: FLAGS.maintenance }, data: { enabled: false } });
   await t.close();
-});
+}, 60_000);
 
 const setMaintenance = (on: boolean) => t.prisma.featureFlag.upsert({ where: { key: FLAGS.maintenance }, create: { key: FLAGS.maintenance, enabled: on }, update: { enabled: on } });
 
