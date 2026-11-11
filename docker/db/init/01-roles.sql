@@ -1,6 +1,6 @@
 -- Database roles (plan 0.1, section 4.9). Development/test only: the passwords are not secrets.
 -- mt_owner owns every object and runs migrations; mt_app is the API's role with no CREATE;
--- mt_privacy is NOLOGIN and will own the erasure functions (task 0.3 adds them).
+-- mt_privacy is NOLOGIN and owns the purge and erasure functions (0.3 and 5.5).
 -- Runs against the maintenance database as a superuser; safe to run again.
 DO $$
 BEGIN
@@ -14,6 +14,9 @@ BEGIN
     CREATE ROLE mt_privacy NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
   END IF;
 END $$;
+-- mt_owner may make mt_privacy the owner of the erasure and purge functions (task 0.3), without inheriting its
+-- privileges. Needs PostgreSQL 16 (WITH INHERIT).
+GRANT mt_privacy TO mt_owner WITH INHERIT FALSE;
 
 SELECT 'CREATE DATABASE marathon_trips OWNER mt_owner'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'marathon_trips')\gexec

@@ -54,6 +54,7 @@ model FeatureFlag {
   id          String   @id @default(uuid(7)) @db.Uuid
   /// @nopii flag key chosen by developers, such as module.crm
   key         String   @unique
+  /// @nopii on or off
   enabled     Boolean  @default(false)
   /// @nopii developer-written description
   description String   @default("")
@@ -68,7 +69,11 @@ model Setting {
   key           String   @unique
   /// @nopii configuration validated by a schema in code; never customer data
   value         Json
+  /// @nopii
   schemaVersion Int      @default(1)
+  /// @nopii optimistic lock for the admin panel (task 0.3)
+  version       Int      @default(0)
+  /// @nopii
   updatedAt     DateTime @updatedAt @db.Timestamptz(3)
 
   @@map("settings")
