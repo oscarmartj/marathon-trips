@@ -1,6 +1,6 @@
 # Payments and ledger
 
-Applies to any change under the payments, ledger or webhooks modules of `apps/api`.
+Applies to any change under `apps/api/src/modules/payments/` (core: ledger, payment plan, routing, accounts, webhooks, reconciliation; adapters: one folder per gateway), to `apps/api/prisma/schema/payments.prisma` and `finance.prisma`, and to their migrations.
 
 - Amounts are integers in minor units with an explicit currency. No floats anywhere near money.
 - Ledger entries are append-only. A correction is a new entry that references the original.
