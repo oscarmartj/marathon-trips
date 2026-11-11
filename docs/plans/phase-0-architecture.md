@@ -7,20 +7,24 @@
 
 Los identificadores (tablas, campos, módulos, eventos, permisos) van en inglés. El texto, en español para Oscar.
 
-## Índice
+Secciones: 1 convenciones · 2 monorepo · 3 módulos · 4 plataforma · 5 modelo de datos · 6 estados · 7 fallos · 8 pruebas · 9 decisiones · 10 riesgos y dependencias · 11 supuestos · 12 lo que no hace.
 
-1. Principios y convenciones que valen para todo el código
-2. Estructura del monorepo
-3. Módulos de la API y cómo se hablan
-4. Plataforma común: autenticación, permisos, auditoría, eventos, tareas, archivos, correo
-5. Modelo de datos completo, por módulo
-6. Máquinas de estados
-7. Casos de fallo y cómo los cubre el diseño
-8. Pruebas que cada tarea escribe primero
-9. Decisiones que tomo distinto de lo pedido
-10. Riesgos del plan de fases y cambios en la tabla de dependencias
-11. Supuestos (las preguntas que haría a Oscar)
-12. Lo que este plan no hace
+## Aparcado: dinero (decisión de Oscar, 2026-11-12)
+
+**Aparcado**, sin fecha: cobros reales, libro contable real, reembolsos, contracargos, conciliación, recibos y GST, divisas, pagos a proveedores y cancelación con penalización. Etiquetas "aparcada"/"parcial" en la tabla de `docs/autonomous.md`.
+
+**Sí queda listo**, sin modo real: modelos y tipos con dinero en unidades menores enteras y moneda (1.1); motor de precios en la API (el frontend solo muestra lo que devuelve); `PaymentProvider` con simulador y batería de contrato (3.6), adaptadores en `experimental`; plan de depósito y saldo, endpoints y pantallas de pago (checkout, área del cliente, enlaces) contra el simulador.
+
+**Requisitos vinculantes al retomarlo**: P1–P12 (5.5), las celdas con dinero de 6.2, la tabla de padres de 1.1 y los hallazgos abiertos de la ronda 18:
+
+1. Reembolso de pagos manuales/PayID: quién lo confirma, referencia bancaria y dónde viven los datos bancarios de destino (P13: `manual_refund_confirmed_once_with_bank_reference`, `manual_refund_requires_step_up`, `manual_refund_destination_erased_with_customer`).
+2. Al casar un webhook por id interno, filtrar por la cuenta que lo recibe (`webhook_metadata_id_from_other_account_not_matched`).
+3. Unidad de `rateE9` (unidades mayores) y tabla de exponentes por moneda (`fx_conversion_respects_currency_exponents`, JPY/AUD).
+4. Un descuento no supera el componente al que se aplica; el total nunca baja de 0 (`discount_capped_at_component`).
+5. Cancelación por el cliente antes de 6.4 → 409 (`customer_cancellation_rejected_until_policies_exist`).
+6. GST acumulado por recibo, con nota de ajuste en reembolsos (`receipt_gst_sums_to_booking_gst`).
+7. Penalización mayor que lo cobrado: no se puede cobrar tras cancelar; lo decide 6.4.
+8. Criterio de la fase 6 sin prueba: `amendment_records_difference_and_keeps_original_snapshot`.
 
 ---
 
@@ -336,7 +340,7 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 
 Siete ejes que cada tarea aplica a sus tablas nuevas: datos personales (4.4, 4.9), idempotencia por objeto de negocio (1.2, P5), prueba/real y producción (4.8), concurrencia y bloqueos (6.3), fallo en cerrado (4.1–4.8), dinero (1.1, 5.5) y reversibilidad: nada se edita ni se borra (6.2).
 
-Riesgo que queda y se acepta: si el personal escribe el nombre de un cliente en el motivo de un cambio sobre una entidad **no** ligada a ningún cliente (por ejemplo, un rol), ese texto no se borra con el cliente; vive en `AuditPiiValue` y se purga a los 7 años.
+Riesgo aceptado: un nombre de cliente escrito en el motivo de un cambio sobre algo no ligado a él (p. ej. un rol) no se borra con el cliente; se purga a los 7 años.
 
 ---
 
@@ -703,7 +707,7 @@ Cada una con su motivo y cómo deshacerla. Ninguna cambia lo que Oscar pidió qu
 7. **Ninguna columna `Float` ni `Decimal`**, tampoco en tipos de cambio o coordenadas: regla comprobable sin excepciones.
 8. **Estado de cobro derivado del libro** y transición nueva `balance_paid → confirmed` cuando sube el total o se pierde un contracargo.
 9. **El estado del adaptador vive en código**, no en la base de datos, para que nadie pueda marcarlo `verified` desde el panel.
-10. **Fase 9: no escribir treinta adaptadores a ciegas.** Recomiendo fichas `planned` para todo el catálogo y adaptadores solo para las pasarelas que Oscar pida, empezando por las que den sandbox sin trámite. No cambio el archivo de fase: queda para su revisión.
+10. **Fase 9: no escribir treinta adaptadores a ciegas.** Fichas `planned` para todo el catálogo y adaptadores solo a demanda (hoy, aparcada con el dinero).
 11. **Sin Redis**, coherente con `docs/architecture.md`.
 12. **Módulos de dinero sin feature flag** (`catalogue`, `pricing`, `bookings`, `payments`): apagarlos dejaría reservas y pagos a medias. Deshacer: añadir el flag con consumidores `hold`.
 13. **Los datos demo nunca se publican**, ni en desarrollo; para verlos en local hay una vista previa marcada como "DEMO". Deshacer: permitir publicar demo en `development`.
@@ -744,22 +748,20 @@ Cada una con su motivo y cómo deshacerla. Ninguna cambia lo que Oscar pidió qu
 | 8.5 | fases 0 a 7 cerradas, 8.4 | fases 0, 1, 2, 3, 4, 5, 6 y 7 cerradas, **8.1, 8.2, 8.3**, 8.4, **8.6**, **8.7** | La revisión de seguridad debe cubrir contenido, monitor, mantenimiento y el alojamiento (mismo sitio para web y API, base de la cookie y el CSRF; roles de base de datos). |
 | 9.x | fase 4 cerrada, 8.5 | filas propias 9.1–9.4 | 9.1: fase 4 cerrada, 8.5; 9.2: 9.1; 9.3: 9.2 y 9.4: 9.1, solo con adaptadores propios. Alto salvo 9.4. La cadena respeta las dos variantes y el límite de dos hilos de riesgo alto. |
 
-"Fase N cerrada" se define en una nota bajo la tabla. Comprobado con `node scripts/check-dependency-table.mjs`: 61 filas, sin tareas de más ni de menos, sin identificadores inexistentes ni ciclos ("fase N cerrada" se expande a sus tareas; 9.1 y 9.2 aparecen dos veces en `phase-9.md` a propósito).
+Con el dinero aparcado (2026-11-12), la tabla de `docs/autonomous.md` quita 4.6 de 5.1, "fase 4 cerrada" de 5.7, 4.5 de 6.3 y 6.4 de 6.5, y 3.5 pasa a depender de 3.2, 3.6 y 2.3. "Fase N cerrada" se define en una nota bajo la tabla. Comprobado con `node scripts/check-dependency-table.mjs`: 61 filas, sin tareas de más ni de menos, sin identificadores inexistentes ni ciclos ("fase N cerrada" se expande a sus tareas; 9.1 y 9.2 aparecen dos veces en `phase-9.md` a propósito).
 
 ### 10.2 Riesgos que no cambian la tabla
 
-- **Sin claves de Stripe no se puede ejecutar la e2e "pagar con la tarjeta de prueba de Stripe"**, y CI falla con pruebas saltadas. 3.3 y 3.6: la batería del sandbox real es un comando aparte (`test:sandbox`), fuera de la batería por defecto; la e2e por defecto paga contra el simulador, lo que **no cumple ese criterio: queda BLOQUEADO** (`docs/done/3.3.md` y `docs/BLOCKED.md`) y el adaptador, `experimental`, hasta que Oscar ponga las claves. La prueba semanal de contrato de los `verified` la crea 9.4 con adaptadores propios y 9.1 en la variante del orquestador.
-- **0.3 y 0.5 son grandes** para una sola tarea. Si el plan de cualquiera supera lo razonable, que lo divida en sub-PR dentro de la misma tarea, no en tareas nuevas.
-- **Recibos (4.6) antes de plantillas (5.4):** 4.6 entrega datos, numeración y regla del GST con una representación mínima; el PDF editable llega en 5.4.
-- **El cupo se retiene al solicitar**: mitigado con caducidad configurable y recordatorio.
-- **Alojamiento:** pg-boss y los webhooks exigen una API siempre encendida (0.7, 8.7).
-- **Fase 5 antes que la 6**: hasta 6.4 no hay `Cancellation` ni penalización; una reserva cancelada exige 0 y todo lo cobrado queda como sobrepago a devolver (P8). Se anota en el ensayo general (5.7).
+- **Sin claves de Stripe** la e2e con su tarjeta de prueba queda bloqueada (`test:sandbox` aparte, adaptador `experimental`); hoy está aparcado con el dinero. La prueba semanal de contrato la crea 9.4, o 9.1 con el orquestador.
+- **0.3 y 0.5 son grandes**: si hace falta, sub-PR dentro de la misma tarea.
+- **El cupo se retiene al solicitar** (caducidad y recordatorio); **la API va siempre encendida** por pg-boss y webhooks (0.7, 8.7).
+- **Fase 5 antes que la 6** (y 6.4 aparcada): una reserva cancelada exige 0 y lo cobrado queda como sobrepago a devolver (P8).
 
 ---
 
 ## 11. Supuestos (las preguntas que haría a Oscar)
 
-Cada uno es la opción más conservadora y fácil de cambiar; casi todos son un `Setting`. Los que ya fija otra sección (sesiones en 4.2, recibos en 5.5, "viaje" = paquete en 5.7, `completed` en 6.2) no se repiten.
+Opciones conservadoras y reversibles, casi todas un `Setting`; no se repiten las que fija otra sección.
 
 1. Zona horaria del negocio: `Australia/Brisbane`.
 2. Moneda única por paquete: AUD.
@@ -778,8 +780,4 @@ Cada uno es la opción más conservadora y fácil de cambiar; casi todos son un 
 
 ## 12. Lo que este plan no hace
 
-- No escribe código de producto, migraciones ni configuración (solo el script de comprobación de la tabla, 10.1).
-- No elige pasarela de pagos ni orquestador (0.7 y 3.1), ni alojamiento (0.7 y 8.7).
-- No fija la semántica exacta de reglas de precio, posting del libro ni estados de `Payment`: son de 2.2 y 3.1, dentro de los invariantes y los requisitos P1–P12 de aquí.
-- No cambia los archivos de fase ni los criterios de aceptación; solo la tabla de dependencias de `docs/autonomous.md`.
-- No crea tablas de los módulos "más adelante".
+No escribe código de producto ni migraciones (solo el script de la tabla, 10.1); no elige pasarela, orquestador ni alojamiento (0.7, 3.1, 8.7); no fija la semántica de reglas de precio ni del libro (2.2, 3.1, dentro de P1–P12); no cambia archivos de fase ni criterios, solo la tabla de `docs/autonomous.md`; no crea tablas "más adelante".

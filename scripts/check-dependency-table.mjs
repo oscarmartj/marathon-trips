@@ -2,7 +2,9 @@
 // Checks the dependency table in docs/autonomous.md against docs/phases/*.md.
 // No dependencies: run with `node scripts/check-dependency-table.mjs`.
 // Fails (exit 1) on: unknown task IDs, duplicate rows, tasks missing from either side,
-// malformed dependency tokens, or cycles. "fase N cerrada" means every task of phase N.
+// malformed dependency tokens, cycles, or an active task depending on a parked one.
+// "fase N cerrada" means every non-parked task of phase N. The risk cell may carry a
+// suffix after " · ": "aparcada (dinero)" (parked) or "parcial: …" (partial scope).
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,22 +36,31 @@ if (!section) {
   process.exit(1);
 }
 const deps = new Map(); // id -> Set of task ids
+const parked = new Set();
+const rows = [];
 const risks = new Set(['Bajo', 'Medio', 'Alto', 'Arquitectura']);
 for (const line of section.split('\n')) {
   const m = line.match(taskRow);
   if (!m) continue;
   const cells = line.split('|').slice(1, -1).map((c) => c.trim());
-  const [id, depCell, risk] = cells;
-  if (deps.has(id)) errors.push(`autonomous.md: duplicate row ${id}`);
+  const [id, depCell, riskCell] = cells;
+  if (rows.some((r) => r.id === id)) errors.push(`autonomous.md: duplicate row ${id}`);
+  const [risk, tag] = riskCell.split(' · ');
   if (!risks.has(risk)) errors.push(`autonomous.md: ${id} has unknown risk "${risk}"`);
+  if (tag === 'aparcada (dinero)') parked.add(id);
+  else if (tag !== undefined && !tag.startsWith('parcial: ')) errors.push(`autonomous.md: ${id} has unknown tag "${tag}"`);
+  rows.push({ id, depCell });
+}
+for (const { id, depCell } of rows) {
   const set = new Set();
   if (depCell !== '—') {
     for (const token of depCell.split(',').map((t) => t.trim())) {
       const closed = token.match(/^fase (\d+) cerrada$/);
       if (closed) {
         const phase = Number(closed[1]);
-        const members = [...phaseTasks].filter(([, p]) => p === phase).map(([t]) => t);
-        if (members.length === 0) errors.push(`autonomous.md: ${id} depends on empty phase ${phase}`);
+        const all = [...phaseTasks].filter(([, p]) => p === phase).map(([t]) => t);
+        if (all.length === 0) errors.push(`autonomous.md: ${id} depends on empty phase ${phase}`);
+        const members = all.filter((t) => !parked.has(t));
         members.forEach((t) => set.add(t));
       } else if (/^\d+\.\d+$/.test(token)) {
         set.add(token);
@@ -66,6 +77,7 @@ for (const [id, set] of deps) {
   for (const d of set) {
     if (!deps.has(d)) errors.push(`autonomous.md: ${id} depends on unknown task ${d}`);
     if (d === id) errors.push(`autonomous.md: ${id} depends on itself`);
+    if (!parked.has(id) && parked.has(d)) errors.push(`autonomous.md: ${id} depends on parked task ${d}`);
   }
 }
 for (const id of phaseTasks.keys()) {
@@ -90,4 +102,4 @@ if (errors.length) {
   console.error(errors.join('\n'));
   process.exit(1);
 }
-console.log(`OK: ${deps.size} rows, ${phaseTasks.size} tasks in docs/phases, no cycles, no unknown IDs.`);
+console.log(`OK: ${deps.size} rows (${parked.size} parked), ${phaseTasks.size} tasks in docs/phases, no cycles, no unknown IDs, no active task waits on a parked one.`);
