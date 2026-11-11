@@ -68,7 +68,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
   },
   LoginToken: {
     id: 'nopii',
-    purpose: 'pii',
+    purpose: 'nopii',
     email: 'pii',
     userId: 'nopii',
     tokenHash: 'secret',
@@ -191,7 +191,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
   },
   User: {
     id: 'nopii',
-    kind: 'pii',
+    kind: 'nopii',
     email: 'pii',
     emailVerifiedAt: 'nopii',
     status: 'nopii',

@@ -21,7 +21,8 @@ afterAll(async () => prisma.$disconnect());
 
 const rowsOf = async (logId: string) => ({
   log: await prisma.auditLog.findUniqueOrThrow({ where: { id: logId } }),
-  pii: await prisma.auditPiiValue.findMany({ where: { auditLogId: logId }, orderBy: { field: 'asc' } }),
+  // Sorted in JS: database collations order '_reason' differently.
+  pii: (await prisma.auditPiiValue.findMany({ where: { auditLogId: logId } })).sort((a, b) => (a.field < b.field ? -1 : a.field > b.field ? 1 : 0)),
 });
 
 describe('field classes', () => {

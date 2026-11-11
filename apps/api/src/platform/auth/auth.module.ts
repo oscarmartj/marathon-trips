@@ -1,5 +1,4 @@
 import { Inject, Module, OnModuleInit } from '@nestjs/common';
-import { AccessService } from '../access/access.service';
 import { AdminController } from '../access/admin.controller';
 import { RolesAdminService } from '../access/roles-admin.service';
 import { StaffAdminService } from '../access/staff-admin.service';
@@ -13,7 +12,6 @@ import { registerAuthAuditSubjects } from './audit-subjects';
 import { AuthMaintenanceService } from './auth-maintenance.service';
 import { AuthController } from './auth.controller';
 import { CustomerAuthService } from './customer-auth.service';
-import { SessionService } from './session.service';
 import { SECRET_BOX, StaffAuthService } from './staff-auth.service';
 
 /** Task 0.3: sign-in, sessions, staff and roles administration, audit history, flags and settings administration. */

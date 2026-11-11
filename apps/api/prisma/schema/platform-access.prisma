@@ -27,6 +27,7 @@ enum AuditActorType {
 
 model User {
   id                   String         @id @default(uuid(7)) @db.Uuid
+  /// @nopii staff or customer
   kind                 UserKind
   /// @pii sign-in address
   email                String         @db.Citext
@@ -119,6 +120,7 @@ model Session {
 
 model LoginToken {
   id         String            @id @default(uuid(7)) @db.Uuid
+  /// @nopii magic_link, staff_mfa or staff_enrolment
   purpose    LoginTokenPurpose
   /// @pii address the token was issued for
   email      String            @db.Citext

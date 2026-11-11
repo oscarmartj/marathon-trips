@@ -59,11 +59,14 @@ export async function claimAccountAttempt(db: Db, userId: string, now: Date = ne
   throw tooManyRequests(row?.nextLoginAllowedAt ? (row.nextLoginAllowedAt.getTime() - now.getTime()) / 1000 : 1);
 }
 
-/** Gives back the count claimed for an attempt that succeeded but does not create a session (password step, step-up). */
+/**
+ * Gives back the count claimed for an attempt that succeeded but does not create a session (password step, step-up),
+ * and lifts the delay that claim set: the claim only succeeded because the previous delay had passed. Earlier failures
+ * stay counted, so the next wrong code is delayed as before.
+ */
 export async function refundAccountAttempt(db: Db, userId: string): Promise<void> {
   await db.$executeRaw`
-    UPDATE users SET "failedLoginCount" = GREATEST("failedLoginCount" - 1, 0),
-      "nextLoginAllowedAt" = CASE WHEN "failedLoginCount" - 1 >= 3 THEN "nextLoginAllowedAt" ELSE NULL END
+    UPDATE users SET "failedLoginCount" = GREATEST("failedLoginCount" - 1, 0), "nextLoginAllowedAt" = NULL
     WHERE id = ${userId}::uuid`;
 }
 
