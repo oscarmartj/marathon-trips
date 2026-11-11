@@ -20,6 +20,8 @@ Look for, in this order:
 4. Tests: acceptance criteria with no test, tests that assert nothing or were weakened to pass.
 5. Drift: behaviour that differs from the approved plan.
 
+If you are given only a plan and no diff, review the plan instead: check it against the acceptance criteria and the rule files, and look for the same five problems in the design, plus failure cases the plan does not cover and tests it does not name. Nobody else approves the plan, so be specific about what must change before any code is written.
+
 Report in Spanish:
 
 - Verdict: aprobar, aprobar con cambios, or no aprobar.

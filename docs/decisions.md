@@ -13,6 +13,8 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 | 2026-11-10 | Estilo visual deportivo y enérgico; marca provisional "Marathon Trips" | Preferencia de Oscar; nombre pendiente |
 | 2026-11-10 | Backend configurable y extensible, construido por niveles: núcleo, segunda ola, más adelante | Ambición en el diseño, disciplina en el orden |
 | 2026-11-10 | Orquestación por riesgo: Sonnet por defecto, Opus para planificar y revisar | Optimizar el uso |
+| 2026-11-11 | Modo autónomo con Projects: coordinador, hilos en paralelo, revisor independiente en lugar de la aprobación de Oscar, y fusión automática con CI en verde | Terminar antes sin que Oscar esté pendiente de cada fase |
+| 2026-11-11 | Las reglas de `.claude/rules/` se cargan siempre, sin `paths` | Las reglas con rutas no se cargan en los hilos en la nube |
 
 ## Abiertas
 

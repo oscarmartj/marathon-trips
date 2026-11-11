@@ -1,9 +1,6 @@
----
-paths:
-  - "apps/web/**"
----
-
 # Web app
+
+Applies to any change under `apps/web`.
 
 - All user-facing copy is Australian English. No hard-coded strings: use the translation layer.
 - No claim of "official partner", "guaranteed entry" or any accreditation unless the API flags it for that race.

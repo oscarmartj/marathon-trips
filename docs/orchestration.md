@@ -2,6 +2,8 @@
 
 El objetivo es doble: que cada tarea salga bien a la primera y que no se pague por contexto ni por modelo que la tarea no necesita.
 
+Este documento describe el **modo manual**, con Oscar delante. El **modo autónomo** (coordinador, hilos en paralelo, revisión y fusión sin Oscar) está en `docs/autonomous.md` y manda sobre este documento dentro de un proyecto de Claude Code. La elección de modelo por riesgo es la misma en los dos.
+
 ## Principios
 
 1. **Una tarea, una sesión.** Cada petición reenvía toda la conversación, así que una sesión con tres tareas mezcladas paga las tres en cada turno. Entre tareas, `/clear`.
@@ -57,9 +59,9 @@ Si algo se tuerce a mitad de tarea, vuelve al modo plan y replanifica en vez de 
 - **Bloques de trabajo seguidos.** La caché de la conversación dura alrededor de una hora en suscripción. Si vas a parar más tiempo, cierra la tarea o empieza sesión nueva al volver.
 - **`/usage` una vez por semana**, para ver qué modelo y qué subagente se llevan el uso, y ajustar esta tabla.
 - **`/mcp` al empezar el proyecto**: desactiva los servidores que este repositorio no usa.
-- **`CLAUDE.md` corto.** Se carga en cada sesión. Lo que solo aplica a una carpeta va en `.claude/rules/` con `paths`, que se carga al tocar esos archivos.
+- **`CLAUDE.md` corto.** Se carga en cada sesión. Las reglas de `.claude/rules/` también se cargan siempre y sin `paths`, porque las reglas con rutas no llegan a los hilos en la nube; por eso son pocas y breves.
 - **Peticiones concretas**: número de tarea, archivos afectados y cómo se comprueba. Las peticiones vagas provocan exploración, y la exploración se paga.
-- **Sin sesiones en paralelo** hasta que el núcleo esté terminado.
+- **Sin sesiones en paralelo** en modo manual. En modo autónomo el paralelismo lo limita `docs/autonomous.md`.
 - **Cuando Claude repita un error**, pídele que añada la corrección a `CLAUDE.md` o a la regla de esa carpeta, en una línea.
 
 ## Reparto del trabajo de Oscar
@@ -74,7 +76,9 @@ Regla de avance: no se abre una fase hasta haber usado la anterior con datos de 
 
 ## Lo que no admite excepciones
 
-Estas reglas no dependen de que Claude las recuerde. Están en `.claude/settings.json`: no leer archivos de secretos, no ejecutar herramientas de despliegue y pedir confirmación antes de cualquier `git push`. En la tarea 0.2 se añade un hook que impide cerrar una tarea con lint o tipos en rojo.
+En sesiones locales, estas reglas no dependen de que Claude las recuerde. Están en `.claude/settings.json`: no leer archivos de secretos, no ejecutar herramientas de despliegue y pedir confirmación antes de cualquier `git push`.
+
+En los hilos de un proyecto en la nube ese archivo no se aplica. Allí la barrera es otra: el entorno no tiene credenciales de despliegue ni claves reales, las reglas están en las instrucciones del proyecto y CI impide fusionar con lint, tipos o pruebas en rojo.
 
 ## Fuentes
 
@@ -85,3 +89,5 @@ Estas reglas no dependen de que Claude las recuerde. Están en `.claude/settings
 - https://code.claude.com/docs/en/prompt-caching
 - https://code.claude.com/docs/en/advisor
 - https://support.claude.com/en/articles/14552983-models-usage-and-limits-in-claude-code
+- https://code.claude.com/docs/en/claude-projects
+- https://code.claude.com/docs/en/cloud-environments
