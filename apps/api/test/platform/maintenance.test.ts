@@ -9,6 +9,7 @@ import { allRoutes } from '../support/routes';
 let t: TestApp;
 beforeAll(async () => {
   t = await makeApp();
+  await setMaintenance(false); // a previous aborted run must not leave the site in maintenance
 });
 afterAll(async () => {
   await t.prisma.featureFlag.updateMany({ where: { key: FLAGS.maintenance }, data: { enabled: false } });

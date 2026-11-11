@@ -13,12 +13,20 @@ const hoursAgo = (h: number): Date => new Date(Date.now() - h * 3600_000);
 const tmp = mkdtempSync(join(tmpdir(), 'mt-monitor-'));
 let t: TestApp;
 let p: Platform;
+/**
+ * The monitor reports the whole database, so these tests start from a known state: queued and failed emails left by
+ * earlier runs or other test files are removed (they are never real data in a test database), and each test removes
+ * what it creates.
+ */
+const clearMailBacklog = () => t.prisma.outboundEmail.deleteMany({ where: { status: { in: ['queued', 'failed'] } } });
 beforeAll(async () => {
   t = await makeApp();
   p = await makePlatform();
+  await clearMailBacklog();
+  await t.prisma.featureFlag.updateMany({ where: { key: 'platform.maintenance' }, data: { enabled: false } });
 });
 afterEach(async () => {
-  await t.prisma.outboundEmail.deleteMany({ where: { dedupeKey: { startsWith: 'test-monitor:' } } });
+  await clearMailBacklog();
   await t.prisma.outboxEvent.deleteMany({ where: { type: { startsWith: 'testing.monitor' } } });
 });
 afterAll(async () => {
