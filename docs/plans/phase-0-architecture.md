@@ -31,7 +31,8 @@ Estas reglas se aplican desde la primera migración. Varias se pueden comprobar 
 ### 1.1 Dinero
 
 - Todo importe es un entero en unidades menores, en una columna con sufijo `Minor` (`totalMinor`, `amountMinor`), tipo `Int` de PostgreSQL (`integer`).
-- **Toda fila que tiene una columna `*Minor` tiene su propia columna `currency`** (`Char(3)`, ISO 4217). No se hereda la moneda de una tabla padre: así ninguna consulta puede mezclar monedas por accidente.
+- **Toda fila que tiene una columna `*Minor` tiene su propia columna de moneda** (`Char(3)`, ISO 4217). Regla de emparejado: `fooMinor` usa `fooCurrency` si existe, y si no `currency` (por ejemplo `baseAmountMinor` usa `baseCurrency`). La prueba de convenciones (0.2) rechaza un `*Minor` sin su moneda emparejada.
+- **La moneda de una fila hija no puede diferir de la de su padre.** Se impone con clave ajena compuesta `(parentId, currency)` hacia `@@unique([id, currency])` del padre: `RoomRate`, `ParticipationRate`, `ExtraRate` → `PriceVersion`; `PriceVersion` → `Package`; `PaymentSchedule` → `Booking`; `PaymentScheduleItem` → `PaymentSchedule`; `Payment` → `PaymentScheduleItem` (si lo tiene) y `Booking`; `Refund` → `Payment`; `LedgerEntry` → `LedgerAccount`. Donde no hay padre natural (por ejemplo `CostItem`), la moneda es libre y cualquier suma agrupa por moneda. El motor de precios rechaza entradas con monedas distintas.
 - Límite: `integer` llega a 2 147 483 647 unidades menores (A$21,4 millones). Ningún importe individual (línea, pago, asiento) puede acercarse; la API rechaza importes por encima de A$1 000 000 por línea. Las sumas en SQL devuelven `bigint` y se convierten con comprobación. Pasar a `BigInt` más adelante es una migración que solo ensancha la columna.
 - Porcentajes en **puntos básicos** enteros, columnas con sufijo `Bps` (1000 = 10 %).
 - Tipos de cambio (solo para costes de proveedor en otra moneda y finanzas): entero escalado `rateE9 BigInt` (tipo × 10⁹). No es dinero, pero así **el esquema no tiene ni una columna `Float` ni `Decimal`**, y eso se puede comprobar con una prueba.
@@ -163,7 +164,7 @@ Decisiones de herramientas que 0.2 concreta (versiones estables actuales al empe
 - **Validación:** zod en `packages/shared`; la API valida con esos mismos esquemas y genera el OpenAPI desde ellos (por ejemplo `nestjs-zod`). El cliente tipado se genera con `openapi-typescript` + `openapi-fetch` y se versiona; CI regenera y falla si hay diferencias.
 - **Pruebas:** Vitest (con SWC para los decoradores de NestJS) para unitarias e integración; Playwright para extremo a extremo. Las pruebas de integración usan una base de datos PostgreSQL real, con un esquema aislado por proceso de pruebas.
 - **Fronteras entre módulos** comprobadas en lint (`dependency-cruiser` o reglas `no-restricted-imports`): un módulo solo importa de `platform/*` y del `index.ts` público de otro módulo.
-- **`docker-compose`**: PostgreSQL y Mailpit. **No hay Redis** en el stack: tareas, límites de peticiones y caché van sobre PostgreSQL o en memoria (una sola instancia de API). La mención a Redis en `docs/autonomous.md` es solo una ayuda del entorno; ninguna tarea debe añadir Redis.
+- **`docker-compose`**: servicios `db` (PostgreSQL), `mail` (Mailpit), `api` y `web`. `docker compose up` aplica migraciones, ejecuta el seed de demo y deja la API y la web funcionando (criterio de la fase 0). Seed de demo por capas: 0.2 deja el comando `db:seed` (idempotente, se niega con `APP_ENV=production`) y el arranque de los cuatro servicios; 0.3 añade el usuario de personal demo (correo `owner@example.test`, contraseña y TOTP de desarrollo impresos en consola, solo con `APP_ENV=development`); 0.5 añade filas demo de la tabla de ejemplo; 1.5 añade el catálogo demo. **No hay Redis** en el stack: tareas, límites de peticiones y caché van sobre PostgreSQL o en memoria (una sola instancia de API). La mención a Redis en `docs/autonomous.md` es solo una ayuda del entorno; ninguna tarea debe añadir Redis.
 - Almacenamiento en desarrollo: adaptador de sistema de archivos. El adaptador S3 se prueba con la misma batería de contrato contra un emulador S3 si 0.4 lo encuentra libre y ligero; si no, queda escrito contra la documentación y marcado como no probado.
 
 ---
@@ -185,7 +186,12 @@ Cada módulo de `modules/` exporta:
 
 Las relaciones de clave ajena entre tablas de módulos distintos están permitidas (por ejemplo `Booking.packageId`), pero la escritura es del módulo dueño.
 
-**Feature flag por módulo.** Si el flag está apagado: sus rutas responden 404, sus tareas programadas no se ejecutan y sus consumidores marcan los eventos como `skipped` (al encenderlo no procesa el pasado; si lo necesita, lo reconstruye desde las tablas). El flag se lee en cada petición, sin reiniciar.
+**Feature flag por módulo.** Los módulos `catalogue`, `pricing`, `bookings` y `payments` **no tienen flag**: no se pueden apagar, y los webhooks entrantes de pasarelas siempre se reciben (una cuenta pausada o retirada sigue procesándolos). El resto de módulos tiene flag. Si el flag está apagado: sus rutas responden 404 y sus tareas programadas no se ejecutan. Para los eventos, cada consumidor declara `whenDisabled`:
+
+- `hold`: el evento queda `pending` y se procesa al encender el módulo. **Obligatorio para todo consumidor de eventos `payments.*`, `bookings.*` y `changes.*`** (dinero y estados de reserva); una prueba de 0.4 recorre los consumidores registrados y falla si alguno de esos eventos tiene `skip`.
+- `skip`: el evento se marca `skipped` (para índices, analítica, correos informativos); si el módulo necesita el pasado, lo reconstruye desde las tablas.
+
+El flag se lee en cada petición, sin reiniciar.
 
 **Añadir un módulo** = crear la carpeta, su archivo `.prisma` y una línea en `modules.registry.ts`. No se modifica ningún módulo existente.
 
@@ -193,8 +199,8 @@ Las relaciones de clave ajena entre tablas de módulos distintos están permitid
 
 | Módulo | Nivel | Tarea | Publica (ejemplos) | Escucha (ejemplos) |
 |---|---|---|---|---|
-| platform (auth, access, audit, flags) | base | 0.3 | `auth.user.loggedIn`, `access.role.changed` | — |
-| platform (events, jobs, storage, mail) | base | 0.4 | — | — |
+| platform (events, jobs, storage, mail, tablas y lectura de flags y ajustes) | base | 0.4 | — | — |
+| platform (auth, access, audit, administración de flags y ajustes) | base | 0.3 | `auth.user.loggedIn`, `access.role.changed` | — |
 | platform/common | base | 0.5 | `common.note.added` | todos (índice de búsqueda) |
 | catalogue | núcleo | 1.1 | `catalogue.package.saleStatusChanged`, `catalogue.race.published` | — |
 | pricing | núcleo | 2.1, 2.2 | `pricing.priceVersion.published` | — |
@@ -226,7 +232,7 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 
 ### 4.1 HTTP y seguridad
 
-- API REST con OpenAPI; cada ruta del panel tiene permiso; cada ruta del cliente comprueba que el recurso es suyo.
+- API REST con OpenAPI; cada ruta del panel tiene permiso; cada ruta del cliente declara con un decorador (`@OwnedBy(...)`) cómo comprueba que el recurso es suyo, y una prueba (0.3) recorre todas las rutas del área del cliente y falla si alguna no lo declara.
 - Sesión en cookie `httpOnly`, `Secure` (salvo en local), `SameSite=Lax`. La web y la API deben estar en el **mismo sitio** (mismo dominio registrable, o la web hace de proxy de `/api`): 8.7 lo concreta.
 - CSRF: comprobación de `Origin` más cabecera propia obligatoria en toda petición que cambia datos. Los webhooks entrantes de pasarelas quedan fuera (los protege la firma).
 - Límites de peticiones en memoria (`@nestjs/throttler`), más estrictos en inicio de sesión, enlace mágico, solicitud de reserva y suscripción a alertas.
@@ -237,7 +243,7 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 
 - **Dos tipos de usuario separados**: `User.kind = staff | customer`, con `@@unique([kind, email])`. Una sesión de cliente nunca puede convertirse en sesión de personal, aunque el correo coincida.
 - **Clientes:** enlace mágico de un solo uso, 15 minutos, token aleatorio de 32 bytes guardado como hash. La respuesta a "envíame un enlace" es idéntica exista o no el correo. El usuario `customer` se crea al verificar el enlace.
-- **Personal:** contraseña con argon2id más TOTP obligatorio para todo el personal. Bloqueo progresivo tras intentos fallidos. Códigos de recuperación guardados como hash. **Sin recuperación por correo para el personal**: el primer propietario se crea y se recupera con un comando de consola (`pnpm api:cli staff:create`, `staff:reset`), que exige acceso al servidor.
+- **Personal:** contraseña con argon2id más TOTP obligatorio para todo el personal. Tras intentos fallidos, **retraso progresivo** por cuenta y por IP (sin bloqueo definitivo, para que un atacante no pueda dejar fuera al único `owner`). Códigos de recuperación guardados como hash. **Sin recuperación por correo para el personal**: el primer propietario se crea y se recupera con un comando de consola (`pnpm api:cli staff:create`, `staff:reset`), que exige acceso al servidor.
 - **Step-up:** `Session.mfaVerifiedAt`; las acciones sensibles (credenciales de pasarela, roles, claves de API, exportar todos los datos) exigen TOTP en los últimos 5 minutos.
 - Sesiones opacas en base de datos (token como hash), revocables. Duraciones por defecto: personal, 12 h absolutas y 2 h de inactividad; cliente, 30 días absolutos y 7 días de inactividad.
 - Librería: 0.3 evalúa primero una librería mantenida (por ejemplo Better Auth) contra estos requisitos (separación de tipos, step-up, tokens con hash, nombres de tabla de este plan). Si no los cumple sin parches, implementación propia fina sobre primitivas probadas (`@node-rs/argon2` o `argon2`, `otpauth`). Lo anota en su `done`.
@@ -248,7 +254,7 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 - Roles de sistema: `owner` (todos los permisos, no editable, no se puede quedar sin ningún usuario) y `customer` (implícito: solo sus propios recursos, comprobado por propiedad, no por matriz).
 - `UserRole.scope Json?`: ámbito opcional (por ejemplo `{ "editionIds": [...] }`) para dar a un guía acceso solo a su viaje. 0.3 crea la columna y aplica solo el ámbito vacío; el filtrado por ámbito llega cuando haga falta.
 - Cada ruta del panel declara su permiso con un decorador. Una prueba recorre todas las rutas registradas y falla si alguna ruta del panel no tiene permiso declarado.
-- Claves de API (8.4): un `ApiKey` actúa con un subconjunto de permisos (`scopes`) y nunca con más que el usuario que la creó.
+- Claves de API (8.4): los permisos efectivos de un `ApiKey` se calculan **en cada petición** como `scopes ∩ permisos actuales del dueño`. Si el dueño pierde un permiso, la clave lo pierde; si el dueño está desactivado o borrado, la clave es inválida.
 
 ### 4.4 Auditoría (0.3)
 
@@ -267,14 +273,15 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 - Las cargas de los eventos llevan identificadores, no datos personales.
 - Orden: no se garantiza entre agregados. Dentro de un agregado, el consumidor compara `aggregateVersion` y descarta lo antiguo cuando importa.
 - Retención: eventos despachados y entregas correctas se purgan a los 90 días (no son el registro de auditoría).
+- **Feature flags y ajustes:** 0.4 crea `FeatureFlag` y `Setting` y el servicio de lectura (los necesitan los consumidores de eventos); 0.3 añade la administración desde el panel, con permisos y auditoría.
 - **pg-boss** en su propio esquema de la misma base de datos, para tareas puntuales y programadas (cron). Requiere un proceso de API siempre encendido: condición para el alojamiento (sección 10).
 
 ### 4.6 Archivos y correo (0.4)
 
-- `FileStorage`: `put`, `get`, `delete`, `signedUrl`. Los archivos privados (documentos, adjuntos) solo se sirven a través de la API con permiso, o con URL firmada de corta duración.
+- `FileStorage`: `put`, `get`, `delete`, `signedUrl`. 0.4 entrega solo la interfaz y sus adaptadores, sin rutas HTTP. Los archivos privados (documentos, adjuntos) los sirve el módulo dueño a través de la API con permiso (0.5 en adelante), o con URL firmada de corta duración.
 - `MailSender`: `send(message)`. Adaptador SMTP (Mailpit en local). Todo envío pasa por `OutboundEmail` (registro y cola).
 - **Guarda de desarrollo:** salvo `MAIL_MODE=live` (que solo pone Oscar al desplegar), la plataforma **rechaza enviar** a destinatarios fuera de la lista `MAIL_DEV_ALLOWLIST` (por defecto, dominios `example.test` y `example.com`) y lo registra como `suppressed`. Así ninguna tarea puede escribir a una persona real.
-- Supresiones: bajas en un clic y rebotes en `EmailSuppression`; los correos de marketing la consultan siempre, los transaccionales no.
+- Supresiones: bajas en un clic y rebotes en `EmailSuppression`, que guarda solo un HMAC del correo (no el correo), así sobrevive al borrado de un cliente sin conservar su dato. Los correos de marketing la consultan siempre, los transaccionales no.
 
 ### 4.7 Secretos en reposo
 
@@ -284,14 +291,27 @@ Cuando un evento debe cambiar la web pública (publicar un paquete, una guía), 
 
 ### 4.8 Ajustes y flags
 
-- `FeatureFlag`: interruptores booleanos (módulos y funciones).
+- `FeatureFlag`: interruptores booleanos (módulos y funciones). Tablas y lectura en 0.4; administración en 0.3.
 - `Setting`: ajustes del negocio con valor tipado y validado: `businessTimeZone`, `salesCountries` (`["AU"]`), `gstRegistered` (`false`), `defaultCurrency` (`AUD`), plazos de caducidad de solicitudes y aprobaciones, `maintenanceMode`, retenciones. Abrir otro país es cambiar `salesCountries`.
+- `APP_ENV` (`development`, `test`, `staging`, `production`) es **obligatorio y sin valor por defecto**: la API no arranca si falta.
 
 ### 4.9 Datos personales
 
 - Cada campo personal lleva `/// @pii` en el esquema. Un script genera el registro de campos personales que usan el logger, la auditoría y la privacidad.
 - Cada módulo con datos personales registra un manejador `export(customerId)` y `anonymise(customerId)`. Una prueba (5.5) falla si un modelo con campos `@pii` no tiene manejador.
-- Lo que no lleva datos personales a propósito: asientos del libro, instantáneas de reserva (los viajeros aparecen como "plaza 1, corredor con dorsal"), eventos del outbox, enlaces de pago.
+- Lo que no lleva datos personales a propósito: asientos del libro (`LedgerTransaction.description` se genera desde un código y referencias, sin texto libre), instantáneas de reserva (los viajeros aparecen como "plaza 1, corredor con dorsal"), eventos del outbox, enlaces de pago, `AuditLog.changes` (los campos `@pii` van a `AuditPiiValue`).
+- **Tablas inmutables con datos personales.** Los disparadores anti-modificación tienen una única excepción: dentro de una transacción con la variable de sesión `app.privacy_erasure = 'on'` (solo la pone el servicio de privacidad, y queda auditado) se permiten exactamente estas operaciones. Decisión por tabla:
+
+| Tabla | Qué se conserva y por qué | Qué hace el borrado |
+|---|---|---|
+| `AuditLog` | todo: no tiene datos personales | nada |
+| `AuditPiiValue` | — | `DELETE` de las filas del cliente |
+| `TermsAcceptance` | fila con `customerId`, versión y fecha: prueba del contrato ante disputas y reclamaciones (base: obligación contractual y defensa legal, 7 años) | `ipAddress` y `userAgent` a `NULL` |
+| `ConsentRecord` | fila con hash del correo, finalidad, fecha y texto: prueba de consentimiento y de baja (Spam Act 2003) | `email` a `NULL`; queda `emailHash` |
+| `ComplaintEvent` | fila, tipo y fecha: procedimiento de reclamaciones demostrable (7 años) | `body` (`@pii`) se sustituye por `[redacted]` |
+| `BookingSnapshot`, `LedgerTransaction`, `LedgerEntry` | todo: no tienen datos personales | nada |
+
+- **Lista completa de lo que hace el borrado de un cliente (5.5):** anonimiza `Customer`, `Traveller`, `User`; borra `Session` y `LoginToken`; anonimiza `OutboundEmail.to`; borra `AuditPiiValue`; vacía `WebhookEvent.rawBody` de sus pagos; aplica la tabla de arriba a `TermsAcceptance`, `ConsentRecord` y `ComplaintEvent`; anonimiza `Complaint`; borra `AlertSubscription` y `WaitlistEntry`; redacta `Note.body` (`@pii`) de las notas sobre sus registros; `EmailSuppression` ya guarda solo un HMAC y se conserva para no volver a escribirle. `SupplierContact` no es dato de clientes: tiene su propio manejador (borrar un contacto de proveedor). Se conservan libro, instantáneas, recibos y reservas (con el cliente anonimizado).
 - No se recogen pasaporte ni datos médicos; nunca datos de tarjeta.
 
 ---
@@ -304,7 +324,7 @@ Notación: **SD** = borrado lógico; **CF** = campos personalizados; **Ap** = so
 
 | Entidad | Campos principales | Restricciones y notas | Tarea |
 |---|---|---|---|
-| **User** (pii) | `kind` staff/customer, `email` citext, `emailVerifiedAt`, `status` active/disabled/locked, `passwordHash?`, `totpSecretCiphertext?`, `totpKeyVersion?`, `totpEnabledAt?`, `failedLoginCount`, `lockedUntil?`, `lastLoginAt?`, `anonymisedAt?` | `@@unique([kind, email])`. `passwordHash` y TOTP solo para `staff` (check) | 0.3 |
+| **User** (pii) | `kind` staff/customer, `email` citext, `emailVerifiedAt`, `status` active/disabled, `passwordHash?`, `totpSecretCiphertext?`, `totpKeyVersion?`, `totpEnabledAt?`, `failedLoginCount`, `nextLoginAllowedAt?`, `lastLoginAt?`, `anonymisedAt?` | `@@unique([kind, email])`. `passwordHash` y TOTP solo para `staff` (check) | 0.3 |
 | **RecoveryCode** | `userId`, `codeHash`, `usedAt?` | | 0.3 |
 | **Session** | `userId`, `tokenHash` único, `createdAt`, `expiresAt`, `idleExpiresAt`, `lastSeenAt`, `mfaVerifiedAt?`, `userAgent?`, `ipPrefix?`, `revokedAt?` | IP truncada (/24, /48) | 0.3 |
 | **LoginToken** (pii) | `email`, `userId?`, `purpose` magic_link, `tokenHash` único, `expiresAt`, `consumedAt?` | un solo uso | 0.3 |
@@ -314,18 +334,18 @@ Notación: **SD** = borrado lógico; **CF** = campos personalizados; **Ap** = so
 | **UserRole** | `userId`, `roleId`, `scope Json?` | | 0.3 |
 | **AuditLog** (Ap) | `occurredAt`, `actorType` staff/customer/system/automation/api_key, `actorId?`, `action`, `entityType`, `entityId`, `changes Json`, `reason?`, `requestId?`, `ipPrefix?` | disparador anti-modificación; índice `(entityType, entityId, occurredAt)` | 0.3 |
 | **AuditPiiValue** (pii) | `auditLogId`, `field`, `before?`, `after?`, `subjectCustomerId?` | solo se borra al anonimizar | 0.3 |
-| **FeatureFlag** | `key` único, `enabled`, `description` | | 0.3 |
-| **Setting** | `key` único, `value Json`, `schemaVersion` | validado por esquema del código | 0.3 |
+| **FeatureFlag** | `key` único, `enabled`, `description` | administración en 0.3 | 0.4 |
+| **Setting** | `key` único, `value Json`, `schemaVersion` | validado por esquema del código; administración en 0.3 | 0.4 |
 | **OutboxEvent** | `type`, `schemaVersion`, `aggregateType`, `aggregateId`, `aggregateVersion?`, `payload Json`, `actorType`, `actorId?`, `occurredAt`, `dispatchedAt?` | índice parcial sobre pendientes | 0.4 |
 | **EventDelivery** | `eventId`, `consumer`, `status` pending/done/failed/skipped, `attempts`, `lastError?`, `processedAt?` | `@@unique([eventId, consumer])` | 0.4 |
-| **IdempotencyRecord** | `scope`, `key`, `requestHash`, `status` in_progress/completed, `responseStatus?`, `responseBody Json?`, `lockedUntil?`, `expiresAt` | `@@unique([scope, key])`; misma clave con otro cuerpo → 422 | 0.4 |
+| **IdempotencyRecord** | `scope`, `key`, `requestHash`, `status` in_progress/completed, `responseStatus?`, `responseBody Json?`, `resourceType?`, `resourceId?`, `lockedUntil?`, `expiresAt` | `@@unique([scope, key])`; misma clave con otro cuerpo → 422. **Nunca guarda secretos**: las rutas que devuelven uno (clave de API recién creada, `client_secret` de una pasarela) guardan solo `resourceId`; al repetir, la respuesta se reconstruye (el `client_secret` se vuelve a pedir a la pasarela) o, si el secreto se enseña una sola vez, responde 409 | 0.4 |
 | **StoredFile** | `storageKey` único, `contentType`, `sizeBytes`, `checksumSha256`, `originalName?`, `visibility` private/public, `purpose`, `uploadedById?` | | 0.4 |
 | **OutboundEmail** (pii) | `to`, `templateKey`, `locale`, `subject`, `status` queued/sent/failed/suppressed, `providerMessageId?`, `customerId?`, `relatedEntityType?`, `relatedEntityId?`, `error?`, `sentAt?` | se anonimiza al borrar un cliente | 0.4 |
-| **EmailSuppression** (pii) | `email` citext único, `reason` unsubscribed/bounced/complaint, `scope` marketing/all | | 0.4 |
+| **EmailSuppression** | `emailHash` único (HMAC), `reason` unsubscribed/bounced/complaint, `scope` marketing/all | | 0.4 |
 | **NumberSequence** | `key` único, `prefix`, `nextValue` | incremento en transacción | 0.4 |
 | **Tag** | `name`, `colour`, `entityTypes String[]` | `@@unique([name])` | 0.5 |
 | **Tagging** | `tagId`, `entityType`, `entityId` | `@@unique([tagId, entityType, entityId])` | 0.5 |
-| **Note** (pii posible) | `entityType`, `entityId`, `body`, `authorId`, `pinned` | SD | 0.5 |
+| **Note** (pii) | `entityType`, `entityId`, `body` (`@pii`), `authorId`, `pinned` | SD; sus cambios van a `AuditPiiValue` | 0.5 |
 | **Attachment** | `entityType`, `entityId`, `storedFileId`, `title` | SD | 0.5 |
 | **Task** | `title`, `description?`, `entityType?`, `entityId?`, `dueAt?`, `assigneeId?`, `status` open/done/cancelled, `source` manual/automation/system, `sourceRef?` | SD | 0.5 |
 | **SavedView** | `entityType`, `ownerId`, `name`, `filters Json`, `columns Json`, `sort Json`, `shared` | | 0.5 |
@@ -364,7 +384,7 @@ Notas:
 
 | Entidad | Campos principales | Restricciones y notas | Tarea |
 |---|---|---|---|
-| **PriceVersion** | `packageId`, `label`, `currency`, `validFrom timestamptz`, `validTo?`, `status` draft/published/archived, `publishedAt?` | dos versiones publicadas de un paquete no se solapan (`EXCLUDE USING gist` sobre `tstzrange`). 1.1 crea una versión por paquete; 2.2 permite varias | 1.1 |
+| **PriceVersion** | `packageId`, `label`, `currency` (FK compuesta con `Package`; `@@unique([id, currency])`), `validFrom timestamptz`, `validTo?`, `status` draft/published/archived, `publishedAt?` | dos versiones publicadas de un paquete no se solapan (`EXCLUDE USING gist` sobre `tstzrange`). 1.1 crea una versión por paquete; 2.2 permite varias | 1.1 |
 | **RoomRate** | `priceVersionId`, `roomOptionId`, `occupancy` 1–4, `pricePerPersonMinor`, `extraNightPerPersonMinor`, `currency` | `@@unique([priceVersionId, roomOptionId, occupancy])`; check ≥ 0 | 1.1 |
 | **ParticipationRate** | `priceVersionId`, `participationType`, `raceDistanceId?`, `amountPerPersonMinor`, `currency` | componente del dorsal o del acompañante; ≥ 0 | 1.1 |
 | **ExtraRate** | `priceVersionId`, `extraId`, `amountMinor`, `currency` | | 1.1 |
@@ -389,12 +409,12 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 | **BookingRoom** | `bookingId`, `roomOptionId`, `occupancy`, `travellerSlots Int[]` | configuración vigente (operativa) | 2.4 |
 | **BookingExtra** | `bookingId`, `extraId`, `quantity`, `travellerSlot?` | | 2.4 |
 | **InventoryClaim** | `bookingId`, `poolId`, `quantity`, `status` held/released | qué devolver al cancelar o caducar | 2.4 |
-| **Quote** (SD) | `reference`, `customerId`, `kind` catalogue/bespoke, `configuration Json`, `priceBreakdown Json`, `totalMinor`, `currency`, `expiresAt`, `status` draft/sent/accepted/expired/withdrawn, `bookingId?`, `createdById` | aceptar respeta el precio cotizado hasta `expiresAt`, siempre desde el servidor | 2.5 |
-| **QuoteLine** | `quoteId`, `description LocalizedText`, `quantity`, `unitAmountMinor`, `currency` | para viajes a medida | 2.5 |
-| **WaitlistEntry** (pii) | `email`, `customerId?`, `reason` non_resident/sold_out, `raceId?`, `editionId?`, `packageId?`, `countryOfResidence`, `travellers Int`, `position`, `status` waiting/offered/converted/expired/withdrawn, `offeredAt?`, `offerExpiresAt?` | 2.6 crea; 6.5 añade la promoción | 2.6 |
+| **Quote** (SD) | `reference`, `customerId`, `kind` catalogue/bespoke, `configuration Json`, `priceBreakdown Json`, `totalMinor`, `currency`, `expiresAt`, `status` draft/sent/accepted/expired/withdrawn, `bookingId?`, `createdById` | el total y el desglose salen siempre del motor de precios. Aceptar respeta el precio cotizado hasta `expiresAt` y, en la misma transacción, crea la reserva y **retiene el cupo** (`InventoryClaim`); si no queda cupo, la aceptación falla con 409 | 2.5 |
+| **QuoteLine** | `quoteId`, `description LocalizedText`, `quantity`, `unitAmountMinor`, `currency` | para viajes a medida: Oscar introduce los importes unitarios; la suma la hace el motor de precios | 2.5 |
+| **WaitlistEntry** (pii) | `email` (`@pii`), `customerId?`, `reason` non_resident/sold_out, `raceId?`, `editionId?`, `packageId?`, `countryOfResidence`, `travellers Int`, `position`, `status` waiting/offered/converted/expired/withdrawn, `offeredAt?`, `offerExpiresAt?` | 2.6 crea; 6.5 añade la promoción | 2.6 |
 | **TermsVersion** | `kind` booking_terms/privacy/website_terms, `version`, `content LocalizedText`, `publishedAt`, `isProvisional` | `@@unique([kind, version])`; Ap una vez publicada | 3.5 |
-| **TermsAcceptance** (pii, Ap) | `customerId`, `bookingId?`, `termsVersionId`, `acceptedAt`, `ipAddress?`, `userAgent?` | prueba para disputas | 3.5 |
-| **ConsentRecord** (pii, Ap) | `customerId?`, `email`, `purpose` marketing_email, `granted`, `source`, `wordingVersion`, `recordedAt` | el estado vigente es el último registro | 5.5 |
+| **TermsAcceptance** (pii, Ap) | `customerId`, `bookingId?`, `termsVersionId`, `acceptedAt`, `ipAddress?` (`@pii`), `userAgent?` (`@pii`) | prueba para disputas; excepción de borrado en 4.9 | 3.5 |
+| **ConsentRecord** (pii, Ap) | `customerId?`, `email?` (`@pii`), `emailHash`, `purpose` marketing_email, `granted`, `source`, `wordingVersion`, `recordedAt` | el estado vigente es el último registro; excepción de borrado en 4.9 | 5.5 |
 | **BookingAmendment** | `bookingId`, `fromVersion`, `toVersion?`, `kind` room/nights/travellers/name_change/extras/other, `priceDifferenceMinor` (con signo), `feeMinor`, `currency`, `status` proposed/applied/rejected, `reason`, `createdById`, `appliedAt?` | crea una `BookingSnapshot` nueva; nunca edita la original | 6.3 |
 | **Cancellation** | `bookingId` único, `requestedBy` customer/staff, `requestedAt`, `daysBeforeDeparture`, `policySnapshot Json`, `penaltyMinor`, `refundableMinor`, `currency`, `reason` | | 6.4 |
 
@@ -405,22 +425,24 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 | **ProviderAccount** | `adapterKey`, `displayName`, `mode` test/live, `status` active/paused/retired/archived, `credentialsCiphertext Bytes`, `credentialsKeyVersion`, `webhookSecretCiphertext?`, `webhookPathToken` único, `lastConnectionTestAt?`, `lastConnectionTestResult?`, `createdById` | sin borrado físico si tiene historial (sin ruta DELETE y FK restrictivas); `mode=live` solo si el adaptador es `verified` | 3.3 (mínimo), 4.1 |
 | **PaymentMethodConfig** | `method` card/apple_pay/google_pay/payto/becs/payid_transfer/bpay/bnpl/manual_other, `enabled`, `countries String[]`, `displayOrder`, `instructions LocalizedText?` | bnpl nace apagado | 3.4, 4.2 |
 | **RoutingRule** | `method`, `providerAccountId`, `countries String[]`, `currencies String[]`, `minAmountMinor?`, `maxAmountMinor?`, `currency?`, `priority`, `fallbackForRuleId?`, `enabled` | | 4.2 |
-| **PaymentSchedule** | `bookingId` único, `currency` | | 3.2 |
+| **PaymentSchedule** | `bookingId` único, `currency` | FK compuesta `(bookingId, currency)` | 3.2 |
 | **PaymentScheduleItem** | `scheduleId`, `kind` deposit/balance/instalment/adjustment, `sequence`, `amountMinor`, `currency`, `dueDate @db.Date`, `status` pending/paid/overdue/waived/superseded | importes calculados por la API | 3.2 |
 | **PaymentLink** | `bookingId`, `scheduleItemId?`, `tokenHash` único, `expiresAt`, `status` active/used/expired/revoked, `createdById?` | **no guarda importe**: se calcula al usarlo | 3.2 |
-| **Payment** | `bookingId`, `scheduleItemId?`, `payerCustomerId?`, `providerAccountId`, `adapterKey`, `method`, `amountMinor`, `currency`, `status` created/pending/requires_action/succeeded/failed/cancelled, `idempotencyKey` único, `providerPaymentRef?`, `failureCode?`, `succeededAt?` | `@@unique([providerAccountId, providerPaymentRef])` | 3.2 |
+| **Payment** | `bookingId`, `scheduleItemId?`, `payerCustomerId?`, `providerAccountId`, `adapterKey`, `method`, `amountMinor`, `currency`, `status` created/pending/requires_action/succeeded/failed/cancelled, `idempotencyKey` único, `providerPaymentRef?`, `failureCode?`, `pendingExpiresAt?`, `succeededAt?` | `@@unique([providerAccountId, providerPaymentRef])`. **Índice único parcial** sobre `scheduleItemId` donde `status IN (created, pending, requires_action, succeeded)`: un plazo no puede tener dos cobros vivos ni volver a cobrarse una vez pagado. Al crear el cobro se comprueba, en la misma transacción, que el adaptador sigue `verified` si la cuenta está en `live` | 3.2 |
 | **Refund** | `paymentId`, `amountMinor`, `currency`, `reason`, `status` requested/pending/succeeded/failed, `idempotencyKey` único, `providerRefundRef?`, `requestedById`, `cancellationId?` | suma de reembolsos ≤ pago (comprobado en transacción) | 3.2, 4.5 |
 | **Dispute** | `paymentId`, `providerDisputeRef`, `amountMinor`, `currency`, `reason`, `status` open/evidence_submitted/won/lost/closed, `evidenceDueBy?`, `evidenceDocumentId?` | | 4.5 |
-| **LedgerAccount** | `code` único (p. ej. `customer_funds`, `provider_clearing:<accountId>`, `payment_fees`, `supplier_payable`, `revenue`, `refunds_payable`), `kind` asset/liability/revenue/expense, `currency` | | 3.2 |
+| **LedgerAccount** | `code` (p. ej. `customer_funds`, `customer_overpayments`, `provider_clearing:<accountId>`, `payment_fees`, `supplier_payable`, `revenue`, `refunds_payable`), `kind` asset/liability/revenue/expense, `currency` | `@@unique([code, currency])`: una cuenta por código y moneda | 3.2 |
 | **LedgerTransaction** (Ap) | `occurredAt`, `kind` payment/refund/fee/chargeback/supplier_payment/adjustment/reversal, `bookingId?`, `paymentId?`, `refundId?`, `disputeId?`, `supplierPaymentId?`, `reversesTransactionId?`, `idempotencyKey` único, `description` | una corrección es una transacción nueva que referencia la original | 3.2 |
-| **LedgerEntry** (Ap) | `transactionId`, `accountCode`, `amountMinor` (con signo: débito +, crédito −), `currency`, `bookingId?` | disparador diferido: cada transacción suma 0 por moneda; anti-modificación | 3.2 |
+| **LedgerEntry** (Ap) | `transactionId`, `accountCode`, `amountMinor` (con signo: débito +, crédito −), `currency`, `bookingId?` | FK compuesta `(accountCode, currency)` → `LedgerAccount`: la moneda del asiento es la de su cuenta. Disparador diferido: cada transacción suma 0 por moneda; anti-modificación | 3.2 |
 | **WebhookEvent** (pii posible) | `providerAccountId`, `providerEventId`, `type`, `signatureValid`, `rawBody Bytes?`, `headers Json` (saneadas), `receivedAt`, `status` received/processed/ignored/failed, `attempts`, `processedAt?`, `error?` | `@@unique([providerAccountId, providerEventId])`; el cuerpo crudo se vacía a los 180 días o al anonimizar | 3.3 |
 | **Settlement** | `providerAccountId`, `providerSettlementRef`, `payoutDate`, `grossMinor`, `feesMinor`, `netMinor`, `currency` | | 4.6 |
 | **SettlementLine** | `settlementId`, `paymentId?`, `refundId?`, `kind`, `amountMinor`, `feeMinor`, `currency` | | 4.6 |
 | **ReconciliationRun** | `providerAccountId`, `forDate`, `status` matched/mismatch/failed, `differences Json`, `createdAt` | alerta si no cuadra | 4.6 |
 | **Receipt** | `number` único (secuencia), `bookingId`, `paymentId`, `amountMinor`, `currency`, `gstRegisteredAtIssue`, `gstAmountMinor?`, `issuedAt`, `documentId?` | si `gstRegisteredAtIssue = false`, el documento no muestra GST ni dice "tax invoice" | 4.6 |
 
-**Estado del adaptador** (`verified`, `experimental`, `planned`) **no está en la base de datos**: lo declara el manifiesto del adaptador en código, junto con métodos, monedas, países y capacidades. Cambiarlo exige un PR con pruebas; el panel no puede modificarlo. Así no hay forma de saltarse "solo `verified` pasa a real" desde el panel.
+**Estado del adaptador** (`verified`, `experimental`, `planned`) **no está en la base de datos**: lo declara el manifiesto del adaptador en código, junto con métodos, monedas, países y capacidades. Cambiarlo exige un PR con pruebas; el panel no puede modificarlo. Así no hay forma de saltarse "solo `verified` pasa a real" desde el panel. Se comprueba en tres momentos: al pasar una cuenta a `live`, **al crear cada cobro** de una cuenta `live`, y **al arrancar la API**: si una cuenta `live` usa un adaptador que ya no es `verified` (por ejemplo, tras un PR que lo rebajó), se pausa automáticamente, se audita y se avisa a Oscar.
+
+**Sobrepago.** Si entra más dinero del pendiente (dos transferencias PayID, pago sobre una reserva cancelada o caducada), el exceso se asienta en `customer_overpayments` (pasivo, nunca margen) y se crea una tarea de reembolso para Oscar. Nunca se pierde ni se ignora.
 
 **Estado de cobro de una reserva**: se deriva del libro y del plan de pagos (pendiente, depósito cobrado, pagada, con reembolso parcial, reembolsada), no se guarda a mano.
 
@@ -454,7 +476,7 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 |---|---|---|---|
 | **KeyDate** | `entityType`, `entityId`, `kind` allotment_release/balance_due/entry_submission/supplier_payment/custom, `date`, `title`, `taskId?` | mantenida por eventos; genera tareas | 7.3 |
 | **Complaint** (pii, SD) | `reference` único, `customerId?`, `bookingId?`, `receivedAt`, `channel`, `category`, `description`, `status` received/acknowledged/investigating/resolved/closed, `ownerId?`, `acknowledgeBy`, `resolveBy`, `resolution?`, `resolvedAt?` | | 7.6 |
-| **ComplaintEvent** (Ap) | `complaintId`, `kind`, `body`, `actorId`, `occurredAt` | cronología demostrable | 7.6 |
+| **ComplaintEvent** (pii, Ap) | `complaintId`, `kind`, `body` (`@pii`), `actorId`, `occurredAt` | cronología demostrable; excepción de borrado en 4.9 | 7.6 |
 | **AutomationRule** | `name`, `triggerType` event/schedule, `eventType?`, `cron?`, `conditions Json`, `actions Json`, `enabled`, `testMode`, `version` | acciones de una lista cerrada: nunca mover dinero ni cambiar permisos | 7.4 |
 | **AutomationRun** | `ruleId`, `ruleVersion`, `triggerEventId?`, `testMode`, `status`, `steps Json`, `startedAt`, `finishedAt?` | | 7.4 |
 | **ReportDefinition** | `name`, `entityType`, `columns Json`, `filters Json`, `groupBy Json`, `ownerId`, `shared` | usa el registro de entidades | 7.7 |
@@ -481,7 +503,7 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 | **Segment**, **Campaign**, **CampaignRecipient** | definición de segmento en `Json`; campaña con plantilla, estado, fecha; destinatario solo con consentimiento vigente | `ConsentRecord`, `EmailSuppression` |
 | **Survey**, **SurveyResponse** | encuesta por edición; respuesta ligada a una reserva `completed`, `moderationStatus` | `Booking.status = completed` |
 | Viajes a medida | sin tablas nuevas: `Booking.kind = bespoke`, `Quote.kind = bespoke` y `QuoteLine` | |
-| Más monedas y países | sin tablas nuevas: `Setting.salesCountries`, `PriceVersion.currency`, `currency` en cada fila con importe | |
+| Más monedas y países | sin cambiar el esquema: `Setting.salesCountries`, `PriceVersion.currency`, moneda en cada fila con importe. Sí hace falta crear **filas** nuevas: las cuentas del libro de cada moneda (`LedgerAccount` por código y moneda) y el enrutado de pagos para esa moneda | |
 
 ### 5.10 Archivos de esquema
 
@@ -492,6 +514,8 @@ El **motor de precios** (2.1) es una función pura `price(input, catalogueView, 
 ## 6. Máquinas de estados
 
 Toda transición pasa por un servicio de estados del módulo dueño, con una tabla de transiciones permitidas y una prueba que recorre todos los pares (origen, destino) y comprueba que solo los permitidos pasan. Cada transición escribe auditoría y un evento.
+
+**Transición atómica.** Una transición es `UPDATE … SET status = $to, version = version + 1 WHERE id = $1 AND status = $from` dentro de la transacción; si afecta a 0 filas, otra transición ganó y la API responde 409 sin efectos. Todo lo que acompaña a la transición (liberar cupo, asientos, auditoría, outbox) va en la **misma transacción**. Cuando un evento permite avanzar varios pasos (por ejemplo un pago que cubre el total), el servicio aplica en la misma transacción la cadena de transiciones permitidas, una a una, cada una auditada.
 
 ### 6.1 Estado de venta del paquete (1.1)
 
@@ -505,7 +529,7 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 | closed | open |
 
 - `coming_soon` solo admite alertas. `open` admite solicitudes. `waitlist` y `sold_out` admiten lista de espera.
-- Un paquete con `isDemo` heredado no puede salir de `draft` salvo con `APP_ENV` `development` o `test`. La API pública filtra `isDemo` siempre que `APP_ENV=production`, y el seed se niega a ejecutarse en producción.
+- **Los datos demo no se publican en ningún entorno.** Un paquete con `isDemo` heredado no puede salir de `draft` y una carrera demo no puede pasar a `Race.status = published`, sea cual sea `APP_ENV`. `isDemo` no se puede cambiar por la API. La API pública excluye siempre `isDemo`. Las pruebas e2e crean sus propios datos no demo. Para ver el sitio con datos demo en local existe una vista previa solo con `APP_ENV=development`, que muestra los registros demo en borrador con una banda "DEMO" visible, sin cambiar su estado. El seed se niega a ejecutarse con `APP_ENV=production`.
 - Pasar a `open` exige al menos una versión de precio publicada y vigente, y un depósito configurado.
 
 ### 6.2 Reserva (2.4; se mantienen los estados pedidos)
@@ -516,21 +540,25 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 | requested | declined | Oscar |
 | requested | expired | tarea: `requestExpiresAt` vencido sin revisar |
 | requested | cancelled | el cliente la retira |
-| approved | deposit_paid | evento de pago: depósito cubierto según el libro |
-| approved | expired | tarea: `approvalExpiresAt` vencido sin depósito |
+| approved | deposit_paid | evento de pago: depósito cubierto según el libro (si el pago cubre el total, sigue la cadena permitida en la misma transacción) |
+| approved | expired | tarea: `approvalExpiresAt` vencido sin depósito y **sin ningún `Payment` en `pending` o `requires_action`** |
 | approved | cancelled | cliente u Oscar |
-| deposit_paid | confirmed | automático si `autoConfirmOnDeposit`; si no, Oscar |
+| deposit_paid | confirmed | automático si `autoConfirmOnDeposit`; si no, Oscar; y el total aún no está cubierto |
+| deposit_paid | balance_paid | se confirma (automático u Oscar) y el total ya está cubierto: `balance_paid` implica confirmada |
 | deposit_paid | cancelled | cliente u Oscar (política de cancelación) |
 | confirmed | balance_paid | evento de pago: total cubierto |
 | confirmed | cancelled | |
-| balance_paid | confirmed | un cambio (6.3) sube el total y queda importe pendiente |
+| balance_paid | confirmed | queda importe pendiente: un cambio (6.3) sube el total o se pierde un contracargo |
 | balance_paid | completed | tarea: pasada la fecha de salida |
 | balance_paid | cancelled | |
-| cancelled | refunded | todo lo cobrado ha sido devuelto (neto cobrado = 0) |
+| cancelled | refunded | se llegó a cobrar algo y, tras los reembolsos, el neto cobrado es 0. Si nunca se cobró nada, se queda en `cancelled` |
 
-- **El cupo se retiene al solicitar** (`InventoryClaim` en estado `held`) y se libera al pasar a `declined`, `expired` o `cancelled`. Por eso la solicitud caduca si nadie la revisa (supuesto 11.4).
+- **El cupo se retiene al solicitar** (`InventoryClaim` en estado `held`) y se libera al pasar a `declined`, `expired` o `cancelled`. Por eso la solicitud caduca si nadie la revisa (supuesto 11.4). La liberación es `UPDATE inventory_claim SET status = 'released' WHERE booking_id = $1 AND status = 'held' RETURNING pool_id, quantity`, y solo lo que devuelve esa sentencia se resta de `InventoryPool.consumed`, en la misma transacción que la transición: aunque dos procesos lo intenten, el cupo se libera una sola vez.
 - Los estados de cobro (`deposit_paid`, `balance_paid`) **solo** los provoca el módulo de pagos según el libro; ningún endpoint los fija a mano.
-- Un pago que llega para una reserva `expired` o `declined` no la reactiva sola: queda marcado para revisión, con tarea para Oscar (reembolsar o reactivar).
+- **Caducidad con pago en curso.** BECS, PayTo y PayID tardan días. La tarea de caducidad no caduca una reserva `approved` mientras tenga un `Payment` en `pending` o `requires_action`. Esos pagos tienen su propio vencimiento (`pendingExpiresAt`, por defecto 5 días hábiles para los manuales); al vencer pasan a `cancelled` y la siguiente pasada de la tarea ya puede caducar la reserva.
+- **Pago sobre una reserva `expired`, `declined` o `cancelled`:** no la reactiva. El dinero se asienta (sobrepago, sección 5.5), se marca para revisión y se crea una tarea para Oscar (reembolsar o, si aún hay cupo, reactivar con una acción explícita y auditada).
+- **Contracargo perdido:** asiento de contracargo en el libro; si la reserva estaba `balance_paid`, vuelve a `confirmed` (hay importe pendiente); nunca se cancela sola. Tarea para Oscar.
+- **Pago del saldo antes de confirmar** (`autoConfirmOnDeposit = false`): la reserva sigue en `deposit_paid` con el estado de cobro "pagada"; cuando Oscar confirma, pasa directamente a `balance_paid`.
 - Enviar una solicitud exige sesión de cliente (enlace mágico) y país de residencia en `Setting.salesCountries`; si no, se crea `WaitlistEntry` (2.6).
 
 ### 6.3 Otras
@@ -549,6 +577,16 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 | Caso | Respuesta del diseño | Tarea que lo prueba |
 |---|---|---|
 | Dos solicitudes por la última plaza a la vez | `UPDATE` condicional del cupo en la transacción y `CHECK`; la segunda falla con 409 | 2.4 |
+| Caducidad y cancelación (o aprobación y caducidad) a la vez | transición condicional `WHERE status = $from`; liberación del cupo condicional `WHERE status = 'held'`, en la misma transacción | 2.4 |
+| Dos cobros del mismo plazo (doble clic, dos pasarelas) | índice único parcial en `Payment.scheduleItemId` para cobros vivos o cobrados | 3.2 |
+| Entra más dinero del debido | asiento en `customer_overpayments` y tarea de reembolso | 3.2 |
+| Reserva caduca mientras una transferencia está en camino | la caducidad espera a que no haya `Payment` en `pending` o `requires_action` | 3.2 |
+| Mezcla de monedas | FK compuestas con la moneda del padre; cuenta del libro por moneda; el motor rechaza monedas distintas | 2.1, 3.2 |
+| Un módulo apagado pierde eventos de dinero | módulos de dinero sin flag; consumidores de eventos de dinero con `hold` | 0.4 |
+| Un adaptador deja de ser `verified` con cuentas en `live` | comprobación al crear cada cobro y al arrancar; pausa automática | 3.3, 4.1 |
+| Clave de API de un usuario desactivado o que perdió permisos | permisos efectivos calculados en cada petición | 8.4 |
+| Un secreto queda guardado en la tabla de idempotencia | las rutas con secretos guardan solo `resourceId` | 0.4, 8.4 |
+| Un atacante bloquea al único `owner` con intentos fallidos | retraso progresivo, sin bloqueo definitivo | 0.3 |
 | Un cupo baja de cero por un ajuste manual | `CHECK (consumed BETWEEN 0 AND capacity)`; reducir capacidad por debajo de lo consumido se rechaza | 1.1 |
 | Alguien solicita con el correo de otra persona para retener cupo | la solicitud exige sesión verificada por enlace mágico; límite de peticiones; caducidad de solicitudes | 2.4 |
 | El navegador manda un importe | los esquemas de entrada de solicitud y cobro no tienen campo de importe; prueba que un campo extra se rechaza | 2.4, 3.2 |
@@ -567,9 +605,9 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 | Sesión robada | cookie `httpOnly`, revocable, caducidad por inactividad, step-up en acciones sensibles | 0.3 |
 | Enumeración de correos | respuesta idéntica al pedir enlace mágico | 0.3 |
 | Ruta del panel sin permiso | prueba que recorre todas las rutas | 0.3 |
-| Un cliente ve la reserva de otro | todas las consultas del cliente filtran por `customerId` de la sesión; prueba con dos clientes | 5.1 |
+| Un cliente ve la reserva de otro | cada ruta del cliente declara `@OwnedBy`; las consultas filtran por `customerId` de la sesión; prueba que recorre las rutas y prueba con dos clientes | 0.3, 5.1 |
 | Datos personales en registros | redacción en el logger; eventos sin datos personales | 0.3, 0.4 |
-| Borrar un cliente con pagos | se anonimizan `Customer`, `Traveller`, `User`, `OutboundEmail`, `AuditPiiValue`, cuerpos de webhook; se conservan libro, instantáneas y recibos | 5.5 |
+| Borrar un cliente con pagos | lista completa y excepciones por tabla en la sección 4.9; se conservan libro, instantáneas y recibos | 5.5 |
 | CSV con fórmulas maliciosas (`=`, `+`, `-`, `@`) | se escapan al exportar | 0.5 |
 | Importación CSV a medias | se valida entera antes de escribir; se escribe en una transacción o no se escribe | 0.5 |
 | Fecha límite en el cambio de día | fechas de calendario y zona del negocio; pruebas en el día exacto de cada tramo | 3.2, 6.4 |
@@ -585,15 +623,17 @@ Toda transición pasa por un servicio de estados del módulo dueño, con una tab
 
 Esta tarea no tiene código. Estas son las pruebas que fijan los invariantes del plan; cada tarea las escribe antes de implementar.
 
-- **0.2:** prueba de convenciones del esquema: ninguna columna `Float` ni `Decimal`; toda columna `*Minor` es `Int` y su modelo tiene `currency`; toda columna `*Bps` es `Int`. CI falla si hay pruebas saltadas.
-- **0.3:** 403 para un rol sin permiso; todas las rutas del panel declaran permiso; auditoría con valor anterior y nuevo; campo `@pii` va a `AuditPiiValue`; disparador impide modificar `AuditLog`; enlace mágico de un solo uso y caducado; respuesta idéntica para correo inexistente; sesión de cliente no accede al panel aunque el correo coincida; e2e de entrada con contraseña y TOTP.
-- **0.4:** transacción deshecha no deja evento; evento entregado dos veces se procesa una; consumidor con flag apagado marca `skipped`; guarda de correo rechaza destinatario fuera de la lista; batería de contrato de `FileStorage`.
-- **0.5:** borrado lógico oculta y restaura; vista guardada por usuario; CSV exportado escapa fórmulas; importación con un error no escribe nada; acción en lote respeta el permiso de cada elemento.
-- **1.1:** transiciones de estado de venta; cupo no baja de cero; paquete en `draft` no sale por la API pública; demo no pasa a `open` en producción.
-- **2.1/2.2:** tabla de ocupación 1 a 4, noches extra, acompañantes, códigos, combinaciones de reglas, fechas límite y regla de redondeo.
-- **2.4:** dos solicitudes concurrentes por la última plaza; transición no permitida rechazada; cambio de precio no altera la instantánea; importe del cliente ignorado.
-- **3.2/3.3/3.6:** asiento duplicado imposible; suma por reserva = cobrado − reembolsado; idempotencia; webhooks duplicados, fuera de orden y con firma mala.
-- **5.5:** todo modelo con `@pii` tiene manejador de privacidad; borrado conserva el libro.
+- **0.2:** prueba de convenciones del esquema: ninguna columna `Float` ni `Decimal`; toda columna `*Minor` es `Int` y tiene su moneda emparejada (`fooCurrency` o `currency`); toda columna `*Bps` es `Int`. `docker compose up` arranca `db`, `mail`, `api` y `web` (comprobación de salud de los cuatro). La API no arranca sin `APP_ENV`. CI falla si hay pruebas saltadas.
+- **0.3:** 403 para un rol sin permiso; todas las rutas del panel declaran permiso; todas las rutas del cliente declaran `@OwnedBy`; auditoría con valor anterior y nuevo; campo `@pii` va a `AuditPiiValue`; disparador impide modificar `AuditLog`; enlace mágico de un solo uso y caducado; respuesta idéntica para correo inexistente; sesión de cliente no accede al panel aunque el correo coincida; intentos fallidos aplican retraso y nunca bloqueo definitivo; cambiar un flag desde el panel queda auditado; e2e de entrada con contraseña y TOTP.
+- **0.4:** transacción deshecha no deja evento; evento entregado dos veces se procesa una; consumidor `skip` con flag apagado marca `skipped`; **consumidor `hold` con flag apagado deja el evento `pending` y lo procesa al encender**; ningún consumidor de `payments.*`, `bookings.*` o `changes.*` declara `skip`; repetir una ruta idempotente que devuelve un secreto no lo lee de `IdempotencyRecord`; guarda de correo rechaza destinatario fuera de la lista; batería de contrato de `FileStorage`.
+- **0.5:** sobre la **tabla de ejemplo de la fase 0, que es la lista de `Task` del panel** (tareas con fecha, responsable, estado y entidad enlazada): búsqueda global encuentra una tarea por su título; filtros combinados (estado + responsable + vencimiento) y orden; vista guardada por usuario; acción en lote (completar) respeta el permiso de cada elemento; CSV exportado escapa fórmulas; importación con un error no escribe nada; etiquetar y quitar etiqueta; añadir nota; historial muestra cambios con valor anterior y nuevo; borrado lógico oculta y restaura.
+- **1.1:** transiciones de estado de venta; cupo no baja de cero; paquete en `draft` no sale por la API pública; **un paquete demo no pasa a `open` ni una carrera demo a `published`, con cualquier `APP_ENV`**; `isDemo` no se puede cambiar por la API.
+- **2.1/2.2:** tabla de ocupación 1 a 4, noches extra, acompañantes, códigos, combinaciones de reglas, fechas límite y regla de redondeo; **entradas con monedas distintas se rechazan**.
+- **2.4:** dos solicitudes concurrentes por la última plaza; **caducidad y cancelación concurrentes liberan el cupo una sola vez; aprobar y caducar a la vez: solo gana una**; transición no permitida rechazada; cambio de precio no altera la instantánea; importe del cliente ignorado.
+- **3.2:** `double_charge_same_schedule_item_rejected` (índice único parcial); `overpayment_posts_liability_and_creates_refund_task`; `approval_expiry_skipped_while_payment_pending`; `payment_on_cancelled_booking_does_not_reactivate`; `ledger_entry_currency_must_match_account`; asiento duplicado imposible; suma por reserva = cobrado − reembolsado; idempotencia.
+- **3.3/3.6:** webhooks duplicados, fuera de orden y con firma mala; cobro rechazado si la cuenta `live` usa un adaptador no `verified`; al arrancar, una cuenta así queda pausada.
+- **5.5:** todo modelo con `@pii` tiene manejador de privacidad; borrado conserva el libro; las excepciones de los disparadores solo funcionan con `app.privacy_erasure` y solo sobre las columnas de la tabla de la sección 4.9.
+- **8.4:** una clave de API pierde un permiso cuando su dueño lo pierde; clave de un dueño desactivado → 401.
 
 ---
 
@@ -612,6 +652,8 @@ Cada una con su motivo y cómo deshacerla. Ninguna cambia lo que Oscar pidió qu
 9. **El estado del adaptador vive en código**, no en la base de datos, para que nadie pueda marcarlo `verified` desde el panel.
 10. **Fase 9: no escribir treinta adaptadores a ciegas.** Recomiendo que la fase 9 cree fichas `planned` para todo el catálogo y adaptadores solo para las pasarelas que Oscar vaya a pedir, empezando por las que den sandbox sin trámite. Un adaptador `experimental` sin sandbox es mantenimiento sin uso. No cambio el archivo de fase: lo dejo para la revisión de Oscar.
 11. **Sin Redis**, coherente con `docs/architecture.md`.
+12. **Módulos de dinero sin feature flag** (`catalogue`, `pricing`, `bookings`, `payments`): apagarlos dejaría reservas y pagos a medias. Deshacer: añadir el flag con consumidores `hold`.
+13. **Los datos demo nunca se publican**, ni en desarrollo; para verlos en local hay una vista previa marcada como "DEMO". Deshacer: permitir publicar demo en `development`.
 
 ---
 
@@ -621,17 +663,21 @@ Cada una con su motivo y cómo deshacerla. Ninguna cambia lo que Oscar pidió qu
 
 | Tarea | Antes | Ahora | Motivo |
 |---|---|---|---|
-| 0.3 | 0.2 | 0.2, **0.4** | El enlace mágico necesita la interfaz de correo y la guarda de desarrollo de 0.4. Sin ella, 0.3 inventaría su propio envío. |
+| 0.3 | 0.2 | 0.2, **0.4** | El enlace mágico necesita la interfaz de correo y la guarda de desarrollo de 0.4. Sin ella, 0.3 inventaría su propio envío. Para que no haya dependencia circular, las tablas `FeatureFlag` y `Setting` y su lectura pasan a 0.4 (las necesitan sus consumidores de eventos), y 0.4 no expone rutas HTTP; 0.3 añade la administración de flags y ajustes, con permisos y auditoría. |
 | 2.5 | 2.4, 0.5 | 2.4, **2.3**, 0.5 | La prueba de extremo a extremo de la fase 2 (buscar, configurar, solicitar, gestionar) solo se puede escribir cuando existen constructor, solicitud y bandeja; la asigno a 2.5. |
 | 5.1 | 3.5 | 3.5, **4.6**, **5.4** | El área del cliente descarga recibos (4.6) y documentos PDF (5.4). |
 | 7.3 | 1.2, 0.4 | 1.2, 0.4, **3.2**, **6.1** | Las fechas clave incluyen vencimiento de saldos (plan de pagos, 3.2) y liberación de cupos contratados (6.1). |
-| 8.5 | fases 0 a 7 cerradas, 8.4 | fases 0 a 7 cerradas, **8.1, 8.2, 8.3**, 8.4, **8.6** | Una revisión de seguridad de todo el producto debe incluir el gestor de contenido, el monitor y el modo mantenimiento. |
+| 5.7 | resto de la fase 5, fase 4 cerrada | 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, fase 4 cerrada | Lista explícita. |
+| 8.5 | fases 0 a 7 cerradas, 8.4 | fases 0, 1, 2, 3, 4, 5, 6 y 7 cerradas, **8.1, 8.2, 8.3**, 8.4, **8.6** | Una revisión de seguridad de todo el producto debe incluir el gestor de contenido, el monitor y el modo mantenimiento. |
+| 9.x | fase 4 cerrada, 8.5 | filas propias 9.1–9.4 | 9.1: fase 4 cerrada, 8.5. 9.2: 9.1. 9.3: 9.2 (solo si se eligieron adaptadores propios). 9.4: 9.1 (solo si se eligieron adaptadores propios). Riesgo alto salvo 9.4 (bajo). Encadenar 9.1→9.2→9.3 respeta las dos variantes del archivo de fase y el límite de dos hilos de riesgo alto. |
+
+"Fase N cerrada" queda definido en una nota bajo la tabla: todas las tareas de la fase tienen `docs/done/N.M.md` en `main` y el PR del hilo de cierre de la fase está fusionado.
 
 Comprobado: con estos cambios la tabla no tiene ciclos y todas las tareas de los archivos de fase siguen presentes.
 
 ### 10.2 Riesgos que no cambian la tabla
 
-- **Sin claves de Stripe, la prueba e2e "pagar con la tarjeta de prueba de Stripe" no se puede ejecutar.** Y CI falla si hay pruebas saltadas. Propuesta para 3.3 y 3.6: la batería contra el sandbox real es un comando aparte (`test:sandbox`), no incluido en la batería por defecto ni saltado en ella; la e2e por defecto paga contra el simulador. El adaptador de Stripe queda `experimental` hasta que Oscar ponga las claves y se ejecute `test:sandbox`.
+- **Sin claves de Stripe, la prueba e2e "pagar con la tarjeta de prueba de Stripe" no se puede ejecutar.** Y CI falla si hay pruebas saltadas. Propuesta para 3.3 y 3.6: la batería contra el sandbox real es un comando aparte (`test:sandbox`), no incluido en la batería por defecto ni saltado en ella; la e2e por defecto paga contra el simulador. **Pagar contra el simulador no cumple ese criterio de la fase 3: queda BLOQUEADO** (en `docs/done/3.3.md` y, al cerrar la fase, en `docs/BLOCKED.md`) hasta que Oscar ponga las claves y se ejecute `test:sandbox`. El adaptador de Stripe queda `experimental` mientras tanto.
 - **0.3 y 0.5 son grandes** para una sola tarea. Si el plan de cualquiera supera lo razonable, que lo divida en sub-PR dentro de la misma tarea, no en tareas nuevas.
 - **Recibos (4.6) antes de plantillas (5.4):** 4.6 entrega los datos del recibo, la numeración y la regla del GST con pruebas, y una representación mínima; el PDF con plantilla editable llega en 5.4 y lo conecta 5.1.
 - **El cupo se retiene al solicitar**: si Oscar tarda en revisar, las plazas quedan bloqueadas. Mitigado con caducidad configurable y recordatorio.
@@ -649,7 +695,7 @@ Cada uno es la opción más conservadora y fácil de cambiar; casi todos son un 
 1. Zona horaria del negocio: `Australia/Brisbane`.
 2. Moneda única por paquete: AUD.
 3. Depósito: lo fija cada paquete (por persona, por reserva o porcentaje). Sin valor por defecto: un paquete sin depósito no puede pasar a `open`.
-4. Una solicitud sin revisar caduca a los 7 días (recordatorio a Oscar a los 3). Una aprobación sin depósito caduca a las 72 horas. Ambos ajustables.
+4. Una solicitud sin revisar caduca a los 7 días (recordatorio a Oscar a los 3). Una aprobación sin depósito caduca a las 72 horas, salvo que haya un pago en curso (sección 6.2). Un pago manual pendiente vence a los 5 días hábiles. Todos ajustables.
 5. Un "viaje" es un paquete.
 6. Un cliente por correo. Los viajeros pertenecen al cliente que reserva y se pueden reutilizar.
 7. Los acompañantes y los corredores con dorsal propio no consumen dorsales.

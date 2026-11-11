@@ -143,7 +143,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 5.4 | 2.5 | Bajo |
 | 5.5 | 5.1 | Alto |
 | 5.6 | 5.1, 2.5 | Bajo |
-| 5.7 | resto de la fase 5, fase 4 cerrada | Medio |
+| 5.7 | 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, fase 4 cerrada | Medio |
 | 6.1 | 1.2 | Medio |
 | 6.2 | 6.1, 4.6 | Alto |
 | 6.3 | 4.5, 5.1 | Alto |
@@ -163,8 +163,15 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 8.4 | 0.3, 0.4 | Alto |
 | 8.6 | 0.4 | Medio |
 | 8.7 | 0.7 | Bajo |
-| 8.5 | fases 0 a 7 cerradas, 8.1, 8.2, 8.3, 8.4, 8.6 | Alto |
-| 9.x | fase 4 cerrada, 8.5 | Alto |
+| 8.5 | fase 0 cerrada, fase 1 cerrada, fase 2 cerrada, fase 3 cerrada, fase 4 cerrada, fase 5 cerrada, fase 6 cerrada, fase 7 cerrada, 8.1, 8.2, 8.3, 8.4, 8.6 | Alto |
+| 9.1 | fase 4 cerrada, 8.5 | Alto |
+| 9.2 | 9.1 | Alto |
+| 9.3 | 9.2 | Alto |
+| 9.4 | 9.1 | Bajo |
+
+**Fase N cerrada** significa: todas las tareas de la fase N tienen su `docs/done/N.M.md` en `main` y el PR del hilo de cierre de esa fase está fusionado.
+
+Las filas 9.1 a 9.4 siguen la numeración de `docs/phases/phase-9.md`. Si se eligió el orquestador, solo existen 9.1 y 9.2; si se eligieron adaptadores propios, existen las cuatro.
 
 La fase 9 va la última. Sin sandbox de cada proveedor, sus adaptadores se escriben contra la documentación y la batería de contrato, y se quedan en `experimental` hasta que Oscar consiga las claves de prueba.
 
