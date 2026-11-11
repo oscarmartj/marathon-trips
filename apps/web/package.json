@@ -12,6 +12,7 @@
     "test:e2e": "echo 'No end-to-end tests yet: Playwright arrives with the first user flow (0.3).' && exit 0"
   },
   "dependencies": {
+    "@mt/shared": "workspace:*",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
