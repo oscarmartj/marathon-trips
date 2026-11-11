@@ -46,14 +46,14 @@ Conclusión: un servicio gratuito que se duerme **no sirve para la API en produc
 
 La API va en Docker en todas, para no depender de un proveedor.
 
-| | A. Plataformas gestionadas | B. Servidor único en Sídney | C. Mínimo con servicios pequeños |
-|---|---|---|---|
-| Web | Vercel Pro, US$20/mes | En el mismo servidor (Next.js en Docker) | Cloudflare Pages gratuito, **si** los términos permiten uso comercial (sin confirmar) |
-| API | Fly.io `shared-cpu-1x` 512 MB, desde US$3,69/mes (precio de Sídney sin confirmar) | En el mismo servidor | Render de pago, desde US$7/mes |
-| Base de datos | Neon Launch, del orden de US$15/mes, Sídney, con el escalado a cero desactivado | Postgres en el mismo servidor, copias de seguridad programadas por nosotros | Render Postgres de pago, desde US$6/mes |
-| Coste mensual orientativo (suma de precios de lista) | Unos US$39 | US$12 (Lightsail 2 GB) | Unos US$13, más la web gratuita |
-| Límites | Tres proveedores; la latencia web-API-base depende de la región | Un solo servidor: sin alta disponibilidad, mantenimiento de sistema, copias y actualizaciones a cargo nuestro | Región de Render para Australia sin confirmar; términos comerciales de Cloudflare sin confirmar |
-| Riesgo para webhooks | Bajo (API siempre encendida) | Bajo (servidor siempre encendido) | Bajo con instancia de pago |
+| | A. Plataformas gestionadas | B. Servidor único en Sídney | C. Mínimo con servicios pequeños | Referencias y fecha |
+|---|---|---|---|---|
+| Web | Vercel Pro, US$20/mes | En el mismo servidor (Next.js en Docker) | Cloudflare Pages gratuito, **si** los términos permiten uso comercial (sin confirmar) | derivado de 1.1 y 2 (Vercel, Cloudflare); 2026-11-11 |
+| API | Fly.io `shared-cpu-1x` 512 MB, desde US$3,69/mes (precio de Sídney sin confirmar) | En el mismo servidor | Render de pago, desde US$7/mes | derivado de 2 (Fly.io, Render, Lightsail); 2026-11-11 |
+| Base de datos | Neon Launch, del orden de US$15/mes, Sídney, con el escalado a cero desactivado | Postgres en el mismo servidor, copias de seguridad programadas por nosotros | Render Postgres de pago, desde US$6/mes | derivado de 1.2 y 2 (Neon, Render, Lightsail); 2026-11-11 |
+| Coste mensual orientativo (suma de precios de lista) | Unos US$39 | US$12 (Lightsail 2 GB) | Unos US$13, más la web gratuita | suma de precios de la tabla 2; 2026-11-11 |
+| Límites | Tres proveedores; la latencia web-API-base depende de la región | Un solo servidor: sin alta disponibilidad, mantenimiento de sistema, copias y actualizaciones a cargo nuestro | Región de Render para Australia sin confirmar; términos comerciales de Cloudflare sin confirmar | derivado de 1.1, 1.2 y 2; 2026-11-11 |
+| Riesgo para webhooks | Bajo (API siempre encendida) | Bajo (servidor siempre encendido) | Bajo con instancia de pago | derivado de 1.2; 2026-11-11 |
 
 "Orientativo" aquí significa la suma de precios de lista de arriba, no una cotización ni una conversión a AUD.
 

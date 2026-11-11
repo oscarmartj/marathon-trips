@@ -37,7 +37,24 @@ Comisiones sin GST salvo que se indique. "Viajes" = qué dice la política ofici
 | Zip | Sin mención a viajes; "algunos negocios no se pueden atender por sus productos o servicios" | Solicitud para negocios australianos con ABN; evalúan antigüedad, facturación y sector | Sin alta, cuotas ni permanencia | Se confirma tras el alta | sin confirmar | sin confirmar | sin confirmar | https://zip.co/au/business (2026-11-11) |
 | Klarna | sin confirmar | sin confirmar | sin confirmar | Vía Adyen: 4,29 % + A$0,30. Cobro "por adelantado y en su totalidad" para el comercio | sin confirmar | sin confirmar | sin confirmar | https://www.klarna.com/au/business/ ; https://www.adyen.com/pricing (2026-11-11) |
 | Rapyd | Afirma dar soporte a "online travel" (dato del propio proveedor, sin contrastar) | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.rapyd.net/blog/payment-gateway-for-travel-agency/ (2026-11-11) |
-| Tyro, Till Payments, Bambora Asia-Pacific, NAB Transact, CommBank BPOINT, TravelPay, Mint Payments, Monoova, Zepto, Ezidebit, Hello Clever, Braintree, Worldpay, Nuvei, Worldline, Global Payments, Mastercard Payment Gateway Services, BPAY | **sin confirmar** (no se pudo abrir o no se llegó a consultar la página oficial) | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | Pendiente para la actualización que pide la fase 9 ("actualiza la investigación antes de empezar"). Nota: `bambora.com/en/au/` redirige a Worldline, lo que sugiere que Bambora Asia-Pacific ya no opera con ese nombre (sin confirmar) |
+| Tyro | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.tyro.com/online-payments/ (2026-11-11; consultada, la página devolvió error) |
+| Till Payments | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.tillpayments.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Bambora Asia-Pacific | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.bambora.com/en/au/ (2026-11-11; consultada: redirige a https://worldline.com/sv-se/home; posible integración en Worldline, sin confirmar) |
+| NAB Transact | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.nab.com.au/business/payments-and-merchants (2026-11-11; sitio oficial de referencia, no consultada) |
+| CommBank BPOINT | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.commbank.com.au/business/merchant-services.html (2026-11-11; sitio oficial de referencia, no consultada) |
+| TravelPay | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.travelpay.com.au/ (2026-11-11; sitio de referencia, no consultada) |
+| Mint Payments | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.mintpayments.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Monoova | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.monoova.com/pricing (2026-11-11; consultada, la página devolvió error) |
+| Zepto | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.zepto.com.au/pricing (2026-11-11; consultada, la página devolvió error) |
+| Ezidebit | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.ezidebit.com/en-au/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Hello Clever | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://helloclever.co/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Braintree | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.paypal.com/au/business/braintree-pricing (2026-11-11; consultada, la página devolvió error) |
+| Worldpay | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.worldpay.com/ (2026-11-11; sitio oficial de referencia, no consultada (Hyperswitch sí tiene conector, ver sección 3)) |
+| Nuvei | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.nuvei.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Worldline | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://worldline.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Global Payments | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.globalpayments.com/ (2026-11-11; sitio oficial de referencia, no consultada) |
+| Mastercard Payment Gateway Services | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.mastercard.com.au/en-au/business/merchants/payment-gateway.html (2026-11-11; sitio de referencia, no consultada) |
+| BPAY | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | sin confirmar | https://www.bpay.com.au/ (2026-11-11; sitio oficial de referencia, no consultada) |
 
 ### Revisión del catálogo de `docs/payments.md`
 
@@ -50,17 +67,17 @@ Comisiones sin GST salvo que se indique. "Viajes" = qué dice la política ofici
 
 Comprobado el 2026-11-11.
 
-| Punto | Hallazgo | Fuente |
-|---|---|---|
-| Licencia | Apache 2.0 | https://github.com/juspay/hyperswitch |
-| Mantenimiento | Activo: el changelog tiene entradas fechadas 2026.11.06, .09, .10 y .11 (varias por semana). Unos 43,6 mil estrellas, 816 PR abiertos | https://raw.githubusercontent.com/juspay/hyperswitch/main/CHANGELOG.md ; página de GitHub |
-| Conectores | "100+" según el README (otra sección dice "120+"). Código de la rama principal (`connector_enums.rs`) | https://raw.githubusercontent.com/juspay/hyperswitch/main/crates/common_enums/src/connector_enums.rs |
-| Cobertura de nuestro catálogo | **Sí:** Stripe, PayPal, Braintree, Adyen, Checkout.com, Worldpay, Airwallex, Square, Rapyd, Nuvei, Worldline, Global Payments, GoCardless, Klarna, y un conector `Bamboraapac`. **No aparecen:** eWAY, Pin Payments, SecurePay, Fat Zebra, Windcave, Tyro, Till, Zai, Merchant Warrior, NAB Transact, Westpac PayWay, BPOINT, Azupay, Monoova, Zepto, Ezidebit, Hello Clever, TravelPay, Mint, Afterpay, Zip, BPAY | misma fuente |
-| Métodos australianos | El enum de métodos de pago incluye BECS. PayTo y PayID: no aparecen en el código consultado. Que cada conector australiano los exponga: sin confirmar | https://raw.githubusercontent.com/juspay/hyperswitch/main/crates/common_enums/src/enums.rs |
-| Versión autoalojada | Servidor en Rust; scripts Docker/Podman (perfiles Standard, Full, Minimal) y Helm. Postgres y Redis como requisitos: el README consultado no lo lista; confirmar en la guía de instalación | página de GitHub |
-| Versión gestionada (Cloud) | Precio no publicado: "Contact Us". Alojamiento incluido solo en Cloud | https://hyperswitch.io/pricing |
-| Coste autoalojado | Edición Community "Start Building for Free" (sin cuota de licencia). El coste de infraestructura propia (servidor Rust, Postgres, Redis, panel de control) no se calculó: sin confirmar | https://hyperswitch.io/pricing |
-| PCI | En Community, "self-managed". En Cloud, "available as out-of-the-box service". La página no aclara quién responde de qué. Nosotros evitaríamos PCI con campos alojados de la pasarela de todos modos | https://hyperswitch.io/pricing |
+| Punto | Hallazgo | Fuente | Fecha |
+|---|---|---|---|
+| Licencia | Apache 2.0 | https://github.com/juspay/hyperswitch | 2026-11-11 |
+| Mantenimiento | Activo: el changelog tiene entradas fechadas 2026.11.06, .09, .10 y .11 (varias por semana). Unos 43,6 mil estrellas, 816 PR abiertos | https://raw.githubusercontent.com/juspay/hyperswitch/main/CHANGELOG.md ; página de GitHub | 2026-11-11 |
+| Conectores | "100+" según el README (otra sección dice "120+"). Código de la rama principal (`connector_enums.rs`) | https://raw.githubusercontent.com/juspay/hyperswitch/main/crates/common_enums/src/connector_enums.rs | 2026-11-11 |
+| Cobertura de nuestro catálogo | **Sí:** Stripe, PayPal, Braintree, Adyen, Checkout.com, Worldpay, Airwallex, Square, Rapyd, Nuvei, Worldline, Global Payments, GoCardless, Klarna, y un conector `Bamboraapac`. **No aparecen:** eWAY, Pin Payments, SecurePay, Fat Zebra, Windcave, Tyro, Till, Zai, Merchant Warrior, NAB Transact, Westpac PayWay, BPOINT, Azupay, Monoova, Zepto, Ezidebit, Hello Clever, TravelPay, Mint, Afterpay, Zip, BPAY | misma fuente | 2026-11-11 |
+| Métodos australianos | El enum de métodos de pago incluye BECS. PayTo y PayID: no aparecen en el código consultado. Que cada conector australiano los exponga: sin confirmar | https://raw.githubusercontent.com/juspay/hyperswitch/main/crates/common_enums/src/enums.rs | 2026-11-11 |
+| Versión autoalojada | Servidor en Rust; scripts Docker/Podman (perfiles Standard, Full, Minimal) y Helm. Postgres y Redis como requisitos: el README consultado no lo lista; confirmar en la guía de instalación | página de GitHub | 2026-11-11 |
+| Versión gestionada (Cloud) | Precio no publicado: "Contact Us". Alojamiento incluido solo en Cloud | https://hyperswitch.io/pricing | 2026-11-11 |
+| Coste autoalojado | Edición Community "Start Building for Free" (sin cuota de licencia). El coste de infraestructura propia (servidor Rust, Postgres, Redis, panel de control) no se calculó: sin confirmar | https://hyperswitch.io/pricing | 2026-11-11 |
+| PCI | En Community, "self-managed". En Cloud, "available as out-of-the-box service". La página no aclara quién responde de qué. Nosotros evitaríamos PCI con campos alojados de la pasarela de todos modos | https://hyperswitch.io/pricing | 2026-11-11 |
 
 ### Lectura para la decisión de 3.1
 
