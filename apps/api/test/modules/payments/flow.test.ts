@@ -444,7 +444,8 @@ describe('environments (plan 0.1, P11)', () => {
 
 describe('limits', () => {
   it('payment_rate_limited_per_user_and_ip', async () => {
-    for (const env of [{ PAYMENT_ATTEMPTS_PER_HOUR_PER_USER: '2' }, { PAYMENT_ATTEMPTS_PER_HOUR_PER_IP: '2' }]) {
+    const envs: Array<Record<string, string>> = [{ PAYMENT_ATTEMPTS_PER_HOUR_PER_USER: '2' }, { PAYMENT_ATTEMPTS_PER_HOUR_PER_IP: '2' }];
+    for (const env of envs) {
       const t2 = await makeApp(env);
       try {
         const admin2 = await paymentsStaff(t2);

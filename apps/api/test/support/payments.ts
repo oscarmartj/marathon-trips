@@ -117,12 +117,12 @@ export async function expireNow(paymentId: string, minutesAgo = 1): Promise<void
     await owner.query('COMMIT');
   } catch (err) {
     await owner.query('ROLLBACK');
-    throw err;
-  } finally {
-    const { rows } = await owner.query<{ tgenabled: string }>(`SELECT tgenabled FROM pg_trigger WHERE tgname = 'payments_guard'`);
     await owner.end();
-    if (rows[0]?.tgenabled !== 'O') throw new Error('payments_guard left disabled');
+    throw err;
   }
+  const { rows } = await owner.query<{ tgenabled: string }>(`SELECT tgenabled FROM pg_trigger WHERE tgname = 'payments_guard'`);
+  await owner.end();
+  if (rows[0]?.tgenabled !== 'O') throw new Error('payments_guard left disabled');
 }
 
 /** The secret-free event a simulator would send for the current state of an attempt. */
