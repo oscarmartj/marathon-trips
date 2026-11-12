@@ -32,6 +32,8 @@ export const PAYABLE_STATES: readonly BookingStatus[] = ['approved', 'deposit_pa
 /** READ COMMITTED with short limits, like booking requests (plan 2.4, section 4). */
 export const PAYMENT_TX_OPTIONS = { isolationLevel: 'ReadCommitted' as const, timeout: 15_000, maxWait: 5_000 };
 
+const ENDED_WITHOUT_MONEY: readonly string[] = ['failed', 'cancelled', 'expired'];
+
 const busy = () => conflict('busy_try_again', 'Many people are doing this at once. Try again.');
 
 function mapLoadError(err: unknown): unknown {
@@ -258,7 +260,8 @@ export class PaymentAttemptsService {
         await this.mismatchTask(tx, p, b.reference);
         return false;
       }
-      if (!LIVE_STATUSES.includes(p.status) && (remote.status === 'requires_action' || remote.status === 'pending')) {
+      // Only an attempt that ended without money (never a collected one) can leave an orphan (review round 3, point 2).
+      if (ENDED_WITHOUT_MONEY.includes(p.status) && (remote.status === 'requires_action' || remote.status === 'pending')) {
         // Our attempt already ended but the gateway holds an object that could still be paid: cancel it after this
         // commits and tell Oscar (review round 2, point 2). A late success is still recorded by the state machine.
         await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: p.id, action: 'cancel_orphan' }, { db: bossDb(tx), singletonKey: `orphan:${p.id}` });

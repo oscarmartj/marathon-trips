@@ -11,6 +11,8 @@ import { PaymentScheduleService } from '../../../src/modules/payments/core/sched
 import { succeededPaymentsSource } from '../../../src/modules/payments/core/payable';
 import { SIMULATOR_CHECKOUT_ORIGIN } from '../../../src/modules/payments/adapters/simulator/simulator';
 import { TestApp, makeApp } from '../../support/auth';
+import { ApiError, conflict } from '../../../src/platform/http/api-error';
+import { AppError } from '../../../src/platform/errors/safe-error';
 import { closeCatalogue } from '../../support/catalogue';
 import { cleanBookingEvents, makeBookingFor } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
@@ -505,6 +507,7 @@ describe('gateway errors never end a live attempt by themselves (review G1)', ()
     expect(await sync().run(p!.id, 'cancel_orphan')).toBe('applied');
     expect(sim.find(acc.id, { ref: remote.ref })!.status).toBe('cancelled');
     expect((await paymentsOf(bookingId))[0]!.status).toBe('failed');
+    expect((await t.prisma.task.findFirstOrThrow({ where: { sourceRef: `payments:orphan:${p!.id}` } })).status).toBe('done');
   });
 
   it('a gateway that keeps refusing during expiry still opens the 24-hour task (review round 2, point 1)', async () => {
@@ -521,6 +524,74 @@ describe('gateway errors never end a live attempt by themselves (review G1)', ()
     }
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:unresolved:${p!.id}`, status: 'open' } })).toBe(1);
     expect((await paymentsOf(bookingId))[0]!.liveBookingId).toBe(bookingId);
+  });
+
+  it('the 24-hour task also opens on a refusal of the gateway wrapper or a credential that cannot be decrypted, and closes when the attempt ends (review round 3)', async () => {
+    const { reference, bookingId } = await fresh();
+    await c.pay(reference, { method: 'card' });
+    const [p] = await paymentsOf(bookingId);
+    await expireNow(p!.id);
+    const gateway = t.app.get(ProviderGateway);
+    const later = new Date(Date.now() + 25 * 3_600_000);
+    const refused = vi.spyOn(gateway, 'call').mockRejectedValueOnce(new ApiError(409, 'account_not_accepting_charges', 'x'));
+    await expect(sync().run(p!.id, 'expire', later)).rejects.toMatchObject({ code: 'account_not_accepting_charges' });
+    refused.mockRestore();
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:unresolved:${p!.id}`, status: 'open' } })).toBe(1);
+    await t.prisma.task.updateMany({ where: { sourceRef: `payments:unresolved:${p!.id}` }, data: { status: 'done' } });
+    const undecryptable = vi.spyOn(gateway, 'call').mockRejectedValueOnce(new AppError('crypto_key_version_unavailable', 'x'));
+    await expect(sync().run(p!.id, 'expire', later)).rejects.toMatchObject({ code: 'crypto_key_version_unavailable' });
+    undecryptable.mockRestore();
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:unresolved:${p!.id}`, status: 'open' } })).toBe(1);
+    // The gateway answers again: the attempt expires and its task is closed.
+    expect(await sync().run(p!.id, 'expire', later)).toBe('applied');
+    expect((await paymentsOf(bookingId))[0]!.status).toBe('expired');
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:unresolved:${p!.id}`, status: 'open' } })).toBe(0);
+  });
+
+  it('our own conflicts never open the 24-hour task (only gateway failures do)', async () => {
+    const { reference, bookingId } = await fresh();
+    await c.pay(reference, { method: 'card' });
+    const [p] = await paymentsOf(bookingId);
+    await expireNow(p!.id);
+    const spy = vi.spyOn(t.app.get(PaymentAttemptsService), 'record').mockRejectedValueOnce(conflict('payment_state_changed', 'x'));
+    sim.settle(acc.id, p!.providerPaymentRef!, 'succeeded');
+    await expect(sync().run(p!.id, 'expire', new Date(Date.now() + 25 * 3_600_000))).rejects.toMatchObject({ code: 'payment_state_changed' });
+    spy.mockRestore();
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:unresolved:${p!.id}` } })).toBe(0);
+  });
+
+  it('drive against a webhook, at once: a collected payment never gets an orphan task or job (review round 3, point 2)', async () => {
+    for (let i = 0; i < 3; i++) {
+      const { reference, bookingId } = await fresh();
+      const key = randomUUID();
+      await c.pay(reference, { method: 'card' }, key);
+      const [p] = await paymentsOf(bookingId);
+      const stale = sim.find(acc.id, { paymentId: p!.id })!;
+      sim.settle(acc.id, p!.providerPaymentRef!, 'succeeded');
+      const w = await eventFor(t, acc, p!.id);
+      await Promise.all([c.pay(reference, { method: 'card' }, key), deliver(t, acc, w), t.app.get(PaymentAttemptsService).record(p!.id, { ...stale, status: 'requires_action' }, 'api')]);
+      expect((await paymentsOf(bookingId))[0]!.status).toBe('succeeded');
+      expect(await t.prisma.task.count({ where: { sourceRef: `payments:orphan:${p!.id}` } })).toBe(0);
+      const jobs = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*) AS n FROM pgboss.job WHERE name = 'payments.attempts' AND data->>'paymentId' = $1 AND data->>'action' = 'cancel_orphan'`, p!.id);
+      expect(Number(jobs[0]!.n)).toBe(0);
+    }
+  });
+
+  it('drive against expiry, at once: whatever wins, the gateway object ends cancelled and no orphan task stays open', async () => {
+    for (let i = 0; i < 3; i++) {
+      const { reference, bookingId } = await fresh();
+      const key = randomUUID();
+      await c.pay(reference, { method: 'card' }, key);
+      const [p] = await paymentsOf(bookingId);
+      const stale = sim.find(acc.id, { paymentId: p!.id })!;
+      await expireNow(p!.id);
+      await Promise.allSettled([c.pay(reference, { method: 'card' }, key), sync().run(p!.id, 'expire'), t.app.get(PaymentAttemptsService).record(p!.id, { ...stale, status: 'requires_action' }, 'api')]);
+      const jobs = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*) AS n FROM pgboss.job WHERE name = 'payments.attempts' AND data->>'paymentId' = $1 AND data->>'action' = 'cancel_orphan'`, p!.id);
+      if (Number(jobs[0]!.n) > 0) await sync().run(p!.id, 'cancel_orphan');
+      expect((await paymentsOf(bookingId))[0]!.status).toBe('expired');
+      expect(sim.find(acc.id, { paymentId: p!.id })!.status).toBe('cancelled');
+      expect(await t.prisma.task.count({ where: { sourceRef: `payments:orphan:${p!.id}`, status: 'open' } })).toBe(0);
+    }
   });
 
   it('a gateway-wrapper refusal reaches the customer as a neutral code (review round 2, point 4)', async () => {

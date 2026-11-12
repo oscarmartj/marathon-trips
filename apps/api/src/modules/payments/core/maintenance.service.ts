@@ -54,12 +54,20 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
       WHERE e.status = 'failed' AND e."updatedAt" <= ${new Date(now.getTime() - FAILED_EVENT_MINUTES * 60_000)}
         AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t."sourceRef" = 'payments:webhook_failed:' || e.id::text AND t.status = 'open' AND t."deletedAt" IS NULL)
       ORDER BY e."updatedAt", e.id LIMIT 200`;
+    const flagged: string[] = [];
     for (const ev of failed) {
-      await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
-        title: 'Payment webhook could not be processed',
-        description: `A payment gateway event kept failing (${ev.errorCode ?? 'unknown'}). Check the payment it belongs to and the gateway.`,
-        entityType: 'WebhookEvent', entityId: ev.id, sourceRef: `payments:webhook_failed:${ev.id}`,
-      }));
+      // The event is locked and read again: if processing got through meanwhile, no task (review round 3, point 3).
+      const opened = await this.prisma.$transaction(async (tx) => {
+        const [row] = await tx.$queryRaw<Array<{ status: string }>>`SELECT status::text AS status FROM webhook_events WHERE id = ${ev.id}::uuid FOR UPDATE`;
+        if (row?.status !== 'failed') return false;
+        await this.tasks.createSystemIn(tx, {
+          title: 'Payment webhook could not be processed',
+          description: `A payment gateway event kept failing (${ev.errorCode ?? 'unknown'}). Check the payment it belongs to and the gateway.`,
+          entityType: 'WebhookEvent', entityId: ev.id, sourceRef: `payments:webhook_failed:${ev.id}`,
+        });
+        return true;
+      });
+      if (opened) flagged.push(ev.id);
     }
     let bodiesPurged = 0;
     let rejectionsPurged = 0;
@@ -69,6 +77,6 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     } catch (err) {
       this.logger.error(`payments retention failed: ${safeError(err).code}`);
     }
-    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), failedFlagged: failed.map((f) => f.id), bodiesPurged, rejectionsPurged };
+    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), failedFlagged: flagged, bodiesPurged, rejectionsPurged };
   }
 }

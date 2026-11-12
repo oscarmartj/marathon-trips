@@ -121,6 +121,8 @@ export class PaymentStateMachine {
         payload: { paymentId: p.id, bookingId: p.bookingId }, actorType: 'system',
       });
     }
+    // An attempt that leaves the live states closes its "unresolved" task, whoever ended it (review round 3, point 1).
+    if (LIVE_STATUSES.includes(from) && !live) await this.tasks.closeSystemIn(tx, `payments:unresolved:${p.id}`);
     if (to === 'succeeded' && (from === 'failed' || from === 'cancelled' || from === 'expired')) await this.lateSuccess(tx, p, from, ctx.bookingReference);
     if (to === 'succeeded') await this.checkOverpayment(tx, p, ctx.bookingReference);
     return to;

@@ -2,13 +2,19 @@ import { Inject, Injectable } from '@nestjs/common';
 import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
-import { ApiError, notFound } from '../../../platform/http/api-error';
+import { notFound } from '../../../platform/http/api-error';
 import { LIVE_STATUSES, PaymentStateMachine, lockPayment } from './attempt-state';
 import type { AttemptEvent } from './attempt-state';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import { ProviderGateway } from './gateway';
 import type { ProviderPayment } from './provider';
-import { ProviderError } from './provider';
+
+/** A failure of a call to the gateway (whatever it threw), carried up to run() with the original error. */
+class GatewayCallFailure extends Error {
+  constructor(readonly original: unknown) {
+    super('gateway call failed');
+  }
+}
 
 export type SyncAction = 'sync' | 'cancel' | 'expire' | 'cancel_orphan';
 export type SyncOutcome = 'not_live' | 'not_due' | 'applied' | 'unresolved' | 'still_pending';
@@ -46,12 +52,23 @@ export class PaymentAttemptSyncService {
     try {
       return await this.settle(p, action, now);
     } catch (err) {
-      // A gateway that keeps failing (rotated credentials…) must not hide a blocked booking: past 24 hours the task is
-      // opened anyway, then the error goes back to the job and the sweep tries again (review round 2, point 1).
-      if ((err instanceof ProviderError || err instanceof ApiError) && now.getTime() - p.pendingExpiresAt.getTime() >= UNRESOLVED_AFTER_MS) {
-        await this.unresolved(p.id, p.pendingExpiresAt, now);
+      // A gateway that keeps failing (rotated credentials, a retired key version, a refused call…) must not hide a
+      // blocked booking: past 24 hours the task is opened anyway, then the error goes back to the job and the sweep
+      // tries again (review rounds 2 and 3). Only failures of the gateway call count, never our own conflicts.
+      if (err instanceof GatewayCallFailure) {
+        if (now.getTime() - p.pendingExpiresAt.getTime() >= UNRESOLVED_AFTER_MS) await this.unresolved(p.id, p.pendingExpiresAt, now);
+        throw err.original;
       }
       throw err;
+    }
+  }
+
+  /** Every gateway call of the expiry and cancellation paths, marked so the caller can tell its failures apart. */
+  private async gw<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      throw new GatewayCallFailure(err);
     }
   }
 
@@ -69,14 +86,18 @@ export class PaymentAttemptSyncService {
       ? await this.gateway.call(accountId, 'cancel', (provider, ctx) => provider.cancelPayment(ctx, ref, `orphan:${paymentId}:cancel`))
       : remote;
     if (after.status === 'succeeded') await this.attempts.record(paymentId, after, 'sweep');
+    if (after.status === 'cancelled' || after.status === 'failed') {
+      // The gateway confirmed nothing can be paid any more: the orphan task is done (review round 3, point 2).
+      await this.prisma.$transaction((tx) => this.tasks.closeSystemIn(tx, `payments:orphan:${paymentId}`));
+    }
     return after.status === 'cancelled' || after.status === 'failed' || after.status === 'succeeded' ? 'applied' : 'still_pending';
   }
 
   private async settle(p: { id: string; providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string; pendingExpiresAt: Date }, action: 'cancel' | 'expire', now: Date): Promise<SyncOutcome> {
-    const remote = await this.retrieve(p);
+    const remote = await this.gw(() => this.retrieve(p));
     if (!remote) return this.unresolved(p.id, p.pendingExpiresAt, now);
     if (remote.status === 'requires_action') {
-      const after = await this.gateway.call(p.providerAccountId, 'cancel', (provider, ctx) => provider.cancelPayment(ctx, remote.ref, `${p.idempotencyKey}:cancel`));
+      const after = await this.gw(() => this.gateway.call(p.providerAccountId, 'cancel', (provider, ctx) => provider.cancelPayment(ctx, remote.ref, `${p.idempotencyKey}:cancel`)));
       return this.finish(p.id, after, action, p.pendingExpiresAt, now);
     }
     return this.finish(p.id, remote, action, p.pendingExpiresAt, now);
@@ -104,6 +125,9 @@ export class PaymentAttemptSyncService {
     if (now.getTime() - expiresAt.getTime() >= UNRESOLVED_AFTER_MS) {
       await this.prisma.$transaction(async (tx) => {
         const b = await this.attempts.lockBookingOf(tx, paymentId);
+        // Only while it is still live: one that ended meanwhile needs no task (its end closes any).
+        const p = await lockPayment(tx, paymentId);
+        if (!p || !LIVE_STATUSES.includes(p.status)) return;
         await this.tasks.createSystemIn(tx, {
           title: `Payment attempt unresolved on booking ${b?.reference ?? 'unknown'}`,
           description: 'The payment gateway has not confirmed how this payment attempt ended. It still blocks new payments for the booking. Check the gateway.',
