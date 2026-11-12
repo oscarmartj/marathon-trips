@@ -1,5 +1,5 @@
 // ---- Task 7.4: automations (trigger, conditions, actions, test mode and run log) ----
-// Plan: docs/plans/7.4-automations.md. CHECKs, partial unique index and triggers live in migration 0019.
+// Plan: docs/plans/7.4-automations.md. CHECKs, partial unique index and triggers live in migration 0020.
 // A rule never moves money or changes permissions: its actions come from a closed list in code (ActionRegistry).
 
 enum AutomationTriggerType {
@@ -46,7 +46,7 @@ model AutomationRule {
   owner       User                  @relation(fields: [ownerUserId, ownerKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii optimistic lock
   version     Int                   @default(0)
-  /// @nopii soft delete only (the API role has no DELETE on this table, migration 0019)
+  /// @nopii soft delete only (the API role has no DELETE on this table, migration 0020)
   deletedAt   DateTime?             @db.Timestamptz(3)
   deletedById String?               @db.Uuid
   /// @nopii
