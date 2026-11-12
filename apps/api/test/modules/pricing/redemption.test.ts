@@ -1,5 +1,7 @@
 // Redeeming and releasing promo codes with real concurrent transactions (plan docs/plans/2.2-pricing-rules-promo-codes.md,
 // sections 8 and 15, points 2, 3 and 9). Task 2.4 calls these services inside its request transaction.
+// Since 2.4 a redemption points at a real booking of its customer (foreign keys): each redemption gets one from
+// makeBookingFor, created before the concurrent part starts. The assertions are the ones of 2.2, unchanged.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Prisma } from '../../../src/generated/prisma/client';
 import { PromoRedemptionService, QuoteService, REDEEM_TX_OPTIONS, publicRedemptionError } from '../../../src/modules/pricing';
@@ -9,6 +11,7 @@ import { ApiError } from '../../../src/platform/http/api-error';
 import { TestApp, makeApp } from '../../support/auth';
 import { Client, closeCatalogue, staffClient } from '../../support/catalogue';
 import { createCode, freshCode, promoBody } from '../../support/adjustments';
+import { makeBookingFor, makeCustomer } from '../../support/bookings';
 import { pricedWorld, quoteBody } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 
@@ -31,13 +34,17 @@ afterAll(async () => {
 const RC = Prisma.TransactionIsolationLevel.ReadCommitted;
 const RR = Prisma.TransactionIsolationLevel.RepeatableRead;
 const uuid = () => crypto.randomUUID();
+type Who = { customerId: string; bookingId: string };
+/** A booking (and its customer, unless given) for a redemption to point at. */
+const who = (customerId?: string): Promise<Who> => makeBookingFor(t, w, customerId);
+const whos = (n: number, customerId?: string): Promise<Who[]> => Promise.all(Array.from({ length: n }, () => who(customerId)));
 const code = (over: Record<string, unknown> = {}) => createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id, ...over });
 const counted = async (id: string) => (await t.prisma.promoCode.findUniqueOrThrow({ where: { id } })).redeemedCount;
 const active = (promoCodeId: string) => t.prisma.promoRedemption.count({ where: { promoCodeId, releasedAt: null } });
 
 /** One redemption in its own transaction, as 2.4's request will run it. */
-const redeem = (c: { id: string; version: number }, customerId: string, opts: { isolationLevel?: Prisma.TransactionIsolationLevel; maxAttempts?: number; bookingId?: string } = {}) =>
-  runTransaction(t.prisma, (tx) => svc.redeemIn(tx, { promoCodeId: c.id, promoCodeVersion: c.version, bookingId: opts.bookingId ?? uuid(), customerId, now: new Date() }), {
+const redeem = (c: { id: string; version: number }, x: Who, opts: { isolationLevel?: Prisma.TransactionIsolationLevel; maxAttempts?: number } = {}) =>
+  runTransaction(t.prisma, (tx) => svc.redeemIn(tx, { promoCodeId: c.id, promoCodeVersion: c.version, bookingId: x.bookingId, customerId: x.customerId, now: new Date() }), {
     isolationLevel: opts.isolationLevel ?? REDEEM_TX_OPTIONS.isolationLevel, maxAttempts: opts.maxAttempts, maxWait: 20_000, timeout: 20_000,
   });
 
@@ -62,8 +69,8 @@ describe('limits under concurrency', () => {
     ['REPEATABLE READ, 2 per customer', RR, 2, 10],
   ])('max_per_customer_concurrent_redemptions: %s — 8 at once, exactly the maximum win', async (_n, isolationLevel, max, maxAttempts) => {
     const c = await code({ maxPerCustomer: max });
-    const customer = uuid();
-    const results = await Promise.allSettled(Array.from({ length: 8 }, () => redeem(c, customer, { isolationLevel, maxAttempts })));
+    const mine = await whos(8, await makeCustomer(t));
+    const results = await Promise.allSettled(mine.map((x) => redeem(c, x, { isolationLevel, maxAttempts })));
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(max);
     const codes = losersAre409(results);
     expect(codes.every((x) => x === 'promo_code_customer_limit' || x === 'busy_try_again')).toBe(true);
@@ -75,7 +82,7 @@ describe('limits under concurrency', () => {
     ['REPEATABLE READ', RR, 10],
   ])('max_redemptions_concurrent: %s — 3 of 8 customers win', async (_n, isolationLevel, maxAttempts) => {
     const c = await code({ maxRedemptions: 3 });
-    const results = await Promise.allSettled(Array.from({ length: 8 }, () => redeem(c, uuid(), { isolationLevel, maxAttempts })));
+    const results = await Promise.allSettled((await whos(8)).map((x) => redeem(c, x, { isolationLevel, maxAttempts })));
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(3);
     expect(losersAre409(results).every((x) => x === 'promo_code_unavailable' || x === 'busy_try_again')).toBe(true);
     expect([await counted(c.id), await active(c.id)]).toEqual([3, 3]);
@@ -86,14 +93,14 @@ describe('limits under concurrency', () => {
     ['REPEATABLE READ with enough attempts', RR, 10],
   ])('redeem_contention_with_capacity_all_succeed: %s — 8 at once, room for 8', async (_n, isolationLevel, maxAttempts) => {
     const c = await code({ maxRedemptions: 8 });
-    const results = await Promise.allSettled(Array.from({ length: 8 }, () => redeem(c, uuid(), { isolationLevel, maxAttempts })));
+    const results = await Promise.allSettled((await whos(8)).map((x) => redeem(c, x, { isolationLevel, maxAttempts })));
     expect(results.filter((r) => r.status === 'rejected').map((r) => String((r as PromiseRejectedResult).reason))).toEqual([]);
     expect(await counted(c.id)).toBe(8);
   });
 
   it('REPEATABLE READ with too few attempts: the losers get 409 busy_try_again, never a 500 or 40001', async () => {
     const c = await code();
-    const results = await Promise.allSettled(Array.from({ length: 8 }, () => redeem(c, uuid(), { isolationLevel: RR, maxAttempts: 1 })));
+    const results = await Promise.allSettled((await whos(8)).map((x) => redeem(c, x, { isolationLevel: RR, maxAttempts: 1 })));
     const codes = losersAre409(results);
     expect(codes.every((x) => x === 'busy_try_again')).toBe(true);
     expect(await counted(c.id)).toBe(results.filter((r) => r.status === 'fulfilled').length);
@@ -102,7 +109,8 @@ describe('limits under concurrency', () => {
   it('promo_max_below_redeemed_concurrent_is_409: lowering the limit while codes are redeemed is 200 or 409, never 500', async () => {
     const c = await code({ maxRedemptions: 5 });
     const patch = () => admin.patch(`/admin/pricing/promo-codes/${c.id}`, { ...promoBody('X'), code: undefined, scopeType: undefined, maxRedemptions: 2, version: c.version });
-    const [patched, ...redeemed] = await Promise.allSettled([patch(), ...Array.from({ length: 4 }, () => redeem(c, uuid()))]);
+    const four = await whos(4);
+    const [patched, ...redeemed] = await Promise.allSettled([patch(), ...four.map((x) => redeem(c, x))]);
     expect(patched.status).toBe('fulfilled');
     const res = (patched as PromiseFulfilledResult<Awaited<ReturnType<typeof patch>>>).value;
     expect([200, 409]).toContain(res.status);
@@ -117,60 +125,61 @@ describe('limits under concurrency', () => {
 describe('one booking, one code', () => {
   it('redeem_idempotent_same_booking: the same request twice counts once', async () => {
     const c = await code();
-    const bookingId = uuid();
-    const customer = uuid();
-    const first = await redeem(c, customer, { bookingId });
-    const again = await redeem(c, customer, { bookingId });
+    const x = await who();
+    const first = await redeem(c, x);
+    const again = await redeem(c, x);
     expect([first.created, again.created, again.redemptionId]).toEqual([true, false, first.redemptionId]);
     expect(await counted(c.id)).toBe(1);
   });
 
   it('one_active_redemption_per_booking: a second code on the same booking is refused until the first is released', async () => {
     const [a, b] = [await code(), await code()];
-    const bookingId = uuid();
-    const customer = uuid();
-    await redeem(a, customer, { bookingId });
-    await expect(redeem(b, customer, { bookingId })).rejects.toMatchObject({ status: 409, code: 'booking_has_promo_code' });
+    const x = await who();
+    const { bookingId } = x;
+    await redeem(a, x);
+    await expect(redeem(b, x)).rejects.toMatchObject({ status: 409, code: 'booking_has_promo_code' });
     expect(await counted(b.id)).toBe(0);
     expect(await runTransaction(t.prisma, (tx) => svc.releaseIn(tx, { promoCodeId: a.id, bookingId, now: new Date() }))).toBe(true);
-    await redeem(b, customer, { bookingId });
+    await redeem(b, x);
     expect([await counted(a.id), await counted(b.id)]).toEqual([0, 1]);
   });
 
   it('release_once_concurrent: two releases at once give back one redemption', async () => {
     const c = await code();
-    const bookingId = uuid();
-    await redeem(c, uuid(), { bookingId });
+    const x = await who();
+    const { bookingId } = x;
+    await redeem(c, x);
     const releases = await Promise.all([1, 2].map(() => runTransaction(t.prisma, (tx) => svc.releaseIn(tx, { promoCodeId: c.id, bookingId, now: new Date() }), REDEEM_TX_OPTIONS)));
     expect(releases.sort()).toEqual([false, true]);
     expect([await counted(c.id), await active(c.id)]).toEqual([0, 0]);
     // a released redemption is not redeemed again for the same booking
-    await expect(redeem(c, uuid(), { bookingId })).rejects.toMatchObject({ status: 409, code: 'promo_code_unavailable' });
+    await expect(redeem(c, { customerId: await makeCustomer(t), bookingId })).rejects.toMatchObject({ status: 409, code: 'promo_code_unavailable' });
   });
 
   it('released_redemption_frees_customer_quota and the global count', async () => {
     const c = await code({ maxPerCustomer: 1, maxRedemptions: 2 });
-    const customer = uuid();
-    const first = uuid();
-    await redeem(c, customer, { bookingId: first });
-    await expect(redeem(c, customer)).rejects.toMatchObject({ code: 'promo_code_customer_limit' });
-    await redeem(c, uuid());
-    await expect(redeem(c, uuid())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
-    await runTransaction(t.prisma, (tx) => svc.releaseIn(tx, { promoCodeId: c.id, bookingId: first, now: new Date() }));
-    await redeem(c, customer);
+    const customer = await makeCustomer(t);
+    const first = await who(customer);
+    await redeem(c, first);
+    await expect(redeem(c, await who(customer))).rejects.toMatchObject({ code: 'promo_code_customer_limit' });
+    await redeem(c, await who());
+    await expect(redeem(c, await who())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
+    await runTransaction(t.prisma, (tx) => svc.releaseIn(tx, { promoCodeId: c.id, bookingId: first.bookingId, now: new Date() }));
+    await redeem(c, await who(customer));
     expect([await counted(c.id), await active(c.id)]).toEqual([2, 2]);
   });
 
   it('redeem_rejects_unusable_code: disabled, expired or archived; a release still works after archiving', async () => {
     const disabled = await code({ enabled: false });
-    await expect(redeem(disabled, uuid())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
+    await expect(redeem(disabled, await who())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
     const expired = await code({ validFrom: new Date(Date.now() - 7_200_000).toISOString(), validTo: new Date(Date.now() - 3_600_000).toISOString() });
-    await expect(redeem(expired, uuid())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
+    await expect(redeem(expired, await who())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
     const c = await code();
-    const bookingId = uuid();
-    await redeem(c, uuid(), { bookingId });
+    const x = await who();
+    const { bookingId } = x;
+    await redeem(c, x);
     const archived = (await admin.post(`/admin/pricing/promo-codes/${c.id}/archive`, { version: c.version })).body;
-    await expect(redeem({ id: c.id, version: archived.version }, uuid())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
+    await expect(redeem({ id: c.id, version: archived.version }, await who())).rejects.toMatchObject({ code: 'promo_code_unavailable' });
     expect(await runTransaction(t.prisma, (tx) => svc.releaseIn(tx, { promoCodeId: c.id, bookingId, now: new Date() }))).toBe(true);
     expect(await counted(c.id)).toBe(0);
   });
@@ -187,7 +196,7 @@ describe('the code the quote saw', () => {
     expect(none.promoRef).toBeNull();
     // the code changes between the quote and the redemption: 409, nothing counted
     await admin.patch(`/admin/pricing/promo-codes/${c.id}`, { ...promoBody('X'), code: undefined, scopeType: undefined, valueBps: 2000, version: c.version });
-    await expect(redeem({ id: quoted.promoRef!.id, version: quoted.promoRef!.version }, uuid())).rejects.toMatchObject({ status: 409, code: 'promo_code_changed' });
+    await expect(redeem({ id: quoted.promoRef!.id, version: quoted.promoRef!.version }, await who())).rejects.toMatchObject({ status: 409, code: 'promo_code_changed' });
     expect(await counted(c.id)).toBe(0);
   });
 
@@ -202,8 +211,7 @@ describe('the code the quote saw', () => {
 describe('redemption_rows_immutable: what the database guarantees', () => {
   it('only the release changes, once; never a delete or a truncate; active mirrors the booking', async () => {
     const c = await code();
-    const bookingId = uuid();
-    const { redemptionId } = await redeem(c, uuid(), { bookingId });
+    const { redemptionId } = await redeem(c, await who());
     const sql = (q: string, ...p: unknown[]) => t.prisma.$executeRawUnsafe(q, ...p);
     await expect(sql(`UPDATE promo_redemptions SET "customerId" = $2::uuid WHERE id = $1::uuid`, redemptionId, uuid())).rejects.toThrow(/only released, once/);
     await expect(sql(`UPDATE promo_redemptions SET "releasedAt" = now() WHERE id = $1::uuid`, redemptionId)).rejects.toThrow(/only released, once/);

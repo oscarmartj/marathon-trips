@@ -55,7 +55,9 @@
     "verifySignIn": "Finish signing in",
     "alertsConfirm": "Confirm your alert",
     "alertsUnsubscribe": "Unsubscribe from alerts",
-    "page": "Page"
+    "page": "Page",
+    "bookingRequest": "Request a trip",
+    "bookingRequestSent": "Your booking request"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -2096,5 +2098,66 @@
   },
   "pages": {
     "notFoundTitle": "Page not found"
+  },
+  "bookingRequest": {
+    "title": "Request this trip",
+    "requestThisTrip": "Request this trip",
+    "backToBuilder": "Back to your trip",
+    "notABooking": "This sends a booking request. It is not a confirmed booking and you will not be charged now.",
+    "checking": "Checking whether you are signed in…",
+    "signInFirst": "Sign in with your email address to send a request. We will bring you back here.",
+    "signIn": "Sign in to continue",
+    "contactHeading": "Your contact details",
+    "givenName": "Given name",
+    "familyName": "Family name",
+    "phone": "Mobile number (optional)",
+    "country": "Country of residence (two-letter code, such as AU)",
+    "whatHappensNext": "We check availability with our hotels and the race, then get back to you. Places are held for you while we look.",
+    "send": "Send booking request",
+    "sending": "Sending…",
+    "errors": {
+      "network": "We could not reach our server. Check your connection and try again.",
+      "signIn": "Your session has ended. Sign in again to send your request.",
+      "notOpen": "This trip is not open for requests any more.",
+      "invalid": "Some details are not valid. Check them and try again.",
+      "tooMany": "Too many attempts. Wait a little and try again.",
+      "soldOut": "Some of what you chose has just sold out. Go back to your trip and change it.",
+      "promo": "That code can no longer be used. Remove it to continue.",
+      "country": "For now we can only take requests from residents of Australia.",
+      "tooManyOpen": "You already have open requests with us. We will be in touch about them first.",
+      "tooManyPlaces": "This request would hold more places than we can keep for one person. Contact us for a group booking.",
+      "changed": "This trip changed while you were booking. Check the price and try again.",
+      "busy": "Many people are booking right now. Try again in a moment.",
+      "notReady": "We could not send your request. Try again shortly.",
+      "generic": "Something went wrong. Try again shortly."
+    },
+    "confirmation": {
+      "title": "Your booking request",
+      "heading": "Request received: this is not a confirmed booking yet",
+      "statusHeading": "Your booking request",
+      "notABooking": "We have your booking request. It is a request, not a confirmed booking.",
+      "nothingCharged": "We have not charged you anything.",
+      "next": "We will check availability and be in touch. Your places are held until the end of {date} (Brisbane time).",
+      "reference": "Reference",
+      "dates": "Dates",
+      "dateRange": "{from} to {to}",
+      "total": "Total price",
+      "deposit": "Deposit if approved",
+      "depositLine": "{amount}, with the balance due by {date}",
+      "notFoundTitle": "Booking request",
+      "notFoundBody": "We could not show this request. Sign in with the email address you used to send it."
+    },
+    "status": {
+      "approved": "We have approved your request. We will be in touch about the next step.",
+      "declined": "We could not offer this trip. Your request is closed.",
+      "expired": "This request has expired.",
+      "cancelled": "This request is closed.",
+      "deposit_paid": "Your deposit is paid.",
+      "confirmed": "Your booking is confirmed.",
+      "balance_paid": "Your booking is paid in full.",
+      "completed": "This trip has finished.",
+      "refunded": "This booking was refunded.",
+      "requested": "We have your request."
+    }
   }
 }

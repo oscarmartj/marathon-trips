@@ -39,6 +39,7 @@ model PriceVersion {
   roomRates          RoomRate[]
   participationRates ParticipationRate[]
   extraRates         ExtraRate[]
+  bookingSnapshots   BookingSnapshot[]
 
   @@unique([id, currency])
   @@index([packageId, status])
@@ -261,13 +262,15 @@ model PromoCode {
 }
 
 /// One use of a code by one booking (plan 2.2, section 8). Only releasedAt (and activeBookingId with it) changes, once.
-/// bookingId and customerId get their foreign keys from task 2.4, which creates Booking and Customer.
+/// The redemption belongs to the booking's customer: (bookingId, customerId) points at the booking (task 2.4).
 model PromoRedemption {
   id              String    @id @default(uuid(7)) @db.Uuid
   promoCodeId     String    @db.Uuid
   promoCode       PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   bookingId       String    @db.Uuid
   customerId      String    @db.Uuid
+  booking         Booking   @relation(fields: [bookingId, customerId], references: [id, customerId], onDelete: Restrict, onUpdate: Restrict)
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// The booking while the redemption is active, null once released: one active redemption per booking (unique).
   activeBookingId String?   @unique @db.Uuid
   /// @nopii timestamp

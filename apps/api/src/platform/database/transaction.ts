@@ -5,6 +5,12 @@ import type { PrismaService } from './prisma.service';
 /** SQLSTATEs after which the whole transaction can simply run again (plan 0.1, 6.3). */
 const RETRYABLE = new Set(['40001', '40P01']);
 
+/**
+ * How many times runTransaction has run a transaction again, by cause, since the process started. Read by tests (task
+ * 2.4: requests that lock pools in opposite orders must never deadlock); nothing else depends on it.
+ */
+export const TRANSACTION_RETRIES = { deadlock: 0, serialisation: 0 };
+
 /** True for a serialisation failure or a deadlock, however Prisma wraps it (P2034 or the raw SQLSTATE). */
 export function isRetryableTransactionError(err: unknown): boolean {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034') return true;
@@ -35,6 +41,9 @@ export async function runTransaction<T>(prisma: PrismaService, fn: (tx: Prisma.T
       return await prisma.$transaction(fn, { isolationLevel: opts.isolationLevel, timeout: opts.timeout, maxWait: opts.maxWait });
     } catch (err) {
       if (!isRetryableTransactionError(err)) throw err;
+      const text = err instanceof Error ? `${err.message} ${JSON.stringify((err as { meta?: unknown }).meta ?? {})}` : '';
+      if (/40P01|deadlock detected/.test(text)) TRANSACTION_RETRIES.deadlock++;
+      else TRANSACTION_RETRIES.serialisation++;
       if (attempt >= attempts) throw conflict('busy_try_again', 'Many people are doing this at once. Try again.');
       await new Promise((resolve) => setTimeout(resolve, 5 + Math.floor(Math.random() * 20 * attempt)));
     }

@@ -2,7 +2,8 @@
  * The web app is the API's only public door (plan 4.1, decision 2 of the 0.3 plan): the browser calls /api/* on the
  * web origin and this proxy forwards to API_BASE_URL. Only listed headers cross, in both directions (T16, M1).
  */
-export const FORWARD_REQUEST_HEADERS = ['cookie', 'origin', 'x-mt-csrf', 'content-type', 'accept', 'user-agent', 'x-request-id'] as const;
+// idempotency-key: booking requests (task 2.4) carry one, so a retried submission makes one request.
+export const FORWARD_REQUEST_HEADERS = ['cookie', 'origin', 'x-mt-csrf', 'content-type', 'accept', 'user-agent', 'x-request-id', 'idempotency-key'] as const;
 export const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'x-request-id'] as const;
 
 export const API_KEY_AUTHORIZATION = /^Bearer mtk_[a-z2-7]{12}_[A-Za-z0-9_-]{43}$/;

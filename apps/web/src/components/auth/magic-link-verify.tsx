@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, takeFragmentToken } from '@/lib/api-client';
+import { takeReturnTo } from '@/lib/booking-request';
 import { t } from '@/lib/i18n';
 import { Status } from './field';
 
@@ -31,7 +32,8 @@ export function MagicLinkVerify() {
 
   async function confirm() {
     const r = await api('/auth/customer/magic-link/verify', { method: 'POST', body: { token } });
-    if (r.status === 200) window.location.assign('/account');
+    // Back to the booking request that sent the person here (task 2.4), if any and if it is one of our request pages.
+    if (r.status === 200) window.location.assign(takeReturnTo(window.localStorage) ?? '/account');
     else setState('invalid');
   }
 

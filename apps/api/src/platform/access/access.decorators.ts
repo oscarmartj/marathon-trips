@@ -8,8 +8,12 @@ import type { UserKind } from './auth-context';
 export const ACCESS_MARK = 'access-mark';
 
 export type OwnedBySpec =
-  /** The route acts only on the caller's own user: it takes no resource id (checked by a test). */
-  | { kind: UserKind; resource: 'self' }
+  /**
+   * The route acts only on the caller's own user: it takes no resource id (checked by a test), except the body keys
+   * named in `publicRefs`, which must be ids of public catalogue records, never of another customer's data (task 2.4:
+   * the package of a booking request).
+   */
+  | { kind: UserKind; resource: 'self'; publicRefs?: readonly string[] }
   /** A customer resource: `fixture` names the test data that proves another customer is refused. */
   | { kind: 'customer'; resource: string; fixture: string; owns: (ctx: { userId: string; params: Record<string, string> }) => Promise<boolean> };
 

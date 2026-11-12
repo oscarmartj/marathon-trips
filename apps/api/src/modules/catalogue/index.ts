@@ -2,7 +2,7 @@
 export { CatalogueModule } from './catalogue.module';
 export { catalogueManifest, CATALOGUE_PERMISSIONS } from './manifest';
 export { InventoryService, stockOf } from './inventory.service';
-export type { HoldContext, StockState } from './inventory.service';
+export type { DemandConfiguration, HoldContext, StockState } from './inventory.service';
 export { CatalogueChangeGuards, PackageOpenGates } from './open-gates';
 export type { OpenGate, OpenGateResult, GatedPackage, ChangeGuard, ChangeTarget } from './open-gates';
 export { PackagePricingReader } from './pricing-view';

@@ -18,6 +18,8 @@ export const publicRoutes: readonly RouteDef[] = [
   { path: '/races', file: '(public)/races/page.tsx', labelKey: 'nav.races', nav: true },
   { path: '/races/[slug]', file: '(public)/races/[slug]/page.tsx', labelKey: 'nav.race' },
   { path: '/races/[slug]/build', file: '(public)/races/[slug]/build/page.tsx', labelKey: 'nav.build' },
+  { path: '/races/[slug]/request', file: '(public)/races/[slug]/request/page.tsx', labelKey: 'nav.bookingRequest' },
+  { path: '/trips/requests/[reference]', file: '(public)/trips/requests/[reference]/page.tsx', labelKey: 'nav.bookingRequestSent' },
   { path: '/checkout', file: '(public)/checkout/page.tsx', labelKey: 'nav.checkout' },
   { path: '/about', file: '(public)/about/page.tsx', labelKey: 'nav.about', nav: true, footer: 'company' },
   { path: '/pages/[slug]', file: '(public)/pages/[slug]/page.tsx', labelKey: 'nav.page' },

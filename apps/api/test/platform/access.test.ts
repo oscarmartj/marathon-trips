@@ -65,7 +65,8 @@ describe('access marks (plan 4.1)', () => {
     const { problems, checked } = await checkOwnedRoutes(t, OWNED_ROUTE_FIXTURES, a, b);
     expect(problems).toEqual([]);
     expect(checked).toBeGreaterThanOrEqual(5);
-  });
+    // Customer-resource fixtures build real data (task 2.4: a priced, open package and a booking request).
+  }, 60_000);
 
   it('the owned-route harness catches a leaky route, a missing fixture and self routes that take ids', async () => {
     let db: TestApp['prisma'] | null = null;
@@ -91,7 +92,8 @@ describe('access marks (plan 4.1)', () => {
           return { asOwner: () => tt.http().get(`/probe/${path}/${id}`).set('Cookie', owner.cookie), asOther: () => tt.http().get(`/probe/${path}/${id}`).set('Cookie', other.cookie) };
         },
       });
-      const { problems } = await checkOwnedRoutes(probe, { probeSession: fixture('sessions'), probeLeaky: fixture('leaky') }, a, b);
+      // The app's own customer-resource routes (task 2.4 on) bring their fixtures; the probes add theirs.
+      const { problems } = await checkOwnedRoutes(probe, { ...OWNED_ROUTE_FIXTURES, probeSession: fixture('sessions'), probeLeaky: fixture('leaky') }, a, b);
       expect(problems.sort()).toEqual([
         'GET /probe/leaky/:id: other customer got 200, expected 404',
         'GET /probe/self-query: self route reads the query',
@@ -101,7 +103,7 @@ describe('access marks (plan 4.1)', () => {
     } finally {
       await probe.close();
     }
-  });
+  }, 60_000);
 
   it('a handler mark never hides a controller mark: two marks at any level are denied and reported', async () => {
     @Controller('probe2')

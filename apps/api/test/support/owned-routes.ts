@@ -45,7 +45,9 @@ export async function checkOwnedRoutes(t: TestApp, fixtures: Record<string, Owne
       const inputs = handlerInputs(r.controllerClass, r.handler);
       if (/:/.test(r.path) || inputs.params) problems.push(`${name}: self route with a path parameter`);
       if (inputs.query) problems.push(`${name}: self route reads the query`);
-      const ids = inputs.bodyKeys.filter((k) => /id$|ids$/i.test(k));
+      // Only declared references to public catalogue records may be ids (task 2.4); anything else is a resource id.
+      const publicRefs = new Set(mark.spec.publicRefs ?? []);
+      const ids = inputs.bodyKeys.filter((k) => /id$|ids$/i.test(k) && !publicRefs.has(k));
       if (ids.length) problems.push(`${name}: self route takes ${ids.join(', ')} in the body`);
       checked++;
       continue;

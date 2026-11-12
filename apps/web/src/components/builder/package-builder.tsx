@@ -225,6 +225,14 @@ export function PackageBuilder({ pkg, initial, urlBase }: { pkg: PackageDetail; 
         <h2 id="result-heading">{t('builder.resultHeading')}</h2>
         {'state' in result ? <p>{t('builder.updating')}</p> : null}
         {!('state' in result) && result.ok ? <QuoteSummary pkg={pkg} breakdown={result.breakdown} /> : null}
+        {!('state' in result) && result.ok ? (
+          <p>
+            {/* Same configuration, on the request page next to this one (task 2.4); the price is asked again there. */}
+            <a className="btn" href={`request${urlBase}&${builderToSearch(state)}`}>
+              {t('bookingRequest.requestThisTrip')}
+            </a>
+          </p>
+        ) : null}
         {!('state' in result) && !result.ok ? <p className="form-error" role="alert">{t(quoteErrorKey(result.status))}</p> : null}
       </section>
     </div>
