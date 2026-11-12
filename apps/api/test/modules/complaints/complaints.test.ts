@@ -281,7 +281,14 @@ describe('editing and the owner', () => {
     const unassigned = must(await admin.patch(`/admin/complaints/${c.id}`, { ownerId: null, version: 1 }), 'unassign').body;
     expect(unassigned.owner).toBeNull();
     const owners = must(await admin.get('/admin/complaints/owners'), 'owners').body;
-    expect(owners.items.map((o: { id: string }) => o.id)).toContain(admin.staff.id);
+    // The list is capped, so on a busy test database this staff member may not be on it: check its shape and who is left out.
+    expect(owners.items.length).toBeLessThanOrEqual(200);
+    for (const o of owners.items) expect(Object.keys(o).sort()).toEqual(['email', 'id']);
+    const leaver = await staffClient(t, []);
+    await t.prisma.user.update({ where: { id: leaver.staff.id }, data: { status: 'disabled' } });
+    const disabled = await admin.patch(`/admin/complaints/${c.id}`, { ownerId: leaver.staff.id, version: 2 });
+    expect([disabled.status, disabled.body.code]).toEqual([422, 'owner_unknown']);
+    expect((await admin.get('/admin/complaints/owners')).body.items.map((o: { id: string }) => o.id)).not.toContain(leaver.staff.id);
   });
 
   it('changing a deadline needs a reason and an order that still makes sense, and the reason is in the history', async () => {
