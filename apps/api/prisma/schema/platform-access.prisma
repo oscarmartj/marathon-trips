@@ -66,6 +66,7 @@ model User {
   loginTokens          LoginToken[]
   roles                UserRole[]
   apiKeys              ApiKey[]
+  automationRules      AutomationRule[]
   customer             Customer?
 
   @@unique([kind, email])

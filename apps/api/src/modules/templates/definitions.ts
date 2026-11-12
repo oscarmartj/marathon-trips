@@ -75,6 +75,23 @@ export const TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [
       body: ['Hi {{givenName}},', '', 'We have prepared a quote for you: {{trip}}.', '', 'Total: {{total}}. We hold this price until {{expiresAt}} (Brisbane time).', '', 'Accepting it reserves your places and does not take any payment. We will write to you about the next steps.', '', 'Review and accept it here: {{link}}', '', '{{brandName}}'].join('\n'),
     },
   },
+  // Task 7.4: emails an automation may send. Customer notices are service messages about the customer's own booking or
+  // quote, never promotions, and are not sent to an address on the suppression list. The staff notice goes to the
+  // rule's owner and carries no customer name, address or amount.
+  ...[1, 2, 3].map((n): TemplateDefinition => ({
+    channel: 'email', key: `automations.customer_notice_${n}`,
+    label: `Automation customer notice ${n} (service message about their booking or quote, no promotions)`,
+    variables: [GIVEN, REFERENCE, TRIP, v('link', 'Link to the customer’s booking or quote page', 'https://example.test/trips/requests/BK-7QX4MD'), BRAND],
+    starter: { subject: 'About your booking {{reference}}', body: ['Hi {{givenName}},', '', 'A note about {{trip}}.', '', 'Details: {{link}}', '', '{{brandName}}'].join('\n') },
+  })),
+  {
+    channel: 'email', key: 'automations.staff_notice', label: 'Automation notice to staff (the rule’s owner)',
+    variables: [
+      v('ruleName', 'The automation’s name', 'New request follow-up'), v('reference', 'The booking or quote reference, if the rule is about one', 'BK-7QX4MD'),
+      v('adminLink', 'Link to the record in the panel', 'https://example.test/admin/bookings/0190a1b2-0000-7000-8000-000000000000'), BRAND,
+    ],
+    starter: { subject: 'Automation: {{ruleName}}', body: ['The automation “{{ruleName}}” ran.', '', 'Record: {{reference}} {{adminLink}}', '', '{{brandName}}'].join('\n') },
+  },
   { channel: 'document', key: 'confirmation', label: 'Booking confirmation', variables: documentVars, starter: documentStarter('Booking confirmation', 'This confirms the booking below.') },
   { channel: 'document', key: 'itinerary', label: 'Itinerary', variables: documentVars, starter: { subject: 'Your itinerary', body: ['Your itinerary for {{trip}}.', '', '{{itinerary}}', '', 'Booking reference: {{reference}}', '', '{{brandName}}'].join('\n') } },
   { channel: 'document', key: 'voucher', label: 'Voucher', variables: documentVars, starter: documentStarter('Voucher', 'Show this voucher at check-in.') },

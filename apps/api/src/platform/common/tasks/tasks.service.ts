@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../generated/prisma/client';
-import { AuditService, SYSTEM_ACTOR } from '../../audit/audit.service';
+import { AuditService, SYSTEM_ACTOR, type AuditContext } from '../../audit/audit.service';
 import { PrismaService } from '../../database/prisma.service';
 import { conflict, notFound, unprocessable } from '../../http/api-error';
 import { SearchIndexService } from '../search.service';
@@ -70,6 +70,58 @@ export class TasksService {
     await this.audit.record(tx, { actor: SYSTEM_ACTOR, action: 'common.task.created', entityType: 'Task', entityId: task.id, after: pick(task as unknown as Record<string, unknown>), context: { sourceRef: input.sourceRef } });
     await this.search.sync(tx, this.table, task as unknown as Record<string, unknown>);
     return task;
+  }
+
+  /**
+   * A task an automation creates (task 7.4), in the run's transaction, with the rule as the actor. Its source is
+   * `automation`, so changing or deleting it later needs common.task.manageAutomated. Once per `sourceRef`: a retried
+   * run never creates a second one. An assignee who is no longer active staff leaves the task unassigned.
+   */
+  async createAutomatedIn(
+    tx: Prisma.TransactionClient, actor: Actor,
+    input: { title: string; description?: string | null; dueAt?: Date | null; assigneeId?: string | null; entityType?: string | null; entityId?: string | null; sourceRef: string },
+    context: AuditContext = {},
+  ): Promise<{ id: string; assigneeDropped: boolean }> {
+    const existing = await tx.task.findFirst({ where: { sourceRef: input.sourceRef, source: 'automation' }, select: { id: true } });
+    if (existing) return { id: existing.id, assigneeDropped: false };
+    let assigneeId = input.assigneeId ?? null;
+    let assigneeDropped = false;
+    if (assigneeId && !(await tx.user.findFirst({ where: { id: assigneeId, kind: 'staff', status: 'active' }, select: { id: true } }))) {
+      assigneeId = null;
+      assigneeDropped = true;
+    }
+    const task = await tx.task.create({
+      data: {
+        title: input.title, description: input.description ?? null, dueAt: input.dueAt ?? null, assigneeId, entityType: input.entityType ?? null, entityId: input.entityId ?? null,
+        source: 'automation', sourceRef: input.sourceRef, createdById: null,
+      },
+    });
+    await this.audit.record(tx, { actor, action: 'common.task.created', entityType: 'Task', entityId: task.id, after: pick(task as unknown as Record<string, unknown>), context });
+    await this.search.sync(tx, this.table, task as unknown as Record<string, unknown>);
+    return { id: task.id, assigneeDropped };
+  }
+
+  /** Open automation tasks on a record, optionally only those whose sourceRef starts with a prefix (one rule's). */
+  async openAutomatedOn(tx: Prisma.TransactionClient, entityType: string, entityId: string, sourceRefPrefix?: string): Promise<string[]> {
+    const rows = await tx.task.findMany({
+      where: { entityType, entityId, source: 'automation', status: 'open', deletedAt: null, ...(sourceRefPrefix ? { sourceRef: { startsWith: sourceRefPrefix } } : {}) },
+      select: { id: true }, orderBy: { id: 'asc' },
+    });
+    return rows.map((r) => r.id);
+  }
+
+  /** Closes (done) the given open automation tasks, audited with the automation as the actor (task 7.4). */
+  async closeAutomatedIn(tx: Prisma.TransactionClient, actor: Actor, ids: readonly string[], context: AuditContext = {}): Promise<number> {
+    let closed = 0;
+    for (const id of ids) {
+      const r = await tx.task.updateMany({ where: { id, source: 'automation', status: 'open', deletedAt: null }, data: { status: 'done', version: { increment: 1 } } });
+      if (r.count !== 1) continue;
+      closed += 1;
+      const done = await tx.task.findUniqueOrThrow({ where: { id } });
+      await this.audit.record(tx, { actor, action: 'common.task.updated', entityType: 'Task', entityId: id, before: { status: 'open' }, after: { status: 'done' }, context });
+      await this.search.sync(tx, this.table, done as unknown as Record<string, unknown>);
+    }
+    return closed;
   }
 
   /** Closes (done) the open system task with this `sourceRef`, if any, when what it was about has resolved itself. */
