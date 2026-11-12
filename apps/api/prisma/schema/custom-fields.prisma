@@ -1,0 +1,48 @@
+// ---- Task 7.5: custom fields defined from the panel (plan docs/plans/7.5-custom-fields.md) ----
+// A definition names a field on one kind of record. The values live in that record's `customFields` JSON column, keyed by
+// `key`. Definitions are configuration, not personal data. CHECKs, triggers and GIN indexes: migration 0013.
+
+enum CustomFieldType {
+  text
+  number
+  date
+  boolean
+  select
+  multiselect
+}
+
+model CustomFieldDefinition {
+  id                 String          @id @default(uuid(7)) @db.Uuid
+  /// @nopii entity type chosen by developers, such as Race
+  entityType         String
+  /// @nopii machine name chosen by staff; never changes
+  key                String
+  /// @nopii LocalizedText shown to staff and, if visible, to customers
+  label              Json
+  /// @nopii never changes
+  type               CustomFieldType
+  /// @nopii choices of a select field: value, label and retired flag
+  options            Json?
+  /// @nopii limits such as maxLength or min
+  validation         Json?
+  /// @nopii
+  required           Boolean         @default(false)
+  /// @nopii
+  visibleToCustomer  Boolean         @default(false)
+  /// @nopii
+  editableByCustomer Boolean         @default(false)
+  /// @nopii
+  displayOrder       Int             @default(0)
+  /// @nopii archived fields are hidden but never deleted
+  archivedAt         DateTime?       @db.Timestamptz(3)
+  /// @nopii optimistic lock for the admin panel
+  version            Int             @default(0)
+  /// @nopii
+  createdAt          DateTime        @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  updatedAt          DateTime        @updatedAt @db.Timestamptz(3)
+
+  @@unique([entityType, key])
+  @@index([entityType, archivedAt, displayOrder])
+  @@map("custom_field_definitions")
+}

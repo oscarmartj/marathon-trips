@@ -7,6 +7,7 @@ import type {
 import { Prisma } from '../../generated/prisma/client';
 import { AuditService } from '../../platform/audit/audit.service';
 import type { AuditActor, AuditContext } from '../../platform/audit/audit.service';
+import { CustomFieldsService } from '../../platform/common/custom-fields/custom-fields.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
@@ -45,6 +46,7 @@ export class PackageService {
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(PackageOpenGates) private readonly gates: PackageOpenGates,
     @Inject(CatalogueChangeGuards) private readonly changeGuards: CatalogueChangeGuards,
+    @Inject(CustomFieldsService) private readonly customFields: CustomFieldsService,
   ) {}
 
   // ---- Packages ----
@@ -68,19 +70,20 @@ export class PackageService {
 
   /** Creates a draft package in the caller's transaction (also used by the CSV import). */
   async createIn(tx: Tx, actor: Actor, editionId: string, input: z.infer<typeof createPackageSchema>, context?: AuditContext) {
-    const { reason, deposit, ...rest } = input;
+    const { reason, deposit, customFields, ...rest } = input;
     this.checkDates(rest);
     const edition = await tx.raceEdition.findFirst({ where: { id: editionId, race: { deletedAt: null } }, select: { id: true } });
     if (!edition) throw notFound('edition_not_found', 'Edition not found');
+    const customValues = await this.customFields.forWrite(tx, 'Package', customFields, null, true);
     const created = await tx.package.create({
-      data: { ...rest, editionId, checkInDate: toDate(rest.checkInDate), checkOutDate: toDate(rest.checkOutDate), balanceDueDate: toDate(rest.balanceDueDate), saleStatus: 'draft', ...depositColumns(deposit) },
+      data: { ...rest, customFields: customValues, editionId, checkInDate: toDate(rest.checkInDate), checkOutDate: toDate(rest.checkOutDate), balanceDueDate: toDate(rest.balanceDueDate), saleStatus: 'draft', ...depositColumns(deposit) },
     });
     await this.audit.record(tx, { actor, action: 'catalogue.package.created', entityType: 'Package', entityId: created.id, reason, after: view(created), context });
     return created;
   }
 
   async update(actor: Actor, id: string, input: z.infer<typeof updatePackageSchema>) {
-    const { version, reason, deposit, ...rest } = input;
+    const { version, reason, deposit, customFields, ...rest } = input;
     await orConflict('package_slug_taken', 'This edition already has a package with that slug', () =>
       this.prisma.$transaction(async (tx) => {
         await lockPackage(tx, id, 'share');
@@ -94,7 +97,9 @@ export class PackageService {
           maxTravellers: rest.maxTravellers ?? before.maxTravellers,
         });
         if (deposit === null && LIVE_SALE_STATUSES.includes(before.saleStatus as SaleStatus)) throw conflict('open_package_needs_deposit', 'A package on sale needs its deposit');
+        const customValues = await this.customFields.forWrite(tx, 'Package', customFields, before.customFields, false);
         const data: Prisma.PackageUpdateManyMutationInput = {
+          ...(customValues ? { customFields: customValues } : {}),
           ...defined({ ...rest, checkInDate: undefined, checkOutDate: undefined, balanceDueDate: undefined }),
           ...(rest.checkInDate ? { checkInDate: toDate(rest.checkInDate) } : {}),
           ...(rest.checkOutDate ? { checkOutDate: toDate(rest.checkOutDate) } : {}),
@@ -203,7 +208,7 @@ export class PackageService {
             instantBooking: src.instantBooking, autoConfirmOnDeposit: src.autoConfirmOnDeposit,
             depositMode: src.depositMode, depositAmountMinor: src.depositAmountMinor, depositBps: src.depositBps,
             minTravellers: src.minTravellers, maxTravellers: src.maxTravellers, maxExtraNightsBefore: src.maxExtraNightsBefore, maxExtraNightsAfter: src.maxExtraNightsAfter,
-            currency: src.currency, seo: src.seo as Prisma.InputJsonValue,
+            currency: src.currency, seo: src.seo as Prisma.InputJsonValue, customFields: src.customFields as Prisma.InputJsonValue,
           },
         });
         if (src.participationOptions.length > 0) {

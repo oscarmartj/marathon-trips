@@ -7,6 +7,7 @@ import type { ClaimKind, EditionStatus, RaceStatus } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { AuditService } from '../../platform/audit/audit.service';
 import type { AuditActor, AuditContext } from '../../platform/audit/audit.service';
+import { CustomFieldsService } from '../../platform/common/custom-fields/custom-fields.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
@@ -24,13 +25,16 @@ export class RaceService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(CatalogueChangeGuards) private readonly changeGuards: CatalogueChangeGuards,
+    @Inject(CustomFieldsService) private readonly customFields: CustomFieldsService,
   ) {}
 
   // ---- Races ----
 
   async list(q: z.infer<typeof adminRaceQuerySchema>) {
+    const cf = await this.customFields.filterWhere('Race', q.cf);
     const where: Prisma.RaceWhereInput = {
       deletedAt: null,
+      ...(cf.length ? { AND: cf as Prisma.RaceWhereInput[] } : {}),
       ...(q.status ? { status: q.status } : {}),
       ...(q.q ? { OR: [{ slug: { contains: q.q, mode: 'insensitive' } }, { city: { contains: q.q, mode: 'insensitive' } }, { name: { path: ['en-AU'], string_contains: q.q, mode: 'insensitive' } }] } : {}),
     };
@@ -57,20 +61,22 @@ export class RaceService {
 
   /** Creates a draft race in the caller's transaction (also used by the CSV import). `isDemo` is never taken from input. */
   async createIn(tx: Tx, actor: Actor, input: z.infer<typeof createRaceSchema>, context?: AuditContext) {
-    const { reason, ...data } = input;
-    const created = await tx.race.create({ data: { ...data, isDemo: false } });
+    const { reason, customFields, ...data } = input;
+    const customValues = await this.customFields.forWrite(tx, 'Race', customFields, null, true);
+    const created = await tx.race.create({ data: { ...data, customFields: customValues, isDemo: false } });
     await this.audit.record(tx, { actor, action: 'catalogue.race.created', entityType: 'Race', entityId: created.id, reason, after: view(created), context });
     return created;
   }
 
   async update(actor: Actor, id: string, input: z.infer<typeof updateRaceSchema>) {
-    const { version, reason, ...rest } = input;
+    const { version, reason, customFields, ...rest } = input;
     const patch = defined(rest);
     await orConflict('race_slug_taken', 'A race with this slug already exists', () =>
       this.prisma.$transaction(async (tx) => {
         const before = await tx.race.findFirst({ where: { id, deletedAt: null } });
         assertVersion(before, version, 'Race not found');
-        const res = await tx.race.updateMany({ where: { id, version }, data: { ...patch, version: { increment: 1 } } });
+        const customValues = await this.customFields.forWrite(tx, 'Race', customFields, before.customFields, false);
+        const res = await tx.race.updateMany({ where: { id, version }, data: { ...patch, ...(customValues ? { customFields: customValues } : {}), version: { increment: 1 } } });
         if (res.count !== 1) throw versionConflict();
         const after = await tx.race.findUniqueOrThrow({ where: { id } });
         await this.audit.record(tx, { actor, action: 'catalogue.race.updated', entityType: 'Race', entityId: id, reason, before: view(before), after: view(after) });
