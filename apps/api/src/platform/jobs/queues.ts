@@ -38,6 +38,16 @@ export const QUEUES = {
     data: z.object({ outboundEmailId: uuid }).strict(),
     options: { policy: 'short', retryLimit: 5, retryDelay: 30, retryBackoff: true, expireInSeconds: 300, deleteAfterSeconds: 604800 },
   },
+  webhooksSend: {
+    name: 'webhooks.send',
+    data: z.object({ deliveryId: uuid }).strict(),
+    options: { policy: 'short', retryLimit: 2, retryDelay: 30, retryBackoff: true, expireInSeconds: 120, deleteAfterSeconds: 604800 },
+  },
+  webhooksMaintenance: {
+    name: 'webhooks.maintenance',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
+  },
   authMaintenance: {
     name: 'auth.maintenance',
     data: z.object({}).strict(),
