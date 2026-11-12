@@ -50,7 +50,8 @@ export const QUEUES = {
   },
   bookingsMaintenance: {
     name: 'bookings.maintenance',
-    data: z.object({}).strict(),
+    // Task 3.2: with a booking id, the approval expiry of that booking only (queued when a payment attempt ends).
+    data: z.object({ bookingId: uuid.optional() }).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
   // Task 3.1: process one stored gateway webhook; sync, cancel or expire one payment attempt; the payments sweep.
