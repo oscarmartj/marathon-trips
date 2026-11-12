@@ -445,6 +445,19 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  MessageTemplate: {
+    id: 'nopii',
+    channel: 'nopii',
+    key: 'nopii',
+    locale: 'nopii',
+    revision: 'nopii',
+    status: 'nopii',
+    subject: 'nopii',
+    body: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   Note: {
     id: 'nopii',
     entityType: 'nopii',

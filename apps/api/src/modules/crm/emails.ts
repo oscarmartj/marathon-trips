@@ -6,6 +6,7 @@ import type { DeliveredEvent, ConsumerContext } from '../../platform/events/cons
 import { AppError } from '../../platform/errors/safe-error';
 import { MAIL_NOT_SENDABLE, MailService } from '../../platform/mail/mail.service';
 import type { RenderContext, RenderedMail } from '../../platform/mail/templates';
+import { TemplatesService } from '../templates';
 
 export const QUOTE_SENT_TEMPLATE = { key: 'crm.quote_sent', version: 1 } as const;
 
@@ -38,6 +39,7 @@ export class CrmEmails {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(MailService) private readonly mail: MailService,
+    @Inject(TemplatesService) private readonly templates: TemplatesService,
   ) {}
 
   private url(path: string): string {
@@ -76,6 +78,9 @@ export class CrmEmails {
     const trip = `${en(b.package.edition.race.name)} ${b.package.edition.year}: ${en(b.package.name)}`;
     const link = this.url(`/trips/requests/${b.reference}`);
     const total = formatMinor(b.totalMinor, b.currency);
+    // Wording staff have put into use in the panel (task 5.4) wins over the built-in wording below.
+    const custom = await this.templates.renderEmail(ctx.tx, bookingTemplate(state).key, ctx.email.locale, { givenName: b.customer.givenName, reference: b.reference, trip, total, link });
+    if (custom) return { subject: custom.subject, text: custom.text };
     const body: Record<BookingMailState, { subject: string; lines: string[] }> = {
       requested: {
         subject: `We have your booking request ${b.reference}`,
@@ -126,6 +131,10 @@ export class CrmEmails {
     // Withdrawn or expired before the send step ran: nothing to offer any more.
     if (!q || q.customer.anonymisedAt || q.customer.deletedAt || q.status !== 'sent' || !q.expiresAt) throw new AppError(MAIL_NOT_SENDABLE, 'The quote is no longer open');
     const trip = `${en(q.package.edition.race.name)} ${q.package.edition.year}: ${en(q.package.name)}`;
+    const custom = await this.templates.renderEmail(ctx.tx, QUOTE_SENT_TEMPLATE.key, ctx.email.locale, {
+      givenName: q.customer.givenName, reference: q.reference, trip, total: formatMinor(q.totalMinor, q.currency), expiresAt: dateTime(q.expiresAt), link: this.url(`/quotes/${q.reference}`),
+    });
+    if (custom) return { subject: custom.subject, text: custom.text };
     return {
       subject: `Your quote ${q.reference} for ${en(q.package.edition.race.name)} ${q.package.edition.year}`,
       text: [
