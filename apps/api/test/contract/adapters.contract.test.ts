@@ -5,14 +5,17 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileS
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { APP_ENVS } from '@mt/shared';
+import { INERT_SIMULATOR_ORIGIN, adapterOptions, createAdapters } from '../../src/modules/payments/adapters';
 import { SimulatorProvider, SimulatorWorld } from '../../src/modules/payments/adapters/simulator/simulator';
+import { TEST_ADAPTER_ENVS } from '../../src/modules/payments/core/gateway';
 import { CONTRACT_CLAUSES, sandboxEvidenceLine } from '../../src/modules/payments/core/contract-clauses';
 import type { AdapterManifest, PaymentProvider } from '../../src/modules/payments/core/provider';
-import { hasSandboxEvidence, manifestProblems } from '../../src/modules/payments/core/registry';
+import { PaymentAdapterRegistry, hasSandboxEvidence, manifestProblems } from '../../src/modules/payments/core/registry';
 import { CLAUSE_IMPLS, describePaymentProviderContract } from './payment-provider.contract';
 import type { ContractSubject, SubjectFactory } from './payment-provider.contract';
 import { sandboxEvidence } from './sandbox-evidence';
-import { LOCAL_SUBJECTS, SANDBOX_SUBJECTS, registeredAdapters, resolveSandboxSubject, subjectProblems } from './subjects';
+import { LOCAL_SUBJECTS, SANDBOX_SUBJECTS, registeredAdapters, resolveSandboxSubject, sandboxSubjectsAcceptingEmptyEnv, subjectProblems } from './subjects';
 import { simulatorLocalSubject } from './subjects/simulator';
 
 for (const [key, factory] of Object.entries(LOCAL_SUBJECTS)) describePaymentProviderContract(`local ${key}`, factory());
@@ -116,6 +119,33 @@ describe('contract registry and static checks (plan 3.6, 2.3)', () => {
     expect(originProblem({ ...sim, testOnly: false, checkoutOrigin: 'https://checkout.example.com:8443' })).not.toEqual([]);
     expect(originProblem({ ...sim, checkoutOrigin: 'http://localhost:3000/path' })).not.toEqual([]);
     expect(originProblem({ ...sim, checkoutOrigin: 'javascript:alert(1)' })).not.toEqual([]);
+  });
+
+  it('adapters_boot_whatever_web_origin outside test environments (the simulator gets an inert origin there)', () => {
+    const odd = ['https://my_site.example', 'https://[2001:db8::1]', 'https://shop.example:8443', 'https://xn--bcher-kva.example', 'http://intranet'];
+    for (const env of APP_ENVS) {
+      for (const origin of odd) {
+        const opts = adapterOptions(env, origin);
+        const build = () => new PaymentAdapterRegistry(createAdapters(opts));
+        if (TEST_ADAPTER_ENVS.includes(env)) {
+          expect(opts.webOrigin, env).toBe(origin);
+        } else {
+          expect(build, `${env} ${origin}`).not.toThrow();
+          expect(build().get('simulator')!.manifest.checkoutOrigin, env).toBe(INERT_SIMULATOR_ORIGIN);
+        }
+      }
+    }
+    // Local development and CI origins of any usual shape still start.
+    for (const origin of ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000', 'http://dev_box:3000', 'https://staging.example']) {
+      expect(() => new PaymentAdapterRegistry(createAdapters(adapterOptions('development', origin))), origin).not.toThrow();
+    }
+  });
+
+  it('sandbox_subjects_reject_an_empty_environment: credentials are checked before anything else', () => {
+    expect(sandboxSubjectsAcceptingEmptyEnv(SANDBOX_SUBJECTS)).toEqual([]);
+    // The rule bites: a sandbox subject that would run with no credentials at all.
+    const lax: SubjectFactory = () => ({ ...simulatorLocalSubject(), assertSandboxCredentials() {} });
+    expect(sandboxSubjectsAcceptingEmptyEnv({ lax, strict: simulatorLocalSubject })).toEqual(['lax']);
   });
 
   it('verified_evidence_line_required: a dated, complete run of the current suite for that key', () => {

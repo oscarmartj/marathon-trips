@@ -36,6 +36,21 @@ export function subjectProblems(adapters: readonly PaymentProvider[], local: Rea
 }
 
 /**
+ * Sandbox subjects whose credential check accepts an environment with nothing in it (CI expects none). A factory only
+ * builds objects: it must not touch the network, since it runs before the credential check (see the guide).
+ */
+export function sandboxSubjectsAcceptingEmptyEnv(subjects: Readonly<Record<string, SubjectFactory>>): string[] {
+  return Object.entries(subjects).filter(([, factory]) => {
+    try {
+      factory().assertSandboxCredentials({});
+      return true;
+    } catch {
+      return false;
+    }
+  }).map(([key]) => key);
+}
+
+/**
  * The subject `pnpm --filter @mt/api test:sandbox` runs (plan 3.6, 2.4 and 10.2). Throws, so the run fails rather
  * than skips, when SANDBOX_ADAPTER is unset or unknown, the adapter is test-only, it has no sandbox subject, the
  * subject is not built on the registered class, or the environment does not hold test-mode credentials. The last

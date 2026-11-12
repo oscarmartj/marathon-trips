@@ -60,8 +60,25 @@ function serialise(v: unknown): string {
 class Harness {
   /** Everything the adapter returned or threw during this suite, for C20. */
   readonly seen: unknown[] = [];
+  /** Every context the subject handed out (good and bad credentials), for C20: their secrets are what must not leak. */
+  readonly contexts: ProviderContext[] = [];
 
   constructor(readonly s: ContractSubject) {}
+
+  /** A context from the subject; every one must be test mode (C0 holds for all of them, plan 3.6, 10.2). */
+  async ctx(): Promise<ProviderContext> {
+    const c = await this.s.context();
+    expect(c.mode, 'context mode').toBe('test');
+    this.contexts.push(c);
+    return c;
+  }
+
+  bad(c: ProviderContext): ProviderContext {
+    const b = this.s.badCredentials(c);
+    expect(b.mode, 'bad-credentials context mode').toBe('test');
+    this.contexts.push(b);
+    return b;
+  }
 
   get p(): PaymentProvider {
     return this.s.provider;
@@ -147,9 +164,10 @@ const HOUR = 3_600_000;
 /** One implementation per clause; the type makes a missing or extra clause a compile error. */
 export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Promise<void> } = {
   async context_is_test_mode(h) {
-    const ctx = await h.s.context();
+    // Every clause takes its contexts through h.ctx() and h.bad(), which assert this too.
+    const ctx = await h.ctx();
     expect(ctx.mode, 'context mode').toBe('test');
-    expect(h.s.badCredentials(ctx).mode, 'bad-credentials context mode').toBe('test');
+    expect(h.bad(ctx).mode, 'bad-credentials context mode').toBe('test');
   },
 
   async manifest_is_valid(h) {
@@ -175,7 +193,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async create_returns_normalised_payment(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input();
     const p = await h.create(ctx, input);
     h.expectPayment(p, input);
@@ -185,7 +203,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async same_idempotency_key_same_object(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input();
     const a = await h.create(ctx, input);
     const b = await h.create(ctx, input);
@@ -195,7 +213,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async same_key_other_amount_never_a_second_object(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input();
     const a = await h.create(ctx, input);
     const other = { ...input, amount: { ...input.amount, amountMinor: input.amount.amountMinor + 100n } };
@@ -212,14 +230,14 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async different_keys_different_objects(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const a = await h.create(ctx, h.input());
     const b = await h.create(ctx, h.input());
     expect(a.ref).not.toBe(b.ref);
   },
 
   async definitive_refusal_means_no_object(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input({ amount: { amountMinor: 1500n, currency: h.s.unsupportedCurrency } });
     const e = await h.error('createPayment (unsupported currency)', () => h.p.createPayment(ctx, input));
     expect(e.retryable, 'a refusal for an unsupported currency is definitive').toBe(false);
@@ -227,7 +245,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async retrieve_by_ref_and_by_key_agree(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input();
     const p = await h.create(ctx, input);
     const byRef = h.expectPayment(await h.retrieve(ctx, { ref: p.ref }), input);
@@ -238,7 +256,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async retrieve_unknown_is_null(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     expect(await h.retrieve(ctx, { idempotencyKey: `contract:unknown:${randomUUID()}` })).toBeNull();
     const r = await h.call('retrievePayment (unknown ref)', () => h.p.retrievePayment(ctx, { ref: `contract_unknown_${randomBytes(8).toString('hex')}` }));
     if (r.ok) expect(r.value).toBeNull();
@@ -246,7 +264,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async customer_payment_reflected(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input();
     const p = await h.create(ctx, input);
     await h.s.customerCompletes(ctx, p, 'pay');
@@ -257,7 +275,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async failed_is_terminal(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input();
     const p = await h.create(ctx, input);
     await h.s.customerCompletes(ctx, p, 'decline');
@@ -271,7 +289,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async succeeded_is_final(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
     await h.s.customerCompletes(ctx, p, 'pay');
     expect((await h.cancel(ctx, p.ref)).status, 'cancelling a collected payment says what it is').toBe('succeeded');
@@ -279,7 +297,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async cancel_is_idempotent_and_final(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
     expect((await h.cancel(ctx, p.ref)).status).toBe('cancelled');
     expect((await h.cancel(ctx, p.ref)).status).toBe('cancelled');
@@ -288,13 +306,13 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async cancel_unknown_is_not_found(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const e = await h.error('cancelPayment (unknown ref)', () => h.p.cancelPayment(ctx, `contract_unknown_${randomBytes(8).toString('hex')}`, `contract-cancel:${randomUUID()}`));
     expect([e.code, e.retryable]).toEqual(['provider_not_found', false]);
   },
 
   async statuses_only_move_forward(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const sequences: Array<(input: CreatePaymentInput, p: ProviderPayment) => Promise<ProviderPaymentStatus[]>> = [
       async (input, p) => {
         await h.s.customerCompletes(ctx, p, 'pay');
@@ -317,7 +335,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async webhook_verifies_and_matches_retrieve(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const input = h.input();
     const p = await h.create(ctx, input);
     await h.s.customerCompletes(ctx, p, 'pay');
@@ -341,7 +359,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async webhook_previous_state_and_duplicate(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
     const before = await h.s.webhookFor(ctx, p.ref, now());
     await h.s.customerCompletes(ctx, p, 'pay');
@@ -358,7 +376,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async webhook_rejections(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
     const at = now();
     const w = await h.s.webhookFor(ctx, p.ref, at);
@@ -370,12 +388,16 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     expect(await verify('other secret', { ...ctx, webhookSecret: randomBytes(32).toString('hex') }, w.body, w.headers, at)).toMatchObject({ ok: false, code: 'bad_signature' });
     const unsigned = Object.fromEntries(Object.entries(w.headers).filter(([k]) => !h.p.signatureHeaders.includes(k.toLowerCase())));
     expect((await verify('no signature headers', ctx, w.body, unsigned, at)).ok).toBe(false);
+    // Signatures more than 300 s away from now are refused (replays); within that, accepted.
+    expect((await verify('verified 299 s later', ctx, w.body, w.headers, new Date(at.getTime() + 299_000))).ok).toBe(true);
+    expect(await verify('replayed 301 s later', ctx, w.body, w.headers, new Date(at.getTime() + 301_000))).toMatchObject({ ok: false, code: 'stale_timestamp' });
+    expect(await verify('signed 301 s in the future', ctx, w.body, w.headers, new Date(at.getTime() - 301_000))).toMatchObject({ ok: false, code: 'stale_timestamp' });
     expect(await verify('replayed an hour later', ctx, w.body, w.headers, new Date(at.getTime() + HOUR))).toMatchObject({ ok: false, code: 'stale_timestamp' });
     expect(await verify('signed an hour in the future', ctx, w.body, w.headers, new Date(at.getTime() - HOUR))).toMatchObject({ ok: false, code: 'stale_timestamp' });
   },
 
   async verify_and_parse_never_throw(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
     const w = await h.s.webhookFor(ctx, p.ref, now());
     const bodies = [Buffer.alloc(0), Buffer.from('not json'), Buffer.from([0xff, 0xfe, 0x00, 0xc3, 0x28]), Buffer.alloc(256 * 1024, 0x7b), Buffer.from('null'), Buffer.from('[]'), Buffer.from('{"id":1}')];
@@ -388,13 +410,13 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   },
 
   async test_connection_reports_not_throws(h) {
-    const ctx = await h.s.context();
+    const ctx = await h.ctx();
     expect(await h.value('testConnection', () => h.p.testConnection(ctx))).toEqual({ ok: true });
-    expect((await h.value('testConnection (bad credentials)', () => h.p.testConnection(h.s.badCredentials(ctx)))).ok).toBe(false);
+    expect((await h.value('testConnection (bad credentials)', () => h.p.testConnection(h.bad(ctx)))).ok).toBe(false);
   },
 
   async bad_credentials_are_auth_failed(h) {
-    const ctx = h.s.badCredentials(await h.s.context());
+    const ctx = h.bad(await h.ctx());
     const input = h.input();
     for (const [label, fn] of [
       ['createPayment', () => h.p.createPayment(ctx, input)],
@@ -408,8 +430,8 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
 
   async no_secret_in_results_or_errors(h) {
     // Its own sweep (so the clause stands alone), plus everything the earlier clauses saw.
-    const ctx = await h.s.context();
-    const bad = h.s.badCredentials(ctx);
+    const ctx = await h.ctx();
+    const bad = h.bad(ctx);
     const input = h.input();
     const p = await h.create(ctx, input);
     await h.call('retrievePayment', () => h.p.retrievePayment(ctx, { ref: p.ref }));
@@ -422,13 +444,15 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const w = await h.s.webhookFor(ctx, p.ref, now());
     await h.call('verifyWebhook (other secret)', () => h.p.verifyWebhook(bad.webhookSecret === ctx.webhookSecret ? { ...bad, webhookSecret: randomBytes(32).toString('hex') } : bad, w.body, w.headers, now()));
     const haystack = h.seen.map(serialise).join('\n');
-    const fields: Array<[string, string]> = [
-      ...Object.entries(ctx.credentials).map(([k, v]) => [`credentials.${k}`, v] as [string, string]),
-      ['webhookSecret', ctx.webhookSecret],
-      ...Object.entries(bad.credentials).map(([k, v]) => [`badCredentials.${k}`, v] as [string, string]),
-    ];
-    const checked = fields.filter(([, v]) => typeof v === 'string' && v.length >= 8);
+    // The secrets of every context handed out in this suite (C3 to C19 used their own accounts), each field once.
+    const fields = new Map<string, string>();
+    h.contexts.forEach((c, i) => {
+      for (const [k, v] of Object.entries(c.credentials)) fields.set(`context ${i} credentials.${k}`, v);
+      fields.set(`context ${i} webhookSecret`, c.webhookSecret);
+    });
+    const checked = [...fields].filter(([, v]) => typeof v === 'string' && v.length >= 8);
     expect(checked.length, 'at least one secret to look for').toBeGreaterThan(0);
+    expect(h.contexts.length, 'its own good and bad contexts, plus those of the clauses before it').toBeGreaterThanOrEqual(2);
     for (const [name, value] of checked) {
       const leaked = haystack.includes(value);
       // A boolean, so a failure never prints the secret.

@@ -5,8 +5,11 @@ import { CONTRACT_CLAUSES } from './contract-clauses';
 import type { AdapterManifest, PaymentProvider } from './provider';
 
 const HTTPS_ORIGIN = /^https:\/\/[a-z0-9.-]+$/;
-/** Only a test-only adapter (never in staging or production) may hand out a plain-http page, with a port: local dev and CI. */
-const TEST_ONLY_ORIGIN = /^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/;
+/**
+ * Only a test-only adapter (never in staging or production) may hand out a plain-http page, with a port, an IPv6
+ * literal or an underscore in the host: whatever WEB_ORIGIN local development and CI use.
+ */
+const TEST_ONLY_ORIGIN = /^https?:\/\/([a-z0-9._-]+|\[[0-9a-f:.]+\])(:\d{1,5})?$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** Whether `text` holds the line of a complete, dated sandbox run of the current contract suite for `key` (plan 3.6, 10.9). */

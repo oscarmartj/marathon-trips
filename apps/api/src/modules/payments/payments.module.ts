@@ -9,7 +9,7 @@ import { SettingsService } from '../../platform/flags/flags.service';
 import { RawBodyRoutes } from '../../platform/http/raw-body';
 import { BookingTransitionHooks, BookingsModule } from '../bookings';
 import { PaymentAdminService } from './admin.service';
-import { createAdapters } from './adapters';
+import { adapterOptions, createAdapters } from './adapters';
 import { PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
 import { ProviderAccountsService } from './core/accounts.service';
 import { PaymentStateMachine } from './core/attempt-state';
@@ -34,7 +34,7 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   // the configuration is parsed from.
   controllers: [PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
-    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters({ webOrigin: config.WEB_ORIGIN })), inject: [APP_CONFIG] },
+    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, PaymentCoverageService,
     SimulatorCheckoutService,

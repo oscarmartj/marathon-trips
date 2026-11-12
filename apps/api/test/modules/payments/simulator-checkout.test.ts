@@ -1,7 +1,6 @@
 // The simulator's hosted checkout through HTTP, the real webhook ingestion and PostgreSQL
 // (plan docs/plans/3.6-adapter-contract-suite.md, sections 3, 5 and 10).
 import { randomBytes, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -259,17 +258,25 @@ describe('only in development, test and ci (plan 3.6, 10.6)', () => {
 });
 
 describe('the page itself (plan 3.6, 10.1)', () => {
-  const proxy = readFileSync(resolve(__dirname, '../../../../web/src/lib/api-proxy.ts'), 'utf8');
-  const forwarded = JSON.parse(/FORWARD_RESPONSE_HEADERS = (\[[^\]]*\])/.exec(proxy)![1]!.replace(/'/g, '"')) as string[];
-  const segment = new RegExp(/const SEGMENT = \/(.+)\/;/.exec(proxy)![1]!);
+  // The web app's own proxy code (apps/web/src/lib/api-proxy.ts), loaded at run time: it lives outside this package.
+  interface ApiProxy {
+    responseHeaders(res: Response): Headers;
+    apiUrl(base: string, segments: readonly string[], search: string): URL | null;
+  }
+  const webProxy = (): Promise<ApiProxy> => import(resolve(__dirname, '../../../../web/src/lib/api-proxy.ts')) as Promise<ApiProxy>;
 
   it('checkout_page_safe_through_web_proxy: its policy travels in the HTML, not in headers the proxy drops', async () => {
+    const { responseHeaders } = await webProxy();
     const s = await started();
     const res = await t.http().get(apiPath(s.url));
-    const through = Object.keys(res.headers).filter((h) => forwarded.includes(h));
-    expect(through).toContain('content-type');
-    expect(forwarded).not.toContain('content-security-policy');
-    expect(forwarded).not.toContain('referrer-policy');
+    const apiHeaders = new Headers();
+    for (const [k, v] of Object.entries(res.headers)) if (typeof v === 'string') apiHeaders.set(k, v);
+    expect(apiHeaders.get('referrer-policy')).toBe('no-referrer');
+    // What the browser gets from the web origin: the API's response through the proxy's own header filter.
+    const browser = responseHeaders(new Response(res.text, { status: res.status, headers: apiHeaders }));
+    expect(browser.get('content-type')).toMatch(/^text\/html/);
+    expect(browser.get('content-security-policy')).toBeNull();
+    expect(browser.get('referrer-policy')).toBeNull();
     const page = html(res);
     expect(page).toContain(`<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CHECKOUT_PAGE_CSP)}">`);
     expect(CHECKOUT_PAGE_CSP).toBe("default-src 'none'; form-action 'self'; base-uri 'none'");
@@ -295,11 +302,12 @@ describe('the page itself (plan 3.6, 10.1)', () => {
     expect(formatMinor(9007199254740993n, 'AUD')).toBe('AUD 90,071,992,547,409.93');
   });
 
-  it('checkout_url_survives_web_proxy_shape: every segment passes the proxy', async () => {
+  it('checkout_url_survives_web_proxy_shape: the proxy maps it to the API route', async () => {
+    const { apiUrl } = await webProxy();
     const s = await started();
     const segments = s.url.slice(`${WEB_ORIGIN}/api/`.length).split('/');
     expect(segments).toEqual(['payments', 'simulator', 'checkout', s.token]);
-    for (const seg of segments) expect(segment.test(seg), seg).toBe(true);
+    expect(apiUrl('http://localhost:4000', segments, '')?.toString()).toBe(`http://localhost:4000/payments/simulator/checkout/${s.token}`);
   });
 
   it('completeCheckout refuses a token of another account', async () => {

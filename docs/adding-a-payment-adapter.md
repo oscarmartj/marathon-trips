@@ -24,13 +24,15 @@ Todo eso lo hace el núcleo: guardas de modo y entorno, descifrado de credencial
    - Solo se lanza `ProviderError`, con un código de la lista.
    - Un error no reintentable de `createPayment` significa que con esa clave no hay ni habrá objeto.
    - `failed` es terminal en la pasarela.
-   - `verifyWebhook` no usa la red, compara en tiempo constante y rechaza firmas con más de 300 s.
+   - `verifyWebhook` no usa la red y compara en tiempo constante.
+   - `verifyWebhook` rechaza (`stale_timestamp`) una firma a más de 300 s del momento actual, hacia atrás o hacia delante. La batería prueba 299 s (aceptada), 301 s y una hora (rechazadas).
 3. **Registro.** Una línea en `adapters/index.ts` (`createAdapters`).
 4. **Sujeto local** en `apps/api/test/contract/subjects/<clave>.ts`, añadido a `LOCAL_SUBJECTS`. La pasarela se simula en memoria o con respuestas grabadas de su documentación. La batería completa (`CONTRACT_CLAUSES`) corre con él en CI. Sin sujeto local, CI falla (`every_adapter_has_a_local_contract_subject`).
 5. **Sujeto de sandbox**, añadido a `SANDBOX_SUBJECTS`.
    - Usa la misma clase que devuelve `createAdapters`.
    - Lee las credenciales de variables de entorno.
-   - `assertSandboxCredentials` rechaza todo lo que no tenga forma de clave de prueba.
+   - `assertSandboxCredentials` rechaza todo lo que no tenga forma de clave de prueba, también un entorno vacío (`sandbox_subjects_reject_an_empty_environment`).
+   - La fábrica solo construye objetos: no toca la red, porque corre antes de esa comprobación. La red empieza en `context()`.
 6. **Ejecución contra el sandbox real.** Las claves las pone Oscar en el entorno; nunca van en un archivo:
 
    ```
