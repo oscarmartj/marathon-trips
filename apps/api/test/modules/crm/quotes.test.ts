@@ -513,15 +513,31 @@ describe('expiry job', () => {
     await widen(w);
     const { client, customerId } = await linkedCustomer(t);
     const q = await sendQuote(admin, await makeQuote(admin, customerId, w));
-    await asOwnerWithoutGuard(`UPDATE quotes SET "expiresAt" = clock_timestamp() + interval '1500 milliseconds' WHERE id = $1`, [q.id]);
-    // Another session holds the row; the acceptance starts while it is still open and has to wait for the lock.
+    await asOwnerWithoutGuard(`UPDATE quotes SET "expiresAt" = clock_timestamp() + interval '5 seconds' WHERE id = $1`, [q.id]);
+    // Another session holds the row; the acceptance starts while the quote is still open and has to wait for the lock.
+    let pending: Promise<Awaited<ReturnType<typeof acceptQuote>>> | undefined;
     await owner.query('BEGIN');
-    await owner.query('SELECT id FROM quotes WHERE id = $1 FOR UPDATE', [q.id]);
-    const pending = acceptQuote(t, client, q.reference);
-    await new Promise((r) => setTimeout(r, 2300));
-    const [, row0] = [await owner.query('COMMIT'), await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } })];
+    try {
+      await owner.query('SELECT id FROM quotes WHERE id = $1 FOR UPDATE', [q.id]);
+      pending = Promise.resolve(acceptQuote(t, client, q.reference));
+      // It really is waiting on a lock, and the expiry instant has not come yet.
+      let waiting = false;
+      for (let i = 0; i < 100 && !waiting; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        const act = await t.prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database() AND query ILIKE '%FROM quotes%'`;
+        waiting = act[0]!.n > 0n;
+      }
+      const stillOpen = await t.prisma.$queryRaw<Array<{ open: boolean }>>`SELECT "expiresAt" > clock_timestamp() AS open FROM quotes WHERE id = ${q.id}::uuid`;
+      expect([waiting, stillOpen[0]!.open]).toEqual([true, true]);
+      // Hold the lock until the expiry instant has passed.
+      const left = await t.prisma.$queryRaw<Array<{ ms: number }>>`SELECT (extract(epoch FROM "expiresAt" - clock_timestamp()) * 1000)::float AS ms FROM quotes WHERE id = ${q.id}::uuid`;
+      await new Promise((r) => setTimeout(r, Math.max(0, left[0]!.ms) + 400));
+    } finally {
+      await owner.query('COMMIT');
+    }
+    const row0 = await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } });
     expect(row0.status).toBe('sent');
-    const accept = await pending;
+    const accept = await pending!;
     expect([accept.status, accept.body.code]).toEqual([409, 'quote_expired']);
     expect(await t.prisma.booking.count({ where: { customerId } })).toBe(0);
     expect((await t.app.get(QuoteService).expireDue()).expired).toBeGreaterThanOrEqual(1);
@@ -610,10 +626,10 @@ describe('what a sent quote offers is still true when it is sent (review 2.5, ro
     const r1 = await sendIt();
     expect([r1.status, r1.body.code]).toEqual([409, 'quote_price_changed']);
     await setBalanceDue(w.pkg.id, '2027-04-18');
-    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-17', "checkOutDate" = '2027-06-21' WHERE id = $1`, [w.pkg.id]);
+    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-17', "checkOutDate" = '2027-06-20' WHERE id = $1`, [w.pkg.id]);
     const r2 = await sendIt();
     expect([r2.status, r2.body.code]).toEqual([409, 'quote_price_changed']);
-    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-18', "checkOutDate" = '2027-06-22' WHERE id = $1`, [w.pkg.id]);
+    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-19', "checkOutDate" = '2027-06-22' WHERE id = $1`, [w.pkg.id]);
     expect((await sendIt()).body.code).toBe('quote_price_changed');
     await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-18', "checkOutDate" = '2027-06-21' WHERE id = $1`, [w.pkg.id]);
     expect((await sendIt()).status).toBe(200);
@@ -629,6 +645,22 @@ describe('what a sent quote offers is still true when it is sent (review 2.5, ro
     expect([r.status, r.body.code]).toEqual([409, 'quote_not_available']);
     expect(await t.prisma.booking.count({ where: { customerId } })).toBe(0);
     await setBalanceDue(w.pkg.id, '2027-04-18');
+    expect((await acceptQuote(t, client, q.reference)).status).toBe(200);
+  });
+
+  it.each([
+    ['the check-in day', '2027-06-17', '2027-06-20'],
+    ['the check-out day', '2027-06-18', '2027-06-22'],
+  ])('moving %s between send and accept (same length of stay or not) voids the offer', async (_n, checkIn, checkOut) => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const { client, customerId } = await linkedCustomer(t);
+    const q = await sendQuote(admin, await makeQuote(admin, customerId, w));
+    await owner.query('UPDATE packages SET "checkInDate" = $2, "checkOutDate" = $3 WHERE id = $1', [w.pkg.id, checkIn, checkOut]);
+    const r = await acceptQuote(t, client, q.reference);
+    expect([r.status, r.body.code]).toEqual([409, 'quote_not_available']);
+    expect(await t.prisma.booking.count({ where: { customerId } })).toBe(0);
+    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-18', "checkOutDate" = '2027-06-21' WHERE id = $1`, [w.pkg.id]);
     expect((await acceptQuote(t, client, q.reference)).status).toBe(200);
   });
 });

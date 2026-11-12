@@ -167,14 +167,13 @@ describe('state_change_sends_one_email_each', () => {
     await t.prisma.customer.update({ where: { id: a.customerId }, data: { deletedAt: new Date() } });
     const queued = await t.prisma.outboundEmail.findFirstOrThrow({ where: { customerId: a.customerId, templateKey: 'crm.quote_sent' } });
     const before = t.mail.sent.length;
-    const outcomes: string[] = [];
-    // The send step is retried; it must give up for good, never loop and never write to the closed account.
-    for (let i = 0; i < 8; i++) outcomes.push(await t.app.get(MailService).processSend(queued.id).then((r) => String(r), (e: Error) => `threw:${e.message}`));
+    // A closed account is permanent: the first attempt fails the email for good, and nothing is retried or sent.
+    const first = await t.app.get(MailService).processSend(queued.id);
+    expect(first).toBe('failed');
     const row = await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: queued.id } });
-    expect(row.status).toBe('failed');
-    expect(row.attempts).toBe(5);
+    expect([row.status, row.attempts]).toEqual(['failed', 1]);
     expect(row.error).toBeTruthy();
-    expect(outcomes.map((o) => (o.startsWith('threw') ? 'threw' : o))).toEqual(['threw', 'threw', 'threw', 'threw', 'failed', 'noop', 'noop', 'noop']);
+    expect(await t.app.get(MailService).processSend(queued.id)).toBe('noop');
     expect(t.mail.sent.length).toBe(before);
   });
 });

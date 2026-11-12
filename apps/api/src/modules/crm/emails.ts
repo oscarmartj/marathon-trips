@@ -4,7 +4,7 @@ import type { AppConfig } from '../../platform/config/config';
 import { APP_CONFIG } from '../../platform/database/prisma.service';
 import type { DeliveredEvent, ConsumerContext } from '../../platform/events/consumers';
 import { AppError } from '../../platform/errors/safe-error';
-import { MailService } from '../../platform/mail/mail.service';
+import { MAIL_NOT_SENDABLE, MailService } from '../../platform/mail/mail.service';
 import type { RenderContext, RenderedMail } from '../../platform/mail/templates';
 
 export const QUOTE_SENT_TEMPLATE = { key: 'crm.quote_sent', version: 1 } as const;
@@ -72,7 +72,7 @@ export class CrmEmails {
         package: { select: { name: true, edition: { select: { year: true, race: { select: { name: true } } } } } },
       },
     });
-    if (!b || b.customer.anonymisedAt) throw new AppError('mail_recipient_gone', 'The booking or its customer is no longer available');
+    if (!b || b.customer.anonymisedAt) throw new AppError(MAIL_NOT_SENDABLE, 'The booking or its customer is no longer available');
     const trip = `${en(b.package.edition.race.name)} ${b.package.edition.year}: ${en(b.package.name)}`;
     const link = this.url(`/trips/requests/${b.reference}`);
     const total = formatMinor(b.totalMinor, b.currency);
@@ -124,7 +124,7 @@ export class CrmEmails {
       },
     });
     // Withdrawn or expired before the send step ran: nothing to offer any more.
-    if (!q || q.customer.anonymisedAt || q.customer.deletedAt || q.status !== 'sent' || !q.expiresAt) throw new AppError('quote_no_longer_open', 'The quote is no longer open');
+    if (!q || q.customer.anonymisedAt || q.customer.deletedAt || q.status !== 'sent' || !q.expiresAt) throw new AppError(MAIL_NOT_SENDABLE, 'The quote is no longer open');
     const trip = `${en(q.package.edition.race.name)} ${q.package.edition.year}: ${en(q.package.name)}`;
     return {
       subject: `Your quote ${q.reference} for ${en(q.package.edition.race.name)} ${q.package.edition.year}`,

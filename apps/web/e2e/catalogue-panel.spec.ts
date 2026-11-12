@@ -55,6 +55,8 @@ async function publishPricesThroughApi(page: Page, packageId: string) {
 test('create_publish_and_view_race', async ({ page }) => {
   test.setTimeout(150_000);
   const run = `e2e${Date.now().toString(36)}`;
+  // The hotel list shows the first 500 by name, and other runs leave many "Riverside Hotel" rows: a leading digit keeps this one in view.
+  const hotelName = `0 ${run} Riverside Hotel`;
   const raceName = `${run} Coast Marathon`;
   const slug = `${run}-coast-marathon`;
   await signIn(page, owner('E2E_STAFF_4'));
@@ -63,7 +65,7 @@ test('create_publish_and_view_race', async ({ page }) => {
   await page.goto('/admin/hotels');
   await expect(page.getByRole('heading', { level: 1, name: 'Hotels' })).toBeVisible();
   let f = formWith(page, 'Add hotel');
-  await f.getByLabel(label('Name')).fill(`${run} Riverside Hotel`);
+  await f.getByLabel(label('Name')).fill(hotelName);
   await f.getByLabel('Address').fill('1 River Street');
   await f.getByLabel('City').fill('Brisbane');
   await f.getByRole('button', { name: 'Add hotel', exact: true }).click();
@@ -145,9 +147,9 @@ test('create_publish_and_view_race', async ({ page }) => {
   await expect(page.getByText('Marathon, from Entry stock')).toBeVisible();
 
   f = formWith(page, 'Add hotel');
-  await f.getByLabel(label('Hotel')).selectOption({ label: `${run} Riverside Hotel (Brisbane)` });
+  await f.getByLabel(label('Hotel')).selectOption({ label: `${hotelName} (Brisbane)` });
   await f.getByRole('button', { name: 'Add hotel', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 3, name: new RegExp(`${run} Riverside Hotel`) })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: new RegExp(hotelName) })).toBeVisible();
   await page.getByText(/Add a room to/).click();
   f = formWith(page, 'Add room');
   await f.getByLabel('Room name').fill('Double room');
