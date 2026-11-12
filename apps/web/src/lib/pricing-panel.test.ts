@@ -4,7 +4,7 @@ import { MAX_FIXED_PER_PERSON_MINOR, MAX_LINE_MINOR } from '@mt/shared';
 import { describe, expect, it } from 'vitest';
 import {
   adjustmentBody, adjustmentPatch, bpsToText, cellsDiffer, cellsToBody, creationFields, droppedRateCount, emptyAdjustmentForm, extraCell, formatLineAmount, formatMinor,
-  missingCell, parseMoney, parsePercent, participationCell, patchIsEmpty, rateShapeOf, ratesToCells, roomCell, rowToForm, toQuoteRequest, travellerCount,
+  missingCell, parseMoney, parsePercent, participationCell, patchIsEmpty, rateShapeOf, ratesToCells, roomCell, rowToForm, toQuoteRequest, travellerCount, versionPhase,
   type PackageForPrices, type RatesJson,
 } from './pricing-panel';
 
@@ -315,5 +315,19 @@ describe('purity', () => {
     for (const banned of [/parseFloat/, /\.toFixed\(/, /Math\.(round|floor|ceil|trunc|pow)/, /toLocaleString/, /NumberFormat/, /\bNumber\(\s*[a-z]*[Mm]inor/]) {
       expect(src).not.toMatch(banned);
     }
+  });
+});
+
+describe('versionPhase', () => {
+  const now = Date.parse('2027-03-01T00:00:00Z');
+  it.each([
+    [{ id: 'a', status: 'draft', validFrom: null }, 'a', 'draft'],
+    [{ id: 'a', status: 'archived', validFrom: null }, 'a', 'archived'],
+    [{ id: 'a', status: 'published', validFrom: '2027-01-01T00:00:00Z' }, 'a', 'in_force'],
+    [{ id: 'b', status: 'published', validFrom: '2027-06-01T00:00:00Z' }, 'a', 'scheduled'],
+    [{ id: 'b', status: 'published', validFrom: '2026-06-01T00:00:00Z' }, 'a', 'past'],
+    [{ id: 'b', status: 'published', validFrom: '2026-06-01T00:00:00Z' }, null, 'past'],
+  ] as const)('%j with %s in force is %s', (v, current, phase) => {
+    expect(versionPhase(v, current, now)).toBe(phase);
   });
 });

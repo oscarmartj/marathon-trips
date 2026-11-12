@@ -427,3 +427,39 @@ export function adjustmentPatch(row: Record<string, unknown>, body: Record<strin
 
 /** True when a PATCH carries nothing but its version (and reason): there is nothing to save. */
 export const patchIsEmpty = (patch: Record<string, unknown>): boolean => Object.keys(patch).every((k) => k === 'version' || k === 'reason');
+
+// ---- Versions ----
+
+export interface VersionRow {
+  id: string;
+  packageId: string;
+  currency: string;
+  status: 'draft' | 'published' | 'archived';
+  version: number;
+  label: string;
+  validFrom: string | null;
+  validTo: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+}
+export interface VersionList {
+  currentId: string | null;
+  lastId: string | null;
+  items: VersionRow[];
+}
+export interface VersionDetail extends VersionRow {
+  rates: RatesJson;
+  missing: MissingJson[];
+}
+export type VersionPhase = 'draft' | 'in_force' | 'scheduled' | 'past' | 'archived';
+
+/**
+ * Where a version stands, for its label. The API says which version is in force (`currentId`, read on the server's
+ * clock); a published one that is not in force is scheduled if it starts later than `nowMs`, else it has ended.
+ */
+export function versionPhase(v: Pick<VersionRow, 'id' | 'status' | 'validFrom'>, currentId: string | null, nowMs: number): VersionPhase {
+  if (v.status === 'draft') return 'draft';
+  if (v.status === 'archived') return 'archived';
+  if (v.id === currentId) return 'in_force';
+  return v.validFrom !== null && Date.parse(v.validFrom) > nowMs ? 'scheduled' : 'past';
+}
