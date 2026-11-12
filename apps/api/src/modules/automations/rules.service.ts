@@ -3,7 +3,7 @@ import {
   AUTOMATION_EVENT_TRIGGERS, MAX_ENABLED_RULES, automationRuleDefinitionSchema, isCustomerTemplate, triggerOf,
 } from '@mt/shared';
 import type { AutomationRuleDefinition, AutomationEntityType } from '@mt/shared';
-import type { Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { AccessService } from '../../platform/access/access.service';
 import type { AuthContext } from '../../platform/access/auth-context';
 import { AuditService } from '../../platform/audit/audit.service';
@@ -133,7 +133,7 @@ export class AutomationRulesService {
       const after = await tx.automationRule.update({
         where: { id },
         data: {
-          name: def.name, triggerType: def.triggerType, eventType: def.eventType ?? null, schedule: (def.schedule ?? null) as Prisma.InputJsonValue,
+          name: def.name, triggerType: def.triggerType, eventType: def.eventType ?? null, schedule: def.schedule ? (def.schedule as Prisma.InputJsonValue) : Prisma.DbNull,
           conditions: def.conditions as Prisma.InputJsonValue, actions: def.actions as Prisma.InputJsonValue, ownerUserId: caller.actor.id, version: { increment: 1 },
         },
       });

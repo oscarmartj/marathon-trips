@@ -279,9 +279,9 @@ export class AutomationEngine {
 
     const actor = { type: 'automation' as const, id: rule.id };
     for (const [index, action] of def.actions.entries()) {
-      if (this.beforeAction) await this.beforeAction(index);
       const d = this.actions.registry.get(action.type);
       try {
+        if (this.beforeAction) await this.beforeAction(index);
         const r = await d.run(action as never, {
           tx, testMode, rule: { id: rule.id, name: rule.name, ownerUserId: rule.ownerUserId },
           run: { id: run.id, triggerEventType: run.triggerEventType, scheduledFor: run.scheduledFor }, index, entity, actor, now,

@@ -96,7 +96,7 @@ export class TasksService {
         source: 'automation', sourceRef: input.sourceRef, createdById: null,
       },
     });
-    await this.audit.record(tx, { actor, action: 'common.task.created', entityType: 'Task', entityId: task.id, after: pick(task as unknown as Record<string, unknown>), context: { ...context, sourceRef: input.sourceRef } });
+    await this.audit.record(tx, { actor, action: 'common.task.created', entityType: 'Task', entityId: task.id, after: pick(task as unknown as Record<string, unknown>), context });
     await this.search.sync(tx, this.table, task as unknown as Record<string, unknown>);
     return { id: task.id, assigneeDropped };
   }
