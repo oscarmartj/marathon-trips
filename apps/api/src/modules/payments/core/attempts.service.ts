@@ -5,7 +5,6 @@ import { AuditService } from '../../../platform/audit/audit.service';
 import type { AuditActor } from '../../../platform/audit/audit.service';
 import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import type { AppConfig } from '../../../platform/config/config';
-import { bossDb } from '../../../platform/database/boss-db';
 import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
 import { OutboxService } from '../../../platform/events/outbox.service';
@@ -109,8 +108,9 @@ export class PaymentAttemptsService {
   /** Transaction A (plan 3.1, section 5.1). Returns the id of a new or resumed live attempt. */
   async createOrResume(bookingId: string, body: StartPayment, actor: AuditActor): Promise<string> {
     const expiryMinutes = await this.settings.get(PAYMENT_SETTINGS.attemptExpiryMinutes.key, PAYMENT_SETTINGS.attemptExpiryMinutes.fallback);
+    let result: string | { expiredLive: string };
     try {
-      return await runTransaction(this.prisma, async (tx) => {
+      result = await runTransaction(this.prisma, async (tx): Promise<string | { expiredLive: string }> => {
         const b = await readBookingForPayments(tx, { id: bookingId }, true);
         if (!b) throw notFound();
         const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
@@ -126,10 +126,8 @@ export class PaymentAttemptsService {
           FROM payments WHERE "liveBookingId" = ${b.id}::uuid FOR UPDATE`;
         const current = live[0];
         if (current) {
-          if (current.pendingExpiresAt.getTime() <= at.getTime()) {
-            await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: current.id, action: 'expire' }, { db: bossDb(tx), singletonKey: `expire:${current.id}` });
-            throw conflict('payment_attempt_in_progress', 'A payment for this booking is still being processed. Try again shortly.');
-          }
+          // Past its expiry but not swept yet: not resumable; its sweep is queued after this transaction (plan 3.1, 14.9).
+          if (current.pendingExpiresAt.getTime() <= at.getTime()) return { expiredLive: current.id };
           if (current.status !== 'pending' && current.method === body.method && current.amountMinor === due.amountMinor) return current.id;
           throw conflict('payment_attempt_in_progress', 'A payment for this booking is already in progress');
         }
@@ -160,6 +158,9 @@ export class PaymentAttemptsService {
     } catch (err) {
       throw mapLoadError(err);
     }
+    if (typeof result === 'string') return result;
+    await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: result.expiredLive, action: 'expire' }, { singletonKey: `expire:${result.expiredLive}` });
+    throw conflict('payment_attempt_in_progress', 'A payment for this booking is still being processed. Try again shortly.');
   }
 
   private assertPayable(b: BookingForPayments, at: Date): void {

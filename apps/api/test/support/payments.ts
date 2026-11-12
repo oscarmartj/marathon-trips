@@ -90,7 +90,8 @@ export async function approvedBooking(t: TestApp, admin: Client, w: PricedWorld,
 export const sendWebhook = (t: TestApp, a: SimAccount, w: SignedWebhook) => {
   let r = t.http().post(`/payments/webhooks/${a.pathToken}`);
   for (const [k, v] of Object.entries(w.headers)) r = r.set(k, v);
-  return r.send(w.body);
+  // A string, not the Buffer: superagent would serialise a Buffer as JSON.
+  return r.send(w.body.toString("utf8"));
 };
 
 /** Removes the jobs and events payments tests leave behind. */
@@ -98,4 +99,52 @@ export async function cleanPayments(t: TestApp): Promise<void> {
   await t.prisma.$executeRawUnsafe(`DELETE FROM pgboss.job WHERE name LIKE 'payments.%'`);
   await t.prisma.$executeRawUnsafe(`DELETE FROM event_deliveries WHERE "eventId" IN (SELECT id FROM outbox_events WHERE type LIKE 'payments.%' OR type LIKE 'bookings.%')`);
   await t.prisma.$executeRawUnsafe(`DELETE FROM outbox_events WHERE type LIKE 'payments.%' OR type LIKE 'bookings.%'`);
+}
+
+/**
+ * Moves an attempt's expiry into the past. pendingExpiresAt is immutable for the API role, so this runs as the owner,
+ * with the guard trigger off only inside one transaction (as in 2.4's tests), and checks it is back on afterwards.
+ */
+export async function expireNow(paymentId: string, minutesAgo = 1): Promise<void> {
+  const pg = (await import('pg')).default;
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+  await owner.connect();
+  try {
+    await owner.query('BEGIN');
+    await owner.query('ALTER TABLE payments DISABLE TRIGGER payments_guard');
+    await owner.query(`UPDATE payments SET "pendingExpiresAt" = clock_timestamp() - make_interval(mins => $2) WHERE id = $1::uuid`, [paymentId, minutesAgo]);
+    await owner.query('ALTER TABLE payments ENABLE TRIGGER payments_guard');
+    await owner.query('COMMIT');
+  } catch (err) {
+    await owner.query('ROLLBACK');
+    throw err;
+  } finally {
+    const { rows } = await owner.query<{ tgenabled: string }>(`SELECT tgenabled FROM pg_trigger WHERE tgname = 'payments_guard'`);
+    await owner.end();
+    if (rows[0]?.tgenabled !== 'O') throw new Error('payments_guard left disabled');
+  }
+}
+
+/** The secret-free event a simulator would send for the current state of an attempt. */
+export async function eventFor(t: TestApp, a: SimAccount, paymentId: string, over: { status?: 'requires_action' | 'pending' | 'succeeded' | 'failed' | 'cancelled'; amountMinor?: bigint; currency?: string; withId?: boolean; eventId?: string; ref?: string } = {}): Promise<SignedWebhook> {
+  const p = await t.prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+  const remote = sim.find(a.id, { paymentId });
+  const ref = over.ref ?? p.providerPaymentRef ?? remote?.ref;
+  if (!ref) throw new Error('no reference for this payment');
+  return sim.paymentEvent(a.secret, {
+    ref, status: over.status ?? 'succeeded', amountMinor: over.amountMinor ?? p.amountMinor, currency: over.currency ?? p.currency,
+    ...(over.withId === false ? {} : { paymentId }),
+  }, over.eventId ? { eventId: over.eventId } : {});
+}
+
+/** Sends a signed webhook through HTTP, then runs its job as the worker would. Returns the HTTP status and the outcome. */
+export async function deliver(t: TestApp, a: SimAccount, w: SignedWebhook): Promise<{ status: number; outcome?: string }> {
+  const res = await sendWebhook(t, a, w);
+  if (res.status !== 200) {
+    if (process.env.DEBUG_WEBHOOKS) console.log('webhook', res.status, JSON.stringify(res.body));
+    return { status: res.status };
+  }
+  const ev = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: a.id, providerEventId: w.eventId } } });
+  const { PaymentWebhooksService } = await import('../../src/modules/payments/core/webhooks.service');
+  return { status: 200, outcome: await t.app.get(PaymentWebhooksService).process(ev.id) };
 }
