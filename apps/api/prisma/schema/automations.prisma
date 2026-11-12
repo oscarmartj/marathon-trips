@@ -1,5 +1,5 @@
 // ---- Task 7.4: automations (trigger, conditions, actions, test mode and run log) ----
-// Plan: docs/plans/7.4-automations.md. CHECKs, partial unique index and triggers live in migration 0020.
+// Plan: docs/plans/7.4-automations.md. CHECKs, the partial unique index and the REVOKE of DELETE and TRUNCATE on rules live in migration 0020.
 // A rule never moves money or changes permissions: its actions come from a closed list in code (ActionRegistry).
 
 enum AutomationTriggerType {

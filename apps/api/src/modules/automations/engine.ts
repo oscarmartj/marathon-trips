@@ -264,7 +264,8 @@ export class AutomationEngine {
     // action asks for. Losing any of them stops the rule without acting.
     let needed: string[];
     try {
-      needed = [...new Set([AUTOMATIONS_PERMISSIONS.enable, ...this.rules.permissionsFor(def)])];
+      // A panel test needs only what managing a rule needs; a real or scheduled run also needs the right to switch it on.
+      needed = [...new Set([manual ? AUTOMATIONS_PERMISSIONS.manage : AUTOMATIONS_PERMISSIONS.enable, ...this.rules.permissionsFor(def)])];
     } catch {
       return stop('failed', 'rule_invalid', rule.version, testMode);
     }

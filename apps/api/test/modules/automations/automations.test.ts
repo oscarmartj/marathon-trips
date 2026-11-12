@@ -327,6 +327,17 @@ const everyAction = () => [
 ];
 
 describe('review round 1 of the code', () => {
+  it('a member who can manage but not switch on can draft a rule and test it', async () => {
+    const manager = await signedIn([P.read, P.manage, ...ACTION_PERMISSIONS]);
+    const r = await createRule(manager, { actions: [taskAction('Draft check'), { type: 'add_tag', tagId }] });
+    const { bookingId } = await newBooking();
+    const res = await manager.post(`/admin/automations/${r.id}/test`, { entityId: bookingId });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect([res.body.status, res.body.reasonCode]).toEqual(['succeeded', null]);
+    expect(res.body.steps.map((s: { status: string }) => s.status)).toEqual(['simulated', 'simulated']);
+    expect(await tasksOn(bookingId)).toHaveLength(0);
+  });
+
   it('a rule needs its owner to read the records its trigger is about, when saved and at every run', async () => {
     const blind = await signedIn([...Object.values(P), 'common.task.write']);
     const res = await blind.post('/admin/automations', ruleBody({ conditions: [{ fact: 'status', op: 'is', value: 'requested' }] }));
