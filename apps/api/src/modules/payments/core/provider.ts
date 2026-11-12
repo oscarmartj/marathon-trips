@@ -72,6 +72,8 @@ export interface ProviderPayment {
 
 export interface NormalisedEvent {
   providerEventId: string;
+  /** The gateway's own event type (payment.updated, payout.paid…), as stored with the raw event. */
+  type: string;
   occurredAt: Date;
   /** Refunds, disputes and settlements are extensions for 4.5 and 4.6. */
   kind: 'payment' | 'unsupported';

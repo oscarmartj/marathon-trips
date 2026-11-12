@@ -236,7 +236,7 @@ model WebhookEvent {
   booking           Booking?                   @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   paymentId         String?                    @db.Uuid
   payment           Payment?                   @relation(fields: [paymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  /// @nopii normalised kind: payment or unsupported
+  /// @nopii the gateway's event type (payment.updated…)
   type              String
   /// @pii the body as received (can carry the payer's details)
   rawBody           Bytes?

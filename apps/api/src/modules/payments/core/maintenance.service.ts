@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/comm
 import type { AppConfig } from '../../../platform/config/config';
 import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
 import { safeError } from '../../../platform/errors/safe-error';
+import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { JobsService } from '../../../platform/jobs/jobs.service';
 import { QUEUES } from '../../../platform/jobs/queues';
 import { PaymentAttemptSyncService } from './attempt-sync.service';
@@ -11,12 +12,14 @@ import { PaymentWebhooksService } from './webhooks.service';
 export const RAW_BODY_RETENTION_DAYS = 180;
 export const REJECTION_RETENTION_DAYS = 30;
 export const STUCK_EVENT_MINUTES = 10;
+/** An event still `failed` this long after its last attempt (its job has given up) gets a task for Oscar. */
+export const FAILED_EVENT_MINUTES = 30;
 const DAY = 86_400_000;
 
 /**
  * The payments sweep, every ten minutes (plan 3.1, sections 5.3, 6 and 14.6): live attempts past their expiry go to
  * the attempts queue (one job each), events stuck in `received` are queued again, raw bodies older than 180 days are
- * emptied and rejections older than 30 days deleted. Also runs the workers of the three payments queues.
+ * emptied, rejections older than 30 days deleted, and events that kept failing get a task. Also runs the workers of the three payments queues.
  */
 @Injectable()
 export class PaymentsMaintenanceService implements OnApplicationBootstrap {
@@ -27,6 +30,7 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(PaymentAttemptSyncService) private readonly sync: PaymentAttemptSyncService,
     @Inject(PaymentWebhooksService) private readonly webhooks: PaymentWebhooksService,
+    @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -38,11 +42,20 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     await this.jobs.schedule(QUEUES.paymentsMaintenance, '*/10 * * * *');
   }
 
-  async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; bodiesPurged: number; rejectionsPurged: number }> {
+  async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; failedFlagged: string[]; bodiesPurged: number; rejectionsPurged: number }> {
     const due = await this.prisma.payment.findMany({ where: { liveBookingId: { not: null }, pendingExpiresAt: { lte: now } }, select: { id: true }, orderBy: { pendingExpiresAt: 'asc' }, take: 200 });
     for (const { id } of due) await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: id, action: 'expire' }, { singletonKey: `expire:${id}` });
     const stuck = await this.prisma.webhookEvent.findMany({ where: { status: 'received', receivedAt: { lte: new Date(now.getTime() - STUCK_EVENT_MINUTES * 60_000) } }, select: { id: true }, take: 200 });
     for (const { id } of stuck) await this.jobs.send(QUEUES.paymentsWebhooks, { webhookEventId: id }, { singletonKey: `webhook:${id}` });
+    // Events whose processing kept failing are visible as tasks (review M2): one per event while it is open.
+    const failed = await this.prisma.webhookEvent.findMany({ where: { status: 'failed', updatedAt: { lte: new Date(now.getTime() - FAILED_EVENT_MINUTES * 60_000) } }, select: { id: true, errorCode: true }, take: 200 });
+    for (const ev of failed) {
+      await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
+        title: 'Payment webhook could not be processed',
+        description: `A payment gateway event kept failing (${ev.errorCode ?? 'unknown'}). Check the payment it belongs to and the gateway.`,
+        entityType: 'WebhookEvent', entityId: ev.id, sourceRef: `payments:webhook_failed:${ev.id}`,
+      }));
+    }
     let bodiesPurged = 0;
     let rejectionsPurged = 0;
     try {
@@ -51,6 +64,6 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     } catch (err) {
       this.logger.error(`payments retention failed: ${safeError(err).code}`);
     }
-    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), bodiesPurged, rejectionsPurged };
+    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), failedFlagged: failed.map((f) => f.id), bodiesPurged, rejectionsPurged };
   }
 }

@@ -168,7 +168,7 @@ describe('matching events to payments (plan 0.1, P5)', () => {
   it('an unsupported event type is stored and ignored', async () => {
     const w = sim.paymentEvent(acc.secret, { ref: 'x', status: 'succeeded', amountMinor: 1n, currency: 'AUD' }, { type: 'payout.paid' });
     expect((await deliver(t, acc, w)).outcome).toBe('ignored');
-    expect((await eventRow(w.eventId)).errorCode).toBe('unsupported');
+    expect(await eventRow(w.eventId)).toMatchObject({ errorCode: 'unsupported', type: 'payout.paid' });
   });
 
   it('webhook_processing_failure_retried_and_visible', async () => {
@@ -183,6 +183,11 @@ describe('matching events to payments (plan 0.1, P5)', () => {
     expect([failed.status, failed.attempts]).toEqual(['failed', 1]);
     expect(failed.errorCode).toBeTruthy();
     expect(await statusOf(p.id)).toBe('requires_action');
+    // A failure that stays is visible: the sweep opens one task for it (review M2).
+    const flagged = await t.app.get(PaymentsMaintenanceService).run(new Date(Date.now() + 31 * 60_000));
+    expect(flagged.failedFlagged).toContain(ev.id);
+    await t.app.get(PaymentsMaintenanceService).run(new Date(Date.now() + 41 * 60_000));
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:webhook_failed:${ev.id}` } })).toBe(1);
     expect(await svc().process(ev.id)).toBe('processed');
     expect(await statusOf(p.id)).toBe('succeeded');
   });
@@ -209,6 +214,7 @@ describe('raw events, retention and erasure (plan 3.1, 6 and 7)', () => {
     expect(Buffer.from(ev.rawBody!).equals(w.body)).toBe(true);
     expect(ev.headers).toEqual({ 'content-type': 'application/json', 'content-length': String(w.body.length), 'x-sim-signature': '[present]' });
     expect(ev.status).toBe('received');
+    expect(ev.type).toBe('payment.updated');
   });
 
   it('erasure_clears_matched_webhook_raw_body', async () => {

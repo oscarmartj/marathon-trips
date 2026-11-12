@@ -49,6 +49,7 @@ export const PAYMENT_EVENTS = {
   succeeded: 'payments.payment.succeeded',
   failed: 'payments.payment.failed',
   overpaid: 'payments.booking.overpaid',
+  lateSucceeded: 'payments.payment.late_succeeded',
   scheduleCreated: 'payments.schedule.created',
   scheduleSuperseded: 'payments.schedule.superseded',
 } as const;
@@ -120,8 +121,22 @@ export class PaymentStateMachine {
         payload: { paymentId: p.id, bookingId: p.bookingId }, actorType: 'system',
       });
     }
+    if (to === 'succeeded' && (from === 'failed' || from === 'cancelled' || from === 'expired')) await this.lateSuccess(tx, p, from, ctx.bookingReference);
     if (to === 'succeeded') await this.checkOverpayment(tx, p, ctx.bookingReference);
     return to;
+  }
+
+  /**
+   * Money for an attempt that had already ended (failed, cancelled or expired): the customer may have paid the same
+   * item twice, whatever the totals say. Always a task for Oscar and an event (review M1).
+   */
+  private async lateSuccess(tx: Tx, p: LockedPayment, from: PaymentStatus, reference: string): Promise<void> {
+    await this.tasks.createSystemIn(tx, {
+      title: `Late payment success on booking ${reference}`,
+      description: `A payment attempt that had ${from === 'failed' ? 'failed' : from === 'cancelled' ? 'been cancelled' : 'expired'} was collected after all. Check whether the customer paid twice and arrange a refund if needed.`,
+      entityType: 'Payment', entityId: p.id, sourceRef: `payments:late_success:${p.id}`,
+    });
+    await this.outbox.publish(tx, { type: PAYMENT_EVENTS.lateSucceeded, aggregateType: 'Payment', aggregateId: p.id, aggregateVersion: p.version, payload: { paymentId: p.id, bookingId: p.bookingId }, actorType: 'system' });
   }
 
   /**

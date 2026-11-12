@@ -44,6 +44,23 @@ const paymentsOf = (bookingId: string) => t.prisma.payment.findMany({ where: { b
 const fresh = async () => approvedBooking(t, admin, await pricedWorld(admin), c);
 const sync = () => t.app.get(PaymentAttemptSyncService);
 
+/** A booking of customer c with a chosen total and deposit (written like makeBookingFor), approved through the API. */
+async function smallDepositBooking(depositMinor: bigint, totalMinor: bigint): Promise<{ reference: string; bookingId: string }> {
+  const ww = await pricedWorld(admin);
+  // The customer row exists from c's first request.
+  if (!(await t.prisma.customer.findFirst({ where: { userId: c.userId } }))) await fresh();
+  const customer = await t.prisma.customer.findFirstOrThrow({ where: { userId: c.userId } });
+  const { bookingId } = await makeBookingFor(t, ww, customer.id);
+  await t.prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`UPDATE bookings SET "currentSnapshotVersion" = 2, "totalMinor" = $2, "depositMinor" = $3 WHERE id = $1::uuid`, bookingId, totalMinor, depositMinor);
+    await tx.bookingSnapshot.create({ data: { bookingId, version: 2, kind: 'amendment', configuration: {}, priceBreakdown: {}, totalMinor, depositMinor, currency: 'AUD', priceVersionId: ww.versionId, engineVersion: 'pricing-0.0.0' } });
+  });
+  const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+  const ok = await admin.post(`/admin/bookings/${bookingId}/approve`, { version: b.version });
+  if (ok.status !== 200) throw new Error(`approve failed ${ok.status} ${JSON.stringify(ok.body)}`);
+  return { reference: b.reference, bookingId };
+}
+
 describe('the payment plan (plan 3.1, section 4)', () => {
   it('schedule_created_atomically_with_approval: deposit and balance from the snapshot, audited and published', async () => {
     const { reference, bookingId } = await fresh();
@@ -168,12 +185,13 @@ describe('payment attempts (plan 3.1, section 5)', () => {
 
   it('concurrent_create_attempt_different_keys_one_provider_object: ten at once, one attempt and one gateway object', async () => {
     const { reference, bookingId } = await fresh();
+    const objectsBefore = sim.objectCount(acc.id);
     const results = await Promise.all(Array.from({ length: 10 }, () => c.pay(reference, { method: 'card' })));
     expect(results.every((r) => r.status === 201 || (r.status === 409 && ['payment_attempt_in_progress', 'busy_try_again', 'idempotency_in_progress'].includes(r.body.code)))).toBe(true);
     const ps = await paymentsOf(bookingId);
     expect(ps).toHaveLength(1);
-    const objects = [...Array(1)].map(() => sim.find(acc.id, { paymentId: ps[0]!.id }));
-    expect(objects.filter(Boolean)).toHaveLength(1);
+    // Exactly one new object at the gateway for these ten requests (review M4).
+    expect(sim.objectCount(acc.id) - objectsBefore).toBe(1);
   });
 
   it('second_live_attempt_for_booking_rejected (and the database refuses a second live row)', async () => {
@@ -182,7 +200,8 @@ describe('payment attempts (plan 3.1, section 5)', () => {
     const res = await c.pay(reference, { method: 'apple_pay' });
     expect([res.status, res.body.code]).toEqual([409, 'payment_attempt_in_progress']);
     const [p] = await paymentsOf(bookingId);
-    await expect(t.prisma.payment.create({ data: { ...p!, id: randomUUID(), attemptNumber: 2, idempotencyKey: `booking:${bookingId}:attempt:2`, providerPaymentRef: null, status: 'created', version: 0 } })).rejects.toThrow();
+    // The unique index on liveBookingId is what refuses it (review M4).
+    await expect(t.prisma.payment.create({ data: { ...p!, id: randomUUID(), attemptNumber: 2, idempotencyKey: `booking:${bookingId}:attempt:2`, providerPaymentRef: null, status: 'created', version: 0 } })).rejects.toThrow(/Unique constraint failed[\s\S]*liveBookingId/);
   });
 
   it('resume_does_not_extend_pending_expiry, and expired_unswept_attempt_not_resumed', async () => {
@@ -422,6 +441,93 @@ describe('expiry and cancellation of attempts (plan 3.1, 5.3 and 14.3)', () => {
     expect(ps.map((p) => p.status)).toEqual(['succeeded', 'succeeded']);
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:overpaid:${p1!.id}` } })).toBe(1);
     expect(await t.prisma.outboxEvent.count({ where: { type: 'payments.booking.overpaid', aggregateId: p1!.id } })).toBe(1);
+  });
+});
+
+describe('gateway errors never end a live attempt by themselves (review G1)', () => {
+  it('retrieve_error_keeps_attempt_live: a refusal while reading an existing object is a 503 and the attempt stays live', async () => {
+    const { reference, bookingId } = await fresh();
+    const key = randomUUID();
+    expect((await c.pay(reference, { method: 'card' }, key)).status).toBe(201);
+    for (const fault of ['auth_failed', 'not_found_error', 'unavailable'] as const) {
+      sim.failNextRetrieve(acc.id, fault);
+      const res = await c.pay(reference, { method: 'card' }, key);
+      expect([res.status, res.body.code]).toEqual([503, 'provider_unavailable']);
+      const [p] = await paymentsOf(bookingId);
+      expect([p!.status, p!.liveBookingId]).toEqual(['requires_action', bookingId]);
+    }
+    // A second tab cannot start a new attempt meanwhile.
+    expect((await c.pay(reference, { method: 'apple_pay' })).body.code).toBe('payment_attempt_in_progress');
+    expect((await c.pay(reference, { method: 'card' }, key)).body.status).toBe('requires_action');
+  });
+
+  it('pending_attempt_not_failed_by_provider_error', async () => {
+    const { reference, bookingId } = await fresh();
+    sim.queue(acc.id, 'pending');
+    const key = randomUUID();
+    expect((await c.pay(reference, { method: 'card' }, key)).body.status).toBe('pending');
+    sim.failNextRetrieve(acc.id, 'not_found_error');
+    expect((await c.pay(reference, { method: 'card' }, key)).status).toBe(503);
+    expect((await paymentsOf(bookingId))[0]!.status).toBe('pending');
+  });
+
+  it('idempotency key in use at the gateway: the refusal is checked by key and the existing object is used, never failed', async () => {
+    const { reference, bookingId } = await fresh();
+    const before = sim.objectCount(acc.id);
+    sim.queue(acc.id, 'in_use_after_create');
+    const res = await c.pay(reference, { method: 'card' });
+    expect([res.status, res.body.status]).toEqual([201, 'requires_action']);
+    expect(res.body.nextAction).toBeDefined();
+    const [p] = await paymentsOf(bookingId);
+    expect(p!.providerPaymentRef).toBe(sim.find(acc.id, { paymentId: p!.id })!.ref);
+    expect(sim.objectCount(acc.id) - before).toBe(1);
+  });
+
+  it('a refusal on create fails the attempt only when the gateway holds nothing under our key; doubt is a 503', async () => {
+    const one = await fresh();
+    sim.queue(acc.id, 'auth_failed');
+    expect((await c.pay(one.reference, { method: 'card' })).body.status).toBe('failed');
+    expect((await paymentsOf(one.bookingId))[0]).toMatchObject({ status: 'failed', failureCode: 'provider_auth_failed', liveBookingId: null });
+    const two = await fresh();
+    sim.queue(acc.id, 'rejected');
+    sim.failNextRetrieve(acc.id, 'unavailable');
+    expect((await c.pay(two.reference, { method: 'card' })).status).toBe(503);
+    expect((await paymentsOf(two.bookingId))[0]).toMatchObject({ status: 'created', liveBookingId: two.bookingId });
+  });
+
+  it('late_success_of_an_ended_deposit_attempt_is_flagged_whatever_the_totals (review M1)', async () => {
+    // A booking whose two deposits stay well under the total (500 on 3000), as in the review's scenario.
+    const { reference, bookingId } = await smallDepositBooking(50000n, 300000n);
+    await c.pay(reference, { method: 'card' });
+    const [p1] = await paymentsOf(bookingId);
+    await deliver(t, acc, await eventFor(t, acc, p1!.id, { status: 'failed' }));
+    await c.pay(reference, { method: 'card' });
+    const p2 = (await paymentsOf(bookingId))[1]!;
+    sim.settle(acc.id, p2.providerPaymentRef!, 'succeeded');
+    await deliver(t, acc, await eventFor(t, acc, p2.id));
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:late_success:${p2.id}` } })).toBe(0);
+    await deliver(t, acc, await eventFor(t, acc, p1!.id, { status: 'succeeded' }));
+    expect((await paymentsOf(bookingId)).map((p) => p.status)).toEqual(['succeeded', 'succeeded']);
+    // No overpayment (two deposits are under the total), yet the late success is flagged.
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:overpaid:${p1!.id}` } })).toBe(0);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:late_success:${p1!.id}` } })).toBe(1);
+    expect(await t.prisma.outboxEvent.count({ where: { type: 'payments.payment.late_succeeded', aggregateId: p1!.id } })).toBe(1);
+  });
+
+  it('resume compares the account: a paused account neither resumes nor hands out its redirect (review M3)', async () => {
+    const { reference, bookingId } = await fresh();
+    const key = randomUUID();
+    expect((await c.pay(reference, { method: 'card' }, key)).body.nextAction).toBeDefined();
+    await t.prisma.providerAccount.update({ where: { id: acc.id }, data: { status: 'paused' } });
+    try {
+      const replay = await c.pay(reference, { method: 'card' }, key);
+      expect([replay.status, replay.body.status, replay.body.nextAction]).toEqual([201, 'requires_action', undefined]);
+      const other = await c.pay(reference, { method: 'card' });
+      expect(other.status).toBe(409);
+      expect(await paymentsOf(bookingId)).toHaveLength(1);
+    } finally {
+      await t.prisma.providerAccount.update({ where: { id: acc.id }, data: { status: 'active' } });
+    }
   });
 });
 

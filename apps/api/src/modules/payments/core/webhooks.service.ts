@@ -85,7 +85,7 @@ export class PaymentWebhooksService {
     const event = verdict.event;
     return this.prisma.$transaction(async (tx) => {
       const inserted = await tx.webhookEvent.createMany({
-        data: [{ providerAccountId: account.id, providerEventId: event.providerEventId, type: event.kind, rawBody: new Uint8Array(rawBody), headers: this.sanitiseHeaders(headers, signatureHeaders) }],
+        data: [{ providerAccountId: account.id, providerEventId: event.providerEventId, type: event.type, rawBody: new Uint8Array(rawBody), headers: this.sanitiseHeaders(headers, signatureHeaders) }],
         skipDuplicates: true,
       });
       if (inserted.count === 0) return { received: true as const, duplicate: true };

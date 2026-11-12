@@ -121,18 +121,20 @@ export class PaymentAttemptsService {
         const due = payable(items, collected, body.upToSequence).next;
         if (!due) throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
 
-        const live = await tx.$queryRaw<Array<{ id: string; status: string; method: string; amountMinor: bigint; pendingExpiresAt: Date }>>`
-          SELECT id::text AS id, status::text AS status, method::text AS method, "amountMinor", "pendingExpiresAt"
+        const accounts = await this.routing.candidates(tx, { method: body.method, currency: b.currency, country: b.residenceCountry });
+        const live = await tx.$queryRaw<Array<{ id: string; status: string; method: string; amountMinor: bigint; pendingExpiresAt: Date; providerAccountId: string }>>`
+          SELECT id::text AS id, status::text AS status, method::text AS method, "amountMinor", "pendingExpiresAt", "providerAccountId"::text AS "providerAccountId"
           FROM payments WHERE "liveBookingId" = ${b.id}::uuid FOR UPDATE`;
         const current = live[0];
         if (current) {
           // Past its expiry but not swept yet: not resumable; its sweep is queued after this transaction (plan 3.1, 14.9).
           if (current.pendingExpiresAt.getTime() <= at.getTime()) return { expiredLive: current.id };
-          if (current.status !== 'pending' && current.method === body.method && current.amountMinor === due.amountMinor) return current.id;
+          // Resumed only with the same account (still able to take charges), method and amount (plan 3.1, 5.1).
+          const sameAccount = accounts.some((a) => a.id === current.providerAccountId);
+          if (current.status !== 'pending' && sameAccount && current.method === body.method && current.amountMinor === due.amountMinor) return current.id;
           throw conflict('payment_attempt_in_progress', 'A payment for this booking is already in progress');
         }
 
-        const accounts = await this.routing.candidates(tx, { method: body.method, currency: b.currency, country: b.residenceCountry });
         const account = accounts[0];
         if (!account) throw conflict('no_payment_method_available', 'This payment method is not available for this booking right now');
         const last = await tx.payment.aggregate({ where: { bookingId: b.id }, _max: { attemptNumber: true } });
@@ -180,19 +182,30 @@ export class PaymentAttemptsService {
     });
     if (!LIVE_STATUSES.includes(p.status)) return undefined;
     let remote: ProviderPayment | null;
-    try {
-      remote = p.providerPaymentRef
-        ? await this.gateway.call(p.providerAccountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { ref: p.providerPaymentRef! }))
-        : await this.gateway.call(p.providerAccountId, 'create', (provider, ctx) => provider.createPayment(ctx, {
+    if (p.providerPaymentRef) {
+      // The object exists at the gateway: an error reading it never ends the attempt (plan 3.1, 14.3; review G1).
+      try {
+        remote = await this.gateway.call(p.providerAccountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { ref: p.providerPaymentRef! }));
+      } catch (err) {
+        if (err instanceof ProviderError) throw providerUnavailable();
+        throw err;
+      }
+    } else {
+      try {
+        remote = await this.gateway.call(p.providerAccountId, 'create', (provider, ctx) => provider.createPayment(ctx, {
           amount: { amountMinor: p.amountMinor, currency: p.currency }, method: p.method, idempotencyKey: p.idempotencyKey,
           metadata: { paymentId: p.id, bookingId: p.bookingId }, returnUrl: `${this.config.WEB_ORIGIN}/payments/return`, customerCountry: p.payerCustomer.countryOfResidence,
         }));
-    } catch (err) {
-      if (!(err instanceof ProviderError)) throw err;
-      if (err.retryable) throw providerUnavailable();
-      // A definitive refusal before any object exists at the gateway: this attempt failed; a new one may start.
-      await this.record(p.id, null, 'api', err.code);
-      return undefined;
+      } catch (err) {
+        if (!(err instanceof ProviderError)) throw err;
+        if (err.retryable) throw providerUnavailable();
+        remote = await this.lookupAfterRefusal(p.providerAccountId, p.idempotencyKey);
+        if (remote === null) {
+          // The gateway refused and holds no object under our key: nothing can be charged; a new attempt may start.
+          await this.record(p.id, null, 'api', err.code);
+          return undefined;
+        }
+      }
     }
     if (!remote) return undefined;
     const ok = await this.record(p.id, remote, 'api');
@@ -200,6 +213,20 @@ export class PaymentAttemptsService {
     const origin = this.gateway.registry.get(p.adapterKey)?.manifest.checkoutOrigin;
     if (!ok || !url || !origin || !url.startsWith(`${origin}/`)) return undefined;
     return { type: 'redirect', url };
+  }
+
+  /**
+   * After a definitive refusal of createPayment (credentials, a concurrent request with the same key…), asks the
+   * gateway whether an object exists under our key. Only a clear "none" lets the attempt fail; any doubt is a 503 and
+   * the attempt stays live (plan 3.1, 14.3; review G1).
+   */
+  private async lookupAfterRefusal(accountId: string, idempotencyKey: string): Promise<ProviderPayment | null> {
+    try {
+      return await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { idempotencyKey }));
+    } catch (err) {
+      if (err instanceof ProviderError) throw providerUnavailable();
+      throw err;
+    }
   }
 
   /**
@@ -213,7 +240,8 @@ export class PaymentAttemptsService {
       const p = await lockPayment(tx, paymentId);
       if (!b || !p) throw notFound();
       if (!remote) {
-        await this.machine.apply(tx, p, 'failed', { source, failureCode, bookingReference: b.reference });
+        // Only an attempt the gateway never took (created, no reference) fails without the gateway saying so.
+        if (p.status === 'created' && p.providerPaymentRef === null) await this.machine.apply(tx, p, 'failed', { source, failureCode, bookingReference: b.reference });
         return false;
       }
       await this.machine.setReference(tx, p, remote.ref);
@@ -224,7 +252,9 @@ export class PaymentAttemptsService {
       await this.machine.apply(tx, p, remote.status, { source, failureCode: remote.failureCode, bookingReference: b.reference });
       const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
       const stillPayable = PAYABLE_STATES.includes(b.status) && !(b.status === 'approved' && (!b.approvalExpiresAt || b.approvalExpiresAt <= at));
-      return stillPayable && p.status === 'requires_action';
+      // No redirect to the hosted page of an account that no longer takes charges (review M3).
+      const account = await tx.providerAccount.findUnique({ where: { id: p.providerAccountId }, select: { status: true } });
+      return stillPayable && p.status === 'requires_action' && account?.status === 'active';
     }, PAYMENT_TX_OPTIONS);
   }
 

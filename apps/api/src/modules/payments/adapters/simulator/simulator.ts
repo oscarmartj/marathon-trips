@@ -39,14 +39,20 @@ interface SimPayment {
 }
 
 /** What the next createPayment does, set by a test. */
-export type SimulatorOutcome = 'requires_action' | 'pending' | 'succeeded' | 'decline' | 'timeout' | 'timeout_after_create' | 'unavailable';
+export type SimulatorOutcome =
+  | 'requires_action' | 'pending' | 'succeeded' | 'decline' | 'timeout' | 'timeout_after_create' | 'unavailable'
+  /** Definitive refusals with no object created (bad request, rotated credentials). */
+  | 'rejected' | 'auth_failed'
+  /** A definitive refusal after the object was created, like a gateway's "idempotency key in use" during a race. */
+  | 'in_use_after_create';
+export type SimulatorRetrieveFault = 'unavailable' | 'not_found' | 'not_found_error' | 'auth_failed';
 
 class SimAccount {
   readonly payments = new Map<string, SimPayment>();
   readonly byKey = new Map<string, string>();
   readonly next: SimulatorOutcome[] = [];
   readonly nextCancel: Array<'unavailable'> = [];
-  readonly nextRetrieve: Array<'unavailable' | 'not_found'> = [];
+  readonly nextRetrieve: SimulatorRetrieveFault[] = [];
   createCalls = 0;
 }
 
@@ -113,11 +119,13 @@ export class SimulatorProvider implements PaymentProvider {
     const outcome = acc.next.shift() ?? 'requires_action';
     if (outcome === 'timeout') throw new ProviderError('provider_timeout', true);
     if (outcome === 'unavailable') throw new ProviderError('provider_unavailable', true);
+    if (outcome === 'rejected') throw new ProviderError('provider_rejected', false);
+    if (outcome === 'auth_failed') throw new ProviderError('provider_auth_failed', false);
     if (!simulatorManifest.currencies.includes(input.amount.currency) || input.amount.amountMinor <= 0n) throw new ProviderError('provider_rejected', false);
     const p: SimPayment = {
       ref: `sim_pay_${randomBytes(12).toString('hex')}`,
       idempotencyKey: input.idempotencyKey,
-      status: outcome === 'decline' ? 'failed' : outcome === 'timeout_after_create' ? 'requires_action' : outcome,
+      status: outcome === 'decline' ? 'failed' : outcome === 'timeout_after_create' || outcome === 'in_use_after_create' ? 'requires_action' : outcome,
       amount: { ...input.amount },
       method: input.method,
       paymentId: input.metadata.paymentId,
@@ -126,6 +134,7 @@ export class SimulatorProvider implements PaymentProvider {
     acc.payments.set(p.ref, p);
     acc.byKey.set(p.idempotencyKey, p.ref);
     if (outcome === 'timeout_after_create') throw new ProviderError('provider_timeout', true);
+    if (outcome === 'in_use_after_create') throw new ProviderError('provider_rejected', false);
     return view(p, true);
   }
 
@@ -135,6 +144,8 @@ export class SimulatorProvider implements PaymentProvider {
     const fault = acc.nextRetrieve.shift();
     if (fault === 'unavailable') throw new ProviderError('provider_unavailable', true);
     if (fault === 'not_found') return null;
+    if (fault === 'not_found_error') throw new ProviderError('provider_not_found', false);
+    if (fault === 'auth_failed') throw new ProviderError('provider_auth_failed', false);
     const ref = 'ref' in by ? by.ref : acc.byKey.get(by.idempotencyKey);
     const p = ref ? acc.payments.get(ref) : undefined;
     return p ? view(p, true) : null;
@@ -189,7 +200,8 @@ function parseEvent(body: unknown): NormalisedEvent | null {
   if (!body || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
   if (typeof b.id !== 'string' || !/^sim_evt_[A-Za-z0-9_]{1,80}$/.test(b.id) || typeof b.created !== 'number' || typeof b.type !== 'string') return null;
-  const base = { providerEventId: b.id, occurredAt: new Date(b.created * 1000) };
+  if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(b.type)) return null;
+  const base = { providerEventId: b.id, type: b.type, occurredAt: new Date(b.created * 1000) };
   if (b.type !== 'payment.updated') return { ...base, kind: 'unsupported' };
   const d = b.data as Record<string, unknown> | undefined;
   if (!d || typeof d.ref !== 'string' || !STATUSES.includes(d.status as ProviderPaymentStatus) || typeof d.amountMinor !== 'string' || !/^\d{1,18}$/.test(d.amountMinor) || typeof d.currency !== 'string') return null;
@@ -229,7 +241,7 @@ export class SimulatorControl {
     this.world.account(accountId).nextCancel.push('unavailable');
   }
 
-  failNextRetrieve(accountId: string, how: 'unavailable' | 'not_found' = 'unavailable'): void {
+  failNextRetrieve(accountId: string, how: SimulatorRetrieveFault = 'unavailable'): void {
     this.world.account(accountId).nextRetrieve.push(how);
   }
 
