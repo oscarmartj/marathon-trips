@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TestApp, makeApp } from '../../support/auth';
-import { Client, World, anonymous, announceEdition, buildWorld, closeCatalogue, driveTo, raceBody, slug, staffClient } from '../../support/catalogue';
+import { Client, World, anonymous, announceEdition, buildWorld, closeCatalogue, driveTo, slug, staffClient } from '../../support/catalogue';
 import { CATALOGUE_PERMISSIONS as P } from '../../../src/modules/catalogue';
 
 // Task 1.2: duplicate a package, preview, low-stock warning and catalogue CSV.
