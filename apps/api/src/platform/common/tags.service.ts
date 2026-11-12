@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
-import { AuditService } from '../audit/audit.service';
+import { AuditService, type AuditContext } from '../audit/audit.service';
 import { PrismaService } from '../database/prisma.service';
 import { conflict, notFound, unprocessable } from '../http/api-error';
 import { type Actor, type TableDef, delegateOf } from './table-def';
@@ -91,6 +91,42 @@ export class TagsService {
     const ids = rows.filter((r) => mode === 'any' || r._count._all === new Set(tagIds).size).map((r) => r.entityId);
     if (ids.length > MAX_TAGGED) throw unprocessable('tag_filter_too_broad', 'That tag matches too many records; add another filter');
     return ids;
+  }
+
+  /**
+   * Adds or removes one tag on one record in the caller's transaction (task 7.4, automations). Insert-or-nothing and
+   * delete-or-nothing, audited on the record like setTags. Returns what happened, as a code.
+   */
+  async changeOneIn(
+    tx: Prisma.TransactionClient, actor: Actor, def: TableDef, entityId: string, tagId: string, op: 'add' | 'remove', context: AuditContext = {},
+  ): Promise<'done' | 'tag_unavailable' | 'already_tagged' | 'not_tagged' | 'entity_gone'> {
+    if (!def.taggable) return 'tag_unavailable';
+    const row = await delegateOf(tx, def).findUnique({ where: { id: entityId } });
+    if (!row || row.deletedAt) return 'entity_gone';
+    const tag = await tx.tag.findUnique({ where: { id: tagId } });
+    if (!tag || (tag.entityTypes.length > 0 && !tag.entityTypes.includes(def.entityType))) return 'tag_unavailable';
+    const before = await tx.tagging.findMany({ where: { entityType: def.entityType, entityId }, include: { tag: true } });
+    const has = before.some((b) => b.tagId === tagId);
+    if (op === 'add') {
+      if (has) return 'already_tagged';
+      const inserted = await tx.$executeRaw`
+        INSERT INTO taggings (id, "tagId", "entityType", "entityId", "createdById")
+        VALUES (gen_random_uuid(), ${tagId}::uuid, ${def.entityType}, ${entityId}::uuid, NULL)
+        ON CONFLICT ("tagId", "entityType", "entityId") DO NOTHING`;
+      if (inserted === 0) return 'already_tagged';
+    } else {
+      if (!has) return 'not_tagged';
+      const removed = await tx.tagging.deleteMany({ where: { tagId, entityType: def.entityType, entityId } });
+      if (removed.count === 0) return 'not_tagged';
+    }
+    const names = (list: Array<{ name: string }>) => list.map((t) => t.name).sort();
+    const beforeNames = names(before.map((b) => b.tag));
+    const afterNames = op === 'add' ? [...beforeNames, tag.name].sort() : names(before.filter((b) => b.tagId !== tagId).map((b) => b.tag));
+    await this.audit.record(tx, {
+      actor, action: 'common.tags.changed', entityType: def.entityType, entityId, model: def.model, fieldClasses: { tags: 'nopii' },
+      before: { tags: beforeNames }, after: { tags: afterNames }, context,
+    });
+    return 'done';
   }
 
   /** Sets the full tag set of one record; audits the names before and after on the record itself. */

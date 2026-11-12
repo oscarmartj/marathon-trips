@@ -48,3 +48,37 @@ export async function readBookingForPayments(tx: Tx, where: { id: string } | { r
   );
   return rows[0] ?? null;
 }
+
+/** What automations read about a booking (task 7.4): ids and codes for conditions, and what its emails need. */
+export interface BookingForAutomations {
+  id: string;
+  reference: string;
+  status: BookingStatus;
+  packageId: string;
+  editionId: string;
+  raceId: string;
+  fromQuote: boolean;
+  tagIds: string[];
+  customer: { id: string; email: string; givenName: string; preferredLocale: string; unavailable: boolean };
+  trip: { raceName: unknown; year: number; packageName: unknown };
+}
+
+/** A plain read, no lock. Null when the booking does not exist. */
+export async function readBookingForAutomations(tx: Tx, id: string): Promise<BookingForAutomations | null> {
+  const b = await tx.booking.findUnique({
+    where: { id },
+    select: {
+      id: true, reference: true, status: true, packageId: true, editionId: true, quote: { select: { id: true } },
+      customer: { select: { id: true, email: true, givenName: true, preferredLocale: true, anonymisedAt: true, deletedAt: true } },
+      package: { select: { name: true } }, edition: { select: { year: true, raceId: true, race: { select: { name: true } } } },
+    },
+  });
+  if (!b) return null;
+  const tags = await tx.tagging.findMany({ where: { entityType: 'Booking', entityId: id }, select: { tagId: true }, orderBy: { tagId: 'asc' } });
+  return {
+    id: b.id, reference: b.reference, status: b.status as BookingStatus, packageId: b.packageId, editionId: b.editionId, raceId: b.edition.raceId,
+    fromQuote: !!b.quote, tagIds: tags.map((t) => t.tagId),
+    customer: { id: b.customer.id, email: b.customer.email, givenName: b.customer.givenName, preferredLocale: b.customer.preferredLocale, unavailable: !!(b.customer.anonymisedAt || b.customer.deletedAt) },
+    trip: { raceName: b.edition.race.name, year: b.edition.year, packageName: b.package.name },
+  };
+}
