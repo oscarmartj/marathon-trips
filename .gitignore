@@ -12,3 +12,7 @@ test-results/
 playwright-report/
 var/
 deploy/production.env
+
+# Installer downloads
+*.tar.gz
+*.whl
