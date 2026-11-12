@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import {
-  addPackageHotelSchema, adminRaceQuerySchema, createEditionSchema, createExtraSchema, createHotelSchema, createPackageSchema, createPoolSchema, createRaceSchema, distanceSchema,
+  addPackageHotelSchema, adminPackageQuerySchema, adminRaceQuerySchema, catalogueExportBodySchema, csvImportSchema, duplicatePackageSchema, createEditionSchema, createExtraSchema, createHotelSchema, createPackageSchema, createPoolSchema, createRaceSchema, distanceSchema,
   editionStatusChangeSchema, entryOptionSchema, raceStatusChangeSchema, roomOptionSchema, saleStatusChangeSchema, setClaimSchema, setParticipationSchema, updateDistanceSchema,
   updateEditionSchema, updateExtraSchema, updateRoomOptionSchema, updateHotelSchema, updatePackageSchema, updatePoolSchema, updateRaceSchema, CLAIM_KINDS,
 } from '@mt/shared';
@@ -11,8 +12,10 @@ import { actorOf } from '../../platform/access/actor';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { notFound } from '../../platform/http/api-error';
 import { ZodPipe } from '../../platform/http/zod.pipe';
+import { CatalogueCsvService } from './csv.service';
 import { InventoryService } from './inventory.service';
 import { CATALOGUE_PERMISSIONS as P } from './manifest';
+import { CataloguePanelService } from './panel.service';
 import { PackageService } from './package.service';
 import { RaceService } from './race.service';
 
@@ -30,9 +33,17 @@ export class CatalogueAdminController {
     @Inject(RaceService) private readonly races: RaceService,
     @Inject(PackageService) private readonly packages: PackageService,
     @Inject(InventoryService) private readonly inventory: InventoryService,
+    @Inject(CataloguePanelService) private readonly panel: CataloguePanelService,
+    @Inject(CatalogueCsvService) private readonly csv: CatalogueCsvService,
   ) {}
 
   // ---- Races ----
+  @Post('races/export') @HttpCode(200) @RequirePermission(P.raceRead)
+  async exportRaces(@Body(new ZodPipe(catalogueExportBodySchema)) _b: In<typeof catalogueExportBodySchema>, @Res({ passthrough: true }) res: Response) { return this.sendCsv(res, 'races', (await this.csv.exportRaces()).csv); }
+
+  @Post('races/import') @HttpCode(200) @RequirePermission(P.raceManage)
+  importRaces(@Body(new ZodPipe(csvImportSchema)) b: In<typeof csvImportSchema>, @Req() req: ApiRequest) { return this.csv.importRaces(actorOf(req), b); }
+
   @Get('races') @RequirePermission(P.raceRead)
   listRaces(@Query(new ZodPipe(adminRaceQuerySchema)) q: In<typeof adminRaceQuerySchema>) { return this.races.list(q); }
 
@@ -80,6 +91,24 @@ export class CatalogueAdminController {
   async deleteEdition(@Param('id', uuid()) id: string, @Req() req: ApiRequest) { await this.races.removeEdition(actorOf(req), id); }
 
   // ---- Packages ----
+  @Post('editions/:id/packages/export') @HttpCode(200) @RequirePermission(P.packageRead)
+  async exportPackages(@Param('id', uuid()) id: string, @Body(new ZodPipe(catalogueExportBodySchema)) _b: In<typeof catalogueExportBodySchema>, @Res({ passthrough: true }) res: Response) { return this.sendCsv(res, 'packages', (await this.csv.exportPackages(id)).csv); }
+
+  @Post('editions/:id/packages/import') @HttpCode(200) @RequirePermission(P.packageManage)
+  importPackages(@Param('id', uuid()) id: string, @Body(new ZodPipe(csvImportSchema)) b: In<typeof csvImportSchema>, @Req() req: ApiRequest) { return this.csv.importPackages(actorOf(req), id, b); }
+
+  @Get('packages') @RequirePermission(P.packageRead)
+  listPackages(@Query(new ZodPipe(adminPackageQuerySchema)) q: In<typeof adminPackageQuerySchema>) { return this.panel.listPackages(q); }
+
+  @Get('packages/:id/preview') @RequirePermission(P.packageRead)
+  previewPackage(@Param('id', uuid()) id: string) { return this.panel.preview(id); }
+
+  @Post('packages/:id/duplicate') @RequirePermission(P.packageManage)
+  duplicatePackage(@Param('id', uuid()) id: string, @Body(new ZodPipe(duplicatePackageSchema)) b: In<typeof duplicatePackageSchema>, @Req() req: ApiRequest) { return this.packages.duplicate(actorOf(req), id, b); }
+
+  @Get('low-stock') @RequirePermission(P.packageRead)
+  lowStock() { return this.panel.lowStock(); }
+
   @Post('editions/:id/packages') @RequirePermission(P.packageManage)
   createPackage(@Param('id', uuid()) id: string, @Body(new ZodPipe(createPackageSchema)) b: In<typeof createPackageSchema>, @Req() req: ApiRequest) { return this.packages.create(actorOf(req), id, b); }
 
@@ -153,4 +182,11 @@ export class CatalogueAdminController {
 
   @Get('pools/:id/movements') @RequirePermission(P.packageRead)
   movements(@Param('id', uuid()) id: string) { return this.inventory.movements(id); }
+
+  private sendCsv(res: Response, what: string, csv: string): string {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="catalogue-${what}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return csv;
+  }
 }

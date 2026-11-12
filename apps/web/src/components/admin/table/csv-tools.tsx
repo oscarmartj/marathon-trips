@@ -20,7 +20,16 @@ function line(e: CsvError): string {
   return t('admin.table.csv.errorLine', { row: e.row, column: e.column, message });
 }
 
-export function CsvTools({ meta, query, onImported }: { meta: Meta; query: QueryState; onImported: () => void }) {
+/** Where a table's CSV lives. The shared tables use the default; the catalogue (task 1.2) names its own routes. */
+export interface CsvEndpoints {
+  exportUrl: string;
+  importUrl: string;
+  exportBody: unknown;
+  /** File name stem for the download. */
+  stem: string;
+}
+
+export function CsvTools({ meta, query, onImported, endpoints }: { meta: Meta; query: QueryState; onImported: () => void; endpoints?: CsvEndpoints }) {
   const [text, setText] = useState<string | null>(null);
   const [fileKey, setFileKey] = useState(0);
   const [errors, setErrors] = useState<CsvError[]>([]);
@@ -28,8 +37,8 @@ export function CsvTools({ meta, query, onImported }: { meta: Meta; query: Query
   const [message, setMessage] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
 
   async function exportCsv() {
-    const res = await fetch(`/api/admin/tables/${meta.entityType}/export`, {
-      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-MT-CSRF': '1' }, body: JSON.stringify({ query: queryBody(query) }),
+    const res = await fetch(`/api${endpoints?.exportUrl ?? `/admin/tables/${meta.entityType}/export`}`, {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-MT-CSRF': '1' }, body: JSON.stringify(endpoints ? endpoints.exportBody : { query: queryBody(query) }),
     });
     if (!res.ok) {
       let body: { code?: string } = {};
@@ -43,7 +52,7 @@ export function CsvTools({ meta, query, onImported }: { meta: Meta; query: Query
     }
     const blob = await res.blob();
     // The proxy forwards only listed headers (not Content-Disposition), so the name is built here as the API builds it.
-    const name = `${meta.entityType.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+    const name = `${endpoints?.stem ?? meta.entityType.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = name;
@@ -57,7 +66,7 @@ export function CsvTools({ meta, query, onImported }: { meta: Meta; query: Query
       setMessage({ text: t('admin.table.csv.chooseFile'), tone: 'error' });
       return;
     }
-    const r = await api<{ valid: boolean; committed: boolean; rows: number; errors: CsvError[] }>(`/admin/tables/${meta.entityType}/import`, { method: 'POST', body: { csv: text, dryRun } });
+    const r = await api<{ valid: boolean; committed: boolean; rows: number; errors: CsvError[] }>(endpoints?.importUrl ?? `/admin/tables/${meta.entityType}/import`, { method: 'POST', body: { csv: text, dryRun } });
     if (r.status !== 200) {
       setMessage({ text: errText(r), tone: 'error' });
       return;

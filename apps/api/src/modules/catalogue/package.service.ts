@@ -1,12 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { z } from 'zod';
 import type {
-  SaleStatus, addPackageHotelSchema, createExtraSchema, createHotelSchema, createPackageSchema, depositSchema, entryOptionSchema, roomOptionSchema,
+  SaleStatus, addPackageHotelSchema, createExtraSchema, createHotelSchema, createPackageSchema, depositSchema, duplicatePackageSchema, entryOptionSchema, roomOptionSchema,
   setParticipationSchema, updateExtraSchema, updateHotelSchema, updatePackageSchema, updateRoomOptionSchema,
 } from '@mt/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { AuditService } from '../../platform/audit/audit.service';
-import type { AuditActor } from '../../platform/audit/audit.service';
+import type { AuditActor, AuditContext } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
@@ -61,20 +61,21 @@ export class PackageService {
   }
 
   async create(actor: Actor, editionId: string, input: z.infer<typeof createPackageSchema>) {
+    const row = await orConflict('package_slug_taken', 'This edition already has a package with that slug', () => this.prisma.$transaction((tx) => this.createIn(tx, actor, editionId, input)));
+    return this.get(row.id);
+  }
+
+  /** Creates a draft package in the caller's transaction (also used by the CSV import). */
+  async createIn(tx: Tx, actor: Actor, editionId: string, input: z.infer<typeof createPackageSchema>, context?: AuditContext) {
     const { reason, deposit, ...rest } = input;
     this.checkDates(rest);
-    const row = await orConflict('package_slug_taken', 'This edition already has a package with that slug', () =>
-      this.prisma.$transaction(async (tx) => {
-        const edition = await tx.raceEdition.findFirst({ where: { id: editionId, race: { deletedAt: null } }, select: { id: true } });
-        if (!edition) throw notFound('edition_not_found', 'Edition not found');
-        const created = await tx.package.create({
-          data: { ...rest, editionId, checkInDate: toDate(rest.checkInDate), checkOutDate: toDate(rest.checkOutDate), balanceDueDate: toDate(rest.balanceDueDate), saleStatus: 'draft', ...depositColumns(deposit) },
-        });
-        await this.audit.record(tx, { actor, action: 'catalogue.package.created', entityType: 'Package', entityId: created.id, reason, after: view(created) });
-        return created;
-      }),
-    );
-    return this.get(row.id);
+    const edition = await tx.raceEdition.findFirst({ where: { id: editionId, race: { deletedAt: null } }, select: { id: true } });
+    if (!edition) throw notFound('edition_not_found', 'Edition not found');
+    const created = await tx.package.create({
+      data: { ...rest, editionId, checkInDate: toDate(rest.checkInDate), checkOutDate: toDate(rest.checkOutDate), balanceDueDate: toDate(rest.balanceDueDate), saleStatus: 'draft', ...depositColumns(deposit) },
+    });
+    await this.audit.record(tx, { actor, action: 'catalogue.package.created', entityType: 'Package', entityId: created.id, reason, after: view(created), context });
+    return created;
   }
 
   async update(actor: Actor, id: string, input: z.infer<typeof updatePackageSchema>) {
@@ -149,6 +150,83 @@ export class PackageService {
       if (res.count !== 1) throw versionConflict();
       await this.audit.record(tx, { actor, action: 'catalogue.package.deleted', entityType: 'Package', entityId: id, reason, before: { deletedAt: null }, after: { deletedAt: new Date() } });
     });
+  }
+
+  /**
+   * Copies a package to another edition of the same race (task 1.2) as a draft. The dates and the slug come from the caller.
+   * Stock pools are created again in the target edition, empty and unconfirmed (a supplier's confirmation is about one
+   * edition, so it is never inherited); a pool the source shared between lines is shared in the copy too. All or nothing.
+   */
+  async duplicate(actor: Actor, sourceId: string, input: z.infer<typeof duplicatePackageSchema>) {
+    const { reason, targetEditionId, slug, name, checkInDate, checkOutDate, balanceDueDate } = input;
+    const created = await orConflict('package_slug_taken', 'The target edition already has a package with that slug', () =>
+      this.prisma.$transaction(async (tx) => {
+        const src = await tx.package.findFirst({
+          where: { id: sourceId, deletedAt: null, edition: { race: { deletedAt: null } } },
+          include: {
+            edition: { select: { raceId: true } },
+            participationOptions: true,
+            entryOptions: { include: { entryPool: true } },
+            hotels: { include: { rooms: { include: { roomPool: true } } } },
+            extras: { where: { deletedAt: null }, include: { pool: true } },
+          },
+        });
+        if (!src) throw notFound('package_not_found', 'Package not found');
+        const target = await tx.raceEdition.findFirst({ where: { id: targetEditionId, race: { deletedAt: null } }, select: { id: true, raceId: true } });
+        if (!target) throw notFound('edition_not_found', 'Edition not found');
+        if (target.raceId !== src.edition.raceId) throw unprocessable('duplicate_other_race', 'A package can only be copied to another edition of the same race');
+        this.checkDates({ checkInDate, checkOutDate, balanceDueDate, minTravellers: src.minTravellers, maxTravellers: src.maxTravellers });
+
+        const pools = new Map<string, string>();
+        const poolFor = async (pool: { id: string; kind: 'entry' | 'room' | 'extra'; label: string; capacity: number; lowStockThreshold: number | null }): Promise<string> => {
+          const known = pools.get(pool.id);
+          if (known) return known;
+          const row = await tx.inventoryPool.create({
+            data: { editionId: target.id, kind: pool.kind, label: pool.label, capacity: pool.capacity, lowStockThreshold: pool.lowStockThreshold, confirmedBySupplier: false, confirmationNote: null },
+          });
+          pools.set(pool.id, row.id);
+          await this.audit.record(tx, { actor, action: 'catalogue.inventory.created', entityType: 'InventoryPool', entityId: row.id, after: view(row), context: { copiedFromPackage: sourceId } });
+          return row.id;
+        };
+
+        const pkg = await tx.package.create({
+          data: {
+            editionId: target.id, slug, name: (name ?? src.name) as Prisma.InputJsonValue, saleStatus: 'draft',
+            checkInDate: toDate(checkInDate), checkOutDate: toDate(checkOutDate), balanceDueDate: toDate(balanceDueDate),
+            includes: src.includes as Prisma.InputJsonValue, excludes: src.excludes as Prisma.InputJsonValue,
+            instantBooking: src.instantBooking, autoConfirmOnDeposit: src.autoConfirmOnDeposit,
+            depositMode: src.depositMode, depositAmountMinor: src.depositAmountMinor, depositBps: src.depositBps,
+            minTravellers: src.minTravellers, maxTravellers: src.maxTravellers, maxExtraNightsBefore: src.maxExtraNightsBefore, maxExtraNightsAfter: src.maxExtraNightsAfter,
+            currency: src.currency, seo: src.seo as Prisma.InputJsonValue,
+          },
+        });
+        if (src.participationOptions.length > 0) {
+          await tx.packageParticipationOption.createMany({ data: src.participationOptions.map((o) => ({ packageId: pkg.id, type: o.type, enabled: o.enabled })) });
+        }
+        for (const o of src.entryOptions) {
+          await tx.packageEntryOption.create({ data: { packageId: pkg.id, raceDistanceId: o.raceDistanceId, entryPoolId: await poolFor(o.entryPool) } });
+        }
+        for (const h of src.hotels) {
+          const link = await tx.packageHotel.create({ data: { packageId: pkg.id, hotelId: h.hotelId, displayOrder: h.displayOrder } });
+          for (const r of h.rooms) {
+            await tx.roomOption.create({
+              data: { packageHotelId: link.id, roomType: r.roomType, name: r.name as Prisma.InputJsonValue, minOccupancy: r.minOccupancy, maxOccupancy: r.maxOccupancy, roomPoolId: await poolFor(r.roomPool) },
+            });
+          }
+        }
+        for (const x of src.extras) {
+          await tx.extra.create({
+            data: {
+              packageId: pkg.id, kind: x.kind, name: x.name as Prisma.InputJsonValue, description: x.description as Prisma.InputJsonValue, pricingUnit: x.pricingUnit, availableTo: x.availableTo,
+              mandatory: x.mandatory, maxPerBooking: x.maxPerBooking, poolId: x.pool ? await poolFor(x.pool) : null, schedule: x.schedule === null ? undefined : (x.schedule as Prisma.InputJsonValue),
+            },
+          });
+        }
+        await this.audit.record(tx, { actor, action: 'catalogue.package.duplicated', entityType: 'Package', entityId: pkg.id, reason, after: view(pkg), context: { sourcePackage: sourceId } });
+        return pkg;
+      }),
+    );
+    return this.get(created.id);
   }
 
   private async livePackage(tx: Tx, id: string) {

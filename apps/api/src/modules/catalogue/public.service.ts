@@ -29,6 +29,48 @@ const VISIBLE_EDITION = { status: { not: 'draft' } } satisfies Prisma.RaceEditio
 
 const localised = (v: unknown): Record<string, string> => (v && typeof v === 'object' ? (v as Record<string, string>) : {});
 
+/** What the package view needs from the database. The panel preview uses the same include and the same builder. */
+export const PACKAGE_VIEW_INCLUDE = {
+  edition: true,
+  participationOptions: { where: { enabled: true }, orderBy: { type: 'asc' } },
+  entryOptions: { include: { raceDistance: true, entryPool: true }, orderBy: { createdAt: 'asc' } },
+  hotels: { include: { hotel: true, rooms: { include: { roomPool: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }] },
+  extras: { where: { deletedAt: null }, include: { pool: true }, orderBy: { createdAt: 'asc' } },
+} satisfies Prisma.PackageInclude;
+
+type ViewRace = Prisma.RaceGetPayload<{ include: { claims: true } }>;
+type ViewPackage = Prisma.PackageGetPayload<{ include: typeof PACKAGE_VIEW_INCLUDE }>;
+
+/**
+ * The package as a visitor sees it (task 1.1), built from rows. `race.claims` may hold all claims; only enabled ones count.
+ * It carries no stock numbers, and `guaranteedEntry` follows guaranteedEntryOf. Callers decide which packages may be shown.
+ */
+export function packageView(race: ViewRace, pkg: ViewPackage) {
+  const claims = race.claims.filter((c) => c.enabled);
+  const nights = Math.round((pkg.checkOutDate.getTime() - pkg.checkInDate.getTime()) / 86_400_000);
+  const guaranteedClaim = claims.some((c) => c.kind === 'guaranteed_entry');
+  return {
+    id: pkg.id, slug: pkg.slug, name: localised(pkg.name), saleStatus: pkg.saleStatus, currency: pkg.currency,
+    race: { slug: race.slug, name: localised(race.name), claims: claims.map((c) => c.kind).filter((k) => k !== 'guaranteed_entry') },
+    edition: { year: pkg.edition.year, startDate: fromDate(pkg.edition.startDate), dateStatus: pkg.edition.dateStatus, dateConfirmed: pkg.edition.dateStatus === 'confirmed' },
+    checkInDate: fromDate(pkg.checkInDate), checkOutDate: fromDate(pkg.checkOutDate), nights,
+    includes: localised(pkg.includes), excludes: localised(pkg.excludes),
+    instantBooking: pkg.instantBooking, deposit: depositView(pkg), balanceDueDate: fromDate(pkg.balanceDueDate),
+    minTravellers: pkg.minTravellers, maxTravellers: pkg.maxTravellers, maxExtraNightsBefore: pkg.maxExtraNightsBefore, maxExtraNightsAfter: pkg.maxExtraNightsAfter,
+    participation: pkg.participationOptions.map((o) => o.type),
+    guaranteedEntry: guaranteedEntryOf(guaranteedClaim, pkg.entryOptions.map((o) => o.entryPool)),
+    entries: pkg.entryOptions.map((o) => ({ id: o.id, distance: { id: o.raceDistance.id, kind: o.raceDistance.kind, distanceMetres: o.raceDistance.distanceMetres, name: localised(o.raceDistance.name) }, availability: availability(o.entryPool) })),
+    hotels: pkg.hotels.map((h) => ({
+      id: h.id, name: h.hotel.name, address: h.hotel.address, city: h.hotel.city, countryCode: h.hotel.countryCode, starRating: h.hotel.starRating, description: localised(h.hotel.description),
+      rooms: h.rooms.map((r) => ({ id: r.id, roomType: r.roomType, name: localised(r.name), minOccupancy: r.minOccupancy, maxOccupancy: r.maxOccupancy, availability: availability(r.roomPool) })),
+    })),
+    extras: pkg.extras.map((x) => ({
+      id: x.id, kind: x.kind, name: localised(x.name), description: localised(x.description), pricingUnit: x.pricingUnit, availableTo: x.availableTo, mandatory: x.mandatory, maxPerBooking: x.maxPerBooking,
+      schedule: x.schedule, availability: x.pool ? availability(x.pool) : ('available' as const),
+    })),
+  };
+}
+
 /** Public reads. The sitemap and structured data (1.4) use these same methods, so a draft can never leak through them. */
 @Injectable()
 export class PublicCatalogueService {
@@ -96,37 +138,10 @@ export class PublicCatalogueService {
     if (!race) throw notFound('package_not_found', 'Package not found');
     const pkg = await this.prisma.package.findFirst({
       where: { ...VISIBLE_PACKAGE, slug: packageSlug, edition: { raceId: race.id, year, ...VISIBLE_EDITION } },
-      include: {
-        edition: true,
-        participationOptions: { where: { enabled: true }, orderBy: { type: 'asc' } },
-        entryOptions: { include: { raceDistance: true, entryPool: true }, orderBy: { createdAt: 'asc' } },
-        hotels: { include: { hotel: true, rooms: { include: { roomPool: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }] },
-        extras: { where: { deletedAt: null }, include: { pool: true }, orderBy: { createdAt: 'asc' } },
-      },
+      include: PACKAGE_VIEW_INCLUDE,
     });
     if (!pkg) throw notFound('package_not_found', 'Package not found');
-    const nights = Math.round((pkg.checkOutDate.getTime() - pkg.checkInDate.getTime()) / 86_400_000);
-    const guaranteedClaim = race.claims.some((c) => c.kind === 'guaranteed_entry');
-    return {
-      id: pkg.id, slug: pkg.slug, name: localised(pkg.name), saleStatus: pkg.saleStatus, currency: pkg.currency,
-      race: { slug: race.slug, name: localised(race.name), claims: race.claims.map((c) => c.kind).filter((k) => k !== 'guaranteed_entry') },
-      edition: { year: pkg.edition.year, startDate: fromDate(pkg.edition.startDate), dateStatus: pkg.edition.dateStatus, dateConfirmed: pkg.edition.dateStatus === 'confirmed' },
-      checkInDate: fromDate(pkg.checkInDate), checkOutDate: fromDate(pkg.checkOutDate), nights,
-      includes: localised(pkg.includes), excludes: localised(pkg.excludes),
-      instantBooking: pkg.instantBooking, deposit: depositView(pkg), balanceDueDate: fromDate(pkg.balanceDueDate),
-      minTravellers: pkg.minTravellers, maxTravellers: pkg.maxTravellers, maxExtraNightsBefore: pkg.maxExtraNightsBefore, maxExtraNightsAfter: pkg.maxExtraNightsAfter,
-      participation: pkg.participationOptions.map((o) => o.type),
-      guaranteedEntry: guaranteedEntryOf(guaranteedClaim, pkg.entryOptions.map((o) => o.entryPool)),
-      entries: pkg.entryOptions.map((o) => ({ id: o.id, distance: { id: o.raceDistance.id, kind: o.raceDistance.kind, distanceMetres: o.raceDistance.distanceMetres, name: localised(o.raceDistance.name) }, availability: availability(o.entryPool) })),
-      hotels: pkg.hotels.map((h) => ({
-        id: h.id, name: h.hotel.name, address: h.hotel.address, city: h.hotel.city, countryCode: h.hotel.countryCode, starRating: h.hotel.starRating, description: localised(h.hotel.description),
-        rooms: h.rooms.map((r) => ({ id: r.id, roomType: r.roomType, name: localised(r.name), minOccupancy: r.minOccupancy, maxOccupancy: r.maxOccupancy, availability: availability(r.roomPool) })),
-      })),
-      extras: pkg.extras.map((x) => ({
-        id: x.id, kind: x.kind, name: localised(x.name), description: localised(x.description), pricingUnit: x.pricingUnit, availableTo: x.availableTo, mandatory: x.mandatory, maxPerBooking: x.maxPerBooking,
-        schedule: x.schedule, availability: x.pool ? availability(x.pool) : ('available' as const),
-      })),
-    };
+    return packageView(race, pkg);
   }
 
   /** Every URL-worthy public package, for the sitemap (1.4): the same filters as the pages themselves. */
