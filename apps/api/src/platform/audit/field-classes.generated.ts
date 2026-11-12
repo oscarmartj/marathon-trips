@@ -912,6 +912,26 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     createdById: 'nopii'
   },
+  WaitlistEntry: {
+    id: 'nopii',
+    email: 'pii',
+    customerId: 'nopii',
+    reason: 'nopii',
+    packageId: 'nopii',
+    countryOfResidence: 'pii',
+    travellers: 'nopii',
+    position: 'nopii',
+    status: 'nopii',
+    offeredAt: 'nopii',
+    offerExpiresAt: 'nopii',
+    withdrawnAt: 'nopii',
+    requestKeyHash: 'secret',
+    requestConfigHash: 'secret',
+    isDemo: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   WebhookDelivery: {
     id: 'nopii',
     subscriptionId: 'nopii',

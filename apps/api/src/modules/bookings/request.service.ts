@@ -12,6 +12,7 @@ import { SettingsService } from '../../platform/flags/flags.service';
 import { ApiError, conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import { InventoryService } from '../catalogue';
 import { PromoRedemptionService, QuoteService, REDEEM_TX_OPTIONS, publicRedemptionError } from '../pricing';
+import { WaitlistService } from '../waitlist';
 import type { PriceBreakdown } from '../pricing';
 import { CustomerService } from './customer.service';
 import { BOOKING_EVENTS } from './manifest';
@@ -39,10 +40,11 @@ const BRISBANE_OFFSET = '+10:00';
 const todayInBrisbane = (at: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 const startOfDayInBrisbane = (date: string): Date => new Date(`${date}T00:00:00.000${BRISBANE_OFFSET}`);
 
-export interface CreatedRequest {
-  bookingId: string;
-  created: boolean;
-}
+/**
+ * What a request became (task 2.6): a booking request, or, for someone who does not live in a country we sell to, a
+ * waiting list entry (no price kept, no stock held).
+ */
+export type CreatedRequest = { kind: 'booking'; bookingId: string; created: boolean } | { kind: 'waitlist'; entryId: string; created: boolean };
 
 /**
  * Creates a booking request (plan 2.4, section 4): prices the configuration with the engine, stores the immutable
@@ -57,6 +59,7 @@ export class BookingRequestService {
     @Inject(PromoRedemptionService) private readonly redemptions: PromoRedemptionService,
     @Inject(InventoryService) private readonly inventory: InventoryService,
     @Inject(CustomerService) private readonly customers: CustomerService,
+    @Inject(WaitlistService) private readonly waitlist: WaitlistService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
@@ -87,13 +90,15 @@ export class BookingRequestService {
     // 2. The same Idempotency-Key again (a retry after the commit, or after the idempotency record's lock ran out).
     const existing = await tx.booking.findUnique({ where: { customerId_requestKeyHash: { customerId: customer.id, requestKeyHash: hashes.key } }, select: { id: true, requestConfigHash: true, requestContactHmac: true } });
     if (existing) {
-      if (existing.requestConfigHash === hashes.config && existing.requestContactHmac === hashes.contact) return { bookingId: existing.id, created: false };
+      if (existing.requestConfigHash === hashes.config && existing.requestContactHmac === hashes.contact) return { kind: 'booking', bookingId: existing.id, created: false };
       throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
     }
     if (!created) await this.customers.applyContact(tx, customer, contact, actor);
 
-    // 3–4. Who may ask, and how much one customer may hold.
-    if (!limits.salesCountries.includes(contact.countryOfResidence)) throw conflict('country_not_served', 'We can only take requests from residents of the countries we sell to');
+    // 3. Who may ask: a resident of a country we sell to sends a request; anyone else joins the waiting list (task 2.6).
+    if (!limits.salesCountries.includes(contact.countryOfResidence)) return this.joinWaitlistIn(tx, user, customer.id, body, hashes, actor);
+
+    // 4. How much one customer may hold.
     const open = await tx.booking.count({ where: { customerId: customer.id, status: 'requested' } });
     if (open >= limits.maxOpenRequests) throw conflict('too_many_open_requests', 'You already have as many open requests as we can take. We will be in touch about them first.');
 
@@ -157,7 +162,28 @@ export class BookingRequestService {
       type: BOOKING_EVENTS.requested, aggregateType: 'Booking', aggregateId: bookingId, aggregateVersion: 0,
       payload: { bookingId, packageId: configuration.packageId, editionId: pkg[0]!.editionId, customerId: customer.id }, actorType: actor.type, actorId: actor.id ?? undefined,
     });
-    return { bookingId, created: true };
+    return { kind: 'booking', bookingId, created: true };
+  }
+
+  /**
+   * The waiting list instead of a request (task 2.6), in the same transaction and under the same customer lock. The
+   * configuration is still checked by the engine, so a package that is not open for sale, a departed one or a nonsense
+   * configuration is refused the same way, but nothing it returns is kept except the head count: no price, no snapshot,
+   * no code redeemed (a code, if sent, is ignored) and no stock held.
+   */
+  private async joinWaitlistIn(tx: Tx, user: { id: string; email: string }, customerId: string, body: BookingRequest, hashes: { key: string; config: string }, actor: AuditActor): Promise<CreatedRequest> {
+    const { contact, promoCode: _ignored, ...configuration } = body;
+    const pkg = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM packages WHERE id = ${configuration.packageId}::uuid AND "deletedAt" IS NULL FOR SHARE`;
+    if (pkg.length === 0) throw notFound('package_not_found', 'Package not found');
+    const at = await dbNow(tx);
+    const { breakdown } = await this.quotes.priceWithPromoRef(tx, configuration, { audience: 'public', now: at });
+    if (breakdown.departureDate <= todayInBrisbane(at)) throw conflict('package_departed', 'This trip has already started');
+    const travellers = breakdown.configuration.rooms.reduce((n, r) => n + r.travellers.length, 0);
+    const joined = await this.waitlist.joinIn(tx, {
+      customerId, email: user.email, countryOfResidence: contact.countryOfResidence, packageId: configuration.packageId, travellers,
+      requestKeyHash: hashes.key, requestConfigHash: hashes.config, actor,
+    });
+    return { kind: 'waitlist', ...joined };
   }
 
   /** A fresh random reference; a collision is skipped with ON CONFLICT DO NOTHING (a 23505 would abort the transaction). */

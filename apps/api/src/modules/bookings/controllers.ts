@@ -9,6 +9,7 @@ import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import { IdempotencyInProgressError, IdempotencyKeyReuseError, IdempotencyService } from '../../platform/idempotency/idempotency.service';
 import { PromoAttemptGuard } from '../pricing';
+import { WaitlistService } from '../waitlist';
 import { BookingAdminService } from './admin.service';
 import { BOOKINGS_PERMISSIONS as P } from './manifest';
 import { ownsBookingReference } from './ownership';
@@ -27,6 +28,7 @@ export class BookingRequestsController {
     @Inject(BookingRequestService) private readonly requests: BookingRequestService,
     @Inject(IdempotencyService) private readonly idempotency: IdempotencyService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(WaitlistService) private readonly waitlist: WaitlistService,
   ) {}
 
   @Post()
@@ -38,14 +40,22 @@ export class BookingRequestsController {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: actor.id }, select: { id: true, email: true } });
     const outcome = await this.idempotency.run({ actorType: 'customer', actorId: user.id, route: 'POST /booking-requests', key, body: b }, async () => {
       const r = await this.requests.create(user, b, key, actor);
-      return { status: 201, resourceType: 'Booking', resourceId: r.bookingId };
+      return r.kind === 'waitlist'
+        ? { status: 201, resourceType: 'WaitlistEntry', resourceId: r.entryId }
+        : { status: 201, resourceType: 'Booking', resourceId: r.bookingId };
     }).catch((err: unknown) => {
       // The platform's idempotency errors, as this API's error codes.
       if (err instanceof IdempotencyKeyReuseError) throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
       if (err instanceof IdempotencyInProgressError) throw conflict('idempotency_in_progress', 'A request with this Idempotency-Key is still being processed');
       throw err;
     });
-    // No response body is stored: a repeat gets the current representation of the same booking (plan 0.1, 5.1).
+    // No response body is stored: a repeat gets the current representation of the same booking (plan 0.1, 5.1). A
+    // resident gets the request; anyone else gets the waiting list entry, marked `outcome: 'waitlisted'` (task 2.6).
+    if (outcome.result.resourceType === 'WaitlistEntry') {
+      const entry = await this.waitlist.customerView(outcome.result.resourceId!);
+      if (!entry) throw notFound('waitlist_entry_not_found', 'Waiting list entry not found');
+      return entry;
+    }
     const view = await customerView(this.prisma, { id: outcome.result.resourceId! });
     if (!view) throw notFound('booking_not_found', 'Booking not found');
     return view;

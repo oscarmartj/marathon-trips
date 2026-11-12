@@ -1,0 +1,59 @@
+// Waiting list (task 2.6; plan 0.1, 5.4 "WaitlistEntry"). Someone who does not live in a country we sell to joins the
+// list for a package instead of sending a booking request. No price is kept, no stock is held and nothing is charged:
+// task 6.5 adds offers and the automatic promotion. CHECKs and triggers live in migration 0015_waitlist.
+
+enum WaitlistReason {
+  non_resident
+  sold_out
+}
+
+enum WaitlistStatus {
+  waiting
+  offered
+  converted
+  expired
+  withdrawn
+}
+
+/// One person waiting for one package. Personal data: erased through the entity registry (task 5.5).
+model WaitlistEntry {
+  id                 String         @id @default(uuid(7)) @db.Uuid
+  /// @pii address the offer will go to, copied from the verified customer
+  email              String         @db.Citext
+  customerId         String         @db.Uuid
+  customer           Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii why the person is on the list (sold_out arrives with task 6.5)
+  reason             WaitlistReason
+  packageId          String         @db.Uuid
+  package            Package        @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @pii country of residence declared with the request; ZZ once erased
+  countryOfResidence String         @db.Char(2)
+  /// @nopii how many people the request was for
+  travellers         Int
+  /// @nopii order of joining: a sequence, so it only goes up (gaps are normal)
+  position           Int            @default(autoincrement())
+  /// @nopii where the entry stands
+  status             WaitlistStatus @default(waiting)
+  /// @nopii timestamp (task 6.5)
+  offeredAt          DateTime?      @db.Timestamptz(3)
+  /// @nopii timestamp (task 6.5)
+  offerExpiresAt     DateTime?      @db.Timestamptz(3)
+  /// @nopii timestamp
+  withdrawnAt        DateTime?      @db.Timestamptz(3)
+  /// @secret SHA-256 of the user id and the client's Idempotency-Key: one entry per key and customer
+  requestKeyHash     String         @db.Char(64)
+  /// @secret SHA-256 of the requested configuration (no personal data)
+  requestConfigHash  String         @db.Char(64)
+  /// @nopii demo data root (plan 0.1, 1.3)
+  isDemo             Boolean        @default(false)
+  /// @nopii optimistic lock for the admin panel
+  version            Int            @default(0)
+  /// @nopii timestamp
+  createdAt          DateTime       @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt          DateTime       @updatedAt @db.Timestamptz(3)
+
+  @@unique([customerId, requestKeyHash])
+  @@index([packageId, status, position])
+  @@map("waitlist_entries")
+}
