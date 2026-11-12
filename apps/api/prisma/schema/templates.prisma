@@ -1,0 +1,44 @@
+// ---- Task 5.4: editable email and document templates ----
+// CHECKs and the one-active-per-template index live in migration 0018. A template holds editorial wording with
+// {{variable}} placeholders, never customer data: the values are filled in at send or render time from ids.
+// Editing never changes a revision that has been active: a change is a new draft revision, so a sent email can always be
+// matched to the wording that was live (task 4.5 reads revision from the active row at the time).
+
+enum TemplateChannel {
+  email
+  document
+}
+
+enum TemplateStatus {
+  draft
+  active
+  archived
+}
+
+model MessageTemplate {
+  id        String          @id @default(uuid(7)) @db.Uuid
+  /// @nopii email or document
+  channel   TemplateChannel
+  /// @nopii template key from the code registry, such as crm.booking_approved or confirmation
+  key       String
+  /// @nopii language tag such as en-AU
+  locale    String          @default("en-AU")
+  /// @nopii revision number of this key and locale, counting up from 1
+  revision  Int
+  /// @nopii draft, active or archived
+  status    TemplateStatus  @default(draft)
+  /// @nopii editorial text with placeholders; the subject line of an email, the title of a document
+  subject   String          @default("")
+  /// @nopii editorial text with placeholders
+  body      String
+  /// @nopii optimistic lock for the admin panel
+  version   Int             @default(0)
+  /// @nopii timestamp
+  createdAt DateTime        @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt DateTime        @updatedAt @db.Timestamptz(3)
+
+  @@unique([channel, key, locale, revision])
+  @@index([channel, key, locale, status])
+  @@map("message_templates")
+}

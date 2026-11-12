@@ -237,7 +237,8 @@
       "booking": "Booking",
       "customer": "Customer",
       "quotes": "Quotes",
-      "quote": "Quote"
+      "quote": "Quote",
+      "templates": "Templates"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -2073,6 +2074,71 @@
         "booking": "Booking",
         "send": "Send to customer",
         "withdraw": "Withdraw quote"
+      }
+    },
+    "templates": {
+      "title": "Email and document templates",
+      "intro": "Edit the wording of the emails and PDF documents customers receive. A change is saved as a draft and only goes out once you put it into use.",
+      "channel": "Kind",
+      "channels": {
+        "email": "Emails",
+        "document": "Documents"
+      },
+      "template": "Template",
+      "variablesTitle": "Variables you can use",
+      "variablesHelp": "Type a variable in double curly braces, for example {example}. Only the variables listed here work.",
+      "revisionsTitle": "Revisions",
+      "noRevisions": "No revisions yet. The built-in wording is in use.",
+      "revisionsCaption": "Revisions of this template, newest first",
+      "columns": {
+        "revision": "Revision",
+        "language": "Language",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "status": {
+        "draft": "Draft",
+        "active": "In use",
+        "archived": "Archived"
+      },
+      "editorTitle": "Wording",
+      "subjectEmail": "Subject",
+      "subjectDocument": "Title",
+      "body": "Body",
+      "useStarter": "Start from the suggested wording",
+      "editing": "Editing draft revision {revision}. Saving changes this draft.",
+      "newDraft": "Save as a new draft",
+      "saveDraft": "Save draft",
+      "stopEditing": "Start a new draft instead",
+      "preview": "Preview with sample data",
+      "previewTitle": "Preview",
+      "previewNote": "Made-up details are used here. Nothing is sent.",
+      "previewSubject": "Subject: {subject}",
+      "previewDocumentTitle": "Title: {subject}",
+      "problems": "Fix these before saving.",
+      "problemUnknown": "{field}: the variable {name} is not available in this template.",
+      "problemMalformed": "{field}: curly braces must wrap a single variable name.",
+      "fieldSubject": "Subject",
+      "fieldTitle": "Title",
+      "fieldBody": "Body",
+      "edit": "Edit",
+      "activate": "Put into use",
+      "archive": "Take out of use",
+      "pdf": "Open PDF preview",
+      "saved": "Saved as draft revision {revision}.",
+      "updated": "Draft saved.",
+      "activated": "Revision {revision} is now in use.",
+      "archived": "Revision {revision} is out of use.",
+      "errors": {
+        "template_unknown_key": "That template does not exist.",
+        "template_wording_invalid": "The wording uses a variable this template does not have, or has curly braces that are not a variable.",
+        "template_subject_required": "An email needs a subject.",
+        "template_not_draft": "Only a draft can be changed or put into use. Save a new draft instead.",
+        "template_already_archived": "This revision is already out of use.",
+        "template_revision_conflict": "Someone else just added a revision. Reload and try again.",
+        "template_activation_conflict": "Someone else is changing this template. Reload and try again.",
+        "template_too_long": "This document would run to more than 50 pages.",
+        "forbidden": "You do not have permission to do this."
       }
     }
   },

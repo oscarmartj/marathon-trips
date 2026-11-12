@@ -8,6 +8,7 @@ import { MailTemplateRegistry } from '../../platform/mail/templates';
 import { BookingsModule } from '../bookings';
 import { CatalogueModule } from '../catalogue';
 import { PricingModule } from '../pricing';
+import { TemplatesModule } from '../templates';
 import { QuoteAcceptanceService } from './acceptance.service';
 import { CustomerQuotesController, QuotesAdminController } from './controllers';
 import { BOOKING_MAIL_STATES, CrmEmails, QUOTE_SENT_TEMPLATE, bookingTemplate } from './emails';
@@ -19,7 +20,7 @@ import { QuoteService } from './quote.service';
 import { defineCrmSettings } from './settings';
 
 @Module({
-  imports: [BookingsModule, CatalogueModule, PricingModule],
+  imports: [BookingsModule, CatalogueModule, PricingModule, TemplatesModule],
   controllers: [QuotesAdminController, CustomerQuotesController],
   providers: [QuoteService, QuoteAcceptanceService, QuoteExpiryService, CrmEmails],
 })

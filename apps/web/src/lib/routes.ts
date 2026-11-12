@@ -56,6 +56,7 @@ export const adminRoutes: readonly RouteDef[] = [
   { path: '/admin/bookings/[id]', file: 'admin/(panel)/bookings/[id]/page.tsx', labelKey: 'admin.nav.booking' },
   { path: '/admin/quotes', file: 'admin/(panel)/quotes/page.tsx', labelKey: 'admin.nav.quotes', nav: true },
   { path: '/admin/quotes/[id]', file: 'admin/(panel)/quotes/[id]/page.tsx', labelKey: 'admin.nav.quote' },
+  { path: '/admin/templates', file: 'admin/(panel)/templates/page.tsx', labelKey: 'admin.nav.templates', nav: true },
   { path: '/admin/tasks', file: 'admin/(panel)/tasks/page.tsx', labelKey: 'admin.nav.tasks', nav: true },
   { path: '/admin/customers', file: 'admin/(panel)/customers/page.tsx', labelKey: 'admin.nav.customers', nav: true },
   { path: '/admin/customers/[id]', file: 'admin/(panel)/customers/[id]/page.tsx', labelKey: 'admin.nav.customer' },
