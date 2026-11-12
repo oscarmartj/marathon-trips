@@ -18,6 +18,8 @@ export interface RunTransactionOptions {
   /** Including the first. Default 3 (plan 0.1, 6.3). */
   maxAttempts?: number;
   timeout?: number;
+  /** How long to wait for a connection from the pool. */
+  maxWait?: number;
 }
 
 /**
@@ -30,7 +32,7 @@ export async function runTransaction<T>(prisma: PrismaService, fn: (tx: Prisma.T
   const attempts = opts.maxAttempts ?? 3;
   for (let attempt = 1; ; attempt++) {
     try {
-      return await prisma.$transaction(fn, { isolationLevel: opts.isolationLevel, timeout: opts.timeout });
+      return await prisma.$transaction(fn, { isolationLevel: opts.isolationLevel, timeout: opts.timeout, maxWait: opts.maxWait });
     } catch (err) {
       if (!isRetryableTransactionError(err)) throw err;
       if (attempt >= attempts) throw conflict('busy_try_again', 'Many people are doing this at once. Try again.');

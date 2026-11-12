@@ -195,13 +195,14 @@ BEGIN
        OR NEW."editionId" IS DISTINCT FROM OLD."editionId" OR NEW."packageId" IS DISTINCT FROM OLD."packageId" THEN
       RAISE EXCEPTION 'the scope of a rule or code never changes' USING ERRCODE = 'insufficient_privilege';
     END IF;
-    IF TG_TABLE_NAME = 'promo_codes' AND NEW."code" IS DISTINCT FROM OLD."code" THEN
+    -- Through jsonb: price_rules has no code column, and PL/pgSQL would fail on NEW."code" for it.
+    IF TG_TABLE_NAME = 'promo_codes' AND (to_jsonb(NEW) ->> 'code') IS DISTINCT FROM (to_jsonb(OLD) ->> 'code') THEN
       RAISE EXCEPTION 'the text of a promo code never changes' USING ERRCODE = 'insufficient_privilege';
     END IF;
     IF OLD."archivedAt" IS NOT NULL THEN
       IF TG_TABLE_NAME = 'promo_codes'
          AND (to_jsonb(NEW) - 'redeemedCount' - 'updatedAt') = (to_jsonb(OLD) - 'redeemedCount' - 'updatedAt')
-         AND NEW."redeemedCount" < OLD."redeemedCount" THEN
+         AND (to_jsonb(NEW) ->> 'redeemedCount')::int < (to_jsonb(OLD) ->> 'redeemedCount')::int THEN
         RETURN NEW;
       END IF;
       RAISE EXCEPTION 'an archived rule or code never changes' USING ERRCODE = 'insufficient_privilege';
