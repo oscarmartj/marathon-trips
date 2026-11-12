@@ -97,6 +97,33 @@ test('custom_field_appears_in_form_filter_and_export', async ({ page }) => {
     await expect(list.getByRole('link', { name: `${run} Red Run` })).toBeVisible();
     await expect(list.getByRole('link', { name: `${run} Plain Run` })).toHaveCount(0);
 
+    // Showing a field to customers asks first, says how many records already hold a value, and only then saves.
+    await page.goto('/admin/settings/custom-fields');
+    await page.getByLabel('Kind of record', { exact: true }).selectOption({ label: 'Races' });
+    await table.getByRole('row', { name: new RegExp(`${run} Start wave`) }).getByRole('button', { name: /^Edit/ }).click();
+    const edit = formWith(page, 'Save changes');
+    await edit.getByLabel('Show to customers on the website').check();
+    await edit.getByRole('button', { name: 'Save changes', exact: true }).click();
+    const ask = page.getByRole('region', { name: /Show .*Start wave.* to customers\?/ });
+    await expect(ask.getByText('1 record already holds a value for this field.')).toBeVisible();
+    await ask.getByRole('button', { name: 'Keep it internal' }).click();
+    await expect(ask).toHaveCount(0);
+    await edit.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await ask.getByRole('button', { name: 'Show to customers' }).click();
+    await expect(ask).toHaveCount(0);
+    await expect(table.getByRole('row', { name: new RegExp(`${run} Start wave`) })).toContainText('Shown to customers');
+
+    // A required choose-several field says "required" in its group name, not only with a star.
+    f = formWith(page, 'Add field');
+    await f.getByLabel(label('Label')).fill(`${run} Wave groups`);
+    await f.getByLabel('Type', { exact: true }).selectOption({ label: 'Choose several' });
+    await f.getByLabel('Choices', { exact: true }).fill('a | Group A\nb | Group B');
+    await f.getByLabel('Required when a record is created').check();
+    await f.getByRole('button', { name: 'Add field', exact: true }).click();
+    await expect(table.getByRole('rowheader', { name: `${run} Wave groups` })).toBeVisible();
+    await page.goto(raceUrl);
+    await expect(page.getByRole('group', { name: new RegExp(`${run} Wave groups.*required`) })).toBeVisible();
+
     // The CSV export carries the column and the value.
     const exported = await page.request.post('/api/admin/catalogue/races/export', { headers: STATE, data: {} });
     expect(exported.status()).toBe(200);

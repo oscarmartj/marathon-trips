@@ -26,6 +26,11 @@ const MAX_ABS_NUMBER = 1e12;
 const fail = (code: string): ValueResult => ({ ok: false, code });
 const ok = (value: CustomValue): ValueResult => ({ ok: true, value });
 
+/** A record's own value for a key. Never an inherited one: `held['constructor']` would be a function (the key format also refuses that name). */
+export function ownValue(held: unknown, key: string): unknown {
+  return held !== null && typeof held === 'object' && Object.hasOwn(held, key) ? (held as Record<string, unknown>)[key] : undefined;
+}
+
 /** True when the value means "no value": null, blank text or an empty list. */
 export function isBlank(raw: unknown): boolean {
   return raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '') || (Array.isArray(raw) && raw.length === 0);
@@ -93,7 +98,7 @@ function optionAllowed(def: RuleDef, value: string, alreadyHeld: boolean): boole
 export function toCsvCell(def: RuleDef, value: unknown): string | number | boolean | null {
   if (value === null || value === undefined) return null;
   if (def.type === 'multiselect') return Array.isArray(value) ? value.join('; ') : null;
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if ((typeof value === 'number' && Number.isFinite(value)) || typeof value === 'string' || typeof value === 'boolean') return value;
   return null;
 }
 
@@ -106,7 +111,7 @@ export function fromCsvCell(def: RuleDef, cell: string, current?: unknown): Valu
   if (text === '') return { ok: true, blank: true };
   switch (def.type) {
     case 'number':
-      if (!/^-?\d+(\.\d+)?$/.test(text)) return fail('wrong_type');
+      if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(text)) return fail('wrong_type');
       return validateValue(def, Number(text), current);
     case 'boolean':
       if (text === 'true') return validateValue(def, true, current);

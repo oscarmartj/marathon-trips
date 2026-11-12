@@ -15,7 +15,7 @@ export {
 export const CUSTOM_FIELD_ENTITIES = ['Race', 'Package', 'Supplier'] as const;
 export type CustomFieldEntity = (typeof CUSTOM_FIELD_ENTITIES)[number];
 
-export const CUSTOM_FIELD_KEY = /^[a-z][a-z0-9_]{0,39}$/;
+export const CUSTOM_FIELD_KEY = /^(?!constructor$)[a-z][a-z0-9_]{0,39}$/;
 export const CUSTOM_FIELD_OPTION_VALUE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 export const DEFAULT_TEXT_MAX_LENGTH = 500;
 

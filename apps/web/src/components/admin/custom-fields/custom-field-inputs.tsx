@@ -44,8 +44,11 @@ export function CustomFieldInputs({ idPrefix, defs, values, onChange }: { idPref
         if (d.type === 'multiselect') {
           const held = Array.isArray(v) ? v : [];
           return (
-            <fieldset className="field" key={d.key} aria-required={d.required || undefined}>
-              <legend>{label}</legend>
+            <fieldset className="field" key={d.key}>
+              <legend>
+                {label}
+                {d.required ? <span className="visually-hidden"> ({t('admin.customFields.form.requiredHint')})</span> : null}
+              </legend>
               {offeredOptions(d, held).map((o) => (
                 <label key={o.value} className="field--check">
                   <input

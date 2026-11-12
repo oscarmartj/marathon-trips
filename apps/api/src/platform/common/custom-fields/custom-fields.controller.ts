@@ -20,6 +20,12 @@ export class CustomFieldsController {
     return this.fields.list(q);
   }
 
+  @Get(':id/usage')
+  @RequirePermission(K.customFieldRead)
+  usage(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.fields.usage(id);
+  }
+
   @Post()
   @RequirePermission(K.customFieldManage)
   create(@Body(new ZodPipe(createCustomFieldSchema)) body: CreateCustomFieldInput, @Req() req: ApiRequest) {
@@ -29,7 +35,8 @@ export class CustomFieldsController {
   @Patch(':id')
   @RequirePermission(K.customFieldManage)
   update(@Param('id', new ParseUUIDPipe()) id: string, @Body(new ZodPipe(updateCustomFieldSchema)) body: UpdateCustomFieldInput, @Req() req: ApiRequest) {
-    return this.fields.update(callerOf(req).actor, id, body);
+    const caller = callerOf(req);
+    return this.fields.update(caller.actor, caller.auth, id, body);
   }
 
   @Post(':id/archive')
@@ -43,6 +50,7 @@ export class CustomFieldsController {
   @HttpCode(200)
   @RequirePermission(K.customFieldManage)
   restore(@Param('id', new ParseUUIDPipe()) id: string, @Body(new ZodPipe(archiveCustomFieldSchema)) body: Out<typeof archiveCustomFieldSchema>, @Req() req: ApiRequest) {
-    return this.fields.restore(callerOf(req).actor, id, body);
+    const caller = callerOf(req);
+    return this.fields.restore(caller.actor, caller.auth, id, body);
   }
 }

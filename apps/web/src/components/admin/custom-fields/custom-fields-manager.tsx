@@ -9,11 +9,21 @@ import {
 } from '@/lib/custom-fields-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
-import { ActionButton, EntityForm, type FieldDef, Section, outcome, useLoad } from '../catalogue/kit';
+import { ActionButton, EntityForm, type FieldDef, Section, catalogueError, outcome, useLoad } from '../catalogue/kit';
+import { useStepUp } from '../step-up';
 
 /** Call signatures are written as interfaces because the copy test reads an arrow followed by text and a tag as page text. */
 interface BodyCall {
   (body: Record<string, unknown>): Promise<ApiResult>;
+}
+
+/** A change that would show stored values to customers: waits for a yes (with the number of records) and a fresh authenticator code. */
+interface PublishAsk {
+  def: CustomFieldDef;
+  kind: 'enable' | 'restore';
+  /** The PATCH body for `enable`. */
+  body?: Record<string, unknown>;
+  records: number;
 }
 
 const RULE_FIELDS: Record<string, Pick<FieldDef, 'type'>> = {
@@ -45,11 +55,32 @@ export function CustomFieldsManager() {
   const items = list.data?.items ?? [];
   const current = items.find((d) => (d.id === editing)) ?? null;
   const canShow = CUSTOMER_VISIBLE_ENTITIES.includes(entity);
+  const { run: withStepUp, prompt } = useStepUp();
+  const [ask, setAsk] = useState<PublishAsk | null>(null);
+  const [askMessage, setAskMessage] = useState<string | null>(null);
   const run = async (build: BodyResult, call: BodyCall, message: string) => {
     if (!build.ok) return { ok: false as const, message: t(`admin.customFields.formErrors.${build.code}`) };
-    const out = await outcome(() => call(build.body), message);
+    const out = await outcome(() => withStepUp(() => call(build.body)), message);
     if (out.ok) void list.reload();
     return out;
+  };
+
+  /** Looks up how many records hold a value, then waits for the person to confirm. */
+  const askToPublish = async (def: CustomFieldDef, kind: PublishAsk['kind'], body?: Record<string, unknown>) => {
+    const usage = await api<{ records: number }>(`/admin/custom-fields/${def.id}/usage`);
+    setAskMessage(null);
+    setAsk({ def, kind, body, records: usage.status === 200 ? usage.body.records : -1 });
+  };
+
+  const confirmPublish = async () => {
+    if (!ask) return;
+    const { def, kind, body } = ask;
+    const r = await withStepUp(() => (kind === 'restore' ? api(`/admin/custom-fields/${def.id}/restore`, { method: 'POST', body: { version: def.version } }) : api(`/admin/custom-fields/${def.id}`, { method: 'PATCH', body })));
+    if (r.status >= 200 && r.status < 300) {
+      setAsk(null);
+      setAskMessage(null);
+      void list.reload();
+    } else setAskMessage(catalogueError(r));
   };
 
   return (
@@ -74,6 +105,32 @@ export function CustomFieldsManager() {
           ))}
         </select>
       </div>
+
+      {prompt}
+      {ask ? (
+        <section className="card stack" aria-labelledby="cf-publish-title">
+          <h2 id="cf-publish-title">{t('admin.customFields.publish.title', { label: fieldLabel(ask.def) })}</h2>
+          <p>
+            {ask.records < 0
+              ? t('admin.customFields.publish.countUnknown')
+              : ask.records === 0
+                ? t('admin.customFields.publish.countNone')
+                : ask.records === 1
+                  ? t('admin.customFields.publish.countOne')
+                  : t('admin.customFields.publish.countMany', { count: String(ask.records) })}
+          </p>
+          <p>{t('admin.customFields.publish.help')}</p>
+          <Status message={askMessage} />
+          <div className="actions">
+            <button type="button" className="btn" onClick={() => void confirmPublish()}>
+              {t('admin.customFields.publish.confirm')}
+            </button>
+            <button type="button" className="link-button" onClick={() => setAsk(null)}>
+              {t('admin.customFields.publish.cancel')}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <Section id="cf-list" title={t('admin.customFields.listTitle')}>
         <Status message={list.error} />
@@ -110,7 +167,14 @@ export function CustomFieldsManager() {
                       <td>{d.archivedAt ? t('admin.customFields.archived') : t('admin.customFields.active')}</td>
                       <td>
                         {d.archivedAt ? (
-                          <ActionButton text={t('admin.customFields.restore')} run={() => api(`/admin/custom-fields/${d.id}/restore`, { method: 'POST', body: { version: d.version } })} onDone={() => void list.reload()} />
+                          d.visibleToCustomer ? (
+                            <button type="button" className="btn" onClick={() => void askToPublish(d, 'restore')}>
+                              {t('admin.customFields.restore')}
+                              <span className="visually-hidden"> {fieldLabel(d)}</span>
+                            </button>
+                          ) : (
+                            <ActionButton text={t('admin.customFields.restore')} run={() => withStepUp(() => api(`/admin/custom-fields/${d.id}/restore`, { method: 'POST', body: { version: d.version } }))} onDone={() => void list.reload()} />
+                          )
                         ) : (
                           <>
                             <button type="button" className="btn" onClick={() => setEditing(editing === d.id ? null : d.id)} aria-expanded={editing === d.id}>
@@ -149,7 +213,14 @@ export function CustomFieldsManager() {
             ]}
             initial={definitionFormValues(current)}
             submit={t('admin.catalogue.common.save')}
-            onSubmit={(v) => run(updateDefinitionBody(current, v), (body) => api(`/admin/custom-fields/${current.id}`, { method: 'PATCH', body }), t('admin.customFields.saved'))}
+            onSubmit={async (v) => {
+              const build = updateDefinitionBody(current, v);
+              if (build.ok && build.body.visibleToCustomer === true && !current.visibleToCustomer) {
+                await askToPublish(current, 'enable', build.body);
+                return { ok: false as const, message: t('admin.customFields.publish.confirmBelow') };
+              }
+              return run(build, (body) => api(`/admin/custom-fields/${current.id}`, { method: 'PATCH', body }), t('admin.customFields.saved'));
+            }}
           />
         </Section>
       ) : null}

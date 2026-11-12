@@ -1400,8 +1400,20 @@
         "rule": "One of the limits is not a valid number or date.",
         "options": "Check the choices: one per line as code | Label, with lower case codes that are not repeated."
       },
+      "publish": {
+        "title": "Show \"{label}\" to customers?",
+        "countUnknown": "We could not count the records that already hold a value for this field. Customers will see every value already saved as soon as you confirm.",
+        "countNone": "No record holds a value for this field yet.",
+        "countOne": "1 record already holds a value for this field. Customers will see that value on the public site as soon as you confirm.",
+        "countMany": "{count} records already hold a value for this field. Customers will see those values on the public site as soon as you confirm.",
+        "help": "Values saved while the field was internal are included. You will be asked for your authenticator code.",
+        "confirm": "Show to customers",
+        "cancel": "Keep it internal",
+        "confirmBelow": "Confirm below to make this field visible to customers."
+      },
       "form": {
         "legend": "Custom fields",
+        "requiredHint": "required",
         "notSet": "Not set",
         "yes": "Yes",
         "no": "No",

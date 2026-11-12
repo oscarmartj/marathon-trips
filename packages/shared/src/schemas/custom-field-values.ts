@@ -6,7 +6,7 @@ import { z } from 'zod';
 export const MAX_CUSTOM_FIELD_OPTIONS = 50;
 export const MAX_TEXT_MAX_LENGTH = 2000;
 export const MAX_CUSTOM_FILTERS = 5;
-const CUSTOM_FIELD_KEY = /^[a-z][a-z0-9_]{0,39}$/;
+const CUSTOM_FIELD_KEY = /^(?!constructor$)[a-z][a-z0-9_]{0,39}$/;
 const key = z.string().regex(CUSTOM_FIELD_KEY);
 export const CUSTOM_FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'select', 'multiselect'] as const;
 export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];

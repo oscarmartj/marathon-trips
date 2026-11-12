@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { COMMON_PERMISSIONS_KEYS as K } from '../../src/platform/common/permissions';
 import { PERMISSIONS, PermissionRegistry } from '../../src/platform/access/permissions';
+import pg from 'pg';
 import { parseCsv } from '../../src/platform/common/csv';
 import { SUPPLIERS_PERMISSIONS } from '../../src/modules/suppliers';
 import { TestApp, makeApp } from '../support/auth';
@@ -10,7 +11,7 @@ import { setSuppliersFlag, supplierBody } from '../support/suppliers';
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const RUN = `t${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 5)}`;
-const ALL = [...ALL_CATALOGUE_PERMISSIONS, ...Object.values(SUPPLIERS_PERMISSIONS), K.customFieldRead, K.customFieldManage, PERMISSIONS.auditRead];
+const ALL = [...ALL_CATALOGUE_PERMISSIONS, ...Object.values(SUPPLIERS_PERMISSIONS), K.customFieldRead, K.customFieldManage, K.customFieldPublish, PERMISSIONS.auditRead];
 const text = (s: string) => ({ 'en-AU': s });
 let n = 0;
 const key = (name: string) => `${RUN}_${name}_${n++}`.slice(0, 40);
@@ -140,6 +141,102 @@ describe('definitions', () => {
     expect((await admin.patch(`/admin/custom-fields/${f.id}`, { editableByCustomer: true, version: 0 })).status).toBe(422);
     const s = await define('Supplier', 'suppvis', 'text');
     expect((await admin.patch(`/admin/custom-fields/${s.id}`, { visibleToCustomer: true, version: 0 })).status).toBe(422);
+  });
+});
+
+describe('making a field visible to customers', () => {
+  const staleStepUp = (userId: string) => t.prisma.session.updateMany({ where: { userId, revokedAt: null }, data: { mfaVerifiedAt: new Date(Date.now() - 6 * 60_000) } });
+
+  it('needs its own permission and a recent authenticator check; hiding it again and creating one do not', async () => {
+    const manager = await staffClient(t, [K.customFieldRead, K.customFieldManage]);
+    const hidden = await define('Race', 'pub', 'text');
+    const race = await newRace({ [hidden.key]: 'written while internal' });
+    const blocked = await manager.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: true, version: 0 });
+    expect(blocked.status).toBe(403);
+    expect((await admin.get(`/admin/custom-fields/${hidden.id}/usage`)).status).toBe(200);
+    const stillHidden = (await admin.get('/admin/custom-fields').query({ entityType: 'Race' })).body.items.find((d: { id: string }) => d.id === hidden.id);
+    expect(stillHidden.visibleToCustomer).toBe(false);
+
+    const publisher = await staffClient(t, [K.customFieldRead, K.customFieldManage, K.customFieldPublish]);
+    await staleStepUp(publisher.staff.id);
+    const old = await publisher.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: true, version: 0 });
+    expect([old.status, old.body.code]).toEqual([403, 'step_up_required']);
+    const fresh = await staffClient(t, [K.customFieldRead, K.customFieldManage, K.customFieldPublish]);
+    const on = ok(await fresh.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: true, version: 0 }), 'publish');
+    expect(on.body.visibleToCustomer).toBe(true);
+    expect(race.customFields).toEqual({ [hidden.key]: 'written while internal' });
+
+    // Turning it off, or editing a field that is already visible, needs only manage; so does creating a visible one.
+    const off = ok(await manager.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: false, version: 1 }), 'hide');
+    expect(off.body.visibleToCustomer).toBe(false);
+    ok(await manager.post('/admin/custom-fields', { entityType: 'Race', key: key('newvis'), label: text('New'), type: 'text', visibleToCustomer: true }), 'create visible');
+    const again = ok(await fresh.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: true, version: 2 }), 'publish again');
+    ok(await manager.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: true, required: false, version: again.body.version }), 'already visible, no check');
+  });
+
+  it('bringing back an archived field that is visible needs the same permission', async () => {
+    const manager = await staffClient(t, [K.customFieldRead, K.customFieldManage]);
+    const f = await define('Race', 'back', 'text', { visibleToCustomer: true });
+    const archived = ok(await manager.post(`/admin/custom-fields/${f.id}/archive`, { version: 0 }), 'archive').body;
+    const blocked = await manager.post(`/admin/custom-fields/${f.id}/restore`, { version: archived.version });
+    expect(blocked.status).toBe(403);
+    ok(await admin.post(`/admin/custom-fields/${f.id}/restore`, { version: archived.version }), 'restore');
+    const h = await define('Race', 'backhid', 'text');
+    const a2 = ok(await manager.post(`/admin/custom-fields/${h.id}/archive`, { version: 0 }), 'archive hidden').body;
+    ok(await manager.post(`/admin/custom-fields/${h.id}/restore`, { version: a2.version }), 'restore hidden needs only manage');
+  });
+
+  it('the permission is never an API key scope and asks for step-up', () => {
+    const def = t.app.get(PermissionRegistry).all().find((d) => d.key === K.customFieldPublish);
+    expect(def).toMatchObject({ requiresStepUp: true });
+    expect(def?.apiKeyScopable).not.toBe(true);
+  });
+
+  it('usage counts the records holding a value, never the values, and needs the read permission', async () => {
+    const f = await define('Race', 'use', 'text');
+    const none = ok(await admin.get(`/admin/custom-fields/${f.id}/usage`), 'usage').body;
+    expect(none).toEqual({ records: 0 });
+    await newRace({ [f.key]: 'one secret' });
+    await newRace({ [f.key]: 'two secret' });
+    await newRace();
+    const two = ok(await admin.get(`/admin/custom-fields/${f.id}/usage`), 'usage').body;
+    expect(two).toEqual({ records: 2 });
+    expect(JSON.stringify(two)).not.toContain('secret');
+    const nobody = await staffClient(t, []);
+    expect((await nobody.get(`/admin/custom-fields/${f.id}/usage`)).status).toBe(403);
+    expect((await admin.get('/admin/custom-fields/00000000-0000-4000-8000-000000000000/usage')).status).toBe(404);
+  });
+});
+
+describe('the definitions table', () => {
+  const owner = () => new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+
+  it('the key "constructor" is refused by the API and by the database', async () => {
+    const res = await admin.post('/admin/custom-fields', { entityType: 'Race', key: 'constructor', label: text('x'), type: 'text' });
+    expect([400, 422]).toContain(res.status);
+    await expect(
+      t.prisma.customFieldDefinition.create({ data: { entityType: 'Race', key: 'constructor', label: text('x'), type: 'text' } }),
+    ).rejects.toThrow(/key_format|check constraint/i);
+    ok(await admin.post('/admin/custom-fields', { entityType: 'Race', key: `${RUN}_constructor`, label: text('x'), type: 'text' }), 'a longer name is fine');
+  });
+
+  it('no DELETE and no TRUNCATE, for the app role or the owner', async () => {
+    const f = await define('Race', 'keep', 'text');
+    await expect(t.prisma.$executeRawUnsafe('TRUNCATE custom_field_definitions')).rejects.toThrow();
+    await expect(t.prisma.$executeRawUnsafe('DELETE FROM custom_field_definitions WHERE id = $1::uuid', f.id)).rejects.toThrow();
+    const db = owner();
+    await db.connect();
+    try {
+      await expect(db.query('TRUNCATE custom_field_definitions')).rejects.toThrow(/cannot be deleted; archive it/);
+      await expect(db.query('DELETE FROM custom_field_definitions WHERE id = $1', [f.id])).rejects.toThrow(/cannot be deleted; archive it/);
+      const { rows } = await db.query(`SELECT t.tgtype FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE c.relname = 'custom_field_definitions' AND NOT t.tgisinternal`);
+      const types = rows.map((r) => Number(r.tgtype));
+      expect(types.some((x) => (x & 2) && (x & 32))).toBe(true); // BEFORE TRUNCATE
+      expect(types.some((x) => (x & 2) && (x & 8) && (x & 16))).toBe(true); // BEFORE UPDATE OR DELETE
+    } finally {
+      await db.end();
+    }
+    expect(await t.prisma.customFieldDefinition.count({ where: { id: f.id } })).toBe(1);
   });
 });
 
@@ -333,6 +430,8 @@ describe('filters', () => {
 describe('CSV', () => {
   const csvOf = (res: { text: string; body: unknown }) => (res.text ?? '') as string;
   const rowsOf = (csv: string) => parseCsv(csv);
+  /** A file as a person would send it back: the cells exactly as exported, only quoted. No guard is applied again. */
+  const rawCsv = (rows: string[][]) => rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\r\n');
 
   it('export has a cf:<key> column per active field, and import reads them back', async () => {
     const num = await define('Race', 'cnum', 'number');
@@ -357,6 +456,47 @@ describe('CSV', () => {
     expect(done.committed).toBe(true);
     const created = await t.prisma.race.findUniqueOrThrow({ where: { slug: newSlug } });
     expect(created.customFields).toEqual({ [num.key]: 3, [ms.key]: ['y'], [txt.key]: '=cmd()' });
+  });
+
+  it.each([
+    ['a formula that opens a link', '=HYPERLINK("http://example.test/x","click")', true],
+    ['a plus formula', '+1+1', true],
+    ['a minus formula', '-2+3', true],
+    ['an at formula', '@SUM(A1:A2)', true],
+    ['text that already starts with a quote', "'=already quoted", false],
+    ['text with a comma, a quote and a line break', 'a, "b"\nc', false],
+    ['plain text', 'Meet at the start line', false],
+  ])('text cell: %s leaves the file guarded and comes back unchanged', async (_n, value, guarded) => {
+    const f = await define('Race', 'inject', 'text');
+    const race = await newRace({ [f.key]: value });
+    const exp = parseCsv(csvOf(ok(await admin.post('/admin/catalogue/races/export', {}), 'export')));
+    const header = exp[0]!;
+    const row = exp.find((r) => r[0] === race.slug)!;
+    const written = row[header.indexOf(`cf:${f.key}`)]!;
+    if (guarded) expect(written).toBe(`'${value}`);
+    expect(/^[=+\-@]/.test(written)).toBe(false);
+    const col = (name: string) => row[header.indexOf(name)]!;
+    const newSlug = slug('inj');
+    const back = rawCsv([['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'summary', `cf:${f.key}`], [newSlug, col('name'), col('countryCode'), col('city'), col('timeZone'), col('raceType'), col('summary'), written]]);
+    expect(ok(await admin.post('/admin/catalogue/races/import', { csv: back, dryRun: false }), 'import').body.committed).toBe(true);
+    const imported = await t.prisma.race.findUniqueOrThrow({ where: { slug: newSlug } });
+    expect(imported.customFields).toEqual({ [f.key]: value });
+  });
+
+  it.each([[1e-7], [-1e-7], [1.5e-10], [123456789012], [0.1 + 0.2]])('number %s exports without an exponent and imports as the same number', async (value) => {
+    const f = await define('Race', 'tiny', 'number');
+    const race = await newRace({ [f.key]: value });
+    const exp = parseCsv(csvOf(ok(await admin.post('/admin/catalogue/races/export', {}), 'export')));
+    const header = exp[0]!;
+    const row = exp.find((r) => r[0] === race.slug)!;
+    const written = row[header.indexOf(`cf:${f.key}`)]!;
+    expect(written).not.toMatch(/e/i);
+    expect(Number(written)).toBe(value);
+    const col = (name: string) => row[header.indexOf(name)]!;
+    const newSlug = slug('num');
+    const back = rawCsv([['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'summary', `cf:${f.key}`], [newSlug, col('name'), col('countryCode'), col('city'), col('timeZone'), col('raceType'), col('summary'), written]]);
+    ok(await admin.post('/admin/catalogue/races/import', { csv: back, dryRun: false }), 'import');
+    expect((await t.prisma.race.findUniqueOrThrow({ where: { slug: newSlug } })).customFields).toEqual({ [f.key]: value });
   });
 
   it('a bad custom cell writes nothing and the error has the column and a code but no value', async () => {

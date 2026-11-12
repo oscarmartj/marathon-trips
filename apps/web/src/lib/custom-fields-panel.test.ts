@@ -147,3 +147,25 @@ describe('settings forms', () => {
     expect(res.ok && Object.keys(res.body)).not.toContain('type');
   });
 });
+
+describe('a field called "constructor" never reads an inherited value', () => {
+  const odd = [def('constructor', 'text'), def('constructor', 'multiselect', { id: 'c2' })];
+  it('the form starts empty, not with "function Object() { [native code] }"', () => {
+    expect(initialValues([odd[0]!], {})).toEqual({ constructor: '' });
+    expect(initialValues([odd[1]!], {})).toEqual({ constructor: [] });
+    expect(initialValues([odd[0]!], undefined)).toEqual({ constructor: '' });
+    expect(initialValues([odd[0]!], { constructor: 'mine' })).toEqual({ constructor: 'mine' });
+  });
+
+  it('an untouched new record sends nothing, and a cleared stored value sends null', () => {
+    const empty = initialValues([odd[0]!], {});
+    expect(customFieldPatch([odd[0]!], empty, {}, true)).toEqual({ patch: undefined, invalid: [] });
+    expect(customFieldPatch([odd[0]!], { constructor: '' }, { constructor: 'mine' }, false).patch).toEqual({ constructor: null });
+    expect(customFieldPatch([odd[0]!], {}, {}, true)).toEqual({ patch: undefined, invalid: [] });
+  });
+
+  it('a label that suggests that key gets a different one', () => {
+    expect(suggestKey('Constructor')).toBe('constructor_field');
+    expect(suggestKey('Constructor notes')).toBe('constructor_notes');
+  });
+});

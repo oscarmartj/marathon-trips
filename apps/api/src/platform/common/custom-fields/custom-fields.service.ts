@@ -4,12 +4,15 @@ import {
   type CreateCustomFieldInput, type CustomFieldDefinitionView, type CustomFieldEntity, type CustomFieldOption, type CustomFieldValidation, type CustomFilter,
   type UpdateCustomFieldInput,
 } from '@mt/shared';
+import { AccessService } from '../../access/access.service';
+import type { AuthContext } from '../../access/auth-context';
+import { COMMON_PERMISSIONS_KEYS as K } from '../permissions';
 import { Prisma } from '../../../generated/prisma/client';
 import type { AuditActor } from '../../audit/audit.service';
 import { AuditService } from '../../audit/audit.service';
 import { PrismaService } from '../../database/prisma.service';
 import { conflict, notFound, unprocessable } from '../../http/api-error';
-import { filterCondition, fromCsvCell, isBlank, toCsvCell, validateValue, type CustomValue, type JsonCondition, type RuleDef } from './values';
+import { filterCondition, fromCsvCell, isBlank, ownValue, toCsvCell, validateValue, type CustomValue, type JsonCondition, type RuleDef } from './values';
 
 type Actor = AuditActor & { id: string };
 type Db = Pick<Prisma.TransactionClient, 'customFieldDefinition'>;
@@ -19,10 +22,10 @@ type Row = Prisma.CustomFieldDefinitionGetPayload<object>;
  * What each kind of record allows. Adding Customer, Traveller or Booking later is one line here plus the `customFields`
  * column on the table. Customers cannot see supplier data and cannot edit catalogue records, so those flags are refused.
  */
-export const CUSTOM_FIELD_TARGETS: Record<CustomFieldEntity, { customerVisible: boolean; customerEditable: boolean }> = {
-  Race: { customerVisible: true, customerEditable: false },
-  Package: { customerVisible: true, customerEditable: false },
-  Supplier: { customerVisible: false, customerEditable: false },
+export const CUSTOM_FIELD_TARGETS: Record<CustomFieldEntity, { customerVisible: boolean; customerEditable: boolean; table: string }> = {
+  Race: { customerVisible: true, customerEditable: false, table: 'races' },
+  Package: { customerVisible: true, customerEditable: false, table: 'packages' },
+  Supplier: { customerVisible: false, customerEditable: false, table: 'suppliers' },
 };
 
 const PLAIN = (v: Prisma.JsonValue | null): unknown => v;
@@ -53,6 +56,7 @@ export class CustomFieldsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(AccessService) private readonly access: AccessService,
   ) {}
 
   // ---- Definitions ----
@@ -99,8 +103,30 @@ export class CustomFieldsService {
     }
   }
 
-  async update(actor: Actor, id: string, input: UpdateCustomFieldInput) {
+  /**
+   * Turning on `visibleToCustomer` shows every value already stored on records, some written when the field was internal.
+   * So it needs its own permission with a recent authenticator check (M12), on top of manage. Creating a visible field does
+   * not (no record holds a value yet), and a field that was already visible changes nothing.
+   */
+  private async assertMayPublish(auth: AuthContext): Promise<void> {
+    await this.access.assertPermission(this.prisma, auth, K.customFieldPublish);
+  }
+
+  /** How many records hold a value for a field: what making it visible would show. Counts, never values. */
+  async usage(id: string): Promise<{ records: number }> {
+    const def = await this.prisma.customFieldDefinition.findUnique({ where: { id } });
+    if (!def) throw notFound('custom_field_not_found', 'Custom field not found');
+    const table = CUSTOM_FIELD_TARGETS[def.entityType as CustomFieldEntity].table;
+    const rows = await this.prisma.$queryRaw<Array<{ n: bigint }>>(Prisma.sql`SELECT count(*) AS n FROM ${Prisma.raw(`"${table}"`)} WHERE jsonb_exists("customFields", ${def.key})`);
+    return { records: Number(rows[0]?.n ?? 0) };
+  }
+
+  async update(actor: Actor, auth: AuthContext, id: string, input: UpdateCustomFieldInput) {
     const { version, reason, ...patch } = input;
+    if (patch.visibleToCustomer === true) {
+      const current = await this.prisma.customFieldDefinition.findUnique({ where: { id }, select: { visibleToCustomer: true } });
+      if (current && !current.visibleToCustomer) await this.assertMayPublish(auth);
+    }
     return this.change(actor, id, version, reason, 'common.custom_field.updated', (before) => {
       const next = { required: patch.required ?? before.required, visibleToCustomer: patch.visibleToCustomer ?? before.visibleToCustomer, editableByCustomer: patch.editableByCustomer ?? before.editableByCustomer };
       this.checkFlags(before.entityType as CustomFieldEntity, next);
@@ -127,7 +153,9 @@ export class CustomFieldsService {
     });
   }
 
-  restore(actor: Actor, id: string, input: { version: number; reason?: string }) {
+  async restore(actor: Actor, auth: AuthContext, id: string, input: { version: number; reason?: string }) {
+    const current = await this.prisma.customFieldDefinition.findUnique({ where: { id }, select: { visibleToCustomer: true, archivedAt: true } });
+    if (current?.visibleToCustomer && current.archivedAt) await this.assertMayPublish(auth);
     return this.change(actor, id, input.version, input.reason, 'common.custom_field.restored', (before) => {
       if (!before.archivedAt) throw conflict('custom_field_not_archived', 'This custom field is not archived');
       return { archivedAt: null };
@@ -168,11 +196,11 @@ export class CustomFieldsService {
         delete merged[key];
         continue;
       }
-      const res = validateValue(ruleOf(def), raw, merged[key]);
+      const res = validateValue(ruleOf(def), raw, ownValue(merged, key));
       if (!res.ok) throw bad(def, res.code);
       merged[key] = res.value;
     }
-    if (creating) for (const d of defs) if (d.required && isBlank(merged[d.key])) throw bad(d, 'required');
+    if (creating) for (const d of defs) if (d.required && isBlank(ownValue(merged, d.key))) throw bad(d, 'required');
     return merged as Prisma.InputJsonObject;
   }
 
@@ -196,7 +224,7 @@ export class CustomFieldsService {
   }
 
   csvCell(def: RuleDef, values: unknown): ReturnType<typeof toCsvCell> {
-    return toCsvCell(def, values && typeof values === 'object' ? (values as Record<string, unknown>)[def.key] : undefined);
+    return toCsvCell(def, ownValue(values, def.key));
   }
 
   csvParse(def: RuleDef, cell: string) {
@@ -208,10 +236,9 @@ export class CustomFieldsService {
   /** The values a customer may see: active fields marked visible, with a value. Never anything else from the row. */
   async publicView(entityType: CustomFieldEntity, values: unknown): Promise<PublicCustomField[]> {
     if (!values || typeof values !== 'object' || !CUSTOM_FIELD_TARGETS[entityType].customerVisible) return [];
-    const held = values as Record<string, unknown>;
-    const defs = (await this.activeRows(entityType, this.prisma)).filter((d) => d.visibleToCustomer && !isBlank(held[d.key]));
+    const defs = (await this.activeRows(entityType, this.prisma)).filter((d) => d.visibleToCustomer && !isBlank(ownValue(values, d.key)));
     return defs.map((d) => {
-      const value = held[d.key] as CustomValue;
+      const value = ownValue(values, d.key) as CustomValue;
       const out: PublicCustomField = { key: d.key, label: d.label as Record<string, string>, type: d.type, value };
       if (d.type === 'select' || d.type === 'multiselect') {
         const chosen = new Set(Array.isArray(value) ? value : [value]);

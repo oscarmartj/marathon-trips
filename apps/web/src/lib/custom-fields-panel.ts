@@ -9,6 +9,8 @@ export type CustomFieldDef = CustomFieldDefinitionView;
 export type FormValue = string | string[];
 export type FormValues = Record<string, FormValue>;
 
+/** A record's own value for a key, never an inherited one (`constructor` is also refused as a field key). */
+const own = <T = unknown>(rec: Record<string, T>, key: string): T | undefined => (Object.hasOwn(rec, key) ? rec[key] : undefined);
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** The label staff see for a field, in en-AU, falling back to the key. */
@@ -25,7 +27,7 @@ export function initialValues(defs: readonly CustomFieldDef[], stored: unknown):
   const held = isRecord(stored) ? stored : {};
   const out: FormValues = {};
   for (const d of defs) {
-    const v = held[d.key];
+    const v = own(held, d.key);
     if (d.type === 'multiselect') out[d.key] = Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
     else if (v === undefined || v === null) out[d.key] = '';
     else out[d.key] = String(v);
@@ -64,12 +66,12 @@ export function customFieldPatch(defs: readonly CustomFieldDef[], form: FormValu
   const patch: Record<string, Parsed> = {};
   const invalid: string[] = [];
   for (const d of defs) {
-    const parsed = parseValue(d, form[d.key]);
+    const parsed = parseValue(d, own(form, d.key));
     if (parsed === undefined) {
       invalid.push(d.key);
       continue;
     }
-    if (creating ? parsed !== null : !same(parsed, held[d.key])) patch[d.key] = parsed;
+    if (creating ? parsed !== null : !same(parsed, own(held, d.key))) patch[d.key] = parsed;
   }
   return { patch: Object.keys(patch).length > 0 ? patch : undefined, invalid };
 }
@@ -129,7 +131,8 @@ export function parseOptionLines(text: string, previous: readonly CustomFieldOpt
 /** Keeps the key readable: lower case, digits and underscores, starting with a letter. */
 export function suggestKey(label: string): string {
   const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  return (/^[a-z]/.test(base) ? base : base ? `f_${base}` : '').slice(0, 40).replace(/_+$/, '');
+  const key = (/^[a-z]/.test(base) ? base : base ? `f_${base}` : '').slice(0, 40).replace(/_+$/, '');
+  return key === 'constructor' ? 'constructor_field' : key; // the API refuses this one name, which every object inherits
 }
 
 export { MAIN_LOCALE };

@@ -12,6 +12,7 @@ export const COMMON_PERMISSIONS_KEYS = {
   taskManageAutomated: 'common.task.manageAutomated',
   customFieldRead: 'common.customField.read',
   customFieldManage: 'common.customField.manage',
+  customFieldPublish: 'common.customField.publish',
 } as const;
 const K = COMMON_PERMISSIONS_KEYS;
 
@@ -27,4 +28,5 @@ export const COMMON_PERMISSIONS: readonly PermissionDef[] = [
   { key: K.taskManageAutomated, module: 'common', description: 'Change, close and delete tasks created by automation or the system' },
   { key: K.customFieldRead, module: 'common', description: 'See custom field definitions, so their fields appear on forms, filters and exports' },
   { key: K.customFieldManage, module: 'common', description: 'Create, change, archive and restore custom field definitions' },
+  { key: K.customFieldPublish, module: 'common', description: 'Make a custom field visible to customers (or bring back an archived one that is), which shows the values already stored on records', requiresStepUp: true },
 ];

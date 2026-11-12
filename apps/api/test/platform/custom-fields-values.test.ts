@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createCustomFieldSchema, customFiltersParamSchema, updateCustomFieldSchema, type CustomFieldOption, type CustomFieldType, type CustomFieldValidation } from '@mt/shared';
-import { filterCondition, fromCsvCell, isBlank, toCsvCell, validateValue, type RuleDef } from '../../src/platform/common/custom-fields/values';
+import { CUSTOM_FIELD_KEY, createCustomFieldSchema, customFiltersParamSchema, updateCustomFieldSchema, type CustomFieldOption, type CustomFieldType, type CustomFieldValidation } from '@mt/shared';
+import { cell, guardCell, parseCsv, toCsv, unguardCell } from '../../src/platform/common/csv';
+import { filterCondition, fromCsvCell, isBlank, ownValue, toCsvCell, validateValue, type RuleDef } from '../../src/platform/common/custom-fields/values';
 
 const label = { 'en-AU': 'Field' };
 const opt = (value: string, retired = false): CustomFieldOption => ({ value, label: { 'en-AU': value }, ...(retired ? { retired } : {}) });
@@ -163,6 +164,9 @@ describe('shared schemas', () => {
     ['key with a capital', { ...base, key: 'Ticket' }, false],
     ['key starting with a digit', { ...base, key: '1abc' }, false],
     ['key too long', { ...base, key: 'a'.repeat(41) }, false],
+    ['key that is an inherited object name', { ...base, key: 'constructor' }, false],
+    ['key that only starts like one', { ...base, key: 'constructor_note' }, true],
+    ['key __proto__', { ...base, key: '__proto__' }, false],
     ['unknown entity', { ...base, entityType: 'Booking' }, false],
     ['label without en-AU', { ...base, label: { 'fr-FR': 'x' } }, false],
     ['select without options', { ...base, type: 'select' }, false],
@@ -191,5 +195,56 @@ describe('shared schemas', () => {
     expect(customFiltersParamSchema.safeParse(JSON.stringify(Array(6).fill({ key: 'a', op: 'eq', value: 'x' }))).success).toBe(false);
     expect(customFiltersParamSchema.safeParse(JSON.stringify([{ key: 'a', op: 'drop', value: 'x' }])).success).toBe(false);
     expect(customFiltersParamSchema.safeParse(JSON.stringify([{ key: 'A b', op: 'eq', value: 'x' }])).success).toBe(false);
+  });
+});
+
+describe('keys that collide with Object.prototype', () => {
+  it('no name an object inherits is a valid key', () => {
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) expect(CUSTOM_FIELD_KEY.test(name), name).toBe(false);
+  });
+
+  it('ownValue reads only what the record holds itself', () => {
+    expect(ownValue({}, 'constructor')).toBeUndefined();
+    expect(ownValue({ a: 'x' }, 'toString')).toBeUndefined();
+    expect(ownValue({ a: 'x' }, 'a')).toBe('x');
+    expect(ownValue(null, 'a')).toBeUndefined();
+    expect(isBlank(ownValue({}, 'constructor'))).toBe(true);
+  });
+});
+
+describe('CSV numbers keep every digit and no exponent', () => {
+  const n = def('number');
+  const numbers = [1e-7, -1e-7, 1.5e-10, 0.000001, 123456789012, -999999999999, 0.1 + 0.2, 5e-324, 1.7976931348623157e308, 0, 12.5, 1e21, 123e-20];
+  it.each(numbers.map((v) => [v]))('%s writes plainly and reads back as the same number', (v) => {
+    const written = cell(toCsvCell(n, v) as number);
+    expect(written).not.toMatch(/e/i);
+    expect(written.startsWith("'")).toBe(false);
+    expect(Number(written)).toBe(v);
+    if (Math.abs(v) <= 1e12) expect(fromCsvCell(n, written)).toEqual({ ok: true, value: v });
+  });
+
+  it('a whole export and import of a negative tiny number needs no guard quote', () => {
+    const csv = toCsv(['cf:x'], [[toCsvCell(n, -1e-7)]]);
+    expect(parseCsv(csv)[1]).toEqual(['-0.0000001']);
+  });
+
+  it.each([
+    ['1e-7', 1e-7], ['1E3', 1000], ['-2.5e+2', -250], ['2e0', 2], ['0.0000001', 1e-7],
+  ])('import accepts %s', (text, value) => {
+    expect(fromCsvCell(n, text)).toEqual({ ok: true, value });
+  });
+
+  it.each(['1e', 'e5', '1e-', '1e+', '0x10', 'Infinity', 'NaN', '1e999', '--1', '1,5', '.5', '5.', '1 e5'])('import refuses %s', (text) => {
+    expect(fromCsvCell(n, text)).toMatchObject({ ok: false });
+  });
+});
+
+describe('the formula guard is reversible for every text', () => {
+  it.each([
+    ['=HYPERLINK("http://example.test","x")'], ['+1'], ['-1+1'], ['@SUM(A1)'], ['=x'], ["'=x"], ["''=x"], ["'-x"], ["'plain"], ['plain'], ["it's fine"], [''], ["'"],
+  ])('%s', (text) => {
+    const guarded = guardCell(text);
+    expect(/^[=+\-@\t\r]/.test(guarded)).toBe(false);
+    expect(unguardCell(guarded)).toBe(text);
   });
 });
