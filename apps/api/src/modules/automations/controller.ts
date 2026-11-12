@@ -63,10 +63,11 @@ export class AutomationsAdminController {
     const rule = await this.rules.get(id);
     const trigger = rule.eventType ? triggerOf(rule.eventType) : undefined;
     if (trigger) await this.access.assertPermission(this.prisma, req.auth, ENTITY_READ_PERMISSION[trigger.entityType]);
-    const out = await this.engine.test(id, b.entityId);
-    return { runId: out.runId, status: out.status, reasonCode: out.reasonCode, steps: out.steps, conditions: out.conditions, testMode: true };
+    const out = await this.engine.test(id, b.entityId, actorOf(req));
+    const [shown] = await this.rules.redactSteps(req.auth!, [{ steps: out.steps }]);
+    return { runId: out.runId, status: out.status, reasonCode: out.reasonCode, steps: shown!.steps, conditions: out.conditions, testMode: true };
   }
 
   @Get(':id/runs') @RequirePermission(P.read)
-  runs(@Param('id', uuid()) id: string, @Query(new ZodPipe(listAutomationRunsQuerySchema)) q: In<typeof listAutomationRunsQuerySchema>) { return this.rules.runs(id, q); }
+  runs(@Param('id', uuid()) id: string, @Query(new ZodPipe(listAutomationRunsQuerySchema)) q: In<typeof listAutomationRunsQuerySchema>, @Req() req: ApiRequest) { return this.rules.runs(id, q, req.auth); }
 }

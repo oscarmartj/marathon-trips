@@ -5,6 +5,8 @@ import {
 import type { AutomationFacts, AutomationReasonCode, AutomationRuleDefinition, AutomationStep, AutomationStepCode } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { AccessService } from '../../platform/access/access.service';
+import { AuditService } from '../../platform/audit/audit.service';
+import type { AuditActor } from '../../platform/audit/audit.service';
 import { TasksService } from '../../platform/common/tasks/tasks.service';
 import { bossDb } from '../../platform/database/boss-db';
 import { PrismaService } from '../../platform/database/prisma.service';
@@ -19,8 +21,8 @@ import { AutomationActions } from './actions';
 import { evaluateConditions } from './conditions';
 import { factsOf, loadEntity } from './facts';
 import type { LoadedEntity } from './facts';
-import { AUTOMATION_EVENTS, AUTOMATIONS_MODULE, AUTOMATIONS_TIME_ZONE } from './manifest';
-import { scopeOf } from './rules.service';
+import { AUTOMATION_EVENTS, AUTOMATIONS_MODULE, AUTOMATIONS_PERMISSIONS, AUTOMATIONS_TIME_ZONE } from './manifest';
+import { AutomationRulesService, scopeOf } from './rules.service';
 import { SCHEDULE_GRACE_MS, latestOccurrence, localDate } from './schedule';
 
 type Tx = Prisma.TransactionClient;
@@ -71,6 +73,8 @@ export class AutomationEngine {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(AutomationActions) private readonly actions: AutomationActions,
+    @Inject(AutomationRulesService) private readonly rules: AutomationRulesService,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   // ---------------------------------------------------------------- dispatch
@@ -148,7 +152,13 @@ export class AutomationEngine {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM automation_runs WHERE id = ${runId}::uuid AND status = 'pending' FOR UPDATE SKIP LOCKED`;
-        if (locked.length === 0) return 'noop' as const;
+        if (locked.length === 0) {
+          // Still pending but locked: another attempt is running it (or hung past the job's expiry). Throw so pg-boss
+          // tries again later instead of dropping this attempt.
+          const row = await tx.automationRun.findUnique({ where: { id: runId }, select: { status: true } });
+          if (row?.status === 'pending') throw new AppError('automation_run_busy', 'This run is being processed');
+          return 'noop' as const;
+        }
         const run = await tx.automationRun.findUniqueOrThrow({ where: { id: runId } });
         attemptsBefore = run.attempts;
         started = true;
@@ -187,7 +197,7 @@ export class AutomationEngine {
   }
 
   /** The panel's test: the same checks and steps, always in test mode, recorded as a manual run. */
-  async test(ruleId: string, entityId: string | undefined, now: Date = new Date()): Promise<Outcome & { runId: string }> {
+  async test(ruleId: string, entityId: string | undefined, actor: AuditActor & { id: string }, now: Date = new Date()): Promise<Outcome & { runId: string }> {
     return this.prisma.$transaction(async (tx) => {
       const rule = await tx.automationRule.findUnique({ where: { id: ruleId } });
       if (!rule || rule.deletedAt) throw notFound('automation_not_found', 'Automation not found');
@@ -212,6 +222,10 @@ export class AutomationEngine {
       await tx.automationRun.update({
         where: { id: run.id },
         data: { status: out.status, reasonCode: out.reasonCode, steps: out.steps as unknown as Prisma.InputJsonValue, ruleVersion: out.ruleVersion, finishedAt: now, attempts: 1 },
+      });
+      await this.audit.record(tx, {
+        actor, action: 'automations.rule.tested', entityType: 'AutomationRule', entityId: ruleId, fieldClasses: { status: 'nopii' },
+        after: { status: out.status }, context: { runId: run.id, ...(out.reasonCode ? { reasonCode: out.reasonCode } : {}) },
       });
       return { ...out, testMode: true, runId: run.id };
     });
@@ -246,9 +260,11 @@ export class AutomationEngine {
       return stop('skipped', 'owner_inactive', rule.version, testMode);
     }
     const eff = await this.access.effective(tx, rule.ownerUserId);
+    // What the rule needs from its owner today: switching automations on, reading the trigger's records, and what each
+    // action asks for. Losing any of them stops the rule without acting.
     let needed: string[];
     try {
-      needed = [...new Set(def.actions.flatMap((a) => this.actions.registry.permissionsOf(a, scope)))];
+      needed = [...new Set([AUTOMATIONS_PERMISSIONS.enable, ...this.rules.permissionsFor(def)])];
     } catch {
       return stop('failed', 'rule_invalid', rule.version, testMode);
     }
@@ -257,6 +273,8 @@ export class AutomationEngine {
       return stop('failed', 'automation_cannot_exceed_author_permissions', rule.version, testMode);
     }
     if (!testMode) {
+      // Serialises the count with other runs of the same rule, so the cap holds under concurrency.
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`automation_run:${rule.id}`}))`;
       const recent = await tx.automationRun.count({ where: { ruleId: rule.id, testMode: false, source: { not: 'manual' }, status: { in: ['succeeded', 'failed'] }, startedAt: { gt: new Date(now.getTime() - 3_600_000) } } });
       if (recent >= MAX_REAL_RUNS_PER_HOUR) {
         await this.notify(tx, rule, 'rate_limited', 'An automation ran too often in the last hour and was held back');

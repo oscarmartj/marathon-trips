@@ -103,6 +103,7 @@ async function counts(bookingId: string) {
     deliveries: await q('SELECT count(*) AS n FROM webhook_deliveries'),
     events: await q(`SELECT count(*) AS n FROM outbox_events WHERE type LIKE 'automations.%'`),
     jobs: await q(`SELECT count(*) AS n FROM pgboss.job WHERE name IN ('mail.send', 'webhooks.send')`),
+    audit: await q('SELECT count(*) AS n FROM audit_logs'),
     booking: (await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, select: { version: true, status: true } })),
   };
 }
@@ -325,9 +326,77 @@ const everyAction = () => [
   { type: 'send_email', template: 'staff_notice' }, { type: 'call_webhook', subscriptionId: hookId },
 ];
 
+describe('review round 1 of the code', () => {
+  it('a rule needs its owner to read the records its trigger is about, when saved and at every run', async () => {
+    const blind = await signedIn([...Object.values(P), 'common.task.write']);
+    const res = await blind.post('/admin/automations', ruleBody({ conditions: [{ fact: 'status', op: 'is', value: 'requested' }] }));
+    expect([res.status, res.body.code]).toEqual([403, 'automation_cannot_exceed_author_permissions']);
+    // A scheduled rule is about no record, so it needs no read permission.
+    expect((await blind.post('/admin/automations', ruleBody({ triggerType: 'schedule', eventType: undefined, schedule: { frequency: 'daily', time: '08:00' } }))).status).toBe(201);
+
+    const author = await signedIn(ALL);
+    const r = await ruleOn({ conditions: [{ fact: 'status', op: 'is', value: 'requested' }] }, false, author);
+    await revoke(author.staff, 'bookings.booking.read');
+    const { bookingId } = await newBooking();
+    await fire('bookings.booking.requested', bookingId);
+    await runPending();
+    expect((await runsOf(r.id)).map((x) => [x.status, x.reasonCode, x.steps])).toEqual([['failed', 'automation_cannot_exceed_author_permissions', []]]);
+    expect(await tasksOn(bookingId)).toHaveLength(0);
+    expect(await t.prisma.task.count({ where: { sourceRef: `automations:permission_lost:${r.id}` } })).toBe(1);
+  });
+
+  it('an owner who loses the automation permissions stops the rule', async () => {
+    const author = await signedIn(ALL);
+    const r = await ruleOn({}, false, author);
+    for (const k of Object.values(P)) await revoke(author.staff, k);
+    const { bookingId } = await newBooking();
+    await fire('bookings.booking.requested', bookingId);
+    await runPending();
+    expect((await runsOf(r.id)).map((x) => x.reasonCode)).toEqual(['automation_cannot_exceed_author_permissions']);
+    expect(await tasksOn(bookingId)).toHaveLength(0);
+    expect(await t.prisma.task.count({ where: { sourceRef: `automations:permission_lost:${r.id}` } })).toBe(1);
+  });
+
+  it('a run locked by another attempt is retried later, not dropped', async () => {
+    const r = await ruleOn({}, false);
+    const { bookingId } = await newBooking();
+    await fire('bookings.booking.requested', bookingId);
+    const [run] = await runsOf(r.id);
+    let release!: () => void;
+    const held = new Promise<void>((res) => { release = res; });
+    let locked!: () => void;
+    const isLocked = new Promise<void>((res) => { locked = res; });
+    const holder = t.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM automation_runs WHERE id = ${run!.id}::uuid FOR UPDATE`;
+      locked();
+      await held;
+    }, { timeout: 30_000 });
+    await isLocked;
+    await expect(engine.processRun(run!.id)).rejects.toMatchObject({ code: 'automation_run_busy' });
+    release();
+    await holder;
+    expect((await t.prisma.automationRun.findUniqueOrThrow({ where: { id: run!.id } })).status).toBe('pending');
+    expect(await engine.processRun(run!.id)).toBe('succeeded');
+  });
+
+  it('whether a customer could be reached is shown only to staff who can see customers', async () => {
+    const r = await ruleOn({ actions: [{ type: 'send_email', template: 'customer_notice_1' }] }, false);
+    const { bookingId, customerId } = await newBooking();
+    await t.prisma.customer.update({ where: { id: customerId }, data: { anonymisedAt: new Date() } });
+    await fire('bookings.booking.requested', bookingId);
+    await runPending();
+    const step = (body: { items: Array<{ steps: unknown[] }> }) => body.items[0]!.steps[0];
+    expect(step((await owner.get(`/admin/automations/${r.id}/runs`)).body)).toEqual({ index: 0, action: 'send_email', status: 'skipped', code: 'recipient_unavailable' });
+    const reader = await signedIn([P.read, P.manage, 'bookings.booking.read']);
+    expect(step((await reader.get(`/admin/automations/${r.id}/runs`)).body)).toEqual({ index: 0, action: 'send_email', status: 'skipped' });
+    const tested = await reader.post(`/admin/automations/${r.id}/test`, { entityId: bookingId });
+    expect(tested.body.steps).toEqual([{ index: 0, action: 'send_email', status: 'skipped' }]);
+  });
+});
+
 describe('automation_test_mode_sends_and_changes_nothing', () => {
   it('a rule in test mode, fired by a real event, only records what it would do', async () => {
-    const r = await ruleOn({ actions: everyAction() }, true);
+    const r = await ruleOn({ actions: [...everyAction(), { type: 'remove_tag', tagId }] }, true);
     const { bookingId } = await newBooking();
     // An open automation task, so close_tasks would have something to close.
     await t.prisma.task.create({ data: { title: 'Earlier', entityType: 'Booking', entityId: bookingId, source: 'automation', sourceRef: 'automation:earlier' } });
@@ -338,7 +407,8 @@ describe('automation_test_mode_sends_and_changes_nothing', () => {
     const [run] = await runsOf(r.id);
     expect(run!.status).toBe('succeeded');
     expect(run!.testMode).toBe(true);
-    expect((run!.steps as Array<{ status: string }>).map((s) => s.status)).toEqual(['simulated', 'simulated', 'simulated', 'simulated', 'simulated', 'simulated']);
+    expect((run!.steps as Array<{ status: string }>).map((s) => s.status)).toEqual(['simulated', 'simulated', 'simulated', 'simulated', 'simulated', 'simulated', 'simulated']);
+    expect((await tasksOn(bookingId)).map((x) => [x.sourceRef, x.status])).toEqual([['automation:earlier', 'open']]);
   });
 
   it('the panel test changes nothing, and a manual run can never be real (database check)', async () => {
@@ -349,7 +419,9 @@ describe('automation_test_mode_sends_and_changes_nothing', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.status).toBe('succeeded');
     expect(res.body.steps.map((s: { status: string }) => s.status)).toEqual(['skipped', 'simulated', 'simulated', 'simulated', 'simulated', 'simulated']);
-    expect(await counts(bookingId)).toEqual(before);
+    // The only new row is the audit record of the staff member's test (an action of the staff, not of the rule).
+    expect(await counts(bookingId)).toEqual({ ...before, audit: before.audit + 1 });
+    expect((await t.prisma.auditLog.findFirstOrThrow({ where: { entityType: 'AutomationRule', entityId: r.id }, orderBy: { occurredAt: 'desc' } })).action).toBe('automations.rule.tested');
     await expect(t.prisma.automationRun.create({ data: { ruleId: r.id, ruleVersion: 1, source: 'manual', testMode: false } })).rejects.toThrow();
   });
 
@@ -361,7 +433,7 @@ describe('automation_test_mode_sends_and_changes_nothing', () => {
     const before = await counts(bookingId);
     const res = await owner.post(`/admin/automations/${r.id}/test`, { entityId: bookingId });
     expect([res.body.status, res.body.reasonCode]).toEqual(['failed', 'automation_cannot_exceed_author_permissions']);
-    expect(await counts(bookingId)).toEqual(before);
+    expect(await counts(bookingId)).toEqual({ ...before, audit: before.audit + 1 });
     expect(await t.prisma.task.count({ where: { sourceRef: `automations:permission_lost:${r.id}` } })).toBe(0);
   });
 
@@ -425,7 +497,10 @@ describe('real runs', () => {
     expect(JSON.stringify(delivery.body)).not.toMatch(/Test|@example/);
 
     const audit = await t.prisma.auditLog.findMany({ where: { actorType: 'automation', actorId: r.id } });
-    expect(audit.map((a) => a.action).sort()).toEqual(['common.tags.changed', 'common.task.created', 'common.task.updated']);
+    expect(audit.map((a) => a.action).sort()).toEqual([
+      'automations.action.email_queued', 'automations.action.email_queued', 'automations.action.webhook_queued', 'common.tags.changed', 'common.task.created', 'common.task.updated',
+    ]);
+    expect(JSON.stringify(audit.map((a) => a.changes))).not.toMatch(/Test|@example/);
     expect(await t.prisma.outboxEvent.count({ where: { type: 'automations.run.completed', aggregateId: run!.id } })).toBe(1);
   });
 
@@ -436,8 +511,14 @@ describe('real runs', () => {
     await handle();
     const runs = await runsOf(r.id);
     expect(runs).toHaveLength(1);
-    const results = await Promise.all([engine.processRun(runs[0]!.id), engine.processRun(runs[0]!.id), engine.processRun(runs[0]!.id)]);
-    expect(results.filter((x) => x === 'succeeded')).toHaveLength(1);
+    const results = await Promise.allSettled([engine.processRun(runs[0]!.id), engine.processRun(runs[0]!.id), engine.processRun(runs[0]!.id)]);
+    expect(results.filter((x) => x.status === 'fulfilled' && x.value === 'succeeded')).toHaveLength(1);
+    // The others found the run finished (noop) or still being processed (thrown, so pg-boss tries again later).
+    for (const x of results) {
+      if (x.status === 'fulfilled') expect(['succeeded', 'noop']).toContain(x.value);
+      else expect(x.reason).toMatchObject({ code: 'automation_run_busy' });
+    }
+    expect(await engine.processRun(runs[0]!.id)).toBe('noop');
     expect(await tasksOn(bookingId)).toHaveLength(1);
   });
 

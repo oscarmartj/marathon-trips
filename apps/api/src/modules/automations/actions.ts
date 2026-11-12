@@ -3,6 +3,7 @@ import { automationTemplateKey, isCustomerTemplate } from '@mt/shared';
 import type { AutomationAction, AutomationActionType, AutomationEntityType, AutomationStep } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { AccessService } from '../../platform/access/access.service';
+import { AuditService } from '../../platform/audit/audit.service';
 import type { AuditActor } from '../../platform/audit/audit.service';
 import { TagsService } from '../../platform/common/tags.service';
 import { TasksService } from '../../platform/common/tasks/tasks.service';
@@ -129,6 +130,7 @@ export class AutomationActions {
     @Inject(WebhookDeliveryService) private readonly webhooks: WebhookDeliveryService,
     @Inject(AccessService) private readonly access: AccessService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {
     for (const d of this.definitions()) this.registry.register(d as ActionDef);
   }
@@ -137,6 +139,8 @@ export class AutomationActions {
   async webhookUsable(tx: Tx, subscriptionId: string, scope: Scope): Promise<boolean> {
     const sub = await tx.webhookSubscription.findUnique({ where: { id: subscriptionId }, select: { enabled: true, deletedAt: true, eventTypes: true, createdById: true } });
     if (!sub || !sub.enabled || sub.deletedAt || !sub.eventTypes.includes(AUTOMATION_RULE_FIRED)) return false;
+    // Lock the creator's row against a concurrent role change, as for the rule's owner (plan section 5, point 7).
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${sub.createdById}::uuid FOR SHARE`;
     const eff = await this.access.effective(tx, sub.createdById);
     const needed = [AUTOMATIONS_PERMISSIONS.read, ...(scope === 'schedule' ? [] : [ENTITY_READ_PERMISSION[scope]])];
     return needed.every((k) => eff.keys.has(k));
@@ -224,12 +228,14 @@ export class AutomationActions {
             to: customer.email, templateKey: key, templateVersion: 1, locale: customer.preferredLocale, dedupeKey, category: 'transactional',
             customerId: customer.id, relatedEntityType: ctx.entity!.entityType, relatedEntityId: ctx.entity!.id,
           }, ctx.tx);
+          await this.auditSend(ctx, 'automations.action.email_queued', 'OutboundEmail', r.id, a.template);
           return done('OutboundEmail', r.id);
         }
         const owner = await ctx.tx.user.findUnique({ where: { id: ctx.rule.ownerUserId }, select: { email: true, status: true } });
         if (!owner || owner.status !== 'active') return skipped('recipient_unavailable');
         if (ctx.testMode) return simulated();
         const r = await this.mail.enqueue({ to: owner.email, templateKey: key, templateVersion: 1, locale: 'en-AU', dedupeKey, relatedEntityType: 'AutomationRun', relatedEntityId: ctx.run.id }, ctx.tx);
+        await this.auditSend(ctx, 'automations.action.email_queued', 'OutboundEmail', r.id, a.template);
         return done('OutboundEmail', r.id);
       },
     };
@@ -256,11 +262,19 @@ export class AutomationActions {
         });
         assertIdentifiersOnly('event payload', body.data);
         await this.webhooks.insertDelivery(ctx.tx, a.subscriptionId, ctx.run.id, AUTOMATION_RULE_FIRED, body);
+        await this.auditSend(ctx, 'automations.action.webhook_queued', 'WebhookSubscription', a.subscriptionId, AUTOMATION_RULE_FIRED);
         return done();
       },
     };
 
     return [createTask, tagAction('add'), tagAction('remove'), closeTasks, sendEmail, callWebhook] as unknown as Array<ActionDef<never>>;
+  }
+
+  /** Emails and webhook calls are audited like the other actions, with the automation as the actor (ids and codes only). */
+  private async auditSend(ctx: ActionRunContext, action: string, entityType: string, entityId: string, what: string): Promise<void> {
+    await this.audit.record(ctx.tx, {
+      actor: ctx.actor, action, entityType, entityId, context: { runId: ctx.run.id, what, ...(ctx.entity ? { recordType: ctx.entity.entityType, recordId: ctx.entity.id } : {}) },
+    });
   }
 
   private bookingTable() {

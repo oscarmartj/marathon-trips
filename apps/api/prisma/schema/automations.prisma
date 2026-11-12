@@ -46,7 +46,7 @@ model AutomationRule {
   owner       User                  @relation(fields: [ownerUserId, ownerKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii optimistic lock
   version     Int                   @default(0)
-  /// @nopii soft delete only (a trigger refuses DELETE)
+  /// @nopii soft delete only (the API role has no DELETE on this table, migration 0019)
   deletedAt   DateTime?             @db.Timestamptz(3)
   deletedById String?               @db.Uuid
   /// @nopii

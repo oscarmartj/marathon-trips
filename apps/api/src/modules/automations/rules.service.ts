@@ -13,9 +13,10 @@ import { ApiError, conflict, forbidden, notFound, unprocessable } from '../../pl
 import { existingCatalogueIds } from '../catalogue';
 import { AutomationActions } from './actions';
 import { checkConditions, referencedIds } from './conditions';
-import { AUTOMATIONS_PERMISSIONS as P } from './manifest';
+import { AUTOMATIONS_PERMISSIONS as P, ENTITY_READ_PERMISSION } from './manifest';
 
 type Tx = Prisma.TransactionClient;
+const CUSTOMER_CODES: ReadonlySet<string> = new Set(['recipient_unavailable', 'recipient_suppressed']);
 type Scope = AutomationEntityType | 'schedule';
 export interface Caller {
   auth: AuthContext;
@@ -55,10 +56,14 @@ export class AutomationRulesService {
     };
   }
 
-  /** Every permission the rule's actions ask of its owner. */
+  /**
+   * Every permission the rule needs from its owner: what its actions ask for, and reading the records its trigger is
+   * about (a rule must never see, through its conditions and run log, records its owner cannot read).
+   */
   permissionsFor(def: AutomationRuleDefinition): string[] {
     const scope = scopeOf(def);
-    return [...new Set(def.actions.flatMap((a) => this.actions.registry.permissionsOf(a, scope)))].sort();
+    const read = scope === 'schedule' ? [] : [ENTITY_READ_PERMISSION[scope]];
+    return [...new Set([...read, ...def.actions.flatMap((a) => this.actions.registry.permissionsOf(a, scope))])].sort();
   }
 
   /**
@@ -202,7 +207,20 @@ export class AutomationRulesService {
     return this.view(rule);
   }
 
-  async runs(id: string, q: { limit: number; before?: string }) {
+  /**
+   * Whether a customer could be reached is customer data: without bookings.customer.read, the step codes that say a
+   * customer was unreachable or unsubscribed are left out (the step still shows as skipped).
+   */
+  async redactSteps<T extends { steps: unknown }>(auth: AuthContext, rows: T[]): Promise<T[]> {
+    const eff = await this.access.effectiveFor(this.prisma, auth);
+    if (eff.keys.has('bookings.customer.read')) return rows;
+    return rows.map((r) => ({
+      ...r,
+      steps: (Array.isArray(r.steps) ? r.steps : []).map((s: { code?: string }) => (s.code && CUSTOMER_CODES.has(s.code) ? (({ code: _c, ...rest }) => rest)(s) : s)),
+    }));
+  }
+
+  async runs(id: string, q: { limit: number; before?: string }, auth?: AuthContext) {
     await this.get(id);
     const items = await this.prisma.automationRun.findMany({
       where: { ruleId: id, ...(q.before ? { startedAt: { lt: new Date(q.before) } } : {}) },
@@ -212,7 +230,7 @@ export class AutomationRulesService {
         reasonCode: true, steps: true, attempts: true, startedAt: true, finishedAt: true,
       },
     });
-    return { items };
+    return { items: auth ? await this.redactSteps(auth, items) : items };
   }
 
   view(r: RuleRow) {
