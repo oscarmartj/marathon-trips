@@ -15,6 +15,7 @@ import { PaymentStateMachine, lockPayment } from './attempt-state';
 import { CoverageFailedError } from './coverage.service';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import { ACCOUNT_PUBLIC_SELECT, ProviderGateway } from './gateway';
+import type { AccountForCall } from './gateway';
 
 export const WEBHOOK_PATH_PREFIX = '/payments/webhooks';
 export const WEBHOOK_MAX_BYTES = 256 * 1024;
@@ -70,6 +71,20 @@ export class PaymentWebhooksService {
       this.logger.warn('payment webhook: unknown_account');
       throw notFound();
     }
+    return this.receiveForAccount(account, rawBody, headers, now);
+  }
+
+  /**
+   * The simulator's hosted checkout delivers its webhook here, in the process (plan 3.6, section 3.2): the same path as
+   * an HTTP delivery once the account is known by its path token. Signature, raw event, duplicate key and job as above.
+   */
+  async receiveForAccountId(accountId: string, rawBody: Buffer, headers: Record<string, string>, now: Date = new Date()): Promise<{ received: true; duplicate: boolean }> {
+    const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
+    if (!account) throw notFound();
+    return this.receiveForAccount(account, rawBody, headers, now);
+  }
+
+  private async receiveForAccount(account: AccountForCall, rawBody: Buffer, headers: Record<string, string | string[] | undefined>, now: Date): Promise<{ received: true; duplicate: boolean }> {
     const flat: Record<string, string> = {};
     for (const [k, v] of Object.entries(headers)) if (typeof v === 'string') flat[k.toLowerCase()] = v;
     const signatureHeaders = this.gateway.signatureHeaders(account.adapterKey);

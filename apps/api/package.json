@@ -9,6 +9,7 @@
     "lint": "eslint src test prisma scripts",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "test": "prisma generate && vitest run --config vitest.config.mts --reporter=default --reporter=json --outputFile=test-results/vitest.json",
+    "test:sandbox": "vitest run --config vitest.sandbox.config.mts --reporter=default --reporter=json --outputFile=test-results/sandbox.json && tsx scripts/sandbox-evidence.ts test-results/sandbox.json",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed/seed.ts",

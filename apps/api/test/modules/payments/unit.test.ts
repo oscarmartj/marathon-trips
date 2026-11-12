@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { APP_ENVS, PAYMENT_METHODS, startPaymentSchema } from '@mt/shared';
 import type { AppEnv } from '@mt/shared';
 import { readSources } from '../../conventions/module-boundaries';
-import { ADAPTERS } from '../../../src/modules/payments/adapters';
-import { SimulatorControl, SimulatorProvider, SimulatorWorld, signSimulator, simulatorManifest } from '../../../src/modules/payments/adapters/simulator/simulator';
+import { createAdapters } from '../../../src/modules/payments/adapters';
+import { SimulatorControl, SimulatorProvider, SimulatorWorld, signSimulator } from '../../../src/modules/payments/adapters/simulator/simulator';
 import { PAYMENT_STATUS_PAIRS, nextStatus } from '../../../src/modules/payments/core/attempt-state';
 import type { AttemptEvent } from '../../../src/modules/payments/core/attempt-state';
 import { ProviderGateway, TEST_ADAPTER_ENVS, callBlockReason } from '../../../src/modules/payments/core/gateway';
@@ -18,6 +18,10 @@ import { planItems } from '../../../src/modules/payments/core/schedule';
 
 const repoRoot = resolve(__dirname, '../../../../..');
 const srcDir = resolve(__dirname, '../../../src');
+// The adapters and the simulator's manifest exactly as the API builds them (plan 3.6, 10.4).
+const WEB_ORIGIN = 'http://localhost:3000';
+const ADAPTERS = createAdapters({ webOrigin: WEB_ORIGIN });
+const simulatorManifest = ADAPTERS.find((a) => a.manifest.key === 'simulator')!.manifest;
 const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
 describe('schedule_split_table: the plan from the snapshot (plan 3.1, 4.1)', () => {
@@ -93,7 +97,7 @@ describe('adapter registry and states (plan 3.1, 2.3)', () => {
   const m = (over: Partial<AdapterManifest>): AdapterManifest => ({ ...simulatorManifest, key: 'x', ...over });
   it('adapter_registry_rejects_duplicates_and_planned_accounts', () => {
     expect(manifestProblems([m({}), m({})])).toContain('x: duplicate adapter key');
-    expect(() => new PaymentAdapterRegistry([new SimulatorProvider(), new SimulatorProvider()])).toThrow(/duplicate/);
+    expect(() => new PaymentAdapterRegistry([new SimulatorProvider({ webOrigin: WEB_ORIGIN }), new SimulatorProvider({ webOrigin: WEB_ORIGIN })])).toThrow(/duplicate/);
     // A planned adapter has a manifest only: no account may call it.
     expect(callBlockReason({ id: 'a', adapterKey: 'x', mode: 'test', status: 'active' }, m({ status: 'planned', testOnly: false }), 'create', 'test')).toBe('adapter_unavailable');
   });
@@ -163,7 +167,7 @@ describe('gateway_guard_matrix (plan 3.1, 2.4)', () => {
     };
     const box = { decrypt: () => { reads.push('decrypt'); return '{}'; } };
     const audit = { record: async () => 'id' };
-    const registry = new PaymentAdapterRegistry([new SimulatorProvider()]);
+    const registry = new PaymentAdapterRegistry([new SimulatorProvider({ webOrigin: WEB_ORIGIN })]);
     for (const env of APP_ENVS) {
       const gw = new ProviderGateway(prisma as never, box as never, { APP_ENV: env } as never, audit as never, registry);
       await expect(gw.call('a', 'retrieve', async () => 'called')).rejects.toMatchObject({ status: 409 });
@@ -202,7 +206,7 @@ describe('payment_attempt_state_event_matrix (plan 3.1, 5.2)', () => {
 
 describe('simulator_signature_verification (plan 3.1, 6)', () => {
   const world = new SimulatorWorld();
-  const provider = new SimulatorProvider(world);
+  const provider = new SimulatorProvider({ webOrigin: WEB_ORIGIN }, world);
   const control = new SimulatorControl(world);
   const secret = 'a'.repeat(64);
   const ctx: ProviderContext = { accountId: 'acc', mode: 'test', credentials: { apiKey: 'sim_test_0123456789abcdef' }, webhookSecret: secret };
