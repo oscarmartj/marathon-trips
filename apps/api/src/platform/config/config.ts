@@ -51,6 +51,11 @@ const configSchema = z.object({
   // Task 2.4: booking requests per hour, per customer and per IP (in memory, like the other limits).
   BOOKING_REQUESTS_PER_HOUR_PER_USER: z.coerce.number().int().min(1).default(10),
   BOOKING_REQUESTS_PER_HOUR_PER_IP: z.coerce.number().int().min(1).default(30),
+  // Task 3.1: payment attempts per hour, per customer and per IP; incoming gateway webhooks per minute and IP (checked
+  // before the body is read).
+  PAYMENT_ATTEMPTS_PER_HOUR_PER_USER: z.coerce.number().int().min(1).default(10),
+  PAYMENT_ATTEMPTS_PER_HOUR_PER_IP: z.coerce.number().int().min(1).default(30),
+  PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP: z.coerce.number().int().min(1).default(600),
 
   // Task 8.6: file written by scripts/backup/backup.sh after each good backup; the system monitor reads it. Optional.
   BACKUP_STATUS_FILE: z.string().min(1).optional(),

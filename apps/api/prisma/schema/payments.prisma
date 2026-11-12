@@ -1,0 +1,287 @@
+// Payments core against the simulator (task 3.1; plan docs/plans/3.1-payment-provider-core.md and plan 0.1, 5.5).
+// Money is parked: no ledger, refunds, disputes, receipts, GST, FX or supplier payments here. Only test-mode accounts
+// exist until a task manages live ones (CHECK). CHECKs and triggers live in the migration 0017_payments.
+
+enum PaymentMode {
+  test
+  live
+}
+
+enum ProviderAccountStatus {
+  active
+  paused
+  retired
+  archived
+}
+
+enum PaymentScheduleItemKind {
+  deposit
+  balance
+  instalment
+  adjustment
+}
+
+enum PaymentScheduleItemState {
+  active
+  waived
+  superseded
+}
+
+enum PaymentOrigin {
+  collection
+  manual_intent
+  inbound
+}
+
+enum PaymentMethod {
+  card
+  apple_pay
+  google_pay
+  payto
+  becs
+  payid_transfer
+  bpay
+  bnpl
+  manual_other
+}
+
+enum PaymentStatus {
+  created
+  pending
+  requires_action
+  succeeded
+  failed
+  cancelled
+  expired
+  voided
+}
+
+enum ProviderWebhookEventStatus {
+  received
+  processed
+  ignored
+  failed
+}
+
+enum ProviderWebhookRejectionReason {
+  bad_signature
+  stale_timestamp
+  malformed
+}
+
+/// An account with a payment gateway (plan 0.1, 5.5; minimal in 3.1). Credentials and the webhook secret are encrypted
+/// at rest and only ProviderGateway reads them. Test mode only until a task manages live accounts. Never deleted.
+model ProviderAccount {
+  id                       String                @id @default(uuid(7)) @db.Uuid
+  /// @nopii key of the adapter in the code registry
+  adapterKey               String
+  /// @pii free text typed by staff
+  displayName              String
+  /// @nopii test or live; never changes (trigger); test only in 3.1 (CHECK)
+  mode                     PaymentMode
+  /// @nopii
+  status                   ProviderAccountStatus @default(active)
+  /// @secret AES-256-GCM ciphertext of the adapter's credentials (AAD provider_account:<id>:credentials)
+  credentialsCiphertext    String
+  /// @nopii version of APP_ENCRYPTION_KEY that encrypted the credentials
+  credentialsKeyVersion    Int
+  /// @secret AES-256-GCM ciphertext of the webhook signing secret (AAD provider_account:<id>:webhook_secret)
+  webhookSecretCiphertext  String
+  /// @nopii version of APP_ENCRYPTION_KEY that encrypted the webhook secret
+  webhookKeyVersion        Int
+  /// @secret HMAC of the webhook path token with AUTH_HMAC_KEY; the full URL is shown once
+  webhookPathTokenHash     String                @unique @db.Char(64)
+  /// @nopii
+  lastConnectionTestAt     DateTime?             @db.Timestamptz(3)
+  /// @nopii code: ok or the adapter's error code
+  lastConnectionTestResult String?
+  createdById              String?               @db.Uuid
+  /// @nopii optimistic lock for the admin panel
+  version                  Int                   @default(0)
+  /// @nopii timestamp
+  createdAt                DateTime              @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt                DateTime              @updatedAt @db.Timestamptz(3)
+  payments                 Payment[]
+  webhookEvents            WebhookEvent[]
+  webhookRejections        WebhookRejection[]
+
+  @@unique([id, mode])
+  @@map("provider_accounts")
+}
+
+/// The payment plan of a booking (plan 0.1, 5.5): created with the approval in the same transaction, never deleted;
+/// `version` goes up with every change. The amounts of its items come from the booking's current snapshot.
+model PaymentSchedule {
+  id        String                @id @default(uuid(7)) @db.Uuid
+  bookingId String                @unique @db.Uuid
+  /// @nopii ISO 4217, the booking's
+  currency  String                @db.Char(3)
+  booking   Booking               @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii goes up by one with every change of the plan
+  version   Int                   @default(1)
+  /// @nopii timestamp
+  createdAt DateTime              @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt DateTime              @updatedAt @db.Timestamptz(3)
+  items     PaymentScheduleItem[]
+
+  @@unique([id, bookingId, currency])
+  @@map("payment_schedules")
+}
+
+/// One instalment of a payment plan. Never edited: a change supersedes it and creates new items (plan 0.1, 5.10).
+model PaymentScheduleItem {
+  id                  String                   @id @default(uuid(7)) @db.Uuid
+  scheduleId          String                   @db.Uuid
+  bookingId           String                   @db.Uuid
+  /// @nopii ISO 4217, the booking's
+  currency            String                   @db.Char(3)
+  schedule            PaymentSchedule          @relation(fields: [scheduleId, bookingId, currency], references: [id, bookingId, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii deposit, balance, instalment or adjustment
+  kind                PaymentScheduleItemKind
+  /// @nopii order of the item in its plan version, from 1
+  sequence            Int
+  /// @nopii version of the plan that created the item
+  planVersion         Int
+  /// @nopii minor units, in `currency`, from the booking's snapshot
+  amountMinor         BigInt
+  /// @nopii calendar date in the business time zone
+  dueDate             DateTime                 @db.Date
+  /// @nopii active, waived or superseded
+  state               PaymentScheduleItemState @default(active)
+  /// @nopii plan version that superseded the item
+  supersededInVersion Int?
+  /// @nopii timestamp
+  createdAt           DateTime                 @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt           DateTime                 @updatedAt @db.Timestamptz(3)
+  payments            Payment[]
+
+  @@unique([id, bookingId, currency])
+  @@unique([id, bookingId])
+  @@unique([scheduleId, planVersion, sequence])
+  @@index([bookingId, state])
+  @@map("payment_schedule_items")
+}
+
+/// A payment attempt (plan 0.1, 5.5 and 6.2). Its amount comes from the server (plan, snapshot); its status only moves
+/// through the attempt state machine and the pairs of a trigger; at most one live attempt per booking (liveBookingId).
+model Payment {
+  id                   String              @id @default(uuid(7)) @db.Uuid
+  bookingId            String              @db.Uuid
+  /// @nopii ISO 4217, the booking's
+  currency             String              @db.Char(3)
+  booking              Booking             @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii collection only in 3.1 (CHECK)
+  origin               PaymentOrigin
+  /// @nopii 1, 2, … per booking
+  attemptNumber        Int
+  targetScheduleItemId String              @db.Uuid
+  targetScheduleItem   PaymentScheduleItem @relation(fields: [targetScheduleItemId, bookingId, currency], references: [id, bookingId, currency], onDelete: Restrict, onUpdate: Restrict)
+  payerCustomerId      String              @db.Uuid
+  payerCustomer        Customer            @relation(fields: [payerCustomerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  providerAccountId    String              @db.Uuid
+  /// @nopii test or live, the account's
+  mode                 PaymentMode
+  providerAccount      ProviderAccount     @relation(fields: [providerAccountId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii key of the adapter that served the attempt
+  adapterKey           String
+  /// @nopii the method the customer chose; never changes the amount
+  method               PaymentMethod
+  /// @nopii minor units, in `currency`, computed by the server
+  amountMinor          BigInt
+  /// @nopii state of the attempt (plan 3.1, section 5.2)
+  status               PaymentStatus
+  /// @nopii set to bookingId while the attempt is live (created, requires_action, pending), else NULL: one live attempt per booking
+  liveBookingId        String?             @unique @db.Uuid
+  /// @nopii booking:<id>:attempt:<n>, generated by the server and sent to the gateway as its idempotency key
+  idempotencyKey       String              @unique
+  /// @nopii the gateway's object id
+  providerPaymentRef   String?
+  /// @nopii code from the gateway's closed list
+  failureCode          String?
+  /// @nopii when the sweep asks the gateway about an unfinished attempt; never extended
+  pendingExpiresAt     DateTime            @db.Timestamptz(3)
+  /// @nopii timestamp
+  succeededAt          DateTime?           @db.Timestamptz(3)
+  /// @nopii bumped with every change
+  version              Int                 @default(0)
+  /// @nopii timestamp
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt            DateTime            @updatedAt @db.Timestamptz(3)
+  webhookEvents        WebhookEvent[]
+
+  @@unique([id, bookingId, currency])
+  @@unique([id, mode])
+  @@unique([id, bookingId, providerAccountId, mode, currency])
+  @@unique([bookingId, attemptNumber])
+  @@unique([providerAccountId, providerPaymentRef])
+  @@index([status, pendingExpiresAt])
+  @@index([payerCustomerId])
+  @@index([targetScheduleItemId])
+  @@map("payments")
+}
+
+/// A gateway webhook that passed its signature check, stored raw (plan 0.1, 5.5). The body is personal data: emptied
+/// when the customer is erased and after 180 days. Never deleted.
+model WebhookEvent {
+  id                String                     @id @default(uuid(7)) @db.Uuid
+  providerAccountId String                     @db.Uuid
+  providerAccount   ProviderAccount            @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the gateway's event id
+  providerEventId   String
+  bookingId         String?                    @db.Uuid
+  booking           Booking?                   @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  paymentId         String?                    @db.Uuid
+  payment           Payment?                   @relation(fields: [paymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the gateway's event type (payment.updated…)
+  type              String
+  /// @pii the body as received (can carry the payer's details)
+  rawBody           Bytes?
+  /// @nopii allow-listed headers, signature values removed
+  headers           Json
+  /// @nopii timestamp
+  receivedAt        DateTime                   @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  status            ProviderWebhookEventStatus @default(received)
+  /// @nopii processing attempts
+  attempts          Int                        @default(0)
+  /// @nopii timestamp
+  processedAt       DateTime?                  @db.Timestamptz(3)
+  /// @nopii code only
+  errorCode         String?
+  /// @nopii timestamp
+  updatedAt         DateTime                   @updatedAt @db.Timestamptz(3)
+
+  @@unique([providerAccountId, providerEventId])
+  @@index([status, receivedAt])
+  @@index([bookingId])
+  @@index([paymentId])
+  @@map("webhook_events")
+}
+
+/// A webhook for a known account that failed its signature, timestamp or format check. No body; purged after 30 days.
+/// Oversized requests and unknown paths are only counted in memory (plan 3.1, section 14, point 5).
+model WebhookRejection {
+  id                String                         @id @default(uuid(7)) @db.Uuid
+  providerAccountId String                         @db.Uuid
+  providerAccount   ProviderAccount                @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii timestamp
+  receivedAt        DateTime                       @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  reason            ProviderWebhookRejectionReason
+  /// @nopii SHA-256 of the body, to match retries
+  bodySha256        String                         @db.Char(64)
+  /// @nopii
+  sizeBytes         Int
+  /// @nopii event id the body claimed, if it could be read
+  claimedEventId    String?
+  /// @nopii allow-listed headers, signature values removed
+  headers           Json
+
+  @@index([receivedAt])
+  @@index([providerAccountId, receivedAt])
+  @@map("webhook_rejections")
+}

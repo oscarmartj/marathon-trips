@@ -104,11 +104,11 @@ export class BookingStateMachine {
       if (event === 'approve' && b.requestExpiresAt.getTime() <= at.getTime()) throw conflict('request_expired', 'This request has expired');
     }
 
+    const approvalExpiresAt = to === 'approved' ? new Date(at.getTime() + approvalHours * 3_600_000) : null;
     const hooked = { id: b.id, customerId: b.customerId, packageId: b.packageId, currency: b.currency, from: b.status };
-    if (event === 'approve' || event === 'cancel') await this.hooks.run(event, tx, hooked, { actor: input.actor, at });
+    if (event === 'approve' || event === 'cancel') await this.hooks.run(event, tx, hooked, { actor: input.actor, at, approvalExpiresAt });
 
     const column = TIME_COLUMN[to];
-    const approvalExpiresAt = to === 'approved' ? new Date(at.getTime() + approvalHours * 3_600_000) : null;
     const reason = input.reason ?? null;
     // Compare-and-set: the row is locked, so 0 rows here means a bug, never a race; still a 409, never a silent write.
     const updated = await tx.$executeRawUnsafe(

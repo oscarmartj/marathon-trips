@@ -39,6 +39,7 @@ Node 22 (`.nvmrc`) y pnpm 10 (`corepack enable`). Desde la raíz del repositorio
 | Copias y restauración (8.6) | `pnpm test:file test/ops/backup.test.ts`; necesita `PGHOST`/`PGUSER`/`PGPASSWORD` de un superusuario (CI ya los pone; en local, p. ej. `PGHOST=localhost PGUSER=postgres PGPASSWORD=...`). Scripts en `scripts/backup/`, guía en `docs/deploy/guide.md` |
 | Pruebas de extremo a extremo | `pnpm test:e2e` (Playwright arranca API y web; necesita la base migrada y `pnpm --filter @mt/web build`; sin navegador descargado, `PW_CHANNEL=chrome`) |
 | Personal: alta o reinicio por consola | `pnpm api:cli staff:create --email <correo> [--owner]` y `pnpm api:cli staff:reset --email <correo>` (imprimen un enlace de alta de un solo uso) |
+| Pagos: cuenta del simulador (solo development, test y ci) | `pnpm api:cli payments:simulator-account [--name <nombre>]` (imprime una vez la URL del webhook) |
 | Todo lo anterior | `pnpm check:all` |
 
 Las pruebas de base de datos necesitan `DATABASE_URL` y `MIGRATION_DATABASE_URL` y fallan, no se saltan, si no hay base. En un entorno sin acceso a `binaries.prisma.sh`, `prisma generate` funciona con `PRISMA_SCHEMA_ENGINE_BINARY=/bin/true` y las migraciones se aplican con `psql -f` como `mt_owner`; CI sí usa `prisma migrate deploy`.

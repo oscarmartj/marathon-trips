@@ -12,5 +12,6 @@ export * from './schemas/integrations';
 export * from './schemas/bookings';
 export * from './schemas/waitlist';
 export * from './schemas/custom-fields';
+export * from './schemas/payments';
 export * from './schemas/crm';
 export * from './iso-countries';

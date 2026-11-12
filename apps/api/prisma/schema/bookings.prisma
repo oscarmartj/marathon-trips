@@ -81,6 +81,7 @@ model Customer {
   bookings           Booking[]
   quotes             Quote[]
   promoRedemptions   PromoRedemption[]
+  payments           Payment[]
   waitlistEntries    WaitlistEntry[]
 
   @@unique([userId, userKind])
@@ -160,6 +161,9 @@ model Booking {
   extras                 BookingExtra[]
   claims                 InventoryClaim[]
   promoRedemptions       PromoRedemption[]
+  paymentSchedules       PaymentSchedule[]
+  payments               Payment[]
+  webhookEvents          WebhookEvent[]
   inventoryMovements     InventoryMovement[]
 
   @@unique([id, currency])

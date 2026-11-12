@@ -1,0 +1,81 @@
+import { Inject, Injectable } from '@nestjs/common';
+import type { Prisma } from '../../../generated/prisma/client';
+import { AuditService } from '../../../platform/audit/audit.service';
+import { bossDb } from '../../../platform/database/boss-db';
+import { AppError } from '../../../platform/errors/safe-error';
+import { OutboxService } from '../../../platform/events/outbox.service';
+import { conflict } from '../../../platform/http/api-error';
+import { JobsService } from '../../../platform/jobs/jobs.service';
+import { QUEUES } from '../../../platform/jobs/queues';
+import { BookingTransitionHooks, readBookingForPayments } from '../../bookings';
+import type { BookingHookContext, HookedBooking } from '../../bookings';
+import { PAYMENT_EVENTS } from './attempt-state';
+import { ProviderGateway } from './gateway';
+import { succeededPaymentsSource } from './payable';
+import { planItems } from './schedule';
+
+type Tx = Prisma.TransactionClient;
+
+export const SCHEDULE_HOOK = 'payments.schedule';
+
+/**
+ * The payment plan follows the booking in the booking's own transaction (plan 3.1, section 4.2): created on approval,
+ * superseded on cancellation. Neither hook locks a payment: they run before the code and the stock are released, and
+ * the global order puts Payment after them (plan 0.1, 6.3). A live attempt is cancelled by a job after the commit.
+ */
+@Injectable()
+export class PaymentScheduleService {
+  constructor(
+    @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(OutboxService) private readonly outbox: OutboxService,
+    @Inject(JobsService) private readonly jobs: JobsService,
+    @Inject(ProviderGateway) private readonly gateway: ProviderGateway,
+  ) {}
+
+  register(hooks: BookingTransitionHooks): void {
+    hooks.register('approve', SCHEDULE_HOOK, (tx, b, ctx) => this.onApprove(tx, b, ctx));
+    hooks.register('cancel', SCHEDULE_HOOK, (tx, b, ctx) => this.onCancel(tx, b, ctx));
+  }
+
+  async onApprove(tx: Tx, hooked: HookedBooking, ctx: BookingHookContext): Promise<void> {
+    if (!ctx.approvalExpiresAt) throw new AppError('plan_needs_approval_expiry', 'An approval without an expiry cannot date its deposit');
+    const b = await readBookingForPayments(tx, { id: hooked.id });
+    if (!b || b.currency !== hooked.currency) throw new AppError('plan_booking_mismatch', 'The booking and its snapshot do not agree');
+    if (await tx.paymentSchedule.findUnique({ where: { bookingId: b.id }, select: { id: true } })) throw new AppError('plan_already_exists', 'This booking already has a payment plan');
+    const items = planItems({ totalMinor: b.totalMinor, depositMinor: b.depositMinor, balanceDueDate: b.balanceDueDate, approvalExpiresAt: ctx.approvalExpiresAt });
+    const schedule = await tx.paymentSchedule.create({ data: { bookingId: b.id, currency: b.currency, version: 1 }, select: { id: true } });
+    for (const i of items) {
+      await tx.paymentScheduleItem.create({
+        data: { scheduleId: schedule.id, bookingId: b.id, currency: b.currency, kind: i.kind, sequence: i.sequence, planVersion: 1, amountMinor: i.amountMinor, dueDate: new Date(`${i.dueDate}T00:00:00.000Z`) },
+      });
+    }
+    await this.audit.record(tx, {
+      actor: ctx.actor, action: 'payments.schedule.created', entityType: 'PaymentSchedule', entityId: schedule.id,
+      after: { version: 1, items: items.map((i) => ({ kind: i.kind, sequence: i.sequence, amountMinor: i.amountMinor.toString(), dueDate: i.dueDate })) },
+      fieldClasses: { items: 'nopii' }, context: { bookingId: b.id, items: items.length },
+    });
+    await this.outbox.publish(tx, { type: PAYMENT_EVENTS.scheduleCreated, aggregateType: 'PaymentSchedule', aggregateId: schedule.id, aggregateVersion: 1, payload: { scheduleId: schedule.id, bookingId: b.id }, actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined });
+  }
+
+  /**
+   * Before task 6.4 there are no penalties, so a cancelled booking owes nothing: every active item is superseded. A
+   * booking with money collected cannot be cancelled yet (409, as for the paid states): refunds are parked.
+   */
+  async onCancel(tx: Tx, hooked: HookedBooking, ctx: BookingHookContext): Promise<void> {
+    const schedule = await tx.paymentSchedule.findUnique({ where: { bookingId: hooked.id }, select: { id: true, version: true } });
+    const collected = await succeededPaymentsSource.collected(tx, hooked.id, this.gateway.mode);
+    if (collected > 0n) throw conflict('cancellation_needs_payments', 'This booking has payments to settle first. Cancelling it is not available yet.');
+    if (!schedule) return;
+    const version = schedule.version + 1;
+    await tx.paymentSchedule.update({ where: { id: schedule.id }, data: { version } });
+    const superseded = await tx.paymentScheduleItem.updateMany({ where: { scheduleId: schedule.id, state: 'active' }, data: { state: 'superseded', supersededInVersion: version } });
+    await this.audit.record(tx, {
+      actor: ctx.actor, action: 'payments.schedule.superseded', entityType: 'PaymentSchedule', entityId: schedule.id,
+      before: { version: schedule.version }, after: { version }, context: { bookingId: hooked.id, supersededItems: superseded.count, cause: 'booking_cancelled' },
+    });
+    await this.outbox.publish(tx, { type: PAYMENT_EVENTS.scheduleSuperseded, aggregateType: 'PaymentSchedule', aggregateId: schedule.id, aggregateVersion: version, payload: { scheduleId: schedule.id, bookingId: hooked.id }, actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined });
+    // A live attempt is cancelled at the gateway after this commits (no Payment lock here).
+    const live = await tx.payment.findUnique({ where: { liveBookingId: hooked.id }, select: { id: true } });
+    if (live) await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: live.id, action: 'cancel' }, { db: bossDb(tx), singletonKey: `cancel:${live.id}` });
+  }
+}

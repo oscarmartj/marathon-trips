@@ -53,6 +53,22 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  // Task 3.1: process one stored gateway webhook; sync, cancel or expire one payment attempt; the payments sweep.
+  paymentsWebhooks: {
+    name: 'payments.webhooks',
+    data: z.object({ webhookEventId: uuid }).strict(),
+    options: { policy: 'short', retryLimit: 5, retryDelay: 30, retryBackoff: true, expireInSeconds: 300, deleteAfterSeconds: 604800 },
+  },
+  paymentsAttempts: {
+    name: 'payments.attempts',
+    data: z.object({ paymentId: uuid, action: z.enum(['sync', 'cancel', 'expire', 'cancel_orphan']) }).strict(),
+    options: { policy: 'short', retryLimit: 5, retryDelay: 60, retryBackoff: true, expireInSeconds: 300, deleteAfterSeconds: 604800 },
+  },
+  paymentsMaintenance: {
+    name: 'payments.maintenance',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
+  },
   crmMaintenance: {
     name: 'crm.maintenance',
     data: z.object({}).strict(),
