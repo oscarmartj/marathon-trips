@@ -48,6 +48,9 @@ const configSchema = z.object({
   // Requests per minute per API key, and failed API key authentications per minute per IP.
   API_KEY_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
   API_KEY_FAILED_PER_MINUTE: z.coerce.number().int().min(1).default(30),
+  // Task 2.4: booking requests per hour, per customer and per IP (in memory, like the other limits).
+  BOOKING_REQUESTS_PER_HOUR_PER_USER: z.coerce.number().int().min(1).default(10),
+  BOOKING_REQUESTS_PER_HOUR_PER_IP: z.coerce.number().int().min(1).default(30),
 
   // Task 8.6: file written by scripts/backup/backup.sh after each good backup; the system monitor reads it. Optional.
   BACKUP_STATUS_FILE: z.string().min(1).optional(),

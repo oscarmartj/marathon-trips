@@ -179,6 +179,7 @@ model RaceDistance {
   updatedAt          DateTime             @updatedAt @db.Timestamptz(3)
   entryOptions       PackageEntryOption[]
   participationRates ParticipationRate[]
+  bookingTravellers  BookingTraveller[]
 
   @@index([raceId])
   @@map("race_distances")
@@ -234,6 +235,7 @@ model RaceEdition {
   pools             InventoryPool[]
   alerts            AlertSubscription[]
   supplierContracts SupplierContract[]
+  bookings          Booking[]
 
   @@unique([raceId, year])
   @@index([status])
@@ -303,6 +305,7 @@ model Package {
   priceVersions        PriceVersion[]
   priceRules           PriceRule[]
   promoCodes           PromoCode[]
+  bookings             Booking[]
 
   @@unique([editionId, slug])
   @@unique([id, currency])
@@ -414,6 +417,7 @@ model RoomOption {
   /// @nopii timestamp
   updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
   roomRates      RoomRate[]
+  bookingRooms   BookingRoom[]
 
   @@index([packageHotelId])
   @@index([roomPoolId])
@@ -452,6 +456,7 @@ model Extra {
   /// @nopii timestamp
   updatedAt     DateTime       @updatedAt @db.Timestamptz(3)
   extraRates    ExtraRate[]
+  bookingExtras BookingExtra[]
 
   @@index([packageId])
   @@index([poolId])
@@ -487,6 +492,7 @@ model InventoryPool {
   extras              Extra[]
   movements           InventoryMovement[]
   allotments          Allotment[]
+  claims              InventoryClaim[]
 
   @@index([editionId])
   @@map("inventory_pools")
@@ -501,6 +507,7 @@ model InventoryMovement {
   /// @nopii catalogue data
   reason     InventoryReason
   bookingId  String?         @db.Uuid
+  booking    Booking?        @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii catalogue data
   actorType  AuditActorType
   actorId    String?         @db.Uuid
@@ -509,5 +516,6 @@ model InventoryMovement {
   createdAt  DateTime        @default(now()) @db.Timestamptz(3)
 
   @@index([poolId, createdAt])
+  @@index([bookingId])
   @@map("inventory_movements")
 }

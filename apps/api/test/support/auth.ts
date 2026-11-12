@@ -29,7 +29,7 @@ export class CapturingMailSender implements MailSender {
 /** The whole API, as main.ts builds it, with a capturing mail sender. Rate limit high unless a test asks otherwise. */
 export async function makeApp(env: Record<string, string> = {}, opts: { allLogs?: boolean; controllers?: Array<new (...a: never[]) => object> } = {}) {
   const saved: Record<string, string | undefined> = {};
-  const all = { AUTH_RATE_LIMIT_PER_MINUTE: '10000', WEB_ORIGIN, ...env };
+  const all = { AUTH_RATE_LIMIT_PER_MINUTE: '10000', BOOKING_REQUESTS_PER_HOUR_PER_USER: '10000', BOOKING_REQUESTS_PER_HOUR_PER_IP: '10000', WEB_ORIGIN, ...env };
   for (const [k, v] of Object.entries(all)) {
     saved[k] = process.env[k];
     process.env[k] = v;

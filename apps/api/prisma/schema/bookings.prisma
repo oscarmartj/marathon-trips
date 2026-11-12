@@ -1,0 +1,283 @@
+// Customers and booking requests (task 2.4; plan docs/plans/2.4-booking-requests.md and plan 0.1, 5.4).
+// No money moves here: a request stores the engine's price in an immutable snapshot and holds stock.
+// CHECKs, triggers and partial indexes live in the migration 0014_bookings.
+
+enum BookingStatus {
+  requested
+  approved
+  deposit_paid
+  confirmed
+  balance_paid
+  completed
+  declined
+  expired
+  cancelled
+  refunded
+}
+
+enum BookingKind {
+  catalogue
+  bespoke
+}
+
+enum BookingSourceChannel {
+  web
+  panel
+  api
+}
+
+enum CustomerSource {
+  web
+  panel
+}
+
+enum BookingSnapshotKind {
+  original
+  amendment
+}
+
+enum InventoryClaimStatus {
+  held
+  released
+}
+
+/// A person who books (plan 0.1, 5.4; minimal in 2.4). One per email address; linked to the customer User that
+/// verified the address. Personal data: erased by 5.5 through the entity registry.
+model Customer {
+  id                 String            @id @default(uuid(7)) @db.Uuid
+  userId             String?           @unique @db.Uuid
+  /// @nopii always customer (CHECK): only a customer user can be linked
+  userKind           UserKind          @default(customer)
+  user               User?             @relation(fields: [userId, userKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  /// @pii contact address, copied from the verified customer user
+  email              String            @unique @db.Citext
+  /// @pii
+  givenName          String
+  /// @pii
+  familyName         String
+  /// @pii
+  phone              String?
+  /// @pii country of residence (ISO 3166-1 alpha-2); ZZ once erased
+  countryOfResidence String            @db.Char(2)
+  /// @nopii BCP 47 locale of the site the customer used
+  preferredLocale    String            @default("en-AU")
+  /// @nopii how the record was created
+  source             CustomerSource
+  /// @nopii set when the personal data was erased
+  anonymisedAt       DateTime?         @db.Timestamptz(3)
+  /// @pii custom fields are free text
+  customFields       Json              @default("{}")
+  /// @nopii demo data root (plan 0.1, 1.3)
+  isDemo             Boolean           @default(false)
+  /// @nopii optimistic lock for the admin panel
+  version            Int               @default(0)
+  /// @nopii soft delete
+  deletedAt          DateTime?         @db.Timestamptz(3)
+  deletedById        String?           @db.Uuid
+  /// @nopii timestamp
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+  bookings           Booking[]
+  promoRedemptions   PromoRedemption[]
+
+  @@unique([userId, userKind])
+  @@map("customers")
+}
+
+/// A booking request and, later, the booking (plan 0.1, 5.4 and 6.2). Its status only changes through
+/// BookingStateMachine and the allowed pairs of a trigger; its totals always mirror its current snapshot. Never deleted.
+model Booking {
+  id                     String               @id @default(uuid(7)) @db.Uuid
+  /// @nopii human reference MT-XXXXXX, random (Crockford base32)
+  reference              String               @unique
+  customerId             String               @db.Uuid
+  customer               Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue or bespoke
+  kind                   BookingKind
+  packageId              String               @db.Uuid
+  package                Package              @relation(fields: [packageId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  editionId              String               @db.Uuid
+  edition                RaceEdition          @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii state of the booking (plan 0.1, 6.2)
+  status                 BookingStatus
+  /// @nopii version of the snapshot in force
+  currentSnapshotVersion Int
+  /// @nopii calendar date, extra nights included
+  departureDate          DateTime             @db.Date
+  /// @nopii calendar date, extra nights included
+  returnDate             DateTime             @db.Date
+  /// @nopii ISO 4217
+  currency               String               @db.Char(3)
+  /// @nopii minor units, in `currency`; mirrors the current snapshot
+  totalMinor             BigInt
+  /// @nopii minor units, in `currency`; mirrors the current snapshot
+  depositMinor           BigInt
+  /// @nopii calendar date
+  balanceDueDate         DateTime             @db.Date
+  /// @pii country of residence declared with the request; ZZ once erased
+  residenceCountry       String               @db.Char(2)
+  /// @nopii timestamp
+  requestedAt            DateTime             @db.Timestamptz(3)
+  /// @nopii timestamp
+  requestExpiresAt       DateTime             @db.Timestamptz(3)
+  /// @nopii timestamp
+  approvedAt             DateTime?            @db.Timestamptz(3)
+  /// @nopii timestamp (swept by 3.2)
+  approvalExpiresAt      DateTime?            @db.Timestamptz(3)
+  /// @nopii timestamp
+  declinedAt             DateTime?            @db.Timestamptz(3)
+  /// @nopii timestamp
+  expiredAt              DateTime?            @db.Timestamptz(3)
+  /// @nopii timestamp
+  cancelledAt            DateTime?            @db.Timestamptz(3)
+  /// @pii staff reason for the last decline or cancellation, free text
+  statusReason           String?
+  /// @nopii where the request came from
+  sourceChannel          BookingSourceChannel
+  /// @secret SHA-256 of the user id and the client's Idempotency-Key: one booking per key and customer
+  requestKeyHash         String               @db.Char(64)
+  /// @secret SHA-256 of the requested configuration and code (no personal data)
+  requestConfigHash      String               @db.Char(64)
+  /// @secret HMAC of the contact details sent with the request; NULL once erased
+  requestContactHmac     String?              @db.Char(64)
+  /// @nopii demo data root (plan 0.1, 1.3)
+  isDemo                 Boolean              @default(false)
+  /// @pii custom fields are free text
+  customFields           Json                 @default("{}")
+  /// @nopii optimistic lock for the admin panel
+  version                Int                  @default(0)
+  /// @nopii timestamp
+  createdAt              DateTime             @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt              DateTime             @updatedAt @db.Timestamptz(3)
+  snapshots              BookingSnapshot[]
+  travellers             BookingTraveller[]
+  rooms                  BookingRoom[]
+  extras                 BookingExtra[]
+  claims                 InventoryClaim[]
+  promoRedemptions       PromoRedemption[]
+  inventoryMovements     InventoryMovement[]
+
+  @@unique([id, currency])
+  @@unique([id, customerId])
+  @@unique([customerId, requestKeyHash])
+  @@index([customerId, status])
+  @@index([packageId, status])
+  @@index([editionId, status])
+  @@index([status, requestExpiresAt])
+  @@map("bookings")
+}
+
+/// The configuration and price of a booking as submitted (version 1) or amended (6.3). Never changes: UPDATE, DELETE and
+/// TRUNCATE are refused by triggers (not @appendOnly, because it points at bookings; plan 2.4, section 2.2).
+/// No personal data and no free text: travellers are slots, everything else ids, codes, dates and amounts.
+model BookingSnapshot {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  bookingId      String              @db.Uuid
+  booking        Booking             @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii 1 for the request; each amendment adds one
+  version        Int
+  /// @nopii original or amendment
+  kind           BookingSnapshotKind
+  /// @nopii PricedConfiguration from the engine: ids, slots and counts only (bookingSnapshotSchema)
+  configuration  Json
+  /// @nopii PriceBreakdown from the engine: lines, totals, rule trace (ids and outcomes); no free text
+  priceBreakdown Json
+  /// @nopii minor units, in `currency`
+  totalMinor     BigInt
+  /// @nopii minor units, in `currency`
+  depositMinor   BigInt
+  /// @nopii ISO 4217
+  currency       String              @db.Char(3)
+  priceVersionId String              @db.Uuid
+  priceVersion   PriceVersion        @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii engine version that priced it
+  engineVersion  String
+  /// @nopii timestamp
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+
+  @@unique([bookingId, version])
+  @@index([priceVersionId])
+  @@map("booking_snapshots")
+}
+
+/// A place in a booking (plan 0.1, 5.4). Exists from the request; the traveller's personal data arrives with 5.2.
+model BookingTraveller {
+  id                String            @id @default(uuid(7)) @db.Uuid
+  bookingId         String            @db.Uuid
+  customerId        String            @db.Uuid
+  booking           Booking           @relation(fields: [bookingId, customerId], references: [id, customerId], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii 1-based place in the order of rooms and travellers
+  slot              Int
+  /// @nopii catalogue data
+  participationType ParticipationType
+  raceDistanceId    String?           @db.Uuid
+  raceDistance      RaceDistance?     @relation(fields: [raceDistanceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the customer's own place
+  isLead            Boolean           @default(false)
+  /// @nopii snapshot version that added the place
+  addedInVersion    Int               @default(1)
+  /// @nopii snapshot version that removed the place (6.3)
+  removedInVersion  Int?
+
+  @@unique([bookingId, slot])
+  @@index([customerId])
+  @@index([raceDistanceId])
+  @@map("booking_travellers")
+}
+
+/// A room of the booking as it stands (operations); the snapshot keeps what was priced.
+model BookingRoom {
+  id             String     @id @default(uuid(7)) @db.Uuid
+  bookingId      String     @db.Uuid
+  booking        Booking    @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  roomOptionId   String     @db.Uuid
+  roomOption     RoomOption @relation(fields: [roomOptionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii people in the room, 1 to 4
+  occupancy      Int
+  /// @nopii traveller slots in the room
+  travellerSlots Int[]
+
+  @@index([bookingId])
+  @@index([roomOptionId])
+  @@map("booking_rooms")
+}
+
+/// An extra of the booking as it stands: one row per traveller for per-person extras, one row with a quantity otherwise.
+model BookingExtra {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  bookingId     String  @db.Uuid
+  booking       Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  extraId       String  @db.Uuid
+  extra         Extra   @relation(fields: [extraId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii how many
+  quantity      Int
+  /// @nopii traveller slot for a per-person extra
+  travellerSlot Int?
+
+  @@unique([bookingId, extraId, travellerSlot], map: "booking_extras_booking_extra_slot_key")
+  @@index([extraId])
+  @@map("booking_extras")
+}
+
+/// Places a booking holds in a stock pool (plan 0.1, 5.4). Released once (held → released), never deleted.
+model InventoryClaim {
+  id         String               @id @default(uuid(7)) @db.Uuid
+  bookingId  String               @db.Uuid
+  booking    Booking              @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  poolId     String               @db.Uuid
+  pool       InventoryPool        @relation(fields: [poolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii places held
+  quantity   Int
+  /// @nopii held or released
+  status     InventoryClaimStatus @default(held)
+  /// @nopii timestamp
+  releasedAt DateTime?            @db.Timestamptz(3)
+  /// @nopii timestamp
+  createdAt  DateTime             @default(now()) @db.Timestamptz(3)
+
+  @@unique([bookingId, poolId])
+  @@index([poolId, status])
+  @@map("inventory_claims")
+}

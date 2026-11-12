@@ -18,6 +18,13 @@ export interface HoldContext {
 
 export type StockState = 'available' | 'low' | 'none';
 
+/** What demandFor needs of a priced configuration (pricing's PricedConfiguration has this shape). */
+export interface DemandConfiguration {
+  packageId: string;
+  rooms: Array<{ roomOptionId: string; travellers: Array<{ participationType: string; raceDistanceId: string | null }> }>;
+  extras: Array<{ extraId: string; quantity: number }>;
+}
+
 /** Remaining places and the three-way state the public site may show (never the numbers). */
 export function stockOf(p: { capacity: number; consumed: number; lowStockThreshold: number | null }): { remaining: number; lowStock: boolean; state: StockState } {
   const remaining = p.capacity - p.consumed;
@@ -65,6 +72,52 @@ export class InventoryService {
       type: 'catalogue.inventory.released', aggregateType: 'InventoryPool', aggregateId: poolId, payload: { poolId, editionId: pool.editionId },
       actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined,
     });
+  }
+
+  /**
+   * The stock a priced configuration needs (task 2.4, plan section 6): one room-pool place per room, one entry-pool place
+   * per runner with an entry, and the extras with a pool (per person: one per traveller). Read in ONE statement, so it
+   * is one consistent view of the package's options; an option of the configuration that no longer resolves is a 409
+   * `catalogue_changed` (the options can change under a FOR SHARE lock of the package). Aggregated per pool and sorted by
+   * pool id, the lock order of plan 0.1, 6.3. Supporters and runners with their own entry take no entry; extra nights
+   * have no pool of their own.
+   */
+  async demandFor(tx: Tx, configuration: DemandConfiguration): Promise<Array<{ poolId: string; quantity: number }>> {
+    const roomIds = [...new Set(configuration.rooms.map((r) => r.roomOptionId))];
+    const distanceIds = [...new Set(configuration.rooms.flatMap((r) => r.travellers.filter((x) => x.participationType === 'runner_with_entry').map((x) => x.raceDistanceId!)))];
+    const extraIds = [...new Set(configuration.extras.map((e) => e.extraId))];
+    const rows = await tx.$queryRaw<Array<{ kind: 'room' | 'entry' | 'extra'; ref: string; poolId: string | null }>>`
+      SELECT 'room' AS kind, r.id::text AS ref, r."roomPoolId"::text AS "poolId"
+        FROM room_options r JOIN package_hotels h ON h.id = r."packageHotelId"
+       WHERE h."packageId" = ${configuration.packageId}::uuid AND r.id = ANY(${roomIds}::uuid[])
+      UNION ALL
+      SELECT 'entry', e."raceDistanceId"::text, e."entryPoolId"::text
+        FROM package_entry_options e
+       WHERE e."packageId" = ${configuration.packageId}::uuid AND e."raceDistanceId" = ANY(${distanceIds}::uuid[])
+      UNION ALL
+      SELECT 'extra', x.id::text, x."poolId"::text
+        FROM extras x
+       WHERE x."packageId" = ${configuration.packageId}::uuid AND x."deletedAt" IS NULL AND x.id = ANY(${extraIds}::uuid[])`;
+    const found = new Map(rows.map((r) => [`${r.kind}:${r.ref}`, r.poolId]));
+    const changed = () => conflict('catalogue_changed', 'This trip changed while you were booking. Check the price and try again.');
+    const demand = new Map<string, number>();
+    const add = (poolId: string | null | undefined, n: number) => {
+      if (poolId) demand.set(poolId, (demand.get(poolId) ?? 0) + n);
+    };
+    for (const room of configuration.rooms) {
+      if (!found.has(`room:${room.roomOptionId}`)) throw changed();
+      add(found.get(`room:${room.roomOptionId}`), 1);
+      for (const t of room.travellers) {
+        if (t.participationType !== 'runner_with_entry') continue;
+        if (!t.raceDistanceId || !found.has(`entry:${t.raceDistanceId}`)) throw changed();
+        add(found.get(`entry:${t.raceDistanceId}`), 1);
+      }
+    }
+    for (const e of configuration.extras) {
+      if (!found.has(`extra:${e.extraId}`)) throw changed();
+      add(found.get(`extra:${e.extraId}`), e.quantity);
+    }
+    return [...demand.entries()].map(([poolId, quantity]) => ({ poolId, quantity })).sort((a, b) => (a.poolId < b.poolId ? -1 : a.poolId > b.poolId ? 1 : 0));
   }
 
   private assertPlaces(places: number): void {
