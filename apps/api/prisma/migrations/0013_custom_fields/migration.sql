@@ -26,7 +26,7 @@ CREATE TABLE "custom_field_definitions" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "custom_field_definitions_entityType_key_key" ON "custom_field_definitions"("entityType", "key");
-CREATE INDEX "custom_field_definitions_entityType_archivedAt_displayOrder_idx" ON "custom_field_definitions"("entityType", "archivedAt", "displayOrder");
+CREATE INDEX "custom_field_definitions_list_idx" ON "custom_field_definitions"("entityType", "archivedAt", "displayOrder");
 
 -- Shape rules the application also checks.
 ALTER TABLE "custom_field_definitions"

@@ -43,6 +43,6 @@ model CustomFieldDefinition {
   updatedAt          DateTime        @updatedAt @db.Timestamptz(3)
 
   @@unique([entityType, key])
-  @@index([entityType, archivedAt, displayOrder])
+  @@index([entityType, archivedAt, displayOrder], map: "custom_field_definitions_list_idx")
   @@map("custom_field_definitions")
 }
