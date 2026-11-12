@@ -1,31 +1,60 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PageHeader } from '@/components/page-header';
-import { placeholderRaceSlugs } from '@/lib/routes';
+import { RaceCard } from '@/components/catalogue/race-card';
+import { RaceFiltersForm } from '@/components/catalogue/race-filters';
+import { CatalogueUnavailableError, PAGE_SIZE, listCountryCodes, parseFilters, racesHref, searchRaces, type RaceSearchResult } from '@/lib/catalogue';
 import { t } from '@/lib/i18n';
 
 export const metadata: Metadata = { title: t('races.title') };
 
-const filters = ['filterDistance', 'filterMonth', 'filterCountry', 'filterPrice', 'filterEntry', 'filterStatus'] as const;
+// The filters are in the URL, so this page is rendered per request; the catalogue data behind it is cached for a minute.
+export const revalidate = 60;
 
-export default function Races() {
+type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+export default async function Races({ searchParams }: Props) {
+  const filters = parseFilters(await searchParams);
+  const thisYear = new Date().getUTCFullYear();
+  const years = [thisYear, thisYear + 1, thisYear + 2];
+  let result: RaceSearchResult | null = null;
+  try {
+    result = await searchRaces(filters);
+  } catch (e) {
+    if (!(e instanceof CatalogueUnavailableError)) throw e;
+  }
+  const countries = await listCountryCodes(filters.country);
+  const pages = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : 1;
+  const page = filters.page ?? 1;
   return (
     <>
       <PageHeader title={t('races.title')} intro={t('races.intro')} />
-      <div className="container grid grid--2">
-        <section aria-labelledby="filters-heading" className="card">
-          <h2 id="filters-heading">{t('races.filtersHeading')}</h2>
-          <ul>
-            {filters.map((f) => (
-              <li key={f}>{t(`races.${f}`)}</li>
-            ))}
-          </ul>
-        </section>
-        <section aria-labelledby="sample-heading" className="card">
-          <h2 id="sample-heading">{t('races.sampleHeading')}</h2>
-          <p>
-            <Link href={`/races/${placeholderRaceSlugs[0]}`}>{t('races.sampleLink')}</Link>
-          </p>
+      <div className="container finder">
+        <RaceFiltersForm filters={filters} countries={countries} years={years} />
+        <section aria-labelledby="results-heading" className="stack">
+          <h2 id="results-heading">{t('races.resultsHeading')}</h2>
+          {result === null ? (
+            <p className="notice" role="alert">
+              {t('races.unavailable')}
+            </p>
+          ) : (
+            <>
+              <p aria-live="polite">{result.total === 1 ? t('races.resultsCountOne') : t('races.resultsCount', { count: result.total })}</p>
+              {result.items.length === 0 ? <p>{t('races.noResults')}</p> : null}
+              <div className="grid grid--2">
+                {result.items.map((race) => (
+                  <RaceCard key={race.slug} race={race} />
+                ))}
+              </div>
+              {pages > 1 ? (
+                <nav aria-label={t('races.pagination')} className="pager">
+                  {page > 1 ? <Link href={racesHref({ ...filters, page: page - 1 })}>{t('races.previousPage')}</Link> : null}
+                  <span>{t('races.pageOf', { page, pages })}</span>
+                  {page < pages ? <Link href={racesHref({ ...filters, page: page + 1 })}>{t('races.nextPage')}</Link> : null}
+                </nav>
+              ) : null}
+            </>
+          )}
         </section>
       </div>
     </>
