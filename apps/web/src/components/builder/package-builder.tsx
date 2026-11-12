@@ -229,7 +229,7 @@ export function PackageBuilder({ pkg, initial, urlBase }: { pkg: PackageDetail; 
           <p>
             {/* Same configuration, on the request page next to this one (task 2.4); the price is asked again there. */}
             <a className="btn" href={`request${urlBase}&${builderToSearch(state)}`}>
-              {t('bookingRequest.requestThisTrip')}
+              {t(pkg.saleStatus === 'open' ? 'bookingRequest.requestThisTrip' : 'bookingRequest.joinWaitlist')}
             </a>
           </p>
         ) : null}

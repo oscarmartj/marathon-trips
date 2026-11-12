@@ -4,7 +4,9 @@ import type { PermissionDef } from '../../platform/access/permissions';
 // not an API key scope (the same reasoning as bookings.booking.read, plan 2.4, section 7).
 export const WAITLIST_PERMISSIONS = { read: 'waitlist.entry.read' } as const;
 
-export const WAITLIST_EVENTS = { joined: 'waitlist.entry.joined' } as const;
+export const WAITLIST_EVENTS = {
+  joined: 'waitlist.entry.joined', offered: 'waitlist.entry.offered', converted: 'waitlist.entry.converted', expired: 'waitlist.entry.expired', withdrawn: 'waitlist.entry.withdrawn',
+} as const;
 
 export const waitlistManifest = {
   key: 'waitlist',

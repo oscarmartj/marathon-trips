@@ -9,6 +9,7 @@ import { InventoryService } from '../catalogue';
 import { PromoRedemptionService } from '../pricing';
 import { AppError } from '../../platform/errors/safe-error';
 import { BookingTransitionHooks } from './hooks';
+import { WaitlistOffersService } from './waitlist-offers.service';
 import type { HookedEvent } from './hooks';
 import { BOOKING_EVENTS } from './manifest';
 import { BOOKING_SETTINGS } from './settings';
@@ -105,6 +106,7 @@ export class BookingStateMachine {
     @Inject(PromoRedemptionService) private readonly redemptions: PromoRedemptionService,
     @Inject(BookingTransitionHooks) private readonly hooks: BookingTransitionHooks,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(WaitlistOffersService) private readonly offers: WaitlistOffersService,
   ) {}
 
   async transition(tx: Tx, bookingId: string, event: BookingEvent, input: TransitionInput): Promise<TransitionResult> {
@@ -148,7 +150,11 @@ export class BookingStateMachine {
     if (updated !== 1) throw conflict('booking_state_changed', 'This booking changed. Reload and try again.');
 
     let released = { places: 0, promo: false };
-    if (RELEASING.has(to)) released = await this.release(tx, b.id, input.actor, at);
+    if (RELEASING.has(to)) {
+      released = await this.release(tx, b.id, input.actor, at);
+      // Places came back: the first person on the package's waiting list they fit is offered them, in this transaction (task 6.5).
+      if (released.places > 0) await this.offers.promoteIn(tx, b.packageId, input.actor, at);
+    }
 
     await this.audit.record(tx, {
       actor: input.actor, action: 'bookings.booking.status_changed', entityType: 'Booking', entityId: b.id, model: 'Booking',

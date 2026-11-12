@@ -69,7 +69,41 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       };
     },
   },
+  // Task 6.5: the waiting list entry routes. A is offered the place a holder gave up; B tries the same routes.
+  'waitlist-entry': {
+    async create(t, a, b) {
+      const id = await offeredEntryOf(t, a);
+      return { asOwner: () => t.http().get(`/waitlist/entries/${id}`).set('Cookie', a.cookie), asOther: () => t.http().get(`/waitlist/entries/${id}`).set('Cookie', b.cookie) };
+    },
+  },
+  'waitlist-entry-accept': {
+    async create(t, a, b) {
+      const id = await offeredEntryOf(t, a);
+      const send = (s: CustomerSession) => t.http().post(`/waitlist/entries/${id}/accept`).set(STATE_HEADERS).set('Cookie', s.cookie).send({});
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
+  'waitlist-entry-withdraw': {
+    async create(t, a, b) {
+      const id = await offeredEntryOf(t, a);
+      const send = (s: CustomerSession) => t.http().post(`/waitlist/entries/${id}/withdraw`).set(STATE_HEADERS).set('Cookie', s.cookie).send({});
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
 };
+
+/** Customer A is on the waiting list of a sold out package whose only place has just come back: A holds an offer. */
+async function offeredEntryOf(t: TestApp, a: CustomerSession): Promise<string> {
+  const { bookingStaff, requestBody } = await import('./bookings');
+  const { soldOutWorld, cancelHolder } = await import('./waitlist');
+  const admin = await bookingStaff(t);
+  const s = await soldOutWorld(t, admin);
+  const res = await t.http().post('/booking-requests').set(STATE_HEADERS).set('Cookie', a.cookie).set('Idempotency-Key', randomUUID()).send(requestBody(s.w));
+  if (res.status !== 201) throw new Error(`join failed: ${res.status} ${JSON.stringify(res.body)}`);
+  const entry = await t.prisma.waitlistEntry.findFirstOrThrow({ where: { customer: { userId: a.userId }, packageId: s.w.pkg.id } });
+  await cancelHolder(t, s);
+  return entry.id;
+}
 
 /** A booking request by customer A for a fresh priced package, approved by staff. Returns its reference. */
 async function approvedRequestOf(t: TestApp, a: CustomerSession): Promise<string> {

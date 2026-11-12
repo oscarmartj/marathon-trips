@@ -60,11 +60,11 @@ export class QuoteService {
    * The breakdown and, when a code was applied, the code's id and version as read here: task 2.4 hands them to
    * PromoRedemptionService.redeemIn, which refuses a code that changed since (plan 2.2, section 15, point 3).
    */
-  async priceWithPromoRef(tx: Prisma.TransactionClient, req: QuoteRequest | AdminQuoteRequest, opts: { audience: 'public' | 'staff'; now: Date; anonymousPromo?: boolean }): Promise<{ breakdown: PriceBreakdown; promoRef: PromoRef | null }> {
+  async priceWithPromoRef(tx: Prisma.TransactionClient, req: QuoteRequest | AdminQuoteRequest, opts: { audience: 'public' | 'staff'; now: Date; anonymousPromo?: boolean; includeWaitlist?: boolean }): Promise<{ breakdown: PriceBreakdown; promoRef: PromoRef | null }> {
     const view = await this.catalogue.load(tx, req.packageId);
     if (!view) throw notFound('package_not_found', 'Package not found');
     if (opts.audience === 'public') {
-      if (!view.publiclyVisible || view.saleStatus !== 'open') throw notFound('package_not_found', 'Package not found');
+      if (!view.publiclyVisible || !(view.saleStatus === 'open' || (opts.includeWaitlist && (view.saleStatus === 'waitlist' || view.saleStatus === 'sold_out')))) throw notFound('package_not_found', 'Package not found');
       if (!view.deposit) throw conflict('deposit_not_configured', 'This package is not ready for sale');
     }
     const versionId = opts.audience === 'staff' && 'priceVersionId' in req ? req.priceVersionId : undefined;
@@ -109,14 +109,14 @@ export class QuoteService {
     }
   }
 
-  private run(req: QuoteRequest | AdminQuoteRequest, audience: 'public' | 'staff', anonymousPromo = false): Promise<PriceBreakdown> {
+  private run(req: QuoteRequest | AdminQuoteRequest, audience: 'public' | 'staff', anonymousPromo = false, includeWaitlist = false): Promise<PriceBreakdown> {
     const now = new Date();
-    return this.prisma.$transaction(async (tx) => (await this.priceWithPromoRef(tx, req, { audience, now, anonymousPromo })).breakdown, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return this.prisma.$transaction(async (tx) => (await this.priceWithPromoRef(tx, req, { audience, now, anonymousPromo, includeWaitlist })).breakdown, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   /** The public answer: the breakdown without the rule trace, and one status for any code that was not applied. */
   async quotePublic(req: QuoteRequest) {
-    const { trace: _trace, ...b } = await this.run(req, 'public');
+    const { trace: _trace, ...b } = await this.run(req, 'public', false, true);
     return toJson({ ...b, promo: { status: publicPromoStatus(b.promo.status) } });
   }
 

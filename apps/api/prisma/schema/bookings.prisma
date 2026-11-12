@@ -167,6 +167,7 @@ model Booking {
   webhookEvents          WebhookEvent[]
   inventoryMovements     InventoryMovement[]
   complaints             Complaint[]
+  waitlistEntries        WaitlistEntry[]
 
   @@unique([id, currency])
   @@unique([id, customerId])
@@ -272,21 +273,25 @@ model BookingExtra {
 
 /// Places a booking holds in a stock pool (plan 0.1, 5.4). Released once (held → released), never deleted.
 model InventoryClaim {
-  id         String               @id @default(uuid(7)) @db.Uuid
-  bookingId  String               @db.Uuid
-  booking    Booking              @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  poolId     String               @db.Uuid
-  pool       InventoryPool        @relation(fields: [poolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id              String               @id @default(uuid(7)) @db.Uuid
+  bookingId       String?              @db.Uuid
+  booking         Booking?             @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the waiting list entry whose offer holds the places (task 6.5); exactly one of booking and entry owns a claim
+  waitlistEntryId String?              @db.Uuid
+  waitlistEntry   WaitlistEntry?       @relation(fields: [waitlistEntryId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  poolId          String               @db.Uuid
+  pool            InventoryPool        @relation(fields: [poolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii places held
-  quantity   Int
+  quantity        Int
   /// @nopii held or released
-  status     InventoryClaimStatus @default(held)
+  status          InventoryClaimStatus @default(held)
   /// @nopii timestamp
-  releasedAt DateTime?            @db.Timestamptz(3)
+  releasedAt      DateTime?            @db.Timestamptz(3)
   /// @nopii timestamp
-  createdAt  DateTime             @default(now()) @db.Timestamptz(3)
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
 
   @@unique([bookingId, poolId])
+  @@unique([waitlistEntryId, poolId])
   @@index([poolId, status])
   @@map("inventory_claims")
 }

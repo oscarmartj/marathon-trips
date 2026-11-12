@@ -133,6 +133,10 @@ export default async function RacePage({ params }: Props) {
                       <Link className="btn" href={`/races/${race.slug}/build?edition=${e.year}&package=${encodeURIComponent(p.slug)}`}>
                         {t('races.detail.buildCta')}
                       </Link>
+                    ) : p.saleStatus === 'waitlist' || p.saleStatus === 'sold_out' ? (
+                      <Link className="btn" href={`/races/${race.slug}/build?edition=${e.year}&package=${encodeURIComponent(p.slug)}`}>
+                        {t('races.detail.joinWaitlistCta')}
+                      </Link>
                     ) : null}
                   </li>
                 ))}

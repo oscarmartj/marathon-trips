@@ -32,7 +32,7 @@ export default async function RequestPage({ params, searchParams }: Props) {
     <>
       <PageHeader title={t('bookingRequest.title')} intro={localisedText(pkg.name)} />
       <div className="container stack section">
-        {pkg.saleStatus === 'open' ? <BookingRequestForm pkg={pkg} state={state} here={`/races/${slug}/request?${query}`} /> : <p>{t('builder.notOpenBody')}</p>}
+        {pkg.saleStatus === 'open' || pkg.saleStatus === 'waitlist' || pkg.saleStatus === 'sold_out' ? <BookingRequestForm pkg={pkg} state={state} here={`/races/${slug}/request?${query}`} /> : <p>{t('builder.notOpenBody')}</p>}
         {back}
       </div>
     </>

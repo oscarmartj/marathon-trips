@@ -58,7 +58,8 @@
     "page": "Page",
     "bookingRequest": "Request a trip",
     "bookingRequestSent": "Your booking request",
-    "quote": "Your quote"
+    "quote": "Your quote",
+    "waitlistOffer": "Waiting list place"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -106,7 +107,8 @@
         "closed": "Closed"
       },
       "courseHeading": "The course",
-      "climateHeading": "Climate and conditions"
+      "climateHeading": "Climate and conditions",
+      "joinWaitlistCta": "Join the waiting list"
     },
     "build": {
       "title": "Build your package",
@@ -243,7 +245,8 @@
       "complaint": "Complaint",
       "automations": "Automations",
       "automation": "Automation",
-      "keydates": "Key dates"
+      "keydates": "Key dates",
+      "waitlist": "Waiting list"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -2602,6 +2605,41 @@
         "step_up_required": "Confirm with your authenticator code to continue.",
         "forbidden": "You do not have permission to do this."
       }
+    },
+    "waitlist": {
+      "title": "Waiting list",
+      "intro": "Who is waiting for each package, in the order they joined, and which offers are open.",
+      "filters": {
+        "status": "Status",
+        "all": "All",
+        "apply": "Apply filters"
+      },
+      "statuses": {
+        "waiting": "Waiting",
+        "offered": "Offered",
+        "converted": "Converted",
+        "expired": "Expired",
+        "withdrawn": "Withdrawn"
+      },
+      "reasons": {
+        "non_resident": "Lives outside our sales countries",
+        "sold_out": "Package sold out"
+      },
+      "columns": {
+        "position": "Position",
+        "customer": "Customer",
+        "email": "Email",
+        "country": "Country",
+        "travellers": "Travellers",
+        "reason": "Why",
+        "status": "Status",
+        "offerEnds": "Offer ends",
+        "joined": "Joined"
+      },
+      "empty": "Nobody is on the waiting list for these filters.",
+      "loadMore": "Load more",
+      "loading": "Loading…",
+      "error": "We could not load the waiting list."
     }
   },
   "auth": {
@@ -2785,7 +2823,8 @@
       "tooMany": "You are changing choices very quickly. Please wait a moment and try again.",
       "generic": "Something went wrong working out your price. Please try again."
     },
-    "adjustments": "Surcharges and discounts"
+    "adjustments": "Surcharges and discounts",
+    "waitlistIntro": "This trip is full at the moment. Choose what you would like and join the waiting list. It is not a booking and nothing is charged."
   },
   "seo": {
     "raceDescription": "Plan your trip to {name} in {city}, {country}: race details, editions and travel packages.",
@@ -2800,7 +2839,45 @@
     "heading": "You are on the waiting list: this is not a booking request",
     "notABooking": "We have added you to the waiting list for {name}. This is not a booking request and it is not a booking.",
     "nothingCharged": "We have not charged you anything, and we are not holding any places for you.",
-    "next": "We do not yet take bookings from where you live. You are on the list in case that changes."
+    "next": "We do not yet take bookings from where you live. You are on the list in case that changes.",
+    "soldOut": {
+      "heading": "You are on the waiting list for this trip: this is not a booking request",
+      "next": "If a place comes up, we will email you an offer and hold the place for you for a short time. You can then accept or decline it.",
+      "nothingCharged": "We have not charged you anything, and we are not holding any places for you yet."
+    },
+    "offer": {
+      "title": "Your place on the waiting list",
+      "notFoundTitle": "We could not show this",
+      "notFoundBody": "Sign in with the email address you used to join the list. If you did, this offer may no longer exist.",
+      "signIn": "Sign in to continue",
+      "status": {
+        "waiting": "You are on the waiting list. We will email you if a place comes up.",
+        "offered": "A place has come up and we are holding it for you.",
+        "converted": "You accepted the offer. It is now a booking request that we will review.",
+        "expired": "The offer ended before it was accepted.",
+        "withdrawn": "You have left the waiting list."
+      },
+      "notABooking": "Accepting sends us a booking request. It is not a confirmed booking and you will not be charged now.",
+      "holdUntil": "We are holding the place until {when} (Brisbane time).",
+      "priceHeading": "Price today",
+      "total": "Total",
+      "deposit": "Deposit, with the balance due on {date}",
+      "accept": "Accept the offer",
+      "accepting": "Accepting…",
+      "decline": "Decline the offer",
+      "leave": "Leave the waiting list",
+      "working": "Working…",
+      "viewRequest": "See your booking request",
+      "errors": {
+        "network": "We could not reach our server. Check your connection and try again.",
+        "signedOut": "Your session has ended. Sign in again.",
+        "closed": "This offer has ended, so it can no longer be accepted.",
+        "changed": "This trip changed since the offer was made. Leave the list and join again.",
+        "notOpen": "This trip is no longer open for booking.",
+        "busy": "Many people are booking right now. Try again in a moment.",
+        "generic": "Something went wrong. Try again shortly."
+      }
+    }
   },
   "bookingRequest": {
     "title": "Request this trip",
@@ -2864,7 +2941,9 @@
       "completed": "This trip has finished.",
       "refunded": "This booking was refunded.",
       "requested": "We have your request."
-    }
+    },
+    "joinWaitlist": "Join the waiting list",
+    "waitlistNotice": "This trip is full at the moment. This joins the waiting list for it: it is not a booking request and nothing is charged. If a place comes up we will email you."
   },
   "quote": {
     "title": "Your quote",

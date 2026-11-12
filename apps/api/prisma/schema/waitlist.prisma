@@ -17,43 +17,53 @@ enum WaitlistStatus {
 
 /// One person waiting for one package. Personal data: erased through the entity registry (task 5.5).
 model WaitlistEntry {
-  id                 String         @id @default(uuid(7)) @db.Uuid
+  id                 String           @id @default(uuid(7)) @db.Uuid
   /// @pii address the offer will go to, copied from the verified customer
-  email              String         @db.Citext
-  customerId         String         @db.Uuid
-  customer           Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  email              String           @db.Citext
+  customerId         String           @db.Uuid
+  customer           Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii why the person is on the list (sold_out arrives with task 6.5)
   reason             WaitlistReason
-  packageId          String         @db.Uuid
-  package            Package        @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  packageId          String           @db.Uuid
+  package            Package          @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @pii country of residence declared with the request; ZZ once erased
-  countryOfResidence String         @db.Char(2)
+  countryOfResidence String           @db.Char(2)
   /// @nopii how many people the request was for
   travellers         Int
   /// @nopii order of joining: a sequence, so it only goes up (gaps are normal)
-  position           Int            @default(autoincrement())
+  position           Int              @default(autoincrement())
   /// @nopii where the entry stands
-  status             WaitlistStatus @default(waiting)
+  status             WaitlistStatus   @default(waiting)
   /// @nopii timestamp (task 6.5)
-  offeredAt          DateTime?      @db.Timestamptz(3)
+  offeredAt          DateTime?        @db.Timestamptz(3)
   /// @nopii timestamp (task 6.5)
-  offerExpiresAt     DateTime?      @db.Timestamptz(3)
+  offerExpiresAt     DateTime?        @db.Timestamptz(3)
   /// @nopii timestamp
-  withdrawnAt        DateTime?      @db.Timestamptz(3)
+  withdrawnAt        DateTime?        @db.Timestamptz(3)
+  /// @nopii timestamp (task 6.5)
+  convertedAt        DateTime?        @db.Timestamptz(3)
+  /// @nopii timestamp (task 6.5)
+  expiredAt          DateTime?        @db.Timestamptz(3)
+  /// @nopii the request to price when a place comes up: ids and counts only, no contact and no code (task 6.5; sold_out only)
+  configuration      Json?
+  /// @nopii the booking request an accepted offer became (task 6.5)
+  bookingId          String?          @db.Uuid
+  booking            Booking?         @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claims             InventoryClaim[]
   /// @secret SHA-256 of the user id and the client's Idempotency-Key: one entry per key and customer
-  requestKeyHash     String         @db.Char(64)
+  requestKeyHash     String           @db.Char(64)
   /// @secret SHA-256 of the requested configuration (no personal data)
-  requestConfigHash  String         @db.Char(64)
+  requestConfigHash  String           @db.Char(64)
   /// @secret HMAC of the contact sent with the request; set to NULL when the customer is erased
-  requestContactHmac String?        @db.Char(64)
+  requestContactHmac String?          @db.Char(64)
   /// @nopii demo data root (plan 0.1, 1.3)
-  isDemo             Boolean        @default(false)
+  isDemo             Boolean          @default(false)
   /// @nopii optimistic lock for the admin panel
-  version            Int            @default(0)
+  version            Int              @default(0)
   /// @nopii timestamp
-  createdAt          DateTime       @default(now()) @db.Timestamptz(3)
+  createdAt          DateTime         @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt          DateTime       @updatedAt @db.Timestamptz(3)
+  updatedAt          DateTime         @updatedAt @db.Timestamptz(3)
 
   @@unique([customerId, requestKeyHash])
   @@index([packageId, status, position])

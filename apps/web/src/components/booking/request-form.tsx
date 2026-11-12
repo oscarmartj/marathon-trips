@@ -20,6 +20,8 @@ type Session = 'checking' | 'signed-out' | 'signed-in';
  * and posts the configuration and the contact. Never an amount: the API prices it again and keeps that price.
  */
 export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; state: BuilderState; here: string }) {
+  // A full package takes the waiting list instead of a request (task 6.5): the same form, the same API route.
+  const waitlist = pkg.saleStatus !== 'open';
   const [session, setSession] = useState<Session>('checking');
   const [breakdown, setBreakdown] = useState<PriceBreakdownJson | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
   if (joined) return <WaitlistConfirmation joined={joined} />;
   return (
     <div className="stack">
-      <p className="notice">{t('bookingRequest.notABooking')}</p>
+      <p className="notice">{t(waitlist ? 'bookingRequest.waitlistNotice' : 'bookingRequest.notABooking')}</p>
       {breakdown ? <QuoteSummary pkg={pkg} breakdown={breakdown} /> : null}
       <Status message={error} />
       {session === 'checking' ? <p role="status">{t('bookingRequest.checking')}</p> : null}
@@ -100,9 +102,9 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
           />
           {countryError ? <p id="countryError" className="form-error" role="alert">{countryError}</p> : null}
           <p id="countryHint">{t('bookingRequest.countryHint')}</p>
-          <p>{t('bookingRequest.whatHappensNext')}</p>
+          {waitlist ? null : <p>{t('bookingRequest.whatHappensNext')}</p>}
           <button className="btn" type="submit" disabled={sending || !breakdown} aria-disabled={sending || !breakdown}>
-            {sending ? t('bookingRequest.sending') : t('bookingRequest.send')}
+            {sending ? t('bookingRequest.sending') : t(waitlist ? 'bookingRequest.joinWaitlist' : 'bookingRequest.send')}
           </button>
         </form>
       ) : null}

@@ -58,6 +58,8 @@ export class IdempotencyKeys {
 export interface WaitlistJoined {
   outcome: 'waitlisted';
   status: string;
+  /** Why they wait: where they live (task 2.6) or because the package is sold out (task 6.5). */
+  reason?: 'non_resident' | 'sold_out';
   travellers: number;
   package: { name: Record<string, string> };
 }

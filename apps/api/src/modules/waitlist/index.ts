@@ -3,3 +3,4 @@ export { WaitlistModule } from './waitlist.module';
 export { waitlistManifest, WAITLIST_PERMISSIONS, WAITLIST_EVENTS } from './manifest';
 export { WaitlistService } from './waitlist.service';
 export type { JoinWaitlistInput, JoinedWaitlist } from './waitlist.service';
+export { ownsWaitlistEntry } from './ownership';

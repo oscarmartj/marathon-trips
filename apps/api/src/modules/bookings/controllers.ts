@@ -9,7 +9,8 @@ import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import { IdempotencyInProgressError, IdempotencyKeyReuseError, IdempotencyService } from '../../platform/idempotency/idempotency.service';
 import { PromoAttemptGuard } from '../pricing';
-import { WaitlistService } from '../waitlist';
+import { WaitlistService, ownsWaitlistEntry } from '../waitlist';
+import { WaitlistOffersService } from './waitlist-offers.service';
 import { BookingAdminService } from './admin.service';
 import { CustomerAdminService } from './customer-admin.service';
 import { BOOKINGS_CRM_PERMISSIONS as C, BOOKINGS_PERMISSIONS as P } from './manifest';
@@ -123,4 +124,25 @@ export class CustomersAdminController {
 
   @Patch(':id') @RequirePermission(C.customerWrite)
   update(@Param('id', uuid()) id: string, @Body(new ZodPipe(updateCustomerSchema)) b: In<typeof updateCustomerSchema>, @Req() req: ApiRequest) { return this.customers.update(actorOf(req), id, b); }
+}
+
+/**
+ * A customer's own waiting list entry (task 6.5): see it, take the offer when a place has come up, or leave the list.
+ * The routes take no body: the price comes from the engine when the offer is accepted.
+ */
+@Controller('waitlist/entries')
+export class WaitlistEntriesController {
+  constructor(@Inject(WaitlistOffersService) private readonly offers: WaitlistOffersService) {}
+
+  @Get(':id')
+  @OwnedBy({ kind: 'customer', resource: 'waitlist-entry', fixture: 'waitlist-entry', owns: (ctx) => ownsWaitlistEntry(ctx) })
+  get(@Param('id', uuid()) id: string) { return this.offers.view(id); }
+
+  @Post(':id/accept') @HttpCode(200)
+  @OwnedBy({ kind: 'customer', resource: 'waitlist-entry', fixture: 'waitlist-entry-accept', owns: (ctx) => ownsWaitlistEntry(ctx) })
+  accept(@Param('id', uuid()) id: string, @Req() req: ApiRequest) { const actor = actorOf(req); return this.offers.accept(actor.id!, id, actor); }
+
+  @Post(':id/withdraw') @HttpCode(200)
+  @OwnedBy({ kind: 'customer', resource: 'waitlist-entry', fixture: 'waitlist-entry-withdraw', owns: (ctx) => ownsWaitlistEntry(ctx) })
+  withdraw(@Param('id', uuid()) id: string, @Req() req: ApiRequest) { const actor = actorOf(req); return this.offers.withdraw(actor.id!, id, actor); }
 }
