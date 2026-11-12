@@ -113,6 +113,18 @@ export async function listRaceSlugs(): Promise<string[]> {
   }
 }
 
+/** Every published race, read page by page from the public API (the API allows at most 50 per page). Throws if the catalogue is unreachable. */
+export async function listAllRaces(): Promise<RaceSummary[]> {
+  const all: RaceSummary[] = [];
+  for (let page = 1; page <= 200; page++) {
+    const result = await getJson<RaceSearchResult>(`/catalogue/races?pageSize=50&page=${page}`);
+    if (!result) throw new CatalogueUnavailableError('Catalogue search returned 404');
+    all.push(...result.items);
+    if (result.items.length === 0 || all.length >= result.total) break;
+  }
+  return all;
+}
+
 /** Country codes for the filter, taken from the published races. The selected one is always kept so the form never loses it. */
 export async function listCountryCodes(selected?: string): Promise<string[]> {
   let codes: string[] = [];

@@ -2,12 +2,16 @@ import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import { brand, brandCssVariables } from '@mt/shared/brand';
 import { SkipLink } from '@/components/skip-link';
+import { siteUrl } from '@/lib/site';
 import { t } from '@/lib/i18n';
 import './globals.css';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl()),
   title: { default: t('home.title'), template: `%s | ${brand.name}` },
   description: t('home.tagline'),
+  openGraph: { type: 'website', siteName: brand.name, locale: 'en_AU' },
+  twitter: { card: 'summary_large_image' },
 };
 
 // Brand colours and fonts become CSS custom properties here, from the single brand config file.
