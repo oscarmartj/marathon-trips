@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ISO_COUNTRY_CODES } from '@mt/shared';
 import { BOOKING_SETTINGS } from '../../../src/modules/bookings/settings';
 import { WAITLIST_PERMISSIONS } from '../../../src/modules/waitlist';
 import { PermissionRegistry } from '../../../src/platform/access/permissions';
@@ -141,6 +142,22 @@ describe('non_resident_joins_waitlist: a request from outside the sales countrie
   });
 });
 
+describe('country_must_be_an_assigned_iso_code: a made-up code is a 422, never an entry', () => {
+  it.each([['ZZ'], ['XX'], ['AA'], ['AUS'], [''], ['A'], ['1A']])('%j', async (country) => {
+    const c = await customerClient(t);
+    const res = await c.request(requestBody(w, { contact: contact({ countryOfResidence: country }) }));
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(await t.prisma.customer.count({ where: { userId: c.userId } })).toBe(0);
+    expect(await t.prisma.waitlistEntry.count({ where: { customer: { userId: c.userId } } })).toBe(0);
+  });
+
+  it('the list holds the 249 assigned codes, includes AU and NZ, and never the erased marker', () => {
+    expect(ISO_COUNTRY_CODES.size).toBe(249);
+    expect(['AU', 'NZ', 'GB', 'ES'].every((x) => ISO_COUNTRY_CODES.has(x))).toBe(true);
+    expect(['ZZ', 'XX', 'AA'].some((x) => ISO_COUNTRY_CODES.has(x))).toBe(false);
+  });
+});
+
 describe('waitlist_checks_the_package: the engine still validates what it is asked for', () => {
   it('a closed, unknown or departed package, and a bad configuration, are refused as for a request, and nothing is written', async () => {
     const closed = await pricedWorld(admin);
@@ -233,6 +250,59 @@ describe('waitlist_is_idempotent: a retry, a double click and a second ask are o
   });
 });
 
+describe('one Idempotency-Key, one meaning, even after the platform\'s record of it is gone', () => {
+  const forget = (key: string) => t.prisma.idempotencyRecord.deleteMany({ where: { key } });
+
+  it('a waiting list key replayed with a resident body is a 422 and makes no booking; the same body gets the same entry', async () => {
+    const c = await customerClient(t);
+    const key = randomUUID();
+    const first = await c.request(requestBody(w, { contact: nonResident() }), key);
+    expect(first.status).toBe(201);
+    await forget(key);
+    const resident = await c.request(requestBody(w, { contact: contact() }), key);
+    expect([resident.status, resident.body.code]).toEqual([422, 'idempotency_key_reused']);
+    const customer = await t.prisma.customer.findUniqueOrThrow({ where: { userId: c.userId } });
+    expect(await t.prisma.booking.count({ where: { customerId: customer.id } })).toBe(0);
+    const same = await c.request(requestBody(w, { contact: nonResident() }), key);
+    expect(same.body).toEqual(first.body);
+    expect(await entriesOf(c.userId)).toHaveLength(1);
+  });
+
+  it('the same key and configuration with another contact (another country) is a 422', async () => {
+    const c = await customerClient(t);
+    const key = randomUUID();
+    expect((await c.request(requestBody(w, { contact: nonResident() }), key)).status).toBe(201);
+    await forget(key);
+    const other = await c.request(requestBody(w, { contact: nonResident({ countryOfResidence: 'GB' }) }), key);
+    expect([other.status, other.body.code]).toEqual([422, 'idempotency_key_reused']);
+    expect((await entriesOf(c.userId))[0]!.countryOfResidence).toBe('NZ');
+  });
+
+  it('a booking key replayed with a non-resident body is a 422 and makes no entry', async () => {
+    const c = await customerClient(t);
+    const key = randomUUID();
+    expect((await c.request(requestBody(w, { contact: contact() }), key)).status).toBe(201);
+    await forget(key);
+    const res = await c.request(requestBody(w, { contact: nonResident() }), key);
+    expect([res.status, res.body.code]).toEqual([422, 'idempotency_key_reused']);
+    expect(await entriesOf(c.userId)).toHaveLength(0);
+  });
+
+  it('asking again from another country updates and audits the country as personal data, even with the same head count', async () => {
+    const c = await customerClient(t);
+    expect((await c.request(requestBody(w, { contact: nonResident() }))).status).toBe(201);
+    const [first] = await entriesOf(c.userId);
+    expect((await c.request(requestBody(w, { contact: nonResident({ countryOfResidence: 'GB' }) }))).status).toBe(201);
+    const [after] = await entriesOf(c.userId);
+    expect([after!.id, after!.countryOfResidence, after!.version]).toEqual([first!.id, 'GB', first!.version + 1]);
+    const log = await t.prisma.auditLog.findFirstOrThrow({ where: { entityId: first!.id, action: 'waitlist.entry.updated' } });
+    expect(JSON.stringify(log.changes)).not.toMatch(/"(NZ|GB)"/);
+    const pii = await t.prisma.auditPiiValue.findMany({ where: { auditLogId: log.id } });
+    expect(JSON.stringify(pii)).toMatch(/NZ/);
+    expect(JSON.stringify(pii)).toMatch(/GB/);
+  });
+});
+
 describe('waitlist_database_guards: the tables say no on their own', () => {
   const entry = async () => {
     const c = await customerClient(t);
@@ -299,6 +369,7 @@ describe('waitlist_privacy: the entry follows the customer through export and er
     expect(exported).toMatchObject([{ email: c.email.toLowerCase(), countryOfResidence: 'NZ', status: 'waiting' }]);
     await t.prisma.$transaction((tx) => def.handlers!.anonymise(tx, e!.customerId));
     const after = await t.prisma.waitlistEntry.findUniqueOrThrow({ where: { id: e!.id } });
+    expect(after.requestContactHmac).toBeNull();
     expect([after.status, after.countryOfResidence, after.email, after.withdrawnAt === null]).toEqual(['withdrawn', 'ZZ', `erased+${e!.customerId}@invalid`, false]);
   });
 });
@@ -319,12 +390,36 @@ describe('waitlist_panel: only staff with the permission read the list', () => {
     expect(JSON.stringify(list.body)).not.toMatch(/requestKeyHash|requestConfigHash/);
     const page = await reader.get(`/admin/waitlist?packageId=${p.pkg.id}&limit=1`);
     expect(page.body.items).toHaveLength(1);
-    expect(page.body.nextCursor).toBe(list.body.items[0].id);
+    expect(page.body.nextCursor).toBe(`${p.pkg.id}:${list.body.items[0].position}`);
     expect((await reader.get(`/admin/waitlist?packageId=${p.pkg.id}&cursor=${page.body.nextCursor}`)).body.items.map((i: { id: string }) => i.id)).toEqual([list.body.items[1].id]);
     expect((await reader.get(`/admin/waitlist?packageId=${p.pkg.id}&status=offered`)).body.items).toEqual([]);
     expect((await reader.get(`/admin/waitlist?status=nonsense`)).status).toBe(422);
     expect((await nobody.get(`/admin/waitlist`)).status).toBe(403);
     expect((await t.http().get('/admin/waitlist')).status).toBe(401);
+  });
+
+  it('paging loses nothing: across two packages, with ids out of order with positions, every entry shows up once, in list order', async () => {
+    const p1 = await pricedWorld(admin);
+    const p2 = await pricedWorld(admin);
+    const reader = await staffClient(t, [WAITLIST_PERMISSIONS.read]);
+    const clients = await Promise.all([1, 2, 3, 4].map(() => customerClient(t)));
+    // Joined interleaved across the packages, and two at once, so ids (made before the insert) and positions disagree.
+    for (const [i, c] of clients.entries()) expect((await c.request(requestBody(i % 2 ? p1 : p2, { contact: nonResident() }))).status).toBe(201);
+    await Promise.all(clients.map((c) => c.request(requestBody(p1, { contact: nonResident() }))));
+    const ours = new Set([p1.pkg.id, p2.pkg.id]);
+    const all = (await t.prisma.waitlistEntry.findMany({ where: { packageId: { in: [...ours] } }, orderBy: [{ packageId: 'asc' }, { position: 'asc' }] })).map((e) => e.id);
+    expect(all.length).toBeGreaterThanOrEqual(5);
+    for (const limit of [1, 2, 3]) {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const res: { body: { items: Array<{ id: string; packageId: string }>; nextCursor: string | null } } = await reader.get(`/admin/waitlist?limit=${limit}${cursor ? `&cursor=${cursor}` : ''}`);
+        seen.push(...res.body.items.filter((i) => ours.has(i.packageId)).map((i) => i.id));
+        cursor = res.body.nextCursor;
+      } while (cursor);
+      expect(seen, `limit ${limit}`).toEqual(all);
+    }
+    expect((await reader.get('/admin/waitlist?cursor=not-a-cursor')).status).toBe(422);
   });
 
   it('the permission is not an API key scope: it exposes customers\' contact details', () => {

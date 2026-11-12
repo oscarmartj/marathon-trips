@@ -93,6 +93,12 @@ export class BookingRequestService {
       if (existing.requestConfigHash === hashes.config && existing.requestContactHmac === hashes.contact) return { kind: 'booking', bookingId: existing.id, created: false };
       throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
     }
+    // The same key may have made a waiting list entry (the platform's record of it lasts 24 hours): same answer, or 422.
+    const wl = await this.waitlist.findByKey(tx, customer.id, hashes.key);
+    if (wl) {
+      if (wl.requestConfigHash === hashes.config && wl.requestContactHmac === hashes.contact) return { kind: 'waitlist', entryId: wl.id, created: false };
+      throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
+    }
     if (!created) await this.customers.applyContact(tx, customer, contact, actor);
 
     // 3. Who may ask: a resident of a country we sell to sends a request; anyone else joins the waiting list (task 2.6).
@@ -171,7 +177,7 @@ export class BookingRequestService {
    * configuration is refused the same way, but nothing it returns is kept except the head count: no price, no snapshot,
    * no code redeemed (a code, if sent, is ignored) and no stock held.
    */
-  private async joinWaitlistIn(tx: Tx, user: { id: string; email: string }, customerId: string, body: BookingRequest, hashes: { key: string; config: string }, actor: AuditActor): Promise<CreatedRequest> {
+  private async joinWaitlistIn(tx: Tx, user: { id: string; email: string }, customerId: string, body: BookingRequest, hashes: { key: string; config: string; contact: string }, actor: AuditActor): Promise<CreatedRequest> {
     const { contact, promoCode: _ignored, ...configuration } = body;
     const pkg = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM packages WHERE id = ${configuration.packageId}::uuid AND "deletedAt" IS NULL FOR SHARE`;
     if (pkg.length === 0) throw notFound('package_not_found', 'Package not found');
@@ -181,7 +187,7 @@ export class BookingRequestService {
     const travellers = breakdown.configuration.rooms.reduce((n, r) => n + r.travellers.length, 0);
     const joined = await this.waitlist.joinIn(tx, {
       customerId, email: user.email, countryOfResidence: contact.countryOfResidence, packageId: configuration.packageId, travellers,
-      requestKeyHash: hashes.key, requestConfigHash: hashes.config, actor,
+      requestKeyHash: hashes.key, requestConfigHash: hashes.config, requestContactHmac: hashes.contact, actor,
     });
     return { kind: 'waitlist', ...joined };
   }

@@ -10,6 +10,7 @@ export type WaitlistStatus = (typeof WAITLIST_STATUSES)[number];
 export const listWaitlistQuerySchema = z.strictObject({
   packageId: uuidSchema.optional(),
   status: z.enum(WAITLIST_STATUSES).optional(),
-  cursor: uuidSchema.optional(),
+  /** `<packageId>:<position>` of the last entry of the previous page. */
+  cursor: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]{1,10}$/).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(50),
 });

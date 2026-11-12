@@ -23,6 +23,7 @@ CREATE TABLE "waitlist_entries" (
     "withdrawnAt" TIMESTAMPTZ(3),
     "requestKeyHash" CHAR(64) NOT NULL,
     "requestConfigHash" CHAR(64) NOT NULL,
+    "requestContactHmac" CHAR(64),
     "isDemo" BOOLEAN NOT NULL DEFAULT false,
     "version" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -75,8 +76,9 @@ BEGIN
      OR NEW."packageId" IS DISTINCT FROM OLD."packageId" OR NEW."reason" IS DISTINCT FROM OLD."reason"
      OR NEW."position" IS DISTINCT FROM OLD."position" OR NEW."isDemo" IS DISTINCT FROM OLD."isDemo"
      OR NEW."requestKeyHash" IS DISTINCT FROM OLD."requestKeyHash" OR NEW."requestConfigHash" IS DISTINCT FROM OLD."requestConfigHash"
-     OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
-    RAISE EXCEPTION 'a waiting list entry''s owner, package, reason and place in the queue never change' USING ERRCODE = 'insufficient_privilege';
+     OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt"
+     OR (NEW."requestContactHmac" IS DISTINCT FROM OLD."requestContactHmac" AND NEW."requestContactHmac" IS NOT NULL) THEN
+    RAISE EXCEPTION 'a waiting list entry''s owner, package, reason and place in the queue never change (the contact HMAC may only be cleared)' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF NEW."status" IS DISTINCT FROM OLD."status" AND NOT (
        (OLD."status" = 'waiting' AND NEW."status" IN ('offered', 'withdrawn'))

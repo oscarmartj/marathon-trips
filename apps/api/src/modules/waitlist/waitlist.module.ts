@@ -23,10 +23,11 @@ export class WaitlistModule implements OnModuleInit {
       entityType: 'WaitlistEntry', model: 'WaitlistEntry', customerLink: { kind: 'column', column: 'customerId' },
       handlers: {
         export: (tx, customerId) => tx.waitlistEntry.findMany({ where: { customerId }, select: { email: true, packageId: true, reason: true, status: true, countryOfResidence: true, travellers: true, createdAt: true } }),
-        // Erasing a customer takes them off the list: nobody gets an offer for an erased person.
+        // Erasing a customer takes them off the list: nobody gets an offer for an erased person. The API role cannot
+        // delete (only mt_privacy can), so the entry is withdrawn and redacted here; task 5.5's purge may delete it.
         anonymise: async (tx, customerId) => {
           await tx.waitlistEntry.updateMany({ where: { customerId, status: { in: ['waiting', 'offered'] } }, data: { status: 'withdrawn', withdrawnAt: new Date() } });
-          await tx.waitlistEntry.updateMany({ where: { customerId }, data: { email: `erased+${customerId}@invalid`, countryOfResidence: 'ZZ' } });
+          await tx.waitlistEntry.updateMany({ where: { customerId }, data: { email: `erased+${customerId}@invalid`, countryOfResidence: 'ZZ', requestContactHmac: null } });
         },
       },
     });

@@ -927,6 +927,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     withdrawnAt: 'nopii',
     requestKeyHash: 'secret',
     requestConfigHash: 'secret',
+    requestContactHmac: 'secret',
     isDemo: 'nopii',
     version: 'nopii',
     createdAt: 'nopii',
