@@ -1,7 +1,7 @@
 import { MAX_LINE_MINOR, MAX_TOTAL_MINOR } from '@mt/shared';
 import { BUSINESS_TIME_ZONE, addDays, calendarDateIn, daysBetween } from './calendar';
 import { PricingError } from './errors';
-import { MAX_DISCOUNT_BPS, MAX_SURCHARGE_BPS, applyBps } from './rounding';
+import { MAX_DISCOUNT_BPS, MAX_SURCHARGE_BPS, applyBps, mulDivHalfUp } from './rounding';
 import {
   CatalogueView, Component, Effect, EngineRequest, ParticipationType, PriceBreakdown, PriceLine, PricedConfiguration, PromoInput, PromoStatus,
   RatesView, RuleConditions, RuleInput, RuleTrace, Target,
@@ -311,8 +311,10 @@ export function price(req: EngineRequest, view: CatalogueView, rates: RatesView,
         const left = target === 'subtotal' ? netTotal : net[target];
         const persons = slots === null ? travellers.length : slots.size;
         // On what is left of the target after the rules (plan 2.1, section 4, step 7). Rules are not split by traveller, so
-        // with a traveller filter the code works on the smaller of the filtered base and what is left of the target.
-        const on = filteredBase !== null && filteredBase < left ? filteredBase : left;
+        // with a traveller filter the code takes the filtered travellers' share of what is left, in proportion to their
+        // base (code review, round 2), rounded by the one rule.
+        const targetBase = subtotals[target];
+        const on = filteredBase === null ? left : targetBase === 0n ? 0n : mulDivHalfUp(2n * left, filteredBase, 2n * targetBase);
         const wanted = amountOf(promo, on, persons, MAX_DISCOUNT_BPS);
         apply(promo.id, 'promo', 'promo_code', 'discount', promo, persons, wanted, filteredBase);
         promoStatus = 'applied';

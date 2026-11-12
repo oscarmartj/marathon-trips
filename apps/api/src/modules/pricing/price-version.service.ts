@@ -213,16 +213,26 @@ export class PriceVersionService {
   }
 
   /**
-   * Discards a draft by archiving it (plan 2.1, M1): the row and its rates stay, frozen, so the audit trail can show
-   * what was discarded. An archived version is never priced, published or changed again.
+   * Discards a draft by archiving it (plan 2.1, M1): the row stays, its rates are removed and kept in the audit entry.
+   * An archived version is never priced, published or changed again.
    */
   async discard(actor: Actor, id: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const v = await this.lockVersion(tx, id);
       if (v.status !== 'draft') throw conflict('price_version_not_draft', 'Only a draft price version can be discarded');
+      // Its rates go (they were never in force; the audit keeps them) so they never pin a room or a distance.
+      const rates = await loadRates(tx, id, v.currency);
+      await tx.roomRate.deleteMany({ where: { priceVersionId: id } });
+      await tx.participationRate.deleteMany({ where: { priceVersionId: id } });
+      await tx.extraRate.deleteMany({ where: { priceVersionId: id } });
       const res = await tx.priceVersion.updateMany({ where: { id, status: 'draft' }, data: { status: 'archived' } });
       if (res.count !== 1) throw versionConflict();
-      await this.audit.record(tx, { actor, action: 'pricing.price_version.discarded', entityType: 'PriceVersion', entityId: id, before: { status: 'draft' }, after: { status: 'archived' } });
+      await this.audit.record(tx, {
+        actor, action: 'pricing.price_version.discarded', entityType: 'PriceVersion', entityId: id,
+        before: { status: 'draft', ...(toJson({ roomRates: rates.roomRates, participationRates: rates.participationRates, extraRates: rates.extraRates }) as Record<string, unknown>) },
+        after: { status: 'archived', roomRates: [], participationRates: [], extraRates: [] },
+        fieldClasses: { roomRates: 'nopii', participationRates: 'nopii', extraRates: 'nopii' },
+      });
     });
   }
 

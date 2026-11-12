@@ -209,7 +209,9 @@ describe('rates', () => {
     expect((await admin.delete(`/admin/pricing/price-versions/${d.id}`)).status).toBe(204);
     // discarding archives: the row and its rates stay, frozen, and it is never priced or published
     const archived = (await admin.get(`/admin/pricing/price-versions/${d.id}`)).body;
-    expect([archived.status, archived.rates.extraRates.length]).toEqual(['archived', 1]);
+    expect([archived.status, archived.rates.extraRates.length]).toEqual(['archived', 0]);
+    const discardLog = await t.prisma.auditLog.findFirstOrThrow({ where: { action: 'pricing.price_version.discarded', entityId: d.id } });
+    expect(discardLog.changes).toMatchObject({ extraRates: { before: [{ extraId: w.extraId, amountMinor: '12000' }], after: [] } });
     expect((await admin.put(`/admin/pricing/price-versions/${d.id}/rates`, { version: archived.version, ...w.rates })).body.code).toBe('price_version_not_draft');
     expect((await publishDraft(admin, w.pkg.id, { id: d.id, version: archived.version })).body.code).toBe('price_version_not_draft');
     expect((await admin.post('/admin/pricing/quotes', quoteBody(w, { priceVersionId: d.id }))).status).toBe(404);
@@ -316,6 +318,48 @@ describe('a package on sale always prices (G1)', () => {
     const freeId = (free.body.extras as Array<{ id: string; version: number }>).find((e) => e.id !== other.extraId)!;
     await draftWith(admin, other.pkg.id, { ...other.rates, extraRates: [...other.rates.extraRates, { extraId: freeId.id, amountMinor: '4500' }] });
     expect((await admin.patch(`/admin/catalogue/packages/${other.pkg.id}/extras/${freeId.id}`, { pricingUnit: 'per_booking', version: freeId.version })).status).toBe(200);
+  });
+
+  it('a mandatory extra with prices in force cannot be removed while on sale; off sale, or optional, it can', async () => {
+    const w = await pricedWorld(admin, { open: false });
+    const added = await admin.post(`/admin/catalogue/packages/${w.pkg.id}/extras`, { kind: 'transfer', name: text('Race-day transfer'), pricingUnit: 'per_person', mandatory: true });
+    const transfer = (added.body.extras as Array<{ id: string; mandatory: boolean }>).find((e) => e.mandatory)!;
+    await publishWith(admin, w.pkg.id, { ...w.rates, extraRates: [...w.rates.extraRates, { extraId: transfer.id, amountMinor: '12000' }] });
+    await must(setSale(admin, w.pkg.id, 'open'), 'open');
+    const before = (await publicQuote(quoteBody(w))).body.totalMinor;
+    expect(before).toBe('156500');
+    const del = await admin.delete(`/admin/catalogue/packages/${w.pkg.id}/extras/${transfer.id}`);
+    expect([del.status, del.body.code]).toEqual([409, 'extra_has_rates']);
+    expect((await publicQuote(quoteBody(w))).body.totalMinor).toBe(before);
+    // an optional extra may go while on sale (it never counted unless chosen)
+    expect((await admin.delete(`/admin/catalogue/packages/${w.pkg.id}/extras/${w.extraId}`)).status).toBe(200);
+    await must(setSale(admin, w.pkg.id, 'closed'), 'close');
+    expect((await admin.delete(`/admin/catalogue/packages/${w.pkg.id}/extras/${transfer.id}`)).status).toBe(200);
+  });
+
+  it('more extra nights on a package on sale need an explicit extra-night price in force', async () => {
+    const w = await pricedWorld(admin, { open: false });
+    const free = { ...w.rates, roomRates: w.rates.roomRates.map((r) => ({ ...r, extraNightPerPersonMinor: '0' })) };
+    await publishWith(admin, w.pkg.id, free);
+    await must(setSale(admin, w.pkg.id, 'open'), 'open');
+    const widen = async () => admin.patch(`/admin/catalogue/packages/${w.pkg.id}`, { maxExtraNightsAfter: 2, version: (await admin.get(`/admin/catalogue/packages/${w.pkg.id}`)).body.version });
+    const refused = await widen();
+    expect([refused.status, refused.body.code]).toEqual([409, 'price_version_incomplete']);
+    expect((await admin.get(`/admin/catalogue/packages/${w.pkg.id}`)).body.maxExtraNightsAfter).toBe(0);
+    await publishWith(admin, w.pkg.id, w.rates);
+    expect((await widen()).status).toBe(200);
+    expect((await publicQuote(quoteBody(w, { extraNightsAfter: 1 }))).body.totalMinor).toBe('162500');
+  });
+
+  it('a room priced only in a discarded draft can still be removed', async () => {
+    const w = await pricedWorld(admin, { open: false });
+    const pkg = (await admin.get(`/admin/catalogue/packages/${w.pkg.id}`)).body;
+    const added = await admin.post(`/admin/catalogue/packages/${w.pkg.id}/hotels/${pkg.hotels[0].id}/rooms`, { roomType: 'single', name: text('Single'), minOccupancy: 1, maxOccupancy: 1, roomPoolId: w.roomPoolId });
+    const single = (added.body.hotels[0].rooms as Array<{ id: string }>).find((r) => r.id !== w.roomId)!;
+    const d = await draftWith(admin, w.pkg.id, { ...w.rates, roomRates: [...w.rates.roomRates, { roomOptionId: single.id, occupancy: 1, pricePerPersonMinor: '90000', extraNightPerPersonMinor: '30000' }] });
+    expect((await admin.delete(`/admin/catalogue/packages/${w.pkg.id}/rooms/${single.id}`)).body.code).toBe('room_has_rates');
+    await must(admin.delete(`/admin/pricing/price-versions/${d.id}`), 'discard', 204);
+    expect((await admin.delete(`/admin/catalogue/packages/${w.pkg.id}/rooms/${single.id}`)).status).toBe(200);
   });
 
   it('remove_room_with_rates_returns_409_not_500, and distances and entry options with rates are 409 too', async () => {

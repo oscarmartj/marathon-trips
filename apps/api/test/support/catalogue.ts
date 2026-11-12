@@ -68,6 +68,10 @@ export async function pricePackageFully(admin: Client, packageId: string, amount
   const extras = [...draft.rates.extraRates];
   for (const m of draft.missing as Array<Record<string, unknown>>) {
     if (m.kind === 'room') rooms.push({ roomOptionId: m.roomOptionId, occupancy: m.occupancy, pricePerPersonMinor: amountMinor, extraNightPerPersonMinor: amountMinor });
+    if (m.kind === 'extra_night') {
+      const r = rooms.find((x) => x.roomOptionId === m.roomOptionId && x.occupancy === m.occupancy);
+      if (r) r.extraNightPerPersonMinor = amountMinor;
+    }
     if (m.kind === 'participation') participation.push({ participationType: m.participationType, raceDistanceId: m.raceDistanceId, amountPerPersonMinor: amountMinor });
     if (m.kind === 'extra') extras.push({ extraId: m.extraId, amountMinor });
   }

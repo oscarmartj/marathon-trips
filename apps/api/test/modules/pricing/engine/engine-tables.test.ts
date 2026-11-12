@@ -265,6 +265,14 @@ describe('promo_codes (base 165 000)', () => {
     expect(b.totalMinor).toBe(85_000n);
   });
 
+  it('a filtered code takes only its travellers\' share of what the rules left (double + single, code for rooms of two)', () => {
+    // rooms 100 000 (double) + 80 000 (double at 1) = 180 000; 60 % rule leaves 72 000; the double's share is
+    // 72 000 × 100 000 / 180 000 = 40 000, and 50 % of it is 20 000 (not 36 000)
+    const r = req([['double', [M, M]], ['double', [M]]]);
+    const b = run(r, { rules: [rule({ valueBps: 6000 })], promo: promo({ appliesTo: 'accommodation', valueBps: 5000, conditions: { occupancies: [2] } }) });
+    expect(b.lines.find((l) => l.kind === 'promo')!.amountMinor).toBe(20_000n);
+  });
+
   it('a per-person code shows unit and quantity', () => {
     const b = run(DOUBLE_2M, { promo: promo({ appliesTo: 'participation', ...fixed(2_000n, { per: 'person' }) } as Partial<PromoInput>) });
     expect(b.lines.find((l) => l.kind === 'promo')).toMatchObject({ unitAmountMinor: 2_000n, quantity: 2, amountMinor: 4_000n, direction: 'discount' });

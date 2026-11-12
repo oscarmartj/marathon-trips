@@ -83,6 +83,7 @@ export class PackageService {
     const { version, reason, deposit, ...rest } = input;
     await orConflict('package_slug_taken', 'This edition already has a package with that slug', () =>
       this.prisma.$transaction(async (tx) => {
+        await lockPackage(tx, id, 'share');
         const before = await tx.package.findFirst({ where: { id, deletedAt: null, edition: { race: { deletedAt: null } } } });
         assertVersion(before, version, 'Package not found');
         this.checkDates({
@@ -105,6 +106,8 @@ export class PackageService {
         if (res.count !== 1) throw versionConflict();
         const after = await tx.package.findUniqueOrThrow({ where: { id } });
         await this.audit.record(tx, { actor, action: 'catalogue.package.updated', entityType: 'Package', entityId: id, reason, before: view(before), after: view(after) });
+        // More extra nights, or other limits, can need prices the version in force lacks (code review, round 2).
+        await this.recheckOnSale(tx, after);
       }),
     );
     return this.get(id);
@@ -422,6 +425,11 @@ export class PackageService {
   async removeExtra(actor: Actor, packageId: string, extraId: string) {
     await this.prisma.$transaction(async (tx) => {
       const pkg = await this.livePackage(tx, packageId);
+      const extra = await tx.extra.findFirst({ where: { id: extraId, packageId, deletedAt: null }, select: { mandatory: true } });
+      // Removing a mandatory extra lowers every total of a package on sale, like making it optional (code review, round 2).
+      if (extra?.mandatory && LIVE_SALE_STATUSES.includes(pkg.saleStatus as SaleStatus)) {
+        await this.refuseChange(tx, { kind: 'extra_terms', extraId, packageId, pricingUnitChanged: false, termsChanged: true, onSale: true });
+      }
       const res = await tx.extra.updateMany({ where: { id: extraId, packageId, deletedAt: null }, data: { deletedAt: new Date(), deletedById: actor.id, version: { increment: 1 } } });
       if (res.count !== 1) throw notFound('extra_not_found', 'Extra not found');
       await this.audit.record(tx, { actor, action: 'catalogue.extra.deleted', entityType: 'Extra', entityId: extraId, before: { deletedAt: null }, after: { deletedAt: new Date() } });
