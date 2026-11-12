@@ -238,7 +238,9 @@
       "customer": "Customer",
       "quotes": "Quotes",
       "quote": "Quote",
-      "templates": "Templates"
+      "templates": "Templates",
+      "complaints": "Complaints",
+      "complaint": "Complaint"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -2138,6 +2140,204 @@
         "template_revision_conflict": "Someone else just added a revision. Reload and try again.",
         "template_activation_conflict": "Someone else is changing this template. Reload and try again.",
         "template_too_long": "This document would run to more than 50 pages.",
+        "forbidden": "You do not have permission to do this."
+      }
+    },
+    "complaints": {
+      "title": "Complaints",
+      "intro": "Every complaint, who owns it, and the two deadlines it has to meet: acknowledged, then resolved.",
+      "detailTitle": "Complaint",
+      "detailIntro": "The details, the deadlines, what was decided, and everything that has happened to this complaint.",
+      "summary": {
+        "title": "Where things stand",
+        "open": "Open",
+        "acknowledgeOverdue": "Not acknowledged in time",
+        "resolveOverdue": "Past the resolution date",
+        "dueSoon": "Due in the next {days} days",
+        "unowned": "No owner yet",
+        "show": "Show"
+      },
+      "filters": {
+        "label": "Filter complaints",
+        "search": "Search by reference, name or title",
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "open": "Open (not yet resolved)",
+        "attention": "Needs attention",
+        "anyAttention": "Any",
+        "category": "Category",
+        "anyCategory": "Any category",
+        "apply": "Apply filters",
+        "attentionValues": {
+          "acknowledge_overdue": "Not acknowledged in time",
+          "resolve_overdue": "Past the resolution date",
+          "due_soon": "Due in the next {days} days"
+        }
+      },
+      "list": {
+        "title": "Register",
+        "caption": "Complaints, most urgent first when showing open ones",
+        "empty": "No complaints match.",
+        "reference": "Reference",
+        "titleColumn": "Title",
+        "complainant": "Complainant",
+        "category": "Category",
+        "status": "Status",
+        "received": "Received",
+        "acknowledge": "Acknowledge by",
+        "resolve": "Resolve by",
+        "owner": "Owner",
+        "noOwner": "No owner",
+        "count": "{count} complaints",
+        "previous": "Previous page",
+        "next": "Next page"
+      },
+      "new": {
+        "title": "Log a complaint",
+        "submit": "Log complaint",
+        "logged": "Complaint logged.",
+        "intro": "Log a complaint on the day it arrives. The deadlines count from the day it was received."
+      },
+      "fields": {
+        "complainantName": "Complainant name",
+        "complainantNameHint": "Leave empty to use the customer's name.",
+        "complainantEmail": "Complainant email",
+        "channel": "How it reached us",
+        "category": "Category",
+        "summary": "Title",
+        "description": "What the complainant said",
+        "receivedDate": "Date received",
+        "receivedDateHint": "Leave empty for today. Both deadlines count from this day.",
+        "customerId": "Customer ID (optional)",
+        "bookingId": "Booking ID (optional)",
+        "linkHint": "Copy it from the address of the customer or booking page.",
+        "ownerId": "Owner",
+        "noOwner": "No owner",
+        "acknowledgeDueDate": "Acknowledge by",
+        "resolveDueDate": "Resolve by",
+        "deadlineHint": "Changing a deadline needs a reason, which is kept in the history.",
+        "reason": "Reason (needed to change a deadline, kept in the history)"
+      },
+      "channels": {
+        "email": "Email",
+        "phone": "Phone",
+        "web": "Website",
+        "in_person": "In person",
+        "post": "Post",
+        "other": "Other"
+      },
+      "categories": {
+        "service": "Service",
+        "pricing": "Pricing",
+        "accommodation": "Accommodation",
+        "transport": "Transport",
+        "race_entry": "Race entry",
+        "communication": "Communication",
+        "payment": "Payment",
+        "other": "Other"
+      },
+      "statuses": {
+        "received": "Received",
+        "acknowledged": "Acknowledged",
+        "investigating": "Investigating",
+        "resolved": "Resolved",
+        "closed": "Closed",
+        "withdrawn": "Withdrawn"
+      },
+      "outcomes": {
+        "upheld": "Upheld",
+        "partly_upheld": "Partly upheld",
+        "not_upheld": "Not upheld",
+        "no_finding": "No finding"
+      },
+      "deadline": {
+        "title": "Deadlines",
+        "acknowledge": "Acknowledge",
+        "resolve": "Resolve",
+        "due": "Due {date}",
+        "doneOn": "Done {date}",
+        "state": {
+          "met": "Met",
+          "late": "Done late",
+          "overdue": "Overdue",
+          "due_soon": "Due soon",
+          "pending": "On track",
+          "not_applicable": "Not needed"
+        },
+        "daysLeft": "{count} days left",
+        "dayLeft": "1 day left",
+        "dueToday": "Due today",
+        "daysOver": "{count} days overdue",
+        "dayOver": "1 day overdue"
+      },
+      "detail": {
+        "detailsTitle": "Details",
+        "save": "Save changes",
+        "saved": "Changes saved.",
+        "customer": "Customer",
+        "booking": "Booking",
+        "none": "None",
+        "complainant": "Complainant",
+        "received": "Received",
+        "channel": "Channel",
+        "owner": "Owner",
+        "finalNote": "This complaint is {status}, so it can no longer be edited."
+      },
+      "status": {
+        "title": "Move this complaint on",
+        "none": "This complaint is final. Nothing more can be done to it.",
+        "reason": "Reason (optional, kept in the history)",
+        "outcome": "Outcome",
+        "resolution": "What was decided and what was offered",
+        "resolutionHint": "Write it in words. Refunds and payments are handled in the payments area, not here.",
+        "moved": "Complaint updated.",
+        "reopen": "Reopen and investigate again",
+        "to": {
+          "acknowledged": "Mark as acknowledged",
+          "investigating": "Start investigating",
+          "resolved": "Resolve",
+          "closed": "Close",
+          "withdrawn": "Mark as withdrawn"
+        }
+      },
+      "resolution": {
+        "title": "Resolution",
+        "outcome": "Outcome",
+        "text": "Decision",
+        "resolvedOn": "Resolved {when}",
+        "closedOn": "Closed {when}",
+        "withdrawnOn": "Withdrawn {when}",
+        "acknowledgedOn": "Acknowledged {when}"
+      },
+      "history": {
+        "title": "History",
+        "empty": "Nothing recorded yet.",
+        "line": "{what}, {when}",
+        "reason": "Reason: {reason}",
+        "actions": {
+          "logged": "Logged",
+          "updated": "Details changed",
+          "status_changed": "Status changed",
+          "reopened": "Reopened",
+          "note_added": "Note added",
+          "note_edited": "Note edited",
+          "note_deleted": "Note deleted"
+        }
+      },
+      "errors": {
+        "complainant_required": "Say who is complaining, or choose a customer.",
+        "received_in_future": "A complaint cannot be received in the future.",
+        "owner_unknown": "That person cannot be given the complaint.",
+        "customer_not_found": "That customer was not found.",
+        "booking_not_found": "That booking was not found.",
+        "booking_customer_mismatch": "That booking belongs to a different customer.",
+        "customer_erased": "That customer has been erased and cannot be linked.",
+        "deadline_reason_required": "Give a reason for a deadline that is not the usual one.",
+        "deadlines_out_of_order": "The deadlines must run in order: received, acknowledge, resolve.",
+        "complaint_final": "A closed or withdrawn complaint cannot be changed.",
+        "transition_not_allowed": "That status change is not allowed from here.",
+        "complaint_not_found": "That complaint was not found.",
+        "version_conflict": "Someone else changed this complaint. Reload and try again.",
         "forbidden": "You do not have permission to do this."
       }
     }

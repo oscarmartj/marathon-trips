@@ -1,0 +1,100 @@
+// ---- Task 7.6: complaints register (plan docs/phases/phase-7.md, modules.md module 13) ----
+// A complaint is logged, acknowledged, investigated and resolved with a written outcome, against two deadlines (to
+// acknowledge it and to resolve it). The register is evidence of the procedure, so a complaint is never deleted and its
+// history sits in the audit log. No amounts live here: any refund or goodwill payment goes through the payments
+// module, and the resolution only says in words what was decided. CHECKs are in migration 0019_complaints.
+
+enum ComplaintStatus {
+  received
+  acknowledged
+  investigating
+  resolved
+  closed
+  withdrawn
+}
+
+enum ComplaintCategory {
+  service
+  pricing
+  accommodation
+  transport
+  race_entry
+  communication
+  payment
+  other
+}
+
+enum ComplaintChannel {
+  email
+  phone
+  web
+  in_person
+  post
+  other
+}
+
+enum ComplaintOutcome {
+  upheld
+  partly_upheld
+  not_upheld
+  no_finding
+}
+
+model Complaint {
+  id                 String            @id @default(uuid(7)) @db.Uuid
+  /// @nopii human reference CP-XXXXXX, random (Crockford base32)
+  reference          String            @unique
+  customerId         String?           @db.Uuid
+  customer           Customer?         @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  bookingId          String?           @db.Uuid
+  booking            Booking?          @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @pii who complained, as they gave it (redacted when the customer is erased)
+  complainantName    String
+  /// @pii
+  complainantEmail   String?
+  /// @nopii
+  channel            ComplaintChannel
+  /// @nopii
+  category           ComplaintCategory
+  /// @pii short title written by staff
+  summary            String
+  /// @pii what the complainant said, written by staff
+  description        String
+  /// @nopii calendar date (Brisbane) the complaint reached us; both deadlines count from it
+  receivedDate       DateTime          @db.Date
+  /// @nopii calendar date by which the complaint must be acknowledged
+  acknowledgeDueDate DateTime          @db.Date
+  /// @nopii calendar date by which the complaint must be resolved
+  resolveDueDate     DateTime          @db.Date
+  /// @nopii set the first time the complaint leaves `received`
+  acknowledgedAt     DateTime?         @db.Timestamptz(3)
+  /// @nopii staff member responsible (no foreign key, like all staff ids)
+  ownerId            String?           @db.Uuid
+  /// @nopii
+  status             ComplaintStatus   @default(received)
+  /// @nopii set with the resolution
+  outcome            ComplaintOutcome?
+  /// @pii what was decided and what was offered, in words
+  resolutionSummary  String?
+  /// @nopii timestamp
+  resolvedAt         DateTime?         @db.Timestamptz(3)
+  /// @nopii timestamp
+  closedAt           DateTime?         @db.Timestamptz(3)
+  /// @nopii timestamp
+  withdrawnAt        DateTime?         @db.Timestamptz(3)
+  /// @nopii staff user who logged it
+  createdById        String            @db.Uuid
+  /// @nopii optimistic lock for the admin panel
+  version            Int               @default(0)
+  /// @nopii timestamp
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+
+  @@index([status, resolveDueDate])
+  @@index([status, acknowledgeDueDate])
+  @@index([customerId])
+  @@index([bookingId])
+  @@index([ownerId, status])
+  @@map("complaints")
+}

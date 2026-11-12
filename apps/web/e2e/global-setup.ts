@@ -18,4 +18,7 @@ export default function globalSetup(): void {
   // Template editors: one who can also put wording into use, one who can only read and draft (templates.spec.ts).
   process.env.E2E_STAFF_10 = create('--permissions', 'templates.template.read,templates.template.manage,templates.template.publish');
   process.env.E2E_STAFF_11 = create('--permissions', 'templates.template.read,templates.template.manage');
+  // Complaints register (complaints.spec.ts): slot 12 holds every permission; slot 13 can only read.
+  process.env.E2E_STAFF_12 = create();
+  process.env.E2E_STAFF_13 = create('--permissions', 'complaints.complaint.read,common.table.use');
 }
