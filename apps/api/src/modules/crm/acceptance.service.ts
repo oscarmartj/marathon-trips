@@ -90,6 +90,12 @@ export class QuoteAcceptanceService {
     await lockPackage(tx, q.packageId, 'share');
     const view = await this.catalogue.load(tx, q.packageId);
     if (!view || !view.publiclyVisible || view.saleStatus !== 'open') throw conflict('package_not_open', 'This trip is no longer open for booking');
+    // The trip's dates are part of what was offered (the deposit and the balance date hang on them): if the package moved since, the offer is void.
+    const cfg = q.configuration as { extraNightsBefore: number; extraNightsAfter: number };
+    const shift = (iso: string, n: number) => new Date(new Date(`${iso}T00:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
+    if (view.balanceDueDate !== day(q.balanceDueDate) || shift(view.checkInDate, -cfg.extraNightsBefore) !== day(q.departureDate) || shift(view.checkOutDate, cfg.extraNightsAfter) !== day(q.returnDate)) {
+      throw conflict('quote_not_available', 'This trip has changed since the quote was made. Ask us for a new one.');
+    }
     if (day(q.departureDate) <= todayInBrisbane(at)) throw conflict('package_departed', 'This trip has already started');
 
     const booking = await this.bookings.createApprovedFromQuote(tx, {

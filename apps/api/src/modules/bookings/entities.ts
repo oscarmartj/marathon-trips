@@ -4,10 +4,10 @@ import type { Tx } from './support';
 
 const ERASED = '[redacted]';
 
-/** The team's notes on a customer and on their bookings (task 2.5) are free text and can hold anything: exported, and redacted on erasure. */
+/** The team's notes on a customer and on their bookings (task 2.5) are free text and can hold anything: all of them are exported (a deleted note is still stored) and all are redacted on erasure. */
 const bookingIdsOf = (tx: Tx, customerId: string) => tx.booking.findMany({ where: { customerId }, select: { id: true } }).then((rows) => rows.map((r) => r.id));
 async function exportNotes(tx: Tx, entityType: 'Customer' | 'Booking', ids: string[]) {
-  return ids.length === 0 ? [] : tx.note.findMany({ where: { entityType, entityId: { in: ids }, deletedAt: null }, select: { entityType: true, entityId: true, body: true, pinned: true, createdAt: true }, orderBy: { createdAt: 'asc' } });
+  return ids.length === 0 ? [] : tx.note.findMany({ where: { entityType, entityId: { in: ids } }, select: { entityType: true, entityId: true, body: true, pinned: true, createdAt: true, deletedAt: true }, orderBy: { createdAt: 'asc' } });
 }
 async function redactNotes(tx: Tx, entityType: 'Customer' | 'Booking', ids: string[]) {
   if (ids.length > 0) await tx.note.updateMany({ where: { entityType, entityId: { in: ids } }, data: { body: ERASED } });

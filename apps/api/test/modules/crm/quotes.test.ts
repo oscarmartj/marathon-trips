@@ -496,6 +496,8 @@ describe('expiry job', () => {
       const bookings = await t.prisma.booking.count({ where: { customerId } });
       if (accept.status === 200) {
         expect([row.status, bookings, row.bookingId === null]).toEqual(['accepted', 1, false]);
+        // Won only if it was taken before the expiry instant.
+        expect(row.acceptedAt!.getTime()).toBeLessThan(row.expiresAt!.getTime());
       } else {
         expect(accept.status).toBe(409);
         expect(['quote_expired', 'quote_not_available']).toContain(accept.body.code);
@@ -506,6 +508,26 @@ describe('expiry job', () => {
       expect(['accepted', 'expired']).toContain(row.status === 'sent' ? (await svc.expireDue(), (await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } })).status) : row.status);
     }
   });
+  it('the acceptance is held on the quote lock past the expiry instant: it is refused (quote_expired), makes nothing, and the sweep then expires the quote', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const { client, customerId } = await linkedCustomer(t);
+    const q = await sendQuote(admin, await makeQuote(admin, customerId, w));
+    await asOwnerWithoutGuard(`UPDATE quotes SET "expiresAt" = clock_timestamp() + interval '1500 milliseconds' WHERE id = $1`, [q.id]);
+    // Another session holds the row; the acceptance starts while it is still open and has to wait for the lock.
+    await owner.query('BEGIN');
+    await owner.query('SELECT id FROM quotes WHERE id = $1 FOR UPDATE', [q.id]);
+    const pending = acceptQuote(t, client, q.reference);
+    await new Promise((r) => setTimeout(r, 2300));
+    const [, row0] = [await owner.query('COMMIT'), await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } })];
+    expect(row0.status).toBe('sent');
+    const accept = await pending;
+    expect([accept.status, accept.body.code]).toEqual([409, 'quote_expired']);
+    expect(await t.prisma.booking.count({ where: { customerId } })).toBe(0);
+    expect((await t.app.get(QuoteService).expireDue()).expired).toBeGreaterThanOrEqual(1);
+    expect((await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } })).status).toBe('expired');
+  });
+
 });
 
 describe('what a sent quote offers is still true when it is sent (review 2.5, round 1)', () => {
@@ -575,5 +597,38 @@ describe('what a sent quote offers is still true when it is sent (review 2.5, ro
     expect(row.priceBreakdown.fullPaymentDue).toBe(true);
     expect(row.depositMinor).toBe(row.totalMinor);
     expect((new Date(row.expiresAt).getTime() - new Date(row.sentAt).getTime()) / 86_400_000).toBeCloseTo(14, 3);
+  });
+
+  it('moving the balance date or the trip dates between the draft and the send is a 409; moved back, a new draft sends', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const { customerId } = await linkedCustomer(t);
+    const q = await makeQuote(admin, customerId, w);
+    const sendIt = () => admin.post(`/admin/quotes/${q.id}/send`, { version: q.version });
+    // Same total and deposit, but the package now asks for full payment sooner (no new price version).
+    await setBalanceDue(w.pkg.id, addDays(todayInBrisbane(new Date()), 2));
+    const r1 = await sendIt();
+    expect([r1.status, r1.body.code]).toEqual([409, 'quote_price_changed']);
+    await setBalanceDue(w.pkg.id, '2027-04-18');
+    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-17', "checkOutDate" = '2027-06-21' WHERE id = $1`, [w.pkg.id]);
+    const r2 = await sendIt();
+    expect([r2.status, r2.body.code]).toEqual([409, 'quote_price_changed']);
+    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-18', "checkOutDate" = '2027-06-22' WHERE id = $1`, [w.pkg.id]);
+    expect((await sendIt()).body.code).toBe('quote_price_changed');
+    await owner.query(`UPDATE packages SET "checkInDate" = '2027-06-18', "checkOutDate" = '2027-06-21' WHERE id = $1`, [w.pkg.id]);
+    expect((await sendIt()).status).toBe(200);
+  });
+
+  it('the package moving between send and accept voids the offer: 409 quote_not_available, nothing is made', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const { client, customerId } = await linkedCustomer(t);
+    const q = await sendQuote(admin, await makeQuote(admin, customerId, w));
+    await setBalanceDue(w.pkg.id, addDays(todayInBrisbane(new Date()), 40));
+    const r = await acceptQuote(t, client, q.reference);
+    expect([r.status, r.body.code]).toEqual([409, 'quote_not_available']);
+    expect(await t.prisma.booking.count({ where: { customerId } })).toBe(0);
+    await setBalanceDue(w.pkg.id, '2027-04-18');
+    expect((await acceptQuote(t, client, q.reference)).status).toBe(200);
   });
 });

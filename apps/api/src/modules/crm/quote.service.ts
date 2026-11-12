@@ -113,8 +113,8 @@ export class QuoteService {
   /** draft → sent: sets the expiry (the database clock, never past the departure day) and queues the email, in one transaction. */
   async send(actor: AuditActor, id: string, version: number) {
     await runTransaction(this.prisma, async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string; status: string; version: number; customerId: string; validForDays: number; departureDate: Date; balanceDueDate: Date; reference: string; packageId: string; configuration: unknown; priceBreakdown: unknown; totalMinor: bigint; depositMinor: bigint; priceVersionId: string }>>`
-        SELECT id, status::text AS status, version, "customerId", "validForDays", "departureDate", "balanceDueDate", reference, "packageId", configuration, "priceBreakdown", "totalMinor", "depositMinor", "priceVersionId" FROM quotes WHERE id = ${id}::uuid FOR UPDATE`;
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; version: number; customerId: string; validForDays: number; departureDate: Date; returnDate: Date; balanceDueDate: Date; reference: string; packageId: string; configuration: unknown; priceBreakdown: unknown; totalMinor: bigint; depositMinor: bigint; priceVersionId: string }>>`
+        SELECT id, status::text AS status, version, "customerId", "validForDays", "departureDate", "returnDate", "balanceDueDate", reference, "packageId", configuration, "priceBreakdown", "totalMinor", "depositMinor", "priceVersionId" FROM quotes WHERE id = ${id}::uuid FOR UPDATE`;
       const q = rows[0];
       if (!q) throw notFound('quote_not_found', 'Quote not found');
       if (q.status !== 'draft') throw conflict('transition_not_allowed', 'Only a draft quote can be sent');
@@ -128,14 +128,20 @@ export class QuoteService {
       await tx.$queryRaw`SELECT 1 FROM packages WHERE id = ${q.packageId}::uuid FOR SHARE`;
       const fresh = await this.pricing.priceIn(tx, requestOf(q.configuration as SnapshotConfiguration), { audience: 'public', now: at });
       const held = q.priceBreakdown as { discountsMinor: string; surchargesMinor: string; fullPaymentDue: boolean };
-      if (fresh.totalMinor !== q.totalMinor || fresh.depositMinor !== q.depositMinor || fresh.priceVersionId !== q.priceVersionId || fresh.discountsMinor.toString() !== held.discountsMinor || fresh.surchargesMinor.toString() !== held.surchargesMinor) {
-        throw conflict('quote_price_changed', 'The price has changed since this draft was made. Create a new quote.');
+      const day = (d: Date) => d.toISOString().slice(0, 10);
+      // Everything the offer is made of must still be what the draft holds: the price, and the dates the deposit and the trip hang on.
+      if (
+        fresh.totalMinor !== q.totalMinor || fresh.depositMinor !== q.depositMinor || fresh.priceVersionId !== q.priceVersionId ||
+        fresh.discountsMinor.toString() !== held.discountsMinor || fresh.surchargesMinor.toString() !== held.surchargesMinor ||
+        fresh.fullPaymentDue !== held.fullPaymentDue || fresh.balanceDueDate !== day(q.balanceDueDate) ||
+        fresh.departureDate !== departure || fresh.returnDate !== day(q.returnDate)
+      ) {
+        throw conflict('quote_price_changed', 'The price or the dates have changed since this draft was made. Create a new quote.');
       }
       // Until the balance date the deposit is smaller than the total; accepting after it would keep a stale deposit and date.
-      const balanceDue = q.balanceDueDate.toISOString().slice(0, 10);
       let limit = startOfDayInBrisbane(departure).getTime();
-      if (!held.fullPaymentDue) {
-        const balanceStart = startOfDayInBrisbane(balanceDue).getTime();
+      if (!fresh.fullPaymentDue) {
+        const balanceStart = startOfDayInBrisbane(fresh.balanceDueDate).getTime();
         if (balanceStart <= at.getTime()) throw conflict('quote_price_changed', 'The balance date has passed. Create a new quote.');
         limit = Math.min(limit, balanceStart);
       }

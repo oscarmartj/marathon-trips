@@ -232,7 +232,12 @@ describe('personal data in notes and quotes: export and erasure (review 2.5, rou
     }
     const registry = t.app.get(EntityRegistry);
     const exported = async (type: string, id: string) => t.prisma.$transaction((tx) => registry.get(type)!.handlers!.export(tx, id));
+    // A note deleted in the panel is still stored, so it is still the customer's data: exported, and redacted below.
+    const deletedBody = 'Deleted but kept: ex-partner is Pat Smith';
+    const del = await admin.post(`/admin/tables/Customer/${customerId}/notes`, { body: deletedBody, pinned: false });
+    await t.prisma.note.update({ where: { id: del.body.id }, data: { deletedAt: new Date() } });
     const customerExport = JSON.stringify(await exported('Customer', customerId));
+    expect(customerExport).toContain(deletedBody);
     const bookingExport = JSON.stringify(await exported('Booking', customerId));
     expect(customerExport).toContain(`${secret} (Customer)`);
     expect(bookingExport).toContain(`${secret} (Booking)`);
@@ -244,9 +249,9 @@ describe('personal data in notes and quotes: export and erasure (review 2.5, rou
       await registry.get('Booking')!.handlers!.anonymise(tx, customerId);
     });
     const notes = await t.prisma.note.findMany({ where: { entityId: { in: [customerId, bookingId] } } });
-    expect(notes).toHaveLength(2);
+    expect(notes).toHaveLength(3);
     expect(notes.every((n) => n.body === '[redacted]')).toBe(true);
-    expect(JSON.stringify(await exported('Customer', customerId))).not.toContain('Maria');
+    expect(JSON.stringify(await exported('Customer', customerId))).not.toMatch(/Maria|Pat Smith/);
     const kept = await t.prisma.note.findMany({ where: { entityId: { in: [other.customerId, otherBooking.bookingId] } } });
     expect(kept.map((n) => n.body).sort()).toEqual([`${secret} (Booking)`, `${secret} (Customer)`]);
   });

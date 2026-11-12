@@ -141,7 +141,7 @@ describe('state_change_sends_one_email_each', () => {
     expect((await emailsOf(a.customerId)).map((e) => e.templateKey).sort()).toEqual(['crm.booking_approved', 'crm.quote_sent']);
   });
 
-  it('expiry_text_matches_the_story: a booking that was approved (a quote\'s always is) is not told "we could not review your request"', async () => {
+  it('expiry_text_matches_the_story: the expired email of an approved booking (the state machine has no way to expire one before task 3.2, so the email is queued directly) is not told "we could not review your request"', async () => {
     const a = await linkedCustomer(t);
     const q = await sendQuote(admin, await makeQuote(admin, a.customerId, w));
     await deliverAndSend(a.customerId);
@@ -167,7 +167,14 @@ describe('state_change_sends_one_email_each', () => {
     await t.prisma.customer.update({ where: { id: a.customerId }, data: { deletedAt: new Date() } });
     const queued = await t.prisma.outboundEmail.findFirstOrThrow({ where: { customerId: a.customerId, templateKey: 'crm.quote_sent' } });
     const before = t.mail.sent.length;
-    await t.app.get(MailService).processSend(queued.id).catch(() => undefined);
+    const outcomes: string[] = [];
+    // The send step is retried; it must give up for good, never loop and never write to the closed account.
+    for (let i = 0; i < 8; i++) outcomes.push(await t.app.get(MailService).processSend(queued.id).then((r) => String(r), (e: Error) => `threw:${e.message}`));
+    const row = await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: queued.id } });
+    expect(row.status).toBe('failed');
+    expect(row.attempts).toBe(5);
+    expect(row.error).toBeTruthy();
+    expect(outcomes.map((o) => (o.startsWith('threw') ? 'threw' : o))).toEqual(['threw', 'threw', 'threw', 'threw', 'failed', 'noop', 'noop', 'noop']);
     expect(t.mail.sent.length).toBe(before);
   });
 });
