@@ -20,6 +20,10 @@ export class KeyDatesAdminController {
   @Get() @RequirePermission(P.read)
   calendar(@Query(new ZodPipe(calendarQuerySchema)) q: In<typeof calendarQuerySchema>) { return this.service.calendar(q); }
 
+  // Fixed path first, so it is not read as a key date id.
+  @Get('editions') @RequirePermission(P.read)
+  editions() { return this.service.editions(); }
+
   @Post() @RequirePermission(P.manage)
   create(@Body(new ZodPipe(createKeyDateSchema)) b: In<typeof createKeyDateSchema>, @Req() req: ApiRequest) { return this.service.create(actorOf(req), b); }
 

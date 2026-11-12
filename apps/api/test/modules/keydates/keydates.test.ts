@@ -131,6 +131,13 @@ describe('the calendar joins the three sources', () => {
     expect(JSON.stringify(cal)).not.toMatch(/MT-[0-9A-Z]{6}|Customer|@/);
   });
 
+  it('lists the editions a date can be added to', async () => {
+    const w = await buildWorld(admin);
+    const list = must(await admin.get('/admin/key-dates/editions'), 'editions').body as { items: Array<{ id: string; year: number; raceName: string }> };
+    expect(list.items.find((e) => e.id === w.edition.id)).toMatchObject({ year: w.edition.year });
+    expect((await (await staffClient(t, [])).get('/admin/key-dates/editions')).status).toBe(403);
+  });
+
   it('a window, an edition filter and bad ranges', async () => {
     const w = await buildWorld(admin);
     must(await admin.post('/admin/key-dates', { editionId: w.edition.id, kind: 'custom', label: 'Far away', dueDate: '2031-01-01' }), 'far');

@@ -10,7 +10,7 @@ import { PrismaService } from '../../platform/database/prisma.service';
 import { FeatureFlagService } from '../../platform/flags/flags.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import { readBalancesDueForCalendar } from '../bookings';
-import { readEditionLabels } from '../catalogue';
+import { listEditionLabels, readEditionLabels } from '../catalogue';
 import { readHeldReleasesForCalendar } from '../suppliers';
 import { addDays, longDate, startOfBusinessDay, todayInBusinessZone } from './dates';
 import { KEYDATES_MODULE } from './manifest';
@@ -42,6 +42,11 @@ export class KeyDatesService {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(FeatureFlagService) private readonly flags: FeatureFlagService,
   ) {}
+
+  /** Editions to choose from when adding a date. */
+  async editions() {
+    return { items: await this.prisma.$transaction((tx) => listEditionLabels(tx)) };
+  }
 
   // ---- Stored dates ----
 

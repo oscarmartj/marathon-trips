@@ -47,3 +47,9 @@ export async function readEditionLabels(tx: Tx, ids: readonly string[]): Promise
   const rows = await tx.raceEdition.findMany({ where: { id: { in: [...ids] }, race: { deletedAt: null } }, select: { id: true, year: true, race: { select: { name: true } } } });
   return new Map(rows.map((r) => [r.id, { id: r.id, year: r.year, raceName: enAu(r.race.name) }]));
 }
+
+/** Editions a person can attach a key date to: newest year first, then race name. A plain read of at most 300. */
+export async function listEditionLabels(tx: Tx): Promise<EditionLabel[]> {
+  const rows = await tx.raceEdition.findMany({ where: { race: { deletedAt: null } }, orderBy: [{ year: 'desc' }, { id: 'asc' }], take: 300, select: { id: true, year: true, race: { select: { name: true } } } });
+  return rows.map((r) => ({ id: r.id, year: r.year, raceName: enAu(r.race.name) })).sort((a, b) => b.year - a.year || a.raceName.localeCompare(b.raceName));
+}
