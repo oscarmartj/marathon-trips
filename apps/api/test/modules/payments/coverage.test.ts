@@ -1,5 +1,6 @@
 // The coverage rule, Oscar's confirmation, the approval expiry and the replacement of attempts, through HTTP, the
 // simulator and a real PostgreSQL (plan docs/plans/3.2-payment-plan-coverage.md, sections 1 to 5 and 11).
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BookingStateMachine } from '../../../src/modules/bookings';
 import type { BookingStatus } from '@mt/shared';
@@ -202,6 +203,8 @@ describe('the coverage rule with the simulator (sections 1.2 and 1.4)', () => {
       const stored = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: acc.id, providerEventId: ev.eventId } } });
       expect([stored.status, stored.errorCode]).toEqual(['failed', 'coverage_failed']);
       expect(await t.prisma.task.count({ where: { sourceRef: `payments:coverage_failed:${p!.id}`, status: 'open' } })).toBe(1);
+      // The cause is in the task as a code (review, point 1).
+      expect((await t.prisma.task.findFirstOrThrow({ where: { sourceRef: `payments:coverage_failed:${p!.id}` } })).description).toContain('(boom)');
       // The customer's retry sees the gateway's success and gets a 503, the task stays one.
       const res = await c.pay(reference, { method: 'card' });
       expect([res.status, res.body.code]).toEqual([503, 'payment_processing_delayed']);
@@ -534,6 +537,25 @@ describe('replacing a live attempt (section 4, plan 0.1 P2)', () => {
     expect(await statusOf(bookingId)).toBe('confirmed');
   });
 
+  it('same_key_retry_after_payment_already_recorded_creates_nothing (review, point 4)', async () => {
+    const { reference, bookingId } = await booked();
+    await c.pay(reference, { method: 'card' });
+    const [p] = await paymentsOf(bookingId);
+    sim.settle(acc.id, p!.providerPaymentRef!, 'succeeded');
+    const objects = sim.objectCount(acc.id);
+    const key = randomUUID();
+    const body = { method: 'apple_pay', replaceLiveAttempt: true };
+    const first = await c.pay(reference, body, key);
+    expect([first.status, first.body.code]).toEqual([409, 'payment_already_recorded']);
+    // Same key and body: the stored answer again, never an attempt for the balance.
+    const again = await c.pay(reference, body, key);
+    expect([again.status, again.body.code]).toEqual([409, 'payment_already_recorded']);
+    expect((await paymentsOf(bookingId)).map((x) => x.status)).toEqual(['succeeded']);
+    expect(sim.objectCount(acc.id)).toBe(objects);
+    // A new key is a new decision of the customer: it pays the balance.
+    expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
+  });
+
   it('replace_flag_without_live_attempt_is_plain_create', async () => {
     const { reference, bookingId } = await booked();
     expect((await c.pay(reference, { method: 'card', replaceLiveAttempt: true })).status).toBe(201);
@@ -595,6 +617,24 @@ describe('views and the lock order (sections 5 and 11.11)', () => {
       const b = await readBookingForPayments(tx, { id: two.bookingId }, true);
       return lockPayment(tx, b!, p!.id);
     })).rejects.toMatchObject({ code: 'payment_lock_order' });
+  });
+
+  it('overpayment_on_approval_expiry_event_has_the_payment_shape (review, point 2)', async () => {
+    const { reference, bookingId } = await booked(false);
+    const { p } = await payAndCollect(reference, bookingId);
+    // Money in without the deposit covered cannot happen through the API; the hook is run with that fact forced,
+    // inside a transaction that is then undone (the plan check at commit would refuse it on a paid booking).
+    const coverage = t.app.get(PaymentScheduleService)['coverage'] as { money: (...a: unknown[]) => Promise<{ depositCovered: boolean; collectedMinor: bigint }> };
+    const real = coverage.money.bind(coverage);
+    const spy = vi.spyOn(coverage, 'money').mockImplementation(async (...a: unknown[]) => ({ ...(await real(...a)), depositCovered: false }));
+    const seen = await t.prisma.$transaction(async (tx) => {
+      const b = await readBookingForPayments(tx, { id: bookingId }, true);
+      await t.app.get(PaymentScheduleService).onExpireApproval(tx, { id: b!.id, customerId: b!.customerId, packageId: '', currency: b!.currency, from: 'approved' }, { actor: SYSTEM_ACTOR, at: new Date() });
+      const rows = await tx.outboxEvent.findMany({ where: { type: 'payments.booking.overpaid', payload: { path: ['bookingId'], equals: bookingId } }, select: { aggregateType: true, aggregateId: true, payload: true } });
+      throw Object.assign(new Error('undo'), { rows });
+    }).catch((e: { rows?: unknown }) => e.rows);
+    spy.mockRestore();
+    expect(seen).toEqual([{ aggregateType: 'Payment', aggregateId: p.id, payload: { paymentId: p.id, bookingId } }]);
   });
 
   it('cancel_with_collected_money_rejected stays in the hook (no refunds yet)', async () => {

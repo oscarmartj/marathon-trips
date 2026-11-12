@@ -46,6 +46,9 @@ class ReplacementNeeded extends Error {
   }
 }
 
+/** The idempotency record's answer when a replacement revealed money already in. */
+const ALREADY_RECORDED = 'PaymentAlreadyRecorded';
+
 const alreadyRecorded = () => conflict('payment_already_recorded', 'A payment for this booking has just been recorded. Check the booking before paying again.');
 
 const busy = () => conflict('busy_try_again', 'Many people are doing this at once. Try again.');
@@ -113,13 +116,20 @@ export class PaymentAttemptsService {
     if (!booking) throw notFound();
     // The route of the record carries the booking id, so one key on two bookings is two records (plan 3.1, 14.4).
     const outcome = await this.idempotency.run({ actorType: 'customer', actorId: user.id, route: `POST /booking-requests/${booking.id}/payments`, key, body }, async () => {
-      const paymentId = await this.createOrReplace(booking.id, body, actor);
-      return { status: 201, resourceType: 'Payment', resourceId: paymentId };
+      try {
+        const paymentId = await this.createOrReplace(booking.id, body, actor);
+        return { status: 201, resourceType: 'Payment', resourceId: paymentId };
+      } catch (err) {
+        // Stored as this key's answer, so a retry with the same key and body never pays the next item (review, point 4).
+        if (err instanceof ApiError && err.code === 'payment_already_recorded') return { status: 409, resourceType: ALREADY_RECORDED };
+        throw err;
+      }
     }).catch((err: unknown) => {
       if (err instanceof IdempotencyKeyReuseError) throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
       if (err instanceof IdempotencyInProgressError) throw conflict('idempotency_in_progress', 'A request with this Idempotency-Key is still being processed');
       throw err;
     });
+    if (outcome.result.resourceType === ALREADY_RECORDED) throw alreadyRecorded();
     const payment = await this.prisma.payment.findUnique({ where: { id: outcome.result.resourceId! }, select: { id: true, bookingId: true } });
     if (!payment || payment.bookingId !== booking.id) throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request');
     const nextAction = await this.drive(payment.id);

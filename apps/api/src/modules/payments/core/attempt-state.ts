@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { PaymentStatus } from '@mt/shared';
 import type { Prisma } from '../../../generated/prisma/client';
 import { AuditService, SYSTEM_ACTOR } from '../../../platform/audit/audit.service';
@@ -6,7 +6,7 @@ import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { OutboxService } from '../../../platform/events/outbox.service';
 import { bossDb } from '../../../platform/database/boss-db';
 import { isRetryableTransactionError } from '../../../platform/database/transaction';
-import { AppError } from '../../../platform/errors/safe-error';
+import { AppError, safeError } from '../../../platform/errors/safe-error';
 import { conflict } from '../../../platform/http/api-error';
 import { JobsService } from '../../../platform/jobs/jobs.service';
 import { QUEUES } from '../../../platform/jobs/queues';
@@ -101,6 +101,8 @@ const ENDED_WITHOUT_MONEY: readonly PaymentStatus[] = ['failed', 'cancelled', 'e
  */
 @Injectable()
 export class PaymentStateMachine {
+  private readonly logger = new Logger('Payments');
+
   constructor(
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
@@ -184,10 +186,13 @@ export class PaymentStateMachine {
 
   /** Opens, in its own transaction, the task for a payment whose coverage could not be applied (plan 3.2, 11.8). */
   async coverageFailed(db: { $transaction: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T> }, err: CoverageFailedError, reference: string): Promise<void> {
+    // The cause as a code only (safeError keeps no values, so no personal data or secrets): in the log and the task.
+    const cause = safeError(err.original).code;
+    this.logger.error(`coverage failed for payment ${err.paymentId}: ${cause}`);
     await db.$transaction(async (tx) => {
       await this.tasks.createSystemIn(tx, {
         title: `Payment could not be applied to booking ${reference}`,
-        description: 'A payment the gateway reports as collected could not move the booking along its payment states, so it is not recorded yet. Check the booking; the payment is retried once it is fixed.',
+        description: `A payment the gateway reports as collected could not move the booking along its payment states (${cause}), so it is not recorded yet. Check the booking; the payment is retried once it is fixed.`,
         entityType: 'Payment', entityId: err.paymentId, sourceRef: coverageTaskRef(err.paymentId),
       });
     });

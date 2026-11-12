@@ -98,7 +98,9 @@ export class PaymentScheduleService {
         description: 'The time to pay the deposit ran out with money already paid. Arrange a refund.',
         entityType: 'Booking', entityId: hooked.id, sourceRef: `payments:overpaid:approval_expired:${hooked.id}`,
       });
-      await this.outbox.publish(tx, { type: PAYMENT_EVENTS.overpaid, aggregateType: 'Booking', aggregateId: hooked.id, aggregateVersion: schedule.version + 1, payload: { bookingId: hooked.id }, actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined });
+      // Same shape as the overpayment of task 3.1 (attempt-state.ts): one event per payment, with its id and version.
+      const paid = await tx.payment.findMany({ where: { bookingId: hooked.id, mode: this.gateway.mode, status: 'succeeded' }, select: { id: true, version: true }, orderBy: [{ succeededAt: 'asc' }, { id: 'asc' }] });
+      for (const p of paid) await this.outbox.publish(tx, { type: PAYMENT_EVENTS.overpaid, aggregateType: 'Payment', aggregateId: p.id, aggregateVersion: p.version, payload: { paymentId: p.id, bookingId: hooked.id }, actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined });
     }
   }
 
