@@ -81,6 +81,7 @@ model Customer {
   bookings           Booking[]
   promoRedemptions   PromoRedemption[]
   payments           Payment[]
+  waitlistEntries    WaitlistEntry[]
 
   @@unique([userId, userKind])
   @@map("customers")

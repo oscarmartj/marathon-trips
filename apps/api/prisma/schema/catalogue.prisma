@@ -306,6 +306,7 @@ model Package {
   priceRules           PriceRule[]
   promoCodes           PromoCode[]
   bookings             Booking[]
+  waitlistEntries      WaitlistEntry[]
 
   @@unique([editionId, slug])
   @@unique([id, currency])
