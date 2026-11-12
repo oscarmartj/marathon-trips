@@ -4,9 +4,15 @@ import { PageHeader } from '@/components/page-header';
 import { RaceCard } from '@/components/catalogue/race-card';
 import { RaceFiltersForm } from '@/components/catalogue/race-filters';
 import { CatalogueUnavailableError, PAGE_SIZE, listCountryCodes, parseFilters, racesHref, searchRaces, type RaceSearchResult } from '@/lib/catalogue';
+import { pageMetadata } from '@/lib/seo';
 import { t } from '@/lib/i18n';
 
-export const metadata: Metadata = { title: t('races.title') };
+// Filtered and paged results are thin variants of the same list: they point at /races and ask not to be indexed.
+export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+  const filters = parseFilters(await searchParams);
+  const base = pageMetadata({ title: t('races.title'), description: t('races.intro'), path: '/races' });
+  return Object.keys(filters).length > 0 ? { ...base, robots: { index: false, follow: true } } : base;
+}
 
 // The filters are in the URL, so this page is rendered per request; the catalogue data behind it is cached for a minute.
 export const revalidate = 60;

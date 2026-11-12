@@ -1,11 +1,16 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { PlaceholderImage } from '@/components/placeholder-image';
 import { RaceCard } from '@/components/catalogue/race-card';
 import { searchRaces, type RaceSummary } from '@/lib/catalogue';
+import { pageMetadata } from '@/lib/seo';
 import { t } from '@/lib/i18n';
+import { brand } from '@mt/shared/brand';
 
 // Built ahead and refreshed at most once a minute. The only script on the page is the framework's.
 export const revalidate = 60;
+
+export const metadata: Metadata = pageMetadata({ title: brand.name, description: t('home.tagline'), path: '/' });
 
 async function featuredRaces(): Promise<RaceSummary[]> {
   try {
