@@ -38,10 +38,10 @@ test('complaint_logged_overdue_acknowledged_resolved_closed_and_reader_refused',
 
   // Log a complaint that arrived ten days ago: the two-day acknowledgement deadline has long passed.
   const form = page.getByRole('region', { name: 'Log a complaint' });
-  await form.getByLabel('Title', { exact: true }).fill(`${run} late airport transfer`);
-  await form.getByLabel('What the complainant said', { exact: true }).fill('The transfer arrived an hour late and we missed the expo.');
-  await form.getByLabel('How it reached us', { exact: true }).selectOption({ label: 'Phone' });
-  await form.getByLabel('Category', { exact: true }).selectOption({ label: 'Transport' });
+  await form.getByLabel(/^Title/).fill(`${run} late airport transfer`);
+  await form.getByLabel(/^What the complainant said/).fill('The transfer arrived an hour late and we missed the expo.');
+  await form.getByLabel(/^How it reached us/).selectOption({ label: 'Phone' });
+  await form.getByLabel(/^Category/).selectOption({ label: 'Transport' });
   await form.getByLabel('Complainant name', { exact: true }).fill('Pat Complainant');
   await form.getByLabel('Date received', { exact: true }).fill(daysAgo(10));
   await form.getByRole('button', { name: 'Log complaint', exact: true }).click();
@@ -93,8 +93,8 @@ test('complaint_logged_overdue_acknowledged_resolved_closed_and_reader_refused',
     await other.goto('/admin/complaints');
     await expect(other.getByRole('heading', { level: 1, name: 'Complaints' })).toBeVisible();
     const f2 = other.getByRole('region', { name: 'Log a complaint' });
-    await f2.getByLabel('Title', { exact: true }).fill(`${run} not allowed`);
-    await f2.getByLabel('What the complainant said', { exact: true }).fill('Should be refused.');
+    await f2.getByLabel(/^Title/).fill(`${run} not allowed`);
+    await f2.getByLabel(/^What the complainant said/).fill('Should be refused.');
     await f2.getByLabel('Complainant name', { exact: true }).fill('Nobody');
     await f2.getByRole('button', { name: 'Log complaint', exact: true }).click();
     await expect(f2.getByText('You do not have permission to do this.')).toBeVisible();

@@ -39,7 +39,12 @@ describe('complaints panel copy', () => {
       'deadline_reason_required', 'deadlines_out_of_order', 'complaint_final', 'transition_not_allowed', 'complaint_not_found', 'version_conflict',
     ];
     for (const code of codes) expect(complaintError({ status: 409, body: { code } }), code).toBe(t(`admin.complaints.errors.${code}`));
+    expect(complaintError({ status: 403, body: { code: 'forbidden' } })).toBe('You do not have permission to do this.');
     expect(complaintError({ status: 500, body: {} })).toBe(catalogueError({ status: 500, body: {} }));
+  });
+
+  it('has wording for every history action it recognises', () => {
+    for (const k of ['logged', 'updated', 'status_changed', 'reopened', 'note_added', 'note_edited', 'note_deleted']) expect(() => t(`admin.complaints.history.actions.${k}`), k).not.toThrow();
   });
 
   it('says days left and days over in words', () => {

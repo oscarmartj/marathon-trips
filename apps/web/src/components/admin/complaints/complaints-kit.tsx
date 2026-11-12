@@ -20,6 +20,7 @@ export const SOON = COMPLAINT_DUE_SOON_DAYS;
 
 /** A message for a complaints error code: this area's own wording when it has one, else the catalogue's general wording. */
 export function complaintError(r: { status: number; body: { code?: string } }): string {
+  if (r.status === 403) return t('admin.complaints.errors.forbidden');
   const code = r.body?.code;
   if (code) {
     try {

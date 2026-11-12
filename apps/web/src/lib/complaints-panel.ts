@@ -75,3 +75,10 @@ export function createBody(f: CreateForm): Record<string, unknown> {
   for (const [k, v] of optional) if (v.trim()) body[k] = v.trim();
   return body;
 }
+
+/** The message key of an audit action on a complaint or on one of its notes, or null for anything else. */
+export function historyKey(action: string): string | null {
+  if (action.startsWith('complaints.complaint.')) return action.slice('complaints.complaint.'.length);
+  if (action.startsWith('common.note.')) return `note_${action.slice('common.note.'.length)}`;
+  return null;
+}

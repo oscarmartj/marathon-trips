@@ -2315,13 +2315,13 @@
         "line": "{what}, {when}",
         "reason": "Reason: {reason}",
         "actions": {
-          "complaints.complaint.logged": "Logged",
-          "complaints.complaint.updated": "Details changed",
-          "complaints.complaint.status_changed": "Status changed",
-          "complaints.complaint.reopened": "Reopened",
-          "common.note.added": "Note added",
-          "common.note.edited": "Note edited",
-          "common.note.deleted": "Note deleted"
+          "logged": "Logged",
+          "updated": "Details changed",
+          "status_changed": "Status changed",
+          "reopened": "Reopened",
+          "note_added": "Note added",
+          "note_edited": "Note edited",
+          "note_deleted": "Note deleted"
         }
       },
       "errors": {
@@ -2337,7 +2337,8 @@
         "complaint_final": "A closed or withdrawn complaint cannot be changed.",
         "transition_not_allowed": "That status change is not allowed from here.",
         "complaint_not_found": "That complaint was not found.",
-        "version_conflict": "Someone else changed this complaint. Reload and try again."
+        "version_conflict": "Someone else changed this complaint. Reload and try again.",
+        "forbidden": "You do not have permission to do this."
       }
     }
   },

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { COMPLAINT_OUTCOMES, type ComplaintStatus } from '@mt/shared';
 import { useState, type FormEvent } from 'react';
 import { api } from '@/lib/api-client';
-import { isReopen, nextStatuses, transitionBody } from '@/lib/complaints-panel';
+import { historyKey, isReopen, nextStatuses, transitionBody } from '@/lib/complaints-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { EntityForm, Section, formatDay, useLoad } from '../catalogue/kit';
@@ -50,11 +50,15 @@ interface HistoryEntry {
 }
 
 function actionLabel(action: string): string {
-  try {
-    return t(`admin.complaints.history.actions.${action}`);
-  } catch {
-    return action;
+  const key = historyKey(action);
+  if (key) {
+    try {
+      return t(`admin.complaints.history.actions.${key}`);
+    } catch {
+      /* falls through to the raw action */
+    }
   }
+  return action;
 }
 
 /** The ways to move a complaint on: one button each, and for resolving a form for the outcome and the written resolution. */

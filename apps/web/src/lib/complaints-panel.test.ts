@@ -1,6 +1,6 @@
 import { COMPLAINT_STATUSES } from '@mt/shared';
 import { describe, expect, it } from 'vitest';
-import { badgeClass, createBody, emptyFilters, isReopen, listParams, needsAttention, nextStatuses, transitionBody } from './complaints-panel';
+import { badgeClass, createBody, emptyFilters, historyKey, isReopen, listParams, needsAttention, nextStatuses, transitionBody } from './complaints-panel';
 
 describe('complaints panel rules', () => {
   it('lists open complaints first and sends only what is set', () => {
@@ -36,5 +36,11 @@ describe('complaints panel rules', () => {
   it('leaves empty optional fields out of a new complaint', () => {
     const body = createBody({ complainantName: ' Pat ', complainantEmail: '', channel: 'phone', category: 'service', summary: ' Late bus ', description: ' It was late. ', receivedDate: '', customerId: '', bookingId: '', ownerId: '', reason: '' });
     expect(body).toEqual({ channel: 'phone', category: 'service', summary: 'Late bus', description: 'It was late.', complainantName: 'Pat' });
+  });
+
+  it('turns an audit action into a message key', () => {
+    expect(historyKey('complaints.complaint.status_changed')).toBe('status_changed');
+    expect(historyKey('common.note.added')).toBe('note_added');
+    expect(historyKey('platform.flag.updated')).toBeNull();
   });
 });
