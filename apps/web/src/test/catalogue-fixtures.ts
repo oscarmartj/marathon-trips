@@ -1,5 +1,7 @@
 import { vi } from 'vitest';
 import type { PackageDetail, RaceDetail, RaceSearchResult, RaceSummary } from '@/lib/catalogue';
+import type { PublicBanner, PublicFaq, PublicGuide, PublicMenu, PublicPage } from '@/lib/content';
+import type { RedirectRule } from '@/lib/redirects';
 
 export const SLUG = 'sample-marathon';
 
@@ -57,15 +59,51 @@ export const packageDetail = (over: Partial<PackageDetail> = {}): PackageDetail 
 });
 
 /** Stubs the global fetch with the public catalogue API; `calls` records the URLs asked for. */
-export function stubCatalogue(options: { search?: RaceSearchResult; race?: RaceDetail | null; status?: number; pkg?: PackageDetail | null } = {}) {
+export interface ContentStub {
+  pages?: Record<string, PublicPage>;
+  guides?: Record<string, PublicGuide>;
+  faqs?: PublicFaq[];
+  banners?: PublicBanner[];
+  menu?: Partial<PublicMenu>;
+  redirects?: RedirectRule[];
+}
+
+export const contentPage = (over: Partial<PublicPage> = {}): PublicPage => ({
+  slug: SLUG, locale: 'en-AU', kind: 'general', title: 'A page from the content manager', intro: 'Its introduction.', body: 'First paragraph.\n\nSecond paragraph.',
+  seoTitle: '', seoDescription: '', legalReviewPending: false, publishedAt: '2027-01-01T00:00:00.000Z', updatedAt: '2027-01-02T00:00:00.000Z', heroMedia: null, ...over,
+});
+
+export const contentGuide = (over: Partial<PublicGuide> = {}): PublicGuide => ({
+  raceSlug: SLUG, locale: 'en-AU', course: 'Out and back along the lake.', climate: 'Cool mornings in May.', entry: 'Entries open in January.', travelTips: 'Fly into Auckland.',
+  seoTitle: '', seoDescription: '', publishedAt: '2027-01-01T00:00:00.000Z', updatedAt: '2027-01-02T00:00:00.000Z', heroMedia: null, ...over,
+});
+
+/** Stubs the global fetch with the public catalogue API and the public content API; `calls` records the URLs asked for. */
+export function stubCatalogue(options: { search?: RaceSearchResult; race?: RaceDetail | null; status?: number; pkg?: PackageDetail | null; content?: ContentStub } = {}) {
   const calls: string[] = [];
   const search = options.search ?? { items: [summary()], page: 1, pageSize: 12, total: 1 };
   const race = options.race === undefined ? detail() : options.race;
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
     const url = String(input);
     calls.push(url);
-    if (options.status) return new Response('{}', { status: options.status });
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    if (/\/content\//.test(url)) {
+      const c = options.content ?? {};
+      const last = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '');
+      if (/\/content\/pages\/[^/?]+/.test(url)) {
+        // The sample slug is a published general page unless the test says otherwise; every other slug has none.
+        const pages = c.pages ?? { [SLUG]: contentPage() };
+        return pages[last] ? json(pages[last]) : json({ code: 'not_found' }, 404);
+      }
+      if (/\/content\/pages(\?|$)/.test(url)) return json({ items: Object.values(c.pages ?? {}).filter((p) => p.kind === 'general').map((p) => ({ slug: p.slug, title: p.title, updatedAt: p.updatedAt })) });
+      if (/\/content\/guides\//.test(url)) return c.guides?.[last] ? json(c.guides[last]) : json({ code: 'not_found' }, 404);
+      if (/\/content\/faqs/.test(url)) return json({ items: c.faqs ?? [] });
+      if (/\/content\/banners/.test(url)) return json({ items: c.banners ?? [] });
+      if (/\/content\/menu/.test(url)) return json({ header: [], footer_company: [], footer_legal: [], ...c.menu });
+      if (/\/content\/redirects/.test(url)) return json({ items: c.redirects ?? [] });
+      return json({}, 404);
+    }
+    if (options.status) return new Response('{}', { status: options.status });
     if (/\/catalogue\/races\?/.test(url)) return json(search);
     if (/\/editions\/\d+\/packages\/[^/?]+$/.test(url)) return options.pkg === null ? json({ code: 'package_not_found' }, 404) : json(options.pkg ?? packageDetail());
     if (/\/catalogue\/races\/[^/?]+$/.test(url)) return race ? json(race) : json({ code: 'race_not_found' }, 404);

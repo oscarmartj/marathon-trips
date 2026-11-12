@@ -29,7 +29,14 @@
     "legalPending": "Provisional content, pending legal review.",
     "backToRaces": "Back to races",
     "logoLabel": "{brand} home",
-    "placeholderImage": "Placeholder image"
+    "placeholderImage": "Placeholder image",
+    "externalLink": "(opens an outside website)",
+    "announcements": "Announcements",
+    "bannerTones": {
+      "info": "Update",
+      "notice": "Notice",
+      "warning": "Warning"
+    }
   },
   "nav": {
     "home": "Home",
@@ -47,7 +54,8 @@
     "signIn": "Sign in",
     "verifySignIn": "Finish signing in",
     "alertsConfirm": "Confirm your alert",
-    "alertsUnsubscribe": "Unsubscribe from alerts"
+    "alertsUnsubscribe": "Unsubscribe from alerts",
+    "page": "Page"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -93,7 +101,9 @@
         "waitlist": "Waitlist only",
         "sold_out": "Sold out",
         "closed": "Closed"
-      }
+      },
+      "courseHeading": "The course",
+      "climateHeading": "Climate and conditions"
     },
     "build": {
       "title": "Build your package",
@@ -170,7 +180,9 @@
   },
   "faqPage": {
     "title": "Frequently asked questions",
-    "intro": "Answers to common questions about entries, packages and payments."
+    "intro": "Answers to common questions about entries, packages and payments.",
+    "empty": "Questions and answers will appear here soon.",
+    "generalHeading": "General questions"
   },
   "contact": {
     "title": "Contact us",
@@ -212,6 +224,8 @@
       "packagePreview": "Package preview",
       "suppliers": "Suppliers",
       "supplier": "Supplier",
+      "content": "Content",
+      "contentKind": "Content list",
       "integrations": "Integrations"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
@@ -559,7 +573,23 @@
         "allotment_released": "A released allotment cannot be changed.",
         "cost_not_editable": "A paid or called off cost item cannot be changed.",
         "fixed_cost_quantity": "A fixed cost has a quantity of 1.",
-        "package_not_found": "That package could not be found."
+        "package_not_found": "That package could not be found.",
+        "page_slug_taken": "A page with this address already exists in this language.",
+        "page_empty": "Write the page before publishing it.",
+        "page_not_legal": "Only a legal page has a legal review state.",
+        "guide_exists": "This race already has a guide in this language.",
+        "guide_empty": "Write at least one section before publishing the guide.",
+        "media_in_use": "This image is used by a page or a guide. Change those first.",
+        "media_not_found": "That image is not in the library.",
+        "media_alt_text": "Describe the image, or mark it decorative and leave the description empty.",
+        "banner_link_incomplete": "A link needs both its words and its address.",
+        "banner_window_invalid": "The banner must start before it ends.",
+        "redirect_exists": "There is already a redirect from this address.",
+        "redirect_loop": "That redirect would send visitors round in a circle.",
+        "redirect_chain_too_long": "That redirect would form a chain that is too long. Point it at the final address.",
+        "redirect_path_reserved": "The panel, the API and the site files cannot be redirected.",
+        "content_status_unchanged": "It is already in that state. Reload and try again.",
+        "content_not_found": "That item no longer exists."
       },
       "common": {
         "search": "Search",
@@ -1084,6 +1114,143 @@
         }
       }
     },
+    "content": {
+      "title": "Content",
+      "intro": "Write and publish pages, race guides, questions, banners, menus, images and redirects. Published changes appear on the public site within about a minute, with no deploy.",
+      "kindTitle": "{kind}",
+      "kindIntro": "Add, edit, publish and delete. Drafts stay private until you publish them.",
+      "backToContent": "All content",
+      "kinds": {
+        "pages": "Pages",
+        "guides": "Race guides",
+        "faqs": "FAQs",
+        "banners": "Banners",
+        "menu": "Menu",
+        "media": "Images",
+        "redirects": "Redirects"
+      },
+      "kindHints": {
+        "pages": "Pages such as About, Contact and the legal pages. A page at /pages/your-address is added automatically.",
+        "guides": "One guide per race: the course, the climate, how to get an entry and travel tips.",
+        "faqs": "Questions shown on the FAQ page, grouped by heading.",
+        "banners": "Short messages shown above every page, optionally between two dates.",
+        "menu": "Links in the main menu and the footer. A place with nothing published shows the built-in links.",
+        "media": "Images by address. Every image needs a description for screen readers, or must be marked decorative.",
+        "redirects": "Send an old address to a new one. Paths only, such as /old-page."
+      },
+      "loading": "Loading...",
+      "empty": "Nothing here yet.",
+      "listTitle": "{kind}",
+      "newTitle": "Add",
+      "editTitle": "Edit: {name}",
+      "create": "Add",
+      "save": "Save changes",
+      "saved": "Saved.",
+      "created": "Added.",
+      "edit": "Edit",
+      "close": "Close",
+      "delete": "Delete",
+      "deleteItem": "Delete {name}",
+      "publish": "Publish",
+      "publishItem": "Publish {name}",
+      "unpublish": "Unpublish",
+      "unpublishItem": "Unpublish {name}",
+      "statuses": {
+        "draft": "Draft",
+        "published": "Published"
+      },
+      "enabledState": {
+        "on": "On",
+        "off": "Off"
+      },
+      "legalPending": "Pending legal review",
+      "legalReviewed": "Legal review done",
+      "markReviewed": "Mark legal review as done",
+      "markPending": "Mark as pending legal review",
+      "legalHint": "A legal page shows a visible notice on the public site until it is marked as reviewed. Editing the text does not clear it.",
+      "languageHint": "Language code such as en-AU. Fixed once saved.",
+      "previewHint": "Public address: {path}",
+      "fields": {
+        "locale": "Language",
+        "slug": "Address",
+        "slugHint": "Lower case letters, numbers and hyphens, such as about-us.",
+        "kind": "Type",
+        "title": "Title",
+        "intro": "Introduction",
+        "body": "Text",
+        "bodyHint": "Plain text. Leave a blank line between paragraphs. Nothing is read as HTML.",
+        "seoTitle": "Search title",
+        "seoDescription": "Search description",
+        "heroMediaId": "Header image",
+        "noImage": "No image",
+        "raceId": "Race",
+        "chooseRace": "Choose a race",
+        "course": "The course",
+        "climate": "Climate and conditions",
+        "entry": "How to get an entry",
+        "travelTips": "Travel tips",
+        "category": "Heading",
+        "categoryHint": "Questions with the same heading are shown together.",
+        "question": "Question",
+        "answer": "Answer",
+        "sortOrder": "Position",
+        "sortOrderHint": "Lowest first.",
+        "message": "Message",
+        "linkLabel": "Link words",
+        "linkHref": "Link address",
+        "linkHint": "A path on this site such as /faq, or an https address. Leave both link fields empty for no link.",
+        "tone": "Kind",
+        "startsAt": "Shows from",
+        "endsAt": "Shows until",
+        "dateHint": "Date and time in your local time. Leave empty for no limit.",
+        "location": "Place",
+        "label": "Name",
+        "href": "Link address",
+        "src": "Image address",
+        "srcHint": "An https address, or a path on this site such as /placeholders/hero.svg. Only placeholder or licensed images.",
+        "altText": "Description for screen readers",
+        "decorative": "Decorative image (no description)",
+        "width": "Width in pixels",
+        "height": "Height in pixels",
+        "credit": "Credit or licence note",
+        "fromPath": "Old address",
+        "fromHint": "A path starting with one slash, such as /old-page. No query string.",
+        "toPath": "New address",
+        "statusCode": "Type",
+        "enabled": "Switched on"
+      },
+      "kindsLabels": {
+        "pageKinds": {
+          "general": "General page",
+          "legal": "Legal page"
+        },
+        "tones": {
+          "info": "Update",
+          "notice": "Notice",
+          "warning": "Warning"
+        },
+        "locations": {
+          "header": "Main menu",
+          "footer_company": "Footer: company",
+          "footer_legal": "Footer: legal"
+        },
+        "codes": {
+          "301": "301 Moved permanently",
+          "302": "302 Found",
+          "307": "307 Temporary",
+          "308": "308 Permanent"
+        }
+      },
+      "summary": {
+        "page": "/{slug} ({locale}) - {status}",
+        "guide": "{race} ({locale}) - {status}",
+        "faq": "{question} - {status}",
+        "banner": "{message} - {status}",
+        "menu": "{place}: {label} -> {href} - {status}",
+        "media": "{label}",
+        "redirect": "{from} -> {to} ({code}) - {state}"
+      }
+    },
     "integrations": {
       "title": "Integrations",
       "intro": "API keys let another tool use the admin API; webhooks tell another tool when something happens. Every change needs your authenticator code and is recorded in the audit log.",
@@ -1310,5 +1477,8 @@
     "shareImageAlt": "{name}: race travel for runners",
     "shareImageTagline": "Race travel for runners, based in Australia.",
     "shareImageRaceLine": "{city}, {country}"
+  },
+  "pages": {
+    "notFoundTitle": "Page not found"
   }
 }

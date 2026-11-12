@@ -39,6 +39,15 @@ export function breadcrumbJsonLd(items: ReadonlyArray<{ name: string; path: stri
   };
 }
 
+/** A `FAQPage` for the published questions, in the order the page shows them. Answers are plain text. */
+export function faqJsonLd(faqs: ReadonlyArray<{ question: string; answer: string }>): JsonLd {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqs.map((f) => ({ '@type': 'Question', name: f.question, acceptedAnswer: { '@type': 'Answer', text: f.answer } })),
+  };
+}
+
 const EVENT_STATUS: Record<string, string> = {
   cancelled: 'https://schema.org/EventCancelled',
   postponed: 'https://schema.org/EventPostponed',

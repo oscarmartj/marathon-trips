@@ -1,0 +1,225 @@
+// ---- Task 8.1: content manager (guides, pages, FAQs, banners, menu, redirects, media) ----
+// CHECKs live in migration 0012. Content rows are editorial text, not personal data. Staff edit them in the panel and the
+// public web reads the published ones from the API, so publishing never needs a deploy.
+
+enum ContentStatus {
+  draft
+  published
+}
+
+enum PageKind {
+  general
+  legal
+}
+
+enum BannerTone {
+  info
+  notice
+  warning
+}
+
+enum MenuLocation {
+  header
+  footer_company
+  footer_legal
+}
+
+model MediaAsset {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  /// @nopii https address or a path on this site; the image itself lives elsewhere
+  src         String
+  /// @nopii what the image shows; empty only when decorative
+  altText     String         @default("")
+  /// @nopii true for an image that adds nothing for a screen reader (alt text stays empty)
+  decorative  Boolean        @default(false)
+  /// @nopii pixels, so the page can reserve space
+  width       Int?
+  height      Int?
+  /// @nopii where the image comes from, such as a placeholder or a licence note
+  credit      String         @default("")
+  /// @nopii name in the library
+  label       String
+  /// @nopii optimistic lock for the admin panel
+  version     Int            @default(0)
+  /// @nopii timestamp
+  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt   DateTime       @updatedAt @db.Timestamptz(3)
+  guides      ContentGuide[]
+  pages       ContentPage[]
+
+  @@map("content_media")
+}
+
+model ContentPage {
+  id                 String         @id @default(uuid(7)) @db.Uuid
+  /// @nopii language tag such as en-AU
+  locale             String         @default("en-AU")
+  /// @nopii address segment, such as about or terms
+  slug               String
+  /// @nopii general or legal
+  kind               PageKind       @default(general)
+  /// @nopii editorial text
+  title              String
+  /// @nopii editorial text
+  intro              String         @default("")
+  /// @nopii editorial text, paragraphs separated by a blank line
+  body               String         @default("")
+  /// @nopii draft or published
+  status             ContentStatus  @default(draft)
+  /// @nopii timestamp
+  publishedAt        DateTime?      @db.Timestamptz(3)
+  /// @nopii editorial text
+  seoTitle           String         @default("")
+  /// @nopii editorial text
+  seoDescription     String         @default("")
+  /// @nopii true while a legal page has not been reviewed; the web shows a visible notice
+  legalReviewPending Boolean        @default(false)
+  heroMediaId        String?        @db.Uuid
+  heroMedia          MediaAsset?    @relation(fields: [heroMediaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii optimistic lock for the admin panel
+  version            Int            @default(0)
+  /// @nopii timestamp
+  createdAt          DateTime       @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt          DateTime       @updatedAt @db.Timestamptz(3)
+
+  @@unique([locale, slug])
+  @@index([status])
+  @@map("content_pages")
+}
+
+model ContentGuide {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  raceId         String        @db.Uuid
+  race           Race          @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii language tag such as en-AU
+  locale         String        @default("en-AU")
+  /// @nopii draft or published
+  status         ContentStatus @default(draft)
+  /// @nopii timestamp
+  publishedAt    DateTime?     @db.Timestamptz(3)
+  /// @nopii editorial text
+  course         String        @default("")
+  /// @nopii editorial text
+  climate        String        @default("")
+  /// @nopii editorial text
+  entry          String        @default("")
+  /// @nopii editorial text
+  travelTips     String        @default("")
+  /// @nopii editorial text
+  seoTitle       String        @default("")
+  /// @nopii editorial text
+  seoDescription String        @default("")
+  heroMediaId    String?       @db.Uuid
+  heroMedia      MediaAsset?   @relation(fields: [heroMediaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii optimistic lock for the admin panel
+  version        Int           @default(0)
+  /// @nopii timestamp
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@unique([raceId, locale])
+  @@index([status])
+  @@map("content_guides")
+}
+
+model ContentFaq {
+  id        String        @id @default(uuid(7)) @db.Uuid
+  /// @nopii language tag such as en-AU
+  locale    String        @default("en-AU")
+  /// @nopii heading the question is listed under
+  category  String        @default("")
+  /// @nopii editorial text
+  question  String
+  /// @nopii editorial text
+  answer    String
+  /// @nopii position in the list, lowest first
+  sortOrder Int           @default(0)
+  /// @nopii draft or published
+  status    ContentStatus @default(draft)
+  /// @nopii optimistic lock for the admin panel
+  version   Int           @default(0)
+  /// @nopii timestamp
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@index([locale, status, sortOrder])
+  @@map("content_faqs")
+}
+
+model ContentBanner {
+  id        String        @id @default(uuid(7)) @db.Uuid
+  /// @nopii language tag such as en-AU
+  locale    String        @default("en-AU")
+  /// @nopii editorial text
+  message   String
+  /// @nopii editorial text
+  linkLabel String        @default("")
+  /// @nopii internal path or https address
+  linkHref  String        @default("")
+  /// @nopii info, notice or warning
+  tone      BannerTone    @default(info)
+  /// @nopii timestamp, null means no start
+  startsAt  DateTime?     @db.Timestamptz(3)
+  /// @nopii timestamp, null means no end
+  endsAt    DateTime?     @db.Timestamptz(3)
+  /// @nopii draft or published
+  status    ContentStatus @default(draft)
+  /// @nopii optimistic lock for the admin panel
+  version   Int           @default(0)
+  /// @nopii timestamp
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@index([locale, status])
+  @@map("content_banners")
+}
+
+model ContentMenuItem {
+  id        String        @id @default(uuid(7)) @db.Uuid
+  /// @nopii language tag such as en-AU
+  locale    String        @default("en-AU")
+  /// @nopii header, footer_company or footer_legal
+  location  MenuLocation
+  /// @nopii editorial text
+  label     String
+  /// @nopii internal path or https address
+  href      String
+  /// @nopii position in the menu, lowest first
+  sortOrder Int           @default(0)
+  /// @nopii draft or published
+  status    ContentStatus @default(draft)
+  /// @nopii optimistic lock for the admin panel
+  version   Int           @default(0)
+  /// @nopii timestamp
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@index([locale, location, status, sortOrder])
+  @@map("content_menu_items")
+}
+
+model ContentRedirect {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  /// @nopii path on this site, starting with a slash, no query
+  fromPath   String   @unique
+  /// @nopii internal path or https address
+  toPath     String
+  /// @nopii 301, 302, 307 or 308
+  statusCode Int      @default(301)
+  /// @nopii false switches the redirect off without deleting it
+  enabled    Boolean  @default(true)
+  /// @nopii optimistic lock for the admin panel
+  version    Int      @default(0)
+  /// @nopii timestamp
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("content_redirects")
+}

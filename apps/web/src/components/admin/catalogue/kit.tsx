@@ -53,7 +53,7 @@ export function useLoad<T>(path: string | null) {
 export interface FieldDef {
   key: string;
   label: string;
-  type: 'text' | 'number' | 'date' | 'select' | 'checkbox' | 'textarea';
+  type: 'text' | 'number' | 'date' | 'datetime-local' | 'select' | 'checkbox' | 'textarea';
   options?: ReadonlyArray<{ value: string; label: string }>;
   required?: boolean;
   maxLength?: number;
