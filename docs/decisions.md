@@ -15,9 +15,32 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 | 2026-11-10 | Orquestación por riesgo: Sonnet por defecto, Opus para planificar y revisar | Optimizar el uso |
 | 2026-11-11 | Modo autónomo con Projects: coordinador, hilos en paralelo, revisor independiente en lugar de la aprobación de Oscar, y fusión automática con CI en verde | Terminar antes sin que Oscar esté pendiente de cada fase |
 | 2026-11-11 | Las reglas de `.claude/rules/` se cargan siempre, sin `paths` | Las reglas con rutas no se cargan en los hilos en la nube |
+| 2026-11-12 | Dinero aparcado: cobros reales, libro contable real, reembolsos, contracargos, conciliación, recibos y GST, divisas, pagos a proveedores y cancelación con penalización. Queda listo, sin modo real: tipos con dinero entero, motor de precios, `PaymentProvider` con simulador y checkout contra el simulador | Decisión de Oscar (0.1; sección "Aparcado: dinero" del plan). 15 tareas aparcadas y 6 parciales en `docs/autonomous.md`; se retoma quitando la etiqueta |
+| 2026-11-12 | Orquestador o adaptadores propios: adaptadores propios tras `PaymentProvider` (Hyperswitch solo como adaptador futuro, 9.1) | Desempate de `docs/autonomous.md` y 0.7: el orquestador no cubre la mayoría de pasarelas australianas y añade un servicio que operar |
+| 2026-11-12 | Alojamiento: un servidor en Sídney con Docker Compose y Caddy (combinación B de `docs/research/hosting.md`) | Es la más barata con todos los precios confirmados (0.7, 8.7) |
+| 2026-11-12 | Solo tarjeta o también transferencia: se construyen las dos, cada una con su interruptor | Decisión prevista en `docs/autonomous.md` |
+| 2026-11-12 | Ninguna pasarela nueva en el catálogo de pagos | Sin evidencia oficial en 0.7 |
+| 2026-11-12 | Autenticación propia en lugar de Better Auth (enlace mágico, contraseña con argon2id, TOTP, step-up, límites en memoria sin `@nestjs/throttler`) | Plan 0.3 §3.1: menos superficie y control de los fallos (retraso progresivo, un solo uso bajo concurrencia); se deshace con una migración |
+| 2026-11-12 | El proxy de la web no reenvía la IP del cliente salvo con `WEB_TRUSTED_PROXY_HOPS`; `TRUST_PROXY=uniquelocal`, `WEB_TRUSTED_PROXY_HOPS=1` y puerto 4000 sin publicar en producción (comprobado por `scripts/check-deploy-config.mjs`) | Evitar suplantar `X-Forwarded-For` (0.3, 8.7) |
+| 2026-11-12 | El acceso de clientes va tras el flag `auth.customer_sign_in` (apagado si falta; el seed lo enciende en desarrollo) | Nada visible al público hasta decidirlo (0.3) |
+| 2026-11-12 | Versiones conservadoras: Nest 11, TypeScript 5.9, ESLint 9, Vitest 4, Prisma 7.10 (no Nest 12, TS 7, ESLint 10 ni Prisma 8 RC) | Estabilidad; se suben con un PR (0.2) |
+| 2026-11-12 | La prueba de convenciones del esquema analiza el texto de los `.prisma`, no el DMMF | No depende de internos de Prisma (0.2) |
+| 2026-11-12 | Una sola cola `events.deliver` para todos los consumidores; faltante de flag = apagado; el fallo de idempotencia borra el registro | Evita DDL por módulo y estados a medias (0.4) |
+| 2026-11-12 | Adaptador S3 de `FileStorage` no construido; la batería de contrato queda lista | Sin emulador libre y ligero comprobado (0.4) |
+| 2026-11-12 | `Attachment` fuera de 0.5; importar y exportar CSV síncronos (`CsvJob` sin archivos); el índice de búsqueda se escribe en la misma transacción | Alcance de 0.5; se amplía con una migración |
+| 2026-11-12 | Fuentes del sistema y marca provisional (naranja rojizo, lima, azul noche; logotipo de dos chevrones); un solo idioma `en-AU`; sin sitemap ni datos estructurados hasta la fase de SEO | Sin descargar tipografías ni fotos (0.6); se edita `brand.config.ts` |
+| 2026-11-12 | Copias: cifrado obligatorio en producción, diaria 03:30, 14 locales, pérdida máxima 24 h (sin WAL), copia externa con `rclone` tras `BACKUP_REMOTE_KIND` | Simple y verificable (8.6); alternativa: SDK de S3 |
+| 2026-11-12 | El modo mantenimiento deja pasar `/admin/*`, el acceso del personal y `GET /health` | El personal debe poder terminar el mantenimiento (8.6) |
+| 2026-11-12 | Imagen de producción construida en el servidor con el Dockerfile de desarrollo; Caddy con TLS automático; correo en `catch` hasta que Oscar ponga SMTP | Sin registro de imágenes ni cuentas (8.7) |
+| 2026-11-12 | Catálogo: solo `AUD`; `InventoryPool.editionId`; `InventoryMovement` sin `@appendOnly` pero con disparadores; activar un reclamo exige nota y step-up; un `guaranteedEntry` exige al menos una opción de dorsal; eventos en snake_case | Plan 1.1; se deshacen con una migración |
+| 2026-11-12 | Las pruebas que desactivan a todos los owners usan una base propia por hilo | Evita carreras entre hilos (0.fix-1) |
+| 2026-11-12 | Las automatizaciones no aprueban, rechazan ni cancelan reservas (desviación de `docs/architecture.md`) | Plan 0.1, sección 9 punto 30 |
+| 2026-11-12 | Las 34 decisiones de la sección 9 del plan de 0.1 y los 12 supuestos de la 11 valen salvo que una línea posterior diga otra cosa (participación por viajero, cupos en `InventoryPool`, importes `BigInt` con signo, sin `Float`/`Decimal`, roles de base de datos sin `CREATE`, `@pii`/`@nopii`/`@secret`, toda ruta con marca de acceso, ninguna llamada `live` fuera de producción) | Plan 0.1; cada una lleva allí cómo deshacerla |
+| 2026-11-12 | `scripts/check-dependency-table.mjs` (solo Node, sin dependencias) entra en 0.1 como excepción a «sin código» y 0.2 lo añade a `pnpm lint` | Comprobar mecánicamente la tabla de dependencias |
 
 ## Abiertas
 
-- Orquestador de pagos (Hyperswitch) frente a adaptadores propios: se decide con `docs/research/payment-providers.md`.
-- Proveedor de alojamiento: se decide con `docs/research/hosting.md`.
-- Lanzar solo con tarjeta o también con transferencia.
+- Orquestador de pagos: **resuelta** (adaptadores propios; fila del 2026-11-12). Alojamiento: **resuelta** (combinación B). Solo tarjeta o también transferencia: **resuelta** (las dos, con interruptor).
+- Nombre de marca definitivo (hoy «Marathon Trips», en `brand.config.ts`).
+- Cuándo retomar el dinero (Oscar quita la etiqueta «aparcada» de `docs/autonomous.md`).
+- Si el límite por IP en memoria basta con más de una instancia de API (hoy una; con más, mover los contadores a PostgreSQL).

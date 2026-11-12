@@ -6,20 +6,19 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Ahora
 
-- **Fase en curso:** 0
-- **Siguiente tarea:** 0.1 (plan general y modelo de datos, sin código)
-- **Bloqueos:** ninguno
+- **Fase 0:** hecha: 0.1 a 0.7 y 0.fix-1 en `main`, CI en verde en `4d83a4c`. Se da por cerrada al fusionar 0.fix-2 (único criterio parcial: datos demo comprobados dentro de `docker compose up`).
+- **Hechas fuera de fase:** 8.6 (copias y monitor), 8.7 (guía de despliegue) y 1.1 (API de catálogo).
+- **Siguiente tarea:** 0.fix-2; en paralelo 1.2 y 1.3 (en curso), 1.5 y 2.1 (dependen solo de 1.1). Dinero aparcado desde el 2026-11-12.
+- **Bloqueos:** ninguno que detenga el trabajo; lo externo está en `docs/BLOCKED.md`.
 
 ## Pendiente de Oscar
 
-- Elegir nombre de marca definitivo.
-- Decidir si el lanzamiento es solo con tarjeta (hoy: Stripe + transferencia con PayID).
-- Pedir a Stripe confirmación por escrito de que acepta un operador de viajes.
+- Todo está en `docs/BLOCKED.md` (lo externo) y `docs/FINAL-REVIEW.md` (lo que revisar); no se abre al público nada sin repasarlos.
 
 ## Hecho
 
-Nada todavía.
+Fase 0 (salvo 0.fix-2), 8.6, 8.7 y 1.1: ver `docs/done/`.
 
 ## Sin verificar
 
-Nada todavía. Aquí va lo que se construyó pero no se pudo comprobar, con el motivo.
+Docker no existe en el entorno de los hilos: `compose-smoke` solo corre en CI. Detalle por tarea en `docs/done/` y en `docs/FINAL-REVIEW.md`.
