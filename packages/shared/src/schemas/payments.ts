@@ -58,3 +58,32 @@ export const paymentPlanViewSchema = z.object({
   liveAttempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),
 });
 export type PaymentPlanView = z.infer<typeof paymentPlanViewSchema>;
+
+// Checkout (task 3.5, plan docs/plans/3.5-checkout-simulator.md). The terms text always comes from the server; the
+// browser only says which version and digest it showed. Nothing here carries an amount, a currency or card data.
+
+/** Body of POST /booking-requests/:reference/terms-acceptance. */
+export const acceptTermsSchema = z.strictObject({
+  version: z.number().int().min(0).max(1_000_000),
+  digest: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type AcceptTerms = z.infer<typeof acceptTermsSchema>;
+
+export const checkoutTermsViewSchema = z.object({
+  slug: z.string(),
+  version: z.number().int(),
+  digest: z.string(),
+  title: z.string(),
+  intro: z.string(),
+  body: z.string(),
+  /** When the signed-in customer accepted exactly this text for this booking; null until then. */
+  acceptedAt: z.string().nullable(),
+});
+export type CheckoutTermsView = z.infer<typeof checkoutTermsViewSchema>;
+
+/** Answer of POST /booking-requests/:reference/payments/refresh: where the latest attempt stands, as the gateway says. */
+export const paymentRefreshViewSchema = z.object({
+  bookingStatus: z.string(),
+  attempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),
+});
+export type PaymentRefreshView = z.infer<typeof paymentRefreshViewSchema>;

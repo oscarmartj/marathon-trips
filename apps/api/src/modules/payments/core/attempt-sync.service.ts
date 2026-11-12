@@ -2,12 +2,15 @@ import { Inject, Injectable } from '@nestjs/common';
 import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
-import { notFound } from '../../../platform/http/api-error';
+import type { PaymentMethod, PaymentRefreshView } from '@mt/shared';
+import { ApiError, notFound } from '../../../platform/http/api-error';
+import { readBookingForPayments } from '../../bookings';
 import { LIVE_STATUSES, PaymentStateMachine, lockPayment } from './attempt-state';
 import type { AttemptEvent } from './attempt-state';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import type { ReplaceOutcome } from './attempts.service';
 import { ProviderGateway } from './gateway';
+import { ProviderError } from './provider';
 import type { ProviderPayment } from './provider';
 
 /** A failure of a call to the gateway (whatever it threw), carried up to run() with the original error. */
@@ -49,6 +52,32 @@ export class PaymentAttemptSyncService {
     const p = await this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true } });
     if (p.status === 'succeeded') return 'recorded';
     return outcome === 'applied' && !LIVE_STATUSES.includes(p.status) ? 'replaced' : 'unresolved';
+  }
+
+  /**
+   * The customer's "where does my payment stand" (task 3.5, plan section 3): a live attempt is read from the gateway and
+   * recorded exactly as the sweep does; then the latest attempt and the booking status are returned. It never creates
+   * an attempt. A gateway that cannot be reached leaves things as they are: the page keeps asking. A coverage failure
+   * still reaches the customer as the 503 "being processed".
+   */
+  async refresh(reference: string): Promise<PaymentRefreshView> {
+    const b = await readBookingForPayments(this.prisma, { reference });
+    if (!b) throw notFound();
+    const live = await this.prisma.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } });
+    if (live) {
+      try {
+        await this.run(live.id, 'sync');
+      } catch (err) {
+        const gatewayTrouble = err instanceof ProviderError || (err instanceof ApiError && err.status === 409);
+        if (!gatewayTrouble) throw err;
+      }
+    }
+    const latest = await this.prisma.payment.findFirst({ where: { bookingId: b.id }, orderBy: { attemptNumber: 'desc' }, select: { status: true, method: true, amountMinor: true, currency: true } });
+    const after = await readBookingForPayments(this.prisma, { id: b.id });
+    return {
+      bookingStatus: (after ?? b).status,
+      attempt: latest ? { status: latest.status, method: latest.method as PaymentMethod, amountMinor: latest.amountMinor.toString(), currency: latest.currency } : null,
+    };
   }
 
   async run(paymentId: string, action: SyncAction, now: Date = new Date()): Promise<SyncOutcome> {

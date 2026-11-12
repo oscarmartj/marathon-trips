@@ -119,7 +119,8 @@ describe('the hosted checkout page (plan 3.6, section 3)', () => {
     const s = await started();
     const events = await eventsOfAccount();
     const page = html(await t.http().get(apiPath(s.url)));
-    expect(page).toContain(`<a href="${escapeHtml(`${WEB_ORIGIN}/payments/return`)}" rel="noreferrer">Back to the site</a>`);
+    // Task 3.5: the return address names the booking, so the return page knows which one to show.
+    expect(page).toContain(`<a href="${escapeHtml(`${WEB_ORIGIN}/payments/return?ref=${s.reference}`)}" rel="noreferrer">Back to the site</a>`);
     expect(sim.find(acc.id, { ref: s.ref })?.status).toBe('requires_action');
     expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: s.paymentId } })).status).toBe('requires_action');
     expect(await eventsOfAccount()).toBe(events);

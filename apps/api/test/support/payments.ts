@@ -4,6 +4,7 @@ import { PAYMENTS_PERMISSIONS, ProviderAccountsService } from '../../src/modules
 import { SimulatorControl, SIMULATOR_WORLD } from '../../src/modules/payments/adapters/simulator/simulator';
 import type { SignedWebhook } from '../../src/modules/payments/adapters/simulator/simulator';
 import { webhookSecretAad } from '../../src/modules/payments/core/gateway';
+import { termsDigest } from '../../src/modules/payments/core/terms.service';
 import { STATE_HEADERS } from './auth';
 import type { TestApp } from './auth';
 import { ALL_BOOKING_PERMISSIONS, customerClient, requestBody } from './bookings';
@@ -78,13 +79,33 @@ export async function payingCustomer(t: TestApp): Promise<PayingCustomer> {
 }
 
 /** A real request by the customer, approved by staff through the API (the approval hook creates the plan). */
-export async function approvedBooking(t: TestApp, admin: Client, w: PricedWorld, c: CustomerClient): Promise<{ reference: string; bookingId: string }> {
+export async function approvedBooking(t: TestApp, admin: Client, w: PricedWorld, c: CustomerClient, opts: { acceptTerms?: boolean } = {}): Promise<{ reference: string; bookingId: string }> {
   const res = await c.request(requestBody(w));
   if (res.status !== 201) throw new Error(`request failed: ${res.status} ${JSON.stringify(res.body)}`);
   const b = await t.prisma.booking.findUniqueOrThrow({ where: { reference: res.body.reference as string } });
   const ok = await admin.post(`/admin/bookings/${b.id}/approve`, { version: b.version });
   if (ok.status !== 200) throw new Error(`approve failed: ${ok.status} ${JSON.stringify(ok.body)}`);
+  // Paying needs the booking terms accepted (task 3.5); these tests are about payments, so the customer accepts first.
+  if (opts.acceptTerms !== false) await acceptCurrentTerms(t, c, b.reference);
   return { reference: b.reference, bookingId: b.id };
+}
+
+/** Publishes the `terms` page (or edits it in place, as staff do) and returns it. */
+export async function ensureTerms(t: TestApp, over: { title?: string; intro?: string; body?: string } = {}): Promise<{ version: number; title: string; body: string }> {
+  const data = { title: over.title ?? 'Terms of booking', intro: over.intro ?? 'Read these before you pay.', body: over.body ?? 'First paragraph.\n\nSecond paragraph.' };
+  const where = { locale_slug: { locale: 'en-AU', slug: 'terms' } };
+  const existing = await t.prisma.contentPage.findUnique({ where });
+  if (!existing) return t.prisma.contentPage.create({ data: { slug: 'terms', locale: 'en-AU', kind: 'legal', status: 'published', publishedAt: new Date(), ...data }, select: { version: true, title: true, body: true } });
+  return t.prisma.contentPage.update({ where, data: { ...data, status: 'published', publishedAt: existing.publishedAt ?? new Date(), version: { increment: 1 } }, select: { version: true, title: true, body: true } });
+}
+
+/** The customer reads the current terms and accepts them, through the API. */
+export async function acceptCurrentTerms(t: TestApp, c: { cookie: string }, reference: string): Promise<void> {
+  if (!(await t.prisma.contentPage.findUnique({ where: { locale_slug: { locale: 'en-AU', slug: 'terms' } }, select: { status: true } }))?.status) await ensureTerms(t);
+  const view = await t.http().get(`/booking-requests/${reference}/checkout-terms`).set('Cookie', c.cookie);
+  if (view.status !== 200) throw new Error(`terms failed: ${view.status} ${JSON.stringify(view.body)}`);
+  const ok = await t.http().post(`/booking-requests/${reference}/terms-acceptance`).set(STATE_HEADERS).set('Cookie', c.cookie).send({ version: view.body.version, digest: view.body.digest });
+  if (ok.status !== 200) throw new Error(`accept failed: ${ok.status} ${JSON.stringify(ok.body)}`);
 }
 
 export const sendWebhook = (t: TestApp, a: SimAccount, w: SignedWebhook) => {
@@ -145,3 +166,7 @@ export async function deliver(t: TestApp, a: SimAccount, w: SignedWebhook): Prom
   const { PaymentWebhooksService } = await import('../../src/modules/payments/core/webhooks.service');
   return { status: 200, outcome: await t.app.get(PaymentWebhooksService).process(ev.id) };
 }
+
+/** The digest the API gives a page's words (the same function the server uses). */
+export const digestOf = (p: { title: string; intro?: string; body: string }, intro = 'Read these before you pay.'): string =>
+  termsDigest({ slug: 'terms', locale: 'en-AU', title: p.title, intro: p.intro ?? intro, body: p.body });

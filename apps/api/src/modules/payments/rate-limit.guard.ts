@@ -23,3 +23,20 @@ export class PaymentAttemptRateLimitGuard implements CanActivate {
     return true;
   }
 }
+
+/**
+ * Terms acceptance and "where is my payment" calls per hour, per customer user and per IP. Generous: the return page asks a
+ * few times while a payment settles (task 3.5, plan section 3). In memory, like the other limits.
+ */
+@Injectable()
+export class CheckoutRateLimitGuard implements CanActivate {
+  private readonly perUser = new WindowLimiter(240, 3_600_000);
+  private readonly perIp = new WindowLimiter(1_200, 3_600_000);
+
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<ApiRequest>();
+    if (!this.perIp.allow(`checkout:ip:${req.ip ?? 'unknown'}`)) throw tooManyRequests(3600);
+    if (!this.perUser.allow(`checkout:user:${req.auth?.userId ?? 'none'}`)) throw tooManyRequests(3600);
+    return true;
+  }
+}

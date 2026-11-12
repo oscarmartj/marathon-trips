@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
-import { startPaymentSchema } from '@mt/shared';
+import { acceptTermsSchema, startPaymentSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { Public, OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
@@ -8,10 +8,12 @@ import { unprocessable } from '../../platform/http/api-error';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import { ownsBookingReference } from '../bookings';
+import { PaymentAttemptSyncService } from './core/attempt-sync.service';
 import { PaymentAttemptsService } from './core/attempts.service';
+import { TermsService } from './core/terms.service';
 import { PaymentWebhooksService } from './core/webhooks.service';
 import { PAYMENTS_PERMISSIONS as P } from './manifest';
-import { PaymentAttemptRateLimitGuard } from './rate-limit.guard';
+import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard } from './rate-limit.guard';
 import { PaymentAdminService } from './admin.service';
 
 const uuid = () => new ParseUUIDPipe();
@@ -21,12 +23,40 @@ type In<S extends z.ZodType> = z.infer<S>;
 /** The customer's payment routes, under their booking's reference (plan 3.1, section 7). Another customer gets 404. */
 @Controller('booking-requests/:reference')
 export class PaymentCustomerController {
-  constructor(@Inject(PaymentAttemptsService) private readonly attempts: PaymentAttemptsService) {}
+  constructor(
+    @Inject(PaymentAttemptsService) private readonly attempts: PaymentAttemptsService,
+    @Inject(PaymentAttemptSyncService) private readonly sync: PaymentAttemptSyncService,
+    @Inject(TermsService) private readonly terms: TermsService,
+  ) {}
 
   @Get('payment-plan')
   @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'booking-payment-plan', owns: (ctx) => ownsBookingReference(ctx) })
   plan(@Param('reference') reference: string) {
     return this.attempts.planView(reference);
+  }
+
+  /** The booking terms as they stand now, and whether this customer accepted exactly this text (task 3.5). */
+  @Get('checkout-terms')
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'booking-checkout-terms', owns: (ctx) => ownsBookingReference(ctx) })
+  checkoutTerms(@Param('reference') reference: string) {
+    return this.terms.view(reference);
+  }
+
+  @Post('terms-acceptance')
+  @HttpCode(200)
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'booking-terms-acceptance', owns: (ctx) => ownsBookingReference(ctx) })
+  @UseGuards(CheckoutRateLimitGuard)
+  acceptTerms(@Param('reference') reference: string, @Body(new ZodPipe(acceptTermsSchema)) b: In<typeof acceptTermsSchema>, @Req() req: ApiRequest) {
+    return this.terms.accept(reference, b, actorOf(req));
+  }
+
+  /** Where the latest payment stands, read from the gateway when it is still open. Creates nothing and takes no amount. */
+  @Post('payments/refresh')
+  @HttpCode(200)
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'booking-payment-refresh', owns: (ctx) => ownsBookingReference(ctx) })
+  @UseGuards(CheckoutRateLimitGuard)
+  refresh(@Param('reference') reference: string) {
+    return this.sync.refresh(reference);
   }
 
   @Post('payments')

@@ -25,7 +25,8 @@ import { definePaymentSettings } from './core/settings';
 import { WEBHOOK_MAX_BYTES, WEBHOOK_PATH_PREFIX, PaymentWebhooksService } from './core/webhooks.service';
 import { PAYMENT_ENTITIES } from './entities';
 import { paymentsManifest } from './manifest';
-import { PaymentAttemptRateLimitGuard } from './rate-limit.guard';
+import { TermsService } from './core/terms.service';
+import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
 
 @Module({
@@ -36,7 +37,7 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
-    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, PaymentCoverageService,
+    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentCoverageService, TermsService,
     SimulatorCheckoutService,
   ],
   exports: [ProviderAccountsService, PaymentAttemptsService],
