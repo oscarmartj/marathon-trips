@@ -37,6 +37,7 @@ test('search_configure_request_manage', async ({ page, browser }) => {
   await signInStaff(page, owner());
 
   // The shop window: a published race with an open, priced package (set up through the panel's own API).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const call = async (method: 'post' | 'put' | 'get', path: string, data?: object): Promise<{ status: number; body: any }> => {
     const res: APIResponse = method === 'get' ? await page.request.get(`/api${path}`) : await page.request[method](`/api${path}`, { headers: STATE, data });
     const body = await res.json().catch(() => ({}));

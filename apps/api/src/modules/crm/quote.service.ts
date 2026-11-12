@@ -10,7 +10,7 @@ import { OutboxService } from '../../platform/events/outbox.service';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { MailService } from '../../platform/mail/mail.service';
-import { ReferenceGenerator, dbNow, jsonOf, snapshotBreakdownSchema, snapshotConfigurationSchema, startOfDayInBrisbane, todayInBrisbane } from '../bookings';
+import { ReferenceGenerator, dbNow, jsonOf, snapshotBreakdownSchema, snapshotConfigurationSchema, type SnapshotConfiguration, startOfDayInBrisbane, todayInBrisbane } from '../bookings';
 import { QuoteService as PricingQuoteService, REDEEM_TX_OPTIONS, publicPromoStatus } from '../pricing';
 import { safeError } from '../../platform/errors/safe-error';
 import { QUOTE_SENT_TEMPLATE } from './emails';
@@ -32,6 +32,17 @@ const STAFF_SELECT = {
  * Quotes (plan 2.5): staff prepare a configuration for a customer, the engine prices it (the request has no amount), the
  * result is kept as it was offered, and the quote is held until it expires. Accepting it is QuoteAcceptanceService.
  */
+/** The request that prices a stored, priced configuration again: choices only, as the public site sends them. */
+function requestOf(c: SnapshotConfiguration) {
+  return {
+    packageId: c.packageId,
+    rooms: c.rooms.map((r) => ({ roomOptionId: r.roomOptionId, travellers: r.travellers.map((t) => (t.raceDistanceId ? { participationType: t.participationType, raceDistanceId: t.raceDistanceId } : { participationType: t.participationType })) })),
+    extraNightsBefore: c.extraNightsBefore,
+    extraNightsAfter: c.extraNightsAfter,
+    extras: c.extras.map((e) => (e.travellerSlots.length > 0 ? { extraId: e.extraId, travellerSlots: e.travellerSlots } : { extraId: e.extraId, quantity: e.quantity })),
+  };
+}
+
 @Injectable()
 export class QuoteService {
   private readonly logger = new Logger('Crm');
@@ -102,8 +113,8 @@ export class QuoteService {
   /** draft → sent: sets the expiry (the database clock, never past the departure day) and queues the email, in one transaction. */
   async send(actor: AuditActor, id: string, version: number) {
     await runTransaction(this.prisma, async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string; status: string; version: number; customerId: string; validForDays: number; departureDate: Date; reference: string }>>`
-        SELECT id, status::text AS status, version, "customerId", "validForDays", "departureDate", reference FROM quotes WHERE id = ${id}::uuid FOR UPDATE`;
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; version: number; customerId: string; validForDays: number; departureDate: Date; balanceDueDate: Date; reference: string; packageId: string; configuration: unknown; priceBreakdown: unknown; totalMinor: bigint; depositMinor: bigint; priceVersionId: string }>>`
+        SELECT id, status::text AS status, version, "customerId", "validForDays", "departureDate", "balanceDueDate", reference, "packageId", configuration, "priceBreakdown", "totalMinor", "depositMinor", "priceVersionId" FROM quotes WHERE id = ${id}::uuid FOR UPDATE`;
       const q = rows[0];
       if (!q) throw notFound('quote_not_found', 'Quote not found');
       if (q.status !== 'draft') throw conflict('transition_not_allowed', 'Only a draft quote can be sent');
@@ -113,7 +124,22 @@ export class QuoteService {
       const at = await dbNow(tx);
       const departure = q.departureDate.toISOString().slice(0, 10);
       if (departure <= todayInBrisbane(at)) throw conflict('package_departed', 'This trip has already started');
-      const expiresAt = new Date(Math.min(at.getTime() + q.validForDays * 86_400_000, startOfDayInBrisbane(departure).getTime()));
+      // The price was worked out when the draft was made; the offer starts now, so it is worked out again and must be the same.
+      await tx.$queryRaw`SELECT 1 FROM packages WHERE id = ${q.packageId}::uuid FOR SHARE`;
+      const fresh = await this.pricing.priceIn(tx, requestOf(q.configuration as SnapshotConfiguration), { audience: 'public', now: at });
+      const held = q.priceBreakdown as { discountsMinor: string; surchargesMinor: string; fullPaymentDue: boolean };
+      if (fresh.totalMinor !== q.totalMinor || fresh.depositMinor !== q.depositMinor || fresh.priceVersionId !== q.priceVersionId || fresh.discountsMinor.toString() !== held.discountsMinor || fresh.surchargesMinor.toString() !== held.surchargesMinor) {
+        throw conflict('quote_price_changed', 'The price has changed since this draft was made. Create a new quote.');
+      }
+      // Until the balance date the deposit is smaller than the total; accepting after it would keep a stale deposit and date.
+      const balanceDue = q.balanceDueDate.toISOString().slice(0, 10);
+      let limit = startOfDayInBrisbane(departure).getTime();
+      if (!held.fullPaymentDue) {
+        const balanceStart = startOfDayInBrisbane(balanceDue).getTime();
+        if (balanceStart <= at.getTime()) throw conflict('quote_price_changed', 'The balance date has passed. Create a new quote.');
+        limit = Math.min(limit, balanceStart);
+      }
+      const expiresAt = new Date(Math.min(at.getTime() + q.validForDays * 86_400_000, limit));
       const n = await tx.$executeRaw`
         UPDATE quotes SET status = 'sent', "sentAt" = ${at}, "expiresAt" = ${expiresAt}, version = version + 1, "updatedAt" = ${at}
         WHERE id = ${id}::uuid AND status = 'draft' AND version = ${version}`;
@@ -167,13 +193,18 @@ export class QuoteService {
     });
     if (!q || q.status === 'draft') throw notFound('not_found', 'Not found');
     const at = await this.prisma.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at`;
-    const { trace: _trace, ...price } = q.priceBreakdown as unknown as z.infer<typeof snapshotBreakdownSchema>;
+    const held = q.priceBreakdown as unknown as z.infer<typeof snapshotBreakdownSchema>;
     const acceptable = q.status === 'sent' && q.expiresAt !== null && q.expiresAt.getTime() > at[0]!.at.getTime();
     return jsonOf({
       reference: q.reference, status: q.status, acceptable, expiresAt: q.expiresAt, departureDate: q.departureDate, returnDate: q.returnDate, balanceDueDate: q.balanceDueDate,
       currency: q.currency, totalMinor: q.totalMinor, depositMinor: q.depositMinor, bookingReference: q.booking?.reference ?? null,
       package: { slug: q.package.slug, name: q.package.name, editionYear: q.package.edition.year, race: q.package.edition.race },
-      price: { ...price, promo: { status: publicPromoStatus(price.promo.status) } },
+      // A list of what the customer may see: no ids, no rule trace, no configuration.
+      price: {
+        subtotals: held.subtotals, surchargesMinor: held.surchargesMinor, discountsMinor: held.discountsMinor, totalMinor: held.totalMinor,
+        depositMinor: held.depositMinor, balanceMinor: held.balanceMinor, balanceDueDate: held.balanceDueDate, fullPaymentDue: held.fullPaymentDue,
+        promo: { status: publicPromoStatus(held.promo.status) },
+      },
     });
   }
 

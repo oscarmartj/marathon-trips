@@ -9,7 +9,7 @@ export { QuotedBookingService } from './quoted-booking.service';
 export type { AcceptedQuote, LockedQuoteCustomer } from './quoted-booking.service';
 export { todayInBrisbane, startOfDayInBrisbane } from './request.service';
 export { ReferenceGenerator } from './support';
-export { snapshotBreakdownSchema, snapshotConfigurationSchema } from './snapshot-schema';
+export { snapshotBreakdownSchema, snapshotConfigurationSchema, type SnapshotConfiguration } from './snapshot-schema';
 export { jsonOf, dbNow } from './support';
 export { readBookingLimits } from './settings';
 export type { BookingLimits } from './settings';

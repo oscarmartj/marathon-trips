@@ -8,7 +8,10 @@ import { formatMoney } from '@/lib/builder';
 import { localisedText } from '@/lib/catalogue';
 import { formatDate } from '@/lib/catalogue-format';
 import { t } from '@/lib/i18n';
-import { dateInBrisbane } from './request-confirmation';
+
+/** The instant the price stops standing, in Brisbane time (the API holds an instant, not a day). */
+export const formatStands = (iso: string): string =>
+  new Intl.DateTimeFormat('en-AU', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Australia/Brisbane' }).format(new Date(iso));
 
 export interface QuoteView {
   reference: string;
@@ -64,6 +67,13 @@ export function QuoteDetailView({ view }: { view: QuoteView }) {
     [t('quote.lines.surcharges'), view.price.surchargesMinor],
     [t('quote.lines.discounts'), view.price.discountsMinor],
   ];
+  const rows: Array<[string, string]> = [
+    [t('quote.reference'), view.reference],
+    [t('bookingRequest.confirmation.dates'), t('bookingRequest.confirmation.dateRange', { from: formatDate(view.departureDate), to: formatDate(view.returnDate) })],
+    ...lines.filter(([, v]) => v !== '0').map(([label, v]): [string, string] => [label, formatMoney(v, view.currency)]),
+    [t('bookingRequest.confirmation.total'), formatMoney(view.totalMinor, view.currency)],
+    [t('bookingRequest.confirmation.deposit'), t('bookingRequest.confirmation.depositLine', { amount: formatMoney(view.depositMinor, view.currency), date: formatDate(view.balanceDueDate) })],
+  ];
   return (
     <>
       <PageHeader title={t('quote.title')} intro={localisedText(view.package.name)} />
@@ -72,26 +82,18 @@ export function QuoteDetailView({ view }: { view: QuoteView }) {
           <div className="notice" role="status">
             <p>{t('quote.notABooking')}</p>
             <p>{t('quote.nothingCharged')}</p>
-            {view.expiresAt ? <p>{t('quote.stands', { date: formatDate(dateInBrisbane(view.expiresAt)) })}</p> : null}
+            {view.expiresAt ? <p>{t('quote.stands', { when: formatStands(view.expiresAt) })}</p> : null}
           </div>
         ) : (
           <p className="notice" role="status">{t(`quote.status.${view.status}`)}</p>
         )}
         <dl>
-          <dt>{t('quote.reference')}</dt>
-          <dd>{view.reference}</dd>
-          <dt>{t('bookingRequest.confirmation.dates')}</dt>
-          <dd>{t('bookingRequest.confirmation.dateRange', { from: formatDate(view.departureDate), to: formatDate(view.returnDate) })}</dd>
-          {lines.filter(([, v]) => v !== '0').map(([label, v]) => (
+          {rows.map(([label, value]) => (
             <div key={label}>
               <dt>{label}</dt>
-              <dd>{formatMoney(v, view.currency)}</dd>
+              <dd>{value}</dd>
             </div>
           ))}
-          <dt>{t('bookingRequest.confirmation.total')}</dt>
-          <dd>{formatMoney(view.totalMinor, view.currency)}</dd>
-          <dt>{t('bookingRequest.confirmation.deposit')}</dt>
-          <dd>{t('bookingRequest.confirmation.depositLine', { amount: formatMoney(view.depositMinor, view.currency), date: formatDate(view.balanceDueDate) })}</dd>
         </dl>
         <Status message={error} />
         {view.acceptable ? (

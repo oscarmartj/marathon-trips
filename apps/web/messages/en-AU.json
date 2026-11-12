@@ -2335,7 +2335,7 @@
     "notFoundBody": "We could not show this quote. Sign in with the email address we sent it to, then open the link again.",
     "notABooking": "Accepting this quote asks us to hold these places for you. It is not a confirmed booking yet.",
     "nothingCharged": "You will not be charged now.",
-    "stands": "This price stands until the end of {date} (Brisbane time).",
+    "stands": "This price stands until {when} (Brisbane time).",
     "reference": "Reference",
     "accept": "Accept this quote",
     "accepting": "Accepting…",

@@ -67,7 +67,7 @@ export class CrmEmails {
     const b = await ctx.tx.booking.findUnique({
       where: { id },
       select: {
-        reference: true, currency: true, totalMinor: true, departureDate: true,
+        reference: true, currency: true, totalMinor: true, departureDate: true, approvedAt: true,
         customer: { select: { givenName: true, anonymisedAt: true } },
         package: { select: { name: true, edition: { select: { year: true, race: { select: { name: true } } } } } },
       },
@@ -101,8 +101,11 @@ export class CrmEmails {
         lines: [`Your request for ${trip} has been cancelled and the places we were holding are released.`],
       },
       expired: {
-        subject: `Your booking request ${b.reference} has expired`,
-        lines: [`We could not review your request for ${trip} in time, so it has expired and the places we were holding are released. You are welcome to send a new request.`],
+        subject: b.approvedAt ? `Your booking ${b.reference} has expired` : `Your booking request ${b.reference} has expired`,
+        // A booking that was approved (a quote's always is) expires because the next steps did not happen, not because we did not look.
+        lines: b.approvedAt
+          ? [`The hold on your places for ${trip} has ended because the next steps were not completed in time, and the places are released. You are welcome to get in touch or send a new request.`]
+          : [`We could not review your request for ${trip} in time, so it has expired and the places we were holding are released. You are welcome to send a new request.`],
       },
     };
     const m = body[state];
@@ -116,12 +119,12 @@ export class CrmEmails {
       where: { id },
       select: {
         reference: true, status: true, currency: true, totalMinor: true, depositMinor: true, expiresAt: true,
-        customer: { select: { givenName: true, anonymisedAt: true } },
+        customer: { select: { givenName: true, anonymisedAt: true, deletedAt: true } },
         package: { select: { name: true, edition: { select: { year: true, race: { select: { name: true } } } } } },
       },
     });
     // Withdrawn or expired before the send step ran: nothing to offer any more.
-    if (!q || q.customer.anonymisedAt || q.status !== 'sent' || !q.expiresAt) throw new AppError('quote_no_longer_open', 'The quote is no longer open');
+    if (!q || q.customer.anonymisedAt || q.customer.deletedAt || q.status !== 'sent' || !q.expiresAt) throw new AppError('quote_no_longer_open', 'The quote is no longer open');
     const trip = `${en(q.package.edition.race.name)} ${q.package.edition.year}: ${en(q.package.name)}`;
     return {
       subject: `Your quote ${q.reference} for ${en(q.package.edition.race.name)} ${q.package.edition.year}`,

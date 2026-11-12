@@ -39,6 +39,11 @@ const day = (d: Date) => d.toISOString().slice(0, 10);
  * customer, quote, then the booking and the stock. The booking gets the price the quote holds, not a new one. Accepting
  * twice, or from two tabs at once, gives the same booking: the second waits on the quote's lock and finds it accepted.
  */
+/** A sent quote can be accepted strictly before its expiry instant: at the instant itself, and after it, it cannot. */
+export function quoteIsOpenAt(expiresAt: Date | null, at: Date): boolean {
+  return expiresAt !== null && expiresAt.getTime() > at.getTime();
+}
+
 @Injectable()
 export class QuoteAcceptanceService {
   constructor(
@@ -79,7 +84,7 @@ export class QuoteAcceptanceService {
     }
     if (q.status !== 'sent') throw conflict('quote_not_available', 'This quote can no longer be accepted');
     const at = await dbNow(tx);
-    if (!q.expiresAt || q.expiresAt.getTime() <= at.getTime()) throw conflict('quote_expired', 'This quote has expired. Ask us for a new one.');
+    if (!quoteIsOpenAt(q.expiresAt, at)) throw conflict('quote_expired', 'This quote has expired. Ask us for a new one.');
 
     // The package, shared, and still on sale; the trip still ahead.
     await lockPackage(tx, q.packageId, 'share');

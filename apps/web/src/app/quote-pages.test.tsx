@@ -19,6 +19,11 @@ describe('quote page', () => {
     expect(text).toContain('$1,325.00');
     expect(text).toContain('$900.00');
     expect(text).not.toMatch(/guaranteed|official/i);
+    // The expiry is an instant: 09:23 UTC on the 19th is 7:23 pm in Brisbane, and the page says so.
+    expect(text).toContain('This price stands until 19 November 2026');
+    expect(text).toMatch(/7:23\s?pm \(Brisbane time\)/i);
+    // One valid description list: every term and description sits in a group.
+    expect(html).not.toMatch(/<dl>\s*<dt>/);
     expect(html).toContain('Accept this quote');
   });
 

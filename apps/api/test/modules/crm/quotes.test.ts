@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CRM_PERMISSIONS } from '../../../src/modules/crm';
 import { PermissionRegistry } from '../../../src/platform/access/permissions';
 import { QuoteService } from '../../../src/modules/crm/quote.service';
+import { quoteIsOpenAt } from '../../../src/modules/crm/acceptance.service';
+import { todayInBrisbane } from '../../../src/modules/bookings';
 import { QUOTE_OWNERSHIP_MISSES_PER_HOUR } from '../../../src/modules/crm/ownership';
 import { STATE_HEADERS, TestApp, makeApp, uniqueEmail } from '../../support/auth';
 import { closeCatalogue, staffClient } from '../../support/catalogue';
@@ -117,7 +119,9 @@ describe('creating, sending and withdrawing', () => {
     expect(emails[0]).toMatchObject({ templateKey: 'crm.quote_sent', status: 'queued', customerId });
     const view = (await t.http().get(`/quotes/${q.reference}`).set('Cookie', client.cookie)).body;
     expect(view).toMatchObject({ reference: q.reference, status: 'sent', acceptable: true, totalMinor: draft.totalMinor, bookingReference: null });
-    expect(view.price.trace).toBeUndefined();
+    // A list of what the customer may see: no rule trace, no ids, no configuration.
+    expect(Object.keys(view.price).sort()).toEqual(['balanceDueDate', 'balanceMinor', 'depositMinor', 'discountsMinor', 'fullPaymentDue', 'promo', 'subtotals', 'surchargesMinor', 'totalMinor']);
+    expect(JSON.stringify(view)).not.toMatch(/priceVersionId|engineVersion|refId|roomOptionId|raceDistanceId|trace/);
     expect(JSON.stringify(view)).not.toMatch(/"id"|customerId|createdById/);
   });
 
@@ -208,18 +212,23 @@ describe('the quote table keeps what was offered (trigger)', () => {
     await widen(w);
     q = await sendQuote(admin, await makeQuote(admin, (await linkedCustomer(t)).customerId, w));
   });
-  const run = (sql: string) => t.prisma.$executeRawUnsafe(sql.replace(/\$ID/g, `'${q.id}'`));
+  let otherCustomerId: string;
+  beforeAll(async () => {
+    otherCustomerId = (await linkedCustomer(t)).customerId;
+  });
+  const run = (sql: string) => t.prisma.$executeRawUnsafe(sql.replace(/\$ID/g, `'${q.id}'`).replace(/\$OTHER/g, `'${otherCustomerId}'`));
 
   it.each([
     ['the total', `UPDATE quotes SET "totalMinor" = 1 WHERE id = $ID`],
     ['the deposit', `UPDATE quotes SET "depositMinor" = 0 WHERE id = $ID`],
     ['the breakdown', `UPDATE quotes SET "priceBreakdown" = '{}' WHERE id = $ID`],
     ['the configuration', `UPDATE quotes SET "configuration" = '{}' WHERE id = $ID`],
-    ['the customer', `UPDATE quotes SET "customerId" = (SELECT id FROM customers LIMIT 1 OFFSET 7) WHERE id = $ID AND false OR id = $ID`],
+    ['the customer', `UPDATE quotes SET "customerId" = $OTHER WHERE id = $ID`],
     ['the expiry', `UPDATE quotes SET "expiresAt" = "expiresAt" + interval '30 days' WHERE id = $ID`],
     ['the reference', `UPDATE quotes SET reference = 'QT-AAAAAA' WHERE id = $ID`],
   ])('%s cannot change', async (_n, sql) => {
-    await expect(run(sql)).rejects.toThrow();
+    // The trigger's own message: not a NOT NULL or CHECK failure that would pass for the wrong reason.
+    await expect(run(sql)).rejects.toThrow(/never changes/);
     expect((await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } })).version).toBe(q.version);
   });
 
@@ -340,7 +349,15 @@ describe('accepting a quote', () => {
     expect(booking.snapshots[0]!.priceVersionId).toBe(w.versionId);
   });
 
-  it('expired_quote_cannot_be_accepted: at and after the expiry instant it is 409, before it is fine', async () => {
+  it('expired_quote_cannot_be_accepted: the instant itself and after it are closed, a moment before is open', () => {
+    const at = new Date('2027-01-31T14:00:00.000Z');
+    expect(quoteIsOpenAt(new Date(at.getTime() + 1), at)).toBe(true);
+    expect(quoteIsOpenAt(new Date(at.getTime()), at)).toBe(false);
+    expect(quoteIsOpenAt(new Date(at.getTime() - 1), at)).toBe(false);
+    expect(quoteIsOpenAt(null, at)).toBe(false);
+  });
+
+  it('expired_quote_cannot_be_accepted over HTTP: a quote past its expiry is 409 and makes nothing, one with a minute left is accepted', async () => {
     const w = await pricedWorld(admin);
     await widen(w);
     const { client, customerId } = await linkedCustomer(t);
@@ -457,5 +474,106 @@ describe('expiry job', () => {
     expect(['quote_expired', 'quote_not_available']).toContain(accept.body.code);
     expect(await t.prisma.booking.count({ where: { customerId } })).toBe(0);
     expect(await t.prisma.inventoryClaim.count({ where: { booking: { customerId } } })).toBe(0);
+  });
+
+  it('the expiry job and an acceptance racing across the real expiry instant: one outcome, never a booking from an expired quote', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const svc = t.app.get(QuoteService);
+    for (const offsetMs of [150, 350, 550]) {
+      const { client, customerId } = await linkedCustomer(t);
+      const q = await sendQuote(admin, await makeQuote(admin, customerId, w));
+      await asOwnerWithoutGuard(`UPDATE quotes SET "expiresAt" = clock_timestamp() + ($2 || ' milliseconds')::interval WHERE id = $1`, [q.id, String(offsetMs)]);
+      // The job keeps sweeping while the acceptance runs, so the expiry instant falls inside the acceptance.
+      const sweep = (async () => {
+        for (let i = 0; i < 12; i++) {
+          await svc.expireDue();
+          await new Promise((r) => setTimeout(r, 60));
+        }
+      })();
+      const [accept] = await Promise.all([acceptQuote(t, client, q.reference), sweep]);
+      const row = await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } });
+      const bookings = await t.prisma.booking.count({ where: { customerId } });
+      if (accept.status === 200) {
+        expect([row.status, bookings, row.bookingId === null]).toEqual(['accepted', 1, false]);
+      } else {
+        expect(accept.status).toBe(409);
+        expect(['quote_expired', 'quote_not_available']).toContain(accept.body.code);
+        expect([bookings, row.bookingId]).toEqual([0, null]);
+        expect(await t.prisma.inventoryClaim.count({ where: { booking: { customerId } } })).toBe(0);
+      }
+      // After the sweep the quote is final either way.
+      expect(['accepted', 'expired']).toContain(row.status === 'sent' ? (await svc.expireDue(), (await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } })).status) : row.status);
+    }
+  });
+});
+
+describe('what a sent quote offers is still true when it is sent (review 2.5, round 1)', () => {
+  const addDays = (day: string, n: number) => new Date(new Date(`${day}T00:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
+  const setBalanceDue = (packageId: string, day: string) => owner.query('UPDATE packages SET "balanceDueDate" = $2 WHERE id = $1', [packageId, day]);
+
+  it('quote_price_changed: a new price version published after the draft makes the send a 409, with no email and the draft untouched', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const { customerId } = await linkedCustomer(t);
+    const q = await makeQuote(admin, customerId, w);
+    const dearer = cardFor(w);
+    dearer.participationRates[0]!.amountPerPersonMinor = '35000';
+    await publishWith(admin, w.pkg.id, dearer, 'Dearer');
+    const r = await admin.post(`/admin/quotes/${q.id}/send`, { version: q.version });
+    expect([r.status, r.body.code]).toEqual([409, 'quote_price_changed']);
+    const row = await t.prisma.quote.findUniqueOrThrow({ where: { id: q.id } });
+    expect([row.status, row.expiresAt, row.version]).toEqual(['draft', null, q.version]);
+    expect(await t.prisma.outboundEmail.count({ where: { relatedEntityType: 'Quote', relatedEntityId: q.id } })).toBe(0);
+    // A fresh draft carries the new price and sends.
+    const again = await makeQuote(admin, customerId, w);
+    expect((await admin.post(`/admin/quotes/${again.id}/send`, { version: again.version })).status).toBe(200);
+  });
+
+  it('a draft whose price has not moved sends as before (the new check does not trip on an unchanged price)', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const { customerId } = await linkedCustomer(t);
+    const q = await makeQuote(admin, customerId, w);
+    expect((await admin.post(`/admin/quotes/${q.id}/send`, { version: q.version })).body.status).toBe('sent');
+  });
+
+  it('before the balance date the offer ends when that day starts (Brisbane), so the deposit it holds is still right when it is accepted', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const day = addDays(todayInBrisbane(new Date()), 3);
+    await setBalanceDue(w.pkg.id, day);
+    const { client, customerId } = await linkedCustomer(t);
+    const q = await sendQuote(admin, await makeQuote(admin, customerId, w, { validForDays: 30 }));
+    const sent = (await admin.get(`/admin/quotes/${q.id}`)).body;
+    expect(sent.priceBreakdown.fullPaymentDue).toBe(false);
+    expect(new Date(sent.expiresAt).toISOString()).toBe(new Date(`${day}T00:00:00+10:00`).toISOString());
+    const r = await acceptQuote(t, client, q.reference);
+    expect(r.status).toBe(200);
+    const b = await t.prisma.booking.findUniqueOrThrow({ where: { reference: r.body.bookingReference } });
+    expect(b.depositMinor < b.totalMinor).toBe(true);
+  });
+
+  it('on the balance day itself the price has become full payment, so a draft made the day before cannot be sent (409)', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    const { customerId } = await linkedCustomer(t);
+    await setBalanceDue(w.pkg.id, addDays(todayInBrisbane(new Date()), 1));
+    const q = await makeQuote(admin, customerId, w);
+    await setBalanceDue(w.pkg.id, todayInBrisbane(new Date()));
+    const r = await admin.post(`/admin/quotes/${q.id}/send`, { version: q.version });
+    expect([r.status, r.body.code]).toEqual([409, 'quote_price_changed']);
+  });
+
+  it('a draft made after the balance date is full payment from the start, and its validity is not cut short', async () => {
+    const w = await pricedWorld(admin);
+    await widen(w);
+    await setBalanceDue(w.pkg.id, addDays(todayInBrisbane(new Date()), -1));
+    const { customerId } = await linkedCustomer(t);
+    const q = await sendQuote(admin, await makeQuote(admin, customerId, w));
+    const row = (await admin.get(`/admin/quotes/${q.id}`)).body;
+    expect(row.priceBreakdown.fullPaymentDue).toBe(true);
+    expect(row.depositMinor).toBe(row.totalMinor);
+    expect((new Date(row.expiresAt).getTime() - new Date(row.sentAt).getTime()) / 86_400_000).toBeCloseTo(14, 3);
   });
 });

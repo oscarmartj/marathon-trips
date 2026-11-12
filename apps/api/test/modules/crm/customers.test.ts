@@ -6,6 +6,8 @@ import { TestApp, makeApp, uniqueEmail } from '../../support/auth';
 import { closeCatalogue, staffClient, CATALOGUE_AND_PRICING } from '../../support/catalogue';
 import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, contact, customerClient, requestBody } from '../../support/bookings';
 import { ALL_CRM_PERMISSIONS, ALL_CUSTOMER_PERMISSIONS, linkedCustomer, makeQuote, sendQuote } from '../../support/crm';
+import { EntityRegistry } from '../../../src/platform/entities/entity-registry';
+import { makeBookingFor } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 
@@ -215,5 +217,50 @@ describe('notes, tags and history on customers and bookings (the shared tools of
     await admin.post('/admin/customers', newCustomer({ givenName: tag }));
     expect((await admin.get(`/admin/search?q=${tag}`)).body.results ?? (await admin.get(`/admin/search?q=${tag}`)).body).toEqual(expect.not.arrayContaining([expect.objectContaining({ entityType: 'Customer' })]));
     expect(await t.prisma.$queryRawUnsafe<unknown[]>(`SELECT 1 FROM search_documents WHERE "entityType" IN ('Customer', 'Booking') LIMIT 1`).catch(() => [])).toEqual([]);
+  });
+});
+
+describe('personal data in notes and quotes: export and erasure (review 2.5, round 1)', () => {
+  it('the notes on a customer and on their bookings are exported, then redacted on erasure; other customers keep theirs', async () => {
+    const { customerId } = await linkedCustomer(t);
+    const other = await linkedCustomer(t);
+    const { bookingId } = await makeBookingFor(t, w, customerId);
+    const otherBooking = await makeBookingFor(t, w, other.customerId);
+    const secret = 'Her mother Maria Gonzalez is ill, phone 0412 000 111';
+    for (const [type, id] of [['Customer', customerId], ['Booking', bookingId], ['Customer', other.customerId], ['Booking', otherBooking.bookingId]] as const) {
+      expect((await admin.post(`/admin/tables/${type}/${id}/notes`, { body: `${secret} (${type})`, pinned: false })).status).toBe(201);
+    }
+    const registry = t.app.get(EntityRegistry);
+    const exported = async (type: string, id: string) => t.prisma.$transaction((tx) => registry.get(type)!.handlers!.export(tx, id));
+    const customerExport = JSON.stringify(await exported('Customer', customerId));
+    const bookingExport = JSON.stringify(await exported('Booking', customerId));
+    expect(customerExport).toContain(`${secret} (Customer)`);
+    expect(bookingExport).toContain(`${secret} (Booking)`);
+    expect(customerExport + bookingExport).not.toContain(other.client.email);
+    expect(customerExport + bookingExport).not.toMatch(/\(Customer\).*\(Customer\)/);
+
+    await t.prisma.$transaction(async (tx) => {
+      await registry.get('Customer')!.handlers!.anonymise(tx, customerId);
+      await registry.get('Booking')!.handlers!.anonymise(tx, customerId);
+    });
+    const notes = await t.prisma.note.findMany({ where: { entityId: { in: [customerId, bookingId] } } });
+    expect(notes).toHaveLength(2);
+    expect(notes.every((n) => n.body === '[redacted]')).toBe(true);
+    expect(JSON.stringify(await exported('Customer', customerId))).not.toContain('Maria');
+    const kept = await t.prisma.note.findMany({ where: { entityId: { in: [other.customerId, otherBooking.bookingId] } } });
+    expect(kept.map((n) => n.body).sort()).toEqual([`${secret} (Booking)`, `${secret} (Customer)`]);
+  });
+
+  it('quotes are a registered entity linked by customer: exported with reference, state, total and dates, and nothing of the configuration', async () => {
+    const registry = t.app.get(EntityRegistry);
+    expect(registry.get('Quote')?.customerLink).toEqual({ kind: 'column', column: 'customerId' });
+    const { customerId } = await linkedCustomer(t);
+    const q = await sendQuote(admin, await makeQuote(admin, customerId, w));
+    const rows = (await t.prisma.$transaction((tx) => registry.get('Quote')!.handlers!.export(tx, customerId))) as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ reference: q.reference, status: 'sent', currency: 'AUD' });
+    expect(Object.keys(rows[0]!).sort()).toEqual(['acceptedAt', 'createdAt', 'currency', 'departureDate', 'expiresAt', 'reference', 'returnDate', 'sentAt', 'status', 'totalMinor']);
+    await t.prisma.$transaction((tx) => registry.get('Quote')!.handlers!.anonymise(tx, customerId));
+    expect(await t.prisma.quote.count({ where: { customerId } })).toBe(1);
   });
 });

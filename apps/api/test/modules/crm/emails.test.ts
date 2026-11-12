@@ -95,6 +95,7 @@ describe('state_change_sends_one_email_each', () => {
     expect((await bookingOf(req.reference)).status).toBe('expired');
     const sent = await deliverAndSend(a.customerId);
     expect(sent.map((m) => m.subject)).toEqual([`Your booking request ${req.reference} has expired`]);
+    expect(sent[0]!.text).toContain('We could not review your request');
   });
 
   it('delivering the same events again, or the consumer running twice, sends nothing more', async () => {
@@ -138,6 +139,36 @@ describe('state_change_sends_one_email_each', () => {
     const sent = await deliverAndSend(a.customerId);
     expect(sent.map((m) => m.subject.replace(/MT-\w+/, 'REF'))).toEqual(['Your booking request REF is approved']);
     expect((await emailsOf(a.customerId)).map((e) => e.templateKey).sort()).toEqual(['crm.booking_approved', 'crm.quote_sent']);
+  });
+
+  it('expiry_text_matches_the_story: a booking that was approved (a quote\'s always is) is not told "we could not review your request"', async () => {
+    const a = await linkedCustomer(t);
+    const q = await sendQuote(admin, await makeQuote(admin, a.customerId, w));
+    await deliverAndSend(a.customerId);
+    const accepted = await acceptQuote(t, a.client, q.reference);
+    expect(accepted.status).toBe(200);
+    await deliverAndSend(a.customerId);
+    const booking = await bookingOf(accepted.body.bookingReference);
+    expect(booking.approvedAt).not.toBeNull();
+    await t.app.get(MailService).enqueue({
+      to: a.client.email, templateKey: 'crm.booking_expired', templateVersion: 1, locale: 'en-AU', dedupeKey: `booking:${booking.id}:expired`,
+      customerId: a.customerId, relatedEntityType: 'Booking', relatedEntityId: booking.id,
+    });
+    const sent = await deliverAndSend(a.customerId);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.subject).toBe(`Your booking ${booking.reference} has expired`);
+    expect(sent[0]!.text).toContain('next steps were not completed in time');
+    expect(sent[0]!.text).not.toContain('could not review your request');
+  });
+
+  it('a quote email for a customer whose account was deleted before the send step is not sent', async () => {
+    const a = await linkedCustomer(t);
+    await sendQuote(admin, await makeQuote(admin, a.customerId, w));
+    await t.prisma.customer.update({ where: { id: a.customerId }, data: { deletedAt: new Date() } });
+    const queued = await t.prisma.outboundEmail.findFirstOrThrow({ where: { customerId: a.customerId, templateKey: 'crm.quote_sent' } });
+    const before = t.mail.sent.length;
+    await t.app.get(MailService).processSend(queued.id).catch(() => undefined);
+    expect(t.mail.sent.length).toBe(before);
   });
 });
 
