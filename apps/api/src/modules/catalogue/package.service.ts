@@ -10,9 +10,9 @@ import type { AuditActor } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
-import { PackageOpenGates } from './open-gates';
+import { CatalogueRemovalGuards, PackageOpenGates } from './open-gates';
 import { LIVE_SALE_STATUSES, SALE_TRANSITIONS, canMove } from './transitions';
-import { Tx, assertVersion, defined, fromDate, orConflict, toDate, versionConflict, view } from './support';
+import { Tx, assertVersion, defined, fromDate, lockPackage, orConflict, orInUse, toDate, versionConflict, view } from './support';
 
 type Actor = AuditActor & { id: string };
 type Deposit = z.infer<typeof depositSchema>;
@@ -44,6 +44,7 @@ export class PackageService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(PackageOpenGates) private readonly gates: PackageOpenGates,
+    @Inject(CatalogueRemovalGuards) private readonly removalGuards: CatalogueRemovalGuards,
   ) {}
 
   // ---- Packages ----
@@ -114,6 +115,8 @@ export class PackageService {
    */
   async setSaleStatus(actor: Actor, id: string, input: { status: SaleStatus; version: number; reason?: string }) {
     await this.prisma.$transaction(async (tx) => {
+      // Locked first, so a concurrent change to the options (FOR SHARE) or a publish cannot slip past the gates (2.1, G1).
+      await lockPackage(tx, id, 'update');
       const before = await tx.package.findFirst({ where: { id, deletedAt: null, edition: { race: { deletedAt: null } } }, include: { edition: { select: { raceId: true, race: { select: { isDemo: true } } } } } });
       assertVersion(before, input.version, 'Package not found');
       const from = before.saleStatus as SaleStatus;
@@ -151,7 +154,24 @@ export class PackageService {
     });
   }
 
+  /**
+   * A package on sale must stay priceable (plan 2.1, G1): after a change to its options, the open gates run again in
+   * the same transaction and a failure undoes the change with a 409.
+   */
+  private async recheckOnSale(tx: Tx, pkg: { id: string; editionId: string; currency: string; saleStatus: string }): Promise<void> {
+    if (!LIVE_SALE_STATUSES.includes(pkg.saleStatus as SaleStatus)) return;
+    const failed = await this.gates.firstFailure(tx, { id: pkg.id, editionId: pkg.editionId, currency: pkg.currency });
+    if (failed) throw conflict(failed.code, failed.message);
+  }
+
+  private async refuseRemoval(tx: Tx, target: Parameters<CatalogueRemovalGuards['firstFailure']>[1]): Promise<void> {
+    const failed = await this.removalGuards.firstFailure(tx, target);
+    if (failed) throw conflict(failed.code, failed.message);
+  }
+
+  /** The package, locked FOR SHARE so its sale status cannot change until this change to its options commits. */
   private async livePackage(tx: Tx, id: string) {
+    await lockPackage(tx, id, 'share');
     const p = await tx.package.findFirst({ where: { id, deletedAt: null, edition: { race: { deletedAt: null } } }, include: { edition: { select: { raceId: true, race: { select: { isDemo: true } } } } } });
     if (!p) throw notFound('package_not_found', 'Package not found');
     return p;
@@ -169,7 +189,7 @@ export class PackageService {
 
   async setParticipation(actor: Actor, packageId: string, input: z.infer<typeof setParticipationSchema>) {
     await this.prisma.$transaction(async (tx) => {
-      await this.livePackage(tx, packageId);
+      const pkg = await this.livePackage(tx, packageId);
       const existing = await tx.packageParticipationOption.findMany({ where: { packageId }, select: { type: true } });
       const before = existing.map((e) => e.type).sort();
       await tx.packageParticipationOption.deleteMany({ where: { packageId } });
@@ -178,6 +198,7 @@ export class PackageService {
         actor, action: 'catalogue.package.participation_changed', entityType: 'Package', entityId: packageId,
         before: { participationTypes: before }, after: { participationTypes: [...input.types].sort() }, fieldClasses: { participationTypes: 'nopii' },
       });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }
@@ -192,6 +213,7 @@ export class PackageService {
         await this.poolFor(tx, input.entryPoolId, 'entry', pkg.editionId);
         const row = await tx.packageEntryOption.create({ data: { packageId, ...input } });
         await this.audit.record(tx, { actor, action: 'catalogue.entry_option.created', entityType: 'PackageEntryOption', entityId: row.id, after: view(row) });
+        await this.recheckOnSale(tx, pkg);
       }),
     );
     return this.get(packageId);
@@ -199,11 +221,13 @@ export class PackageService {
 
   async removeEntryOption(actor: Actor, packageId: string, id: string) {
     await this.prisma.$transaction(async (tx) => {
-      await this.livePackage(tx, packageId);
+      const pkg = await this.livePackage(tx, packageId);
       const row = await tx.packageEntryOption.findFirst({ where: { id, packageId } });
       if (!row) throw notFound('entry_option_not_found', 'Entry option not found');
-      await tx.packageEntryOption.delete({ where: { id } });
+      await this.refuseRemoval(tx, { kind: 'entry_option', packageId, raceDistanceId: row.raceDistanceId });
+      await orInUse('entry_option_in_use', 'Something still uses this entry option', () => tx.packageEntryOption.delete({ where: { id } }));
       await this.audit.record(tx, { actor, action: 'catalogue.entry_option.deleted', entityType: 'PackageEntryOption', entityId: id, before: view(row) });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }
@@ -245,6 +269,7 @@ export class PackageService {
       await this.poolFor(tx, input.roomPoolId, 'room', pkg.editionId);
       const row = await tx.roomOption.create({ data: { ...input, packageHotelId } });
       await this.audit.record(tx, { actor, action: 'catalogue.room.created', entityType: 'RoomOption', entityId: row.id, after: view(row) });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }
@@ -260,17 +285,20 @@ export class PackageService {
       if (input.roomPoolId) await this.poolFor(tx, input.roomPoolId, 'room', pkg.editionId);
       const after = await tx.roomOption.update({ where: { id: roomId }, data: defined(input) });
       await this.audit.record(tx, { actor, action: 'catalogue.room.updated', entityType: 'RoomOption', entityId: roomId, before: view(before), after: view(after) });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }
 
   async removeRoom(actor: Actor, packageId: string, roomId: string) {
     await this.prisma.$transaction(async (tx) => {
-      await this.livePackage(tx, packageId);
+      const pkg = await this.livePackage(tx, packageId);
       const before = await tx.roomOption.findFirst({ where: { id: roomId, packageHotel: { packageId } } });
       if (!before) throw notFound('room_not_found', 'Room not found');
-      await tx.roomOption.delete({ where: { id: roomId } });
+      await this.refuseRemoval(tx, { kind: 'room', roomOptionId: roomId, packageId });
+      await orInUse('room_in_use', 'Something still uses this room', () => tx.roomOption.delete({ where: { id: roomId } }));
       await this.audit.record(tx, { actor, action: 'catalogue.room.deleted', entityType: 'RoomOption', entityId: roomId, before: view(before) });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }
@@ -284,6 +312,7 @@ export class PackageService {
       const { schedule, ...rest } = input;
       const row = await tx.extra.create({ data: { ...rest, packageId, schedule: schedule ?? undefined } });
       await this.audit.record(tx, { actor, action: 'catalogue.extra.created', entityType: 'Extra', entityId: row.id, after: view(row) });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }
@@ -302,16 +331,18 @@ export class PackageService {
       if (res.count !== 1) throw versionConflict();
       const after = await tx.extra.findUniqueOrThrow({ where: { id: extraId } });
       await this.audit.record(tx, { actor, action: 'catalogue.extra.updated', entityType: 'Extra', entityId: extraId, before: view(before), after: view(after) });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }
 
   async removeExtra(actor: Actor, packageId: string, extraId: string) {
     await this.prisma.$transaction(async (tx) => {
-      await this.livePackage(tx, packageId);
+      const pkg = await this.livePackage(tx, packageId);
       const res = await tx.extra.updateMany({ where: { id: extraId, packageId, deletedAt: null }, data: { deletedAt: new Date(), deletedById: actor.id, version: { increment: 1 } } });
       if (res.count !== 1) throw notFound('extra_not_found', 'Extra not found');
       await this.audit.record(tx, { actor, action: 'catalogue.extra.deleted', entityType: 'Extra', entityId: extraId, before: { deletedAt: null }, after: { deletedAt: new Date() } });
+      await this.recheckOnSale(tx, pkg);
     });
     return this.get(packageId);
   }

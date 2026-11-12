@@ -14,7 +14,8 @@ export type OpenGate = (tx: Tx, pkg: GatedPackage) => Promise<OpenGateResult>;
 
 /**
  * Extra conditions for moving a package to `open` (plan 6.1). Catalogue itself checks the deposit; pricing (2.1)
- * registers "at least one published, current price version" here when it exists, so catalogue never imports pricing.
+ * registers "a published, current and complete price version" here, so catalogue never imports pricing. The same
+ * gates run again after any change to the options of a package on sale (plan 2.1, G1).
  */
 @Injectable()
 export class PackageOpenGates {
@@ -32,6 +33,35 @@ export class PackageOpenGates {
   async firstFailure(tx: Tx, pkg: GatedPackage): Promise<OpenGateResult> {
     for (const gate of this.gates.values()) {
       const r = await gate(tx, pkg);
+      if (r) return r;
+    }
+    return null;
+  }
+}
+
+/** Something about to be removed from the catalogue; ids only. */
+export type RemovalTarget =
+  | { kind: 'room'; roomOptionId: string; packageId: string }
+  | { kind: 'entry_option'; packageId: string; raceDistanceId: string }
+  | { kind: 'distance'; raceDistanceId: string };
+export type RemovalGuard = (tx: Tx, target: RemovalTarget) => Promise<OpenGateResult>;
+
+/**
+ * Checks other modules register before the catalogue removes a room, an entry option or a distance (plan 2.1, G1):
+ * pricing refuses while rates point at it, so a removal is a clear 409 and never a foreign-key error.
+ */
+@Injectable()
+export class CatalogueRemovalGuards {
+  private readonly guards = new Map<string, RemovalGuard>();
+
+  register(name: string, guard: RemovalGuard): void {
+    if (this.guards.has(name)) throw new AppError('removal_guard_duplicate', `Removal guard ${name} is already registered`);
+    this.guards.set(name, guard);
+  }
+
+  async firstFailure(tx: Tx, target: RemovalTarget): Promise<OpenGateResult> {
+    for (const guard of this.guards.values()) {
+      const r = await guard(tx, target);
       if (r) return r;
     }
     return null;
