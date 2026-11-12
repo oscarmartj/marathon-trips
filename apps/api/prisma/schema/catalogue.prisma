@@ -237,6 +237,7 @@ model RaceEdition {
   supplierContracts SupplierContract[]
   bookings          Booking[]
   quotes            Quote[]
+  keyDates          KeyDate[]
 
   @@unique([raceId, year])
   @@index([status])

@@ -61,11 +61,11 @@ export class TasksService {
    * `sourceRef` while it is open: a second call with the same reference returns the open task instead of a new one.
    * Titles are generated from codes and references, never from personal data.
    */
-  async createSystemIn(tx: Prisma.TransactionClient, input: { title: string; description?: string | null; entityType: string; entityId: string; sourceRef: string }) {
+  async createSystemIn(tx: Prisma.TransactionClient, input: { title: string; description?: string | null; dueAt?: Date | null; entityType: string; entityId: string; sourceRef: string }) {
     const open = await tx.task.findFirst({ where: { sourceRef: input.sourceRef, source: 'system', status: 'open', deletedAt: null } });
     if (open) return open;
     const task = await tx.task.create({
-      data: { title: input.title, description: input.description ?? null, entityType: input.entityType, entityId: input.entityId, source: 'system', sourceRef: input.sourceRef, createdById: null },
+      data: { title: input.title, description: input.description ?? null, dueAt: input.dueAt ?? null, entityType: input.entityType, entityId: input.entityId, source: 'system', sourceRef: input.sourceRef, createdById: null },
     });
     await this.audit.record(tx, { actor: SYSTEM_ACTOR, action: 'common.task.created', entityType: 'Task', entityId: task.id, after: pick(task as unknown as Record<string, unknown>), context: { sourceRef: input.sourceRef } });
     await this.search.sync(tx, this.table, task as unknown as Record<string, unknown>);

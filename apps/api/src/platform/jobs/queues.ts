@@ -91,6 +91,12 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  // Task 7.3: opens tasks for key dates that are coming up and closes the ones that no longer apply.
+  keydatesMaintenance: {
+    name: 'keydates.maintenance',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
+  },
   authMaintenance: {
     name: 'auth.maintenance',
     data: z.object({}).strict(),
