@@ -5,6 +5,8 @@
 export const FORWARD_REQUEST_HEADERS = ['cookie', 'origin', 'x-mt-csrf', 'content-type', 'accept', 'user-agent', 'x-request-id'] as const;
 export const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'x-request-id'] as const;
 
+export const API_KEY_AUTHORIZATION = /^Bearer mtk_[a-z2-7]{12}_[A-Za-z0-9_-]{43}$/;
+
 const SEGMENT = /^[A-Za-z0-9._~-]+$/;
 
 /** The API URL for a proxied path, or null if a segment could escape the API's root (`..`, encoded slashes). */
@@ -27,6 +29,10 @@ export function forwardHeaders(incoming: Headers, trustedHops: number): Headers 
     const v = incoming.get(name);
     if (v !== null) out.set(name, v);
   }
+  // Task 8.4: API keys reach the API through this door too, but only in their own shape; any other Authorization
+  // (Basic, a third-party token, a browser extension's header) is dropped here.
+  const authorization = incoming.get('authorization');
+  if (authorization !== null && API_KEY_AUTHORIZATION.test(authorization)) out.set('authorization', authorization);
   if (trustedHops > 0) {
     const chain = (incoming.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const client = chain[chain.length - trustedHops];

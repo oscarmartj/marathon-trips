@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { FLAGS } from '../flags/flag-registry';
 import { FeatureFlagService } from '../flags/flags.service';
+import { hasAuthorization } from '../integrations/api-key-token';
 import { ApiError } from './api-error';
 import type { ApiRequest } from './request-context';
 
@@ -22,7 +23,8 @@ export class MaintenanceGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== 'http') return true;
     const req = context.switchToHttp().getRequest<ApiRequest>();
-    if (isMaintenanceExempt(req.method, req.path)) return true;
+    // The admin API stays open for staff sessions; API keys wait until maintenance is over (task 8.4).
+    if (isMaintenanceExempt(req.method, req.path) && (!hasAuthorization(req) || req.path.startsWith('/health'))) return true;
     if (!(await this.flags.isEnabled(FLAGS.maintenance))) return true;
     throw new ApiError(503, 'maintenance', 'The site is down for maintenance. Please try again shortly.', { 'Retry-After': '120' });
   }

@@ -34,6 +34,21 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  ApiKey: {
+    id: 'nopii',
+    name: 'pii',
+    prefix: 'nopii',
+    secretHash: 'secret',
+    scopes: 'nopii',
+    ownerUserId: 'nopii',
+    ownerKind: 'nopii',
+    expiresAt: 'nopii',
+    lastUsedAt: 'nopii',
+    revokedAt: 'nopii',
+    revokedById: 'nopii',
+    revokeReason: 'nopii',
+    createdAt: 'nopii'
+  },
   AuditLog: {
     id: 'nopii',
     occurredAt: 'nopii',
@@ -620,5 +635,43 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     scope: 'nopii',
     createdAt: 'nopii',
     createdById: 'nopii'
+  },
+  WebhookDelivery: {
+    id: 'nopii',
+    subscriptionId: 'nopii',
+    eventId: 'nopii',
+    eventType: 'nopii',
+    body: 'nopii',
+    status: 'nopii',
+    attempts: 'nopii',
+    nextAttemptAt: 'nopii',
+    leaseUntil: 'nopii',
+    lastAttemptAt: 'nopii',
+    succeededAt: 'nopii',
+    lastResponseStatus: 'nopii',
+    lastDurationMs: 'nopii',
+    lastErrorCode: 'nopii',
+    createdAt: 'nopii'
+  },
+  WebhookSubscription: {
+    id: 'nopii',
+    description: 'pii',
+    url: 'pii',
+    eventTypes: 'nopii',
+    secretCiphertext: 'secret',
+    keyVersion: 'nopii',
+    previousSecretCiphertext: 'secret',
+    previousKeyVersion: 'nopii',
+    previousExpiresAt: 'nopii',
+    enabled: 'nopii',
+    consecutiveFailures: 'nopii',
+    disabledAt: 'nopii',
+    disabledReason: 'nopii',
+    createdById: 'nopii',
+    deletedAt: 'nopii',
+    deletedById: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   }
 };

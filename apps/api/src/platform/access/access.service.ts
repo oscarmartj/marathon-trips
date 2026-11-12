@@ -77,14 +77,33 @@ export class AccessService implements OnApplicationBootstrap {
   }
 
   /**
+   * What this request may do. For a session: the user's permissions. For an API key (task 8.4): the owner's current
+   * permissions intersected with the key's scopes, keeping only API-key-scopable permissions, and never owner status.
+   */
+  async effectiveFor(db: Db, auth: AuthContext): Promise<Effective> {
+    const eff = await this.effective(db, auth.userId);
+    if (auth.via !== 'api_key') return eff;
+    const keys = [...eff.keys].filter((k) => {
+      const def = this.registry.get(k);
+      return !!def && auth.scopes.has(k) && def.apiKeyScopable === true && !def.requiresStepUp;
+    });
+    return { isOwner: false, keys: new Set(keys) };
+  }
+
+  /**
    * The check AccessGuard runs for @RequirePermission, also used by services for a second, finer permission (M12):
-   * staff only, the permission held, and a recent TOTP check when the permission requires step-up.
+   * staff only, the permission held, and a recent TOTP check when the permission requires step-up. An API key also
+   * needs the permission in its scopes and API-key scopable, and never passes a step-up permission.
    */
   async assertPermission(db: Db, auth: AuthContext | undefined, key: string, now: Date = new Date()): Promise<Effective> {
     const def = this.registry.get(key);
     if (!def) throw forbidden('permission_not_declared', 'This action is not available');
     if (!auth || auth.kind !== 'staff') throw forbidden();
-    const eff = await this.effective(db, auth.userId);
+    if (auth.via === 'api_key') {
+      if (def.requiresStepUp) throw forbidden('api_key_cannot_use_step_up_permission', 'An API key cannot do this; sign in to the panel');
+      if (!def.apiKeyScopable || !auth.scopes.has(key)) throw forbidden('api_key_scope_not_allowed', 'This API key does not allow this action');
+    }
+    const eff = await this.effectiveFor(db, auth);
     if (!eff.keys.has(key)) throw forbidden();
     if (def.requiresStepUp && !(auth.mfaVerifiedAt && now.getTime() - auth.mfaVerifiedAt.getTime() <= STEP_UP_WINDOW_MS)) {
       throw forbidden('step_up_required', 'Confirm with your authenticator code to continue');

@@ -15,9 +15,9 @@ export const suppliersManifest = {
   key: 'suppliers',
   flagKey: 'module.suppliers',
   permissions: [
-    def(SUPPLIERS_PERMISSIONS.supplierRead, 'See suppliers, contacts, contracts, contracted allotments, release dates and stock cover'),
-    def(SUPPLIERS_PERMISSIONS.supplierManage, 'Create and edit suppliers, their contacts and their contracts'),
-    def(SUPPLIERS_PERMISSIONS.allotmentManage, 'Create, edit and release contracted allotments'),
+    { ...def(SUPPLIERS_PERMISSIONS.supplierRead, 'See suppliers, contacts, contracts, contracted allotments, release dates and stock cover'), apiKeyScopable: true },
+    { ...def(SUPPLIERS_PERMISSIONS.supplierManage, 'Create and edit suppliers, their contacts and their contracts'), apiKeyScopable: true },
+    { ...def(SUPPLIERS_PERMISSIONS.allotmentManage, 'Create, edit and release contracted allotments'), apiKeyScopable: true },
     def(SUPPLIERS_PERMISSIONS.costRead, 'See supplier cost prices and the cost totals'),
     def(SUPPLIERS_PERMISSIONS.costManage, 'Create and edit supplier cost items'),
   ] satisfies PermissionDef[],

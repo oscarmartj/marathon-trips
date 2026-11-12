@@ -55,7 +55,7 @@ export class NotesService {
         after: { body: note.body, pinned: note.pinned }, context: { noteId: note.id },
       });
       await this.outbox.publish(tx, {
-        type: 'common.note.added', aggregateType: 'Note', aggregateId: note.id, actorType: 'staff', actorId: caller.actor.id,
+        type: 'common.note.added', aggregateType: 'Note', aggregateId: note.id, actorType: caller.actor.type, actorId: caller.actor.id,
         payload: { entityType: def.entityType, entityId },
       });
       return { id: note.id };

@@ -5,6 +5,7 @@ import { SessionService } from '../auth/session.service';
 import { StaffAuthService } from '../auth/staff-auth.service';
 import { PrismaService } from '../database/prisma.service';
 import { OutboxService } from '../events/outbox.service';
+import { revokeOwnerApiKeys } from '../integrations/revoke-owner-keys';
 import { conflict, notFound, unprocessable } from '../http/api-error';
 import { AccessService, OWNER_ROLE } from './access.service';
 import { PERMISSIONS } from './permissions';
@@ -107,7 +108,10 @@ export class StaffAdminService {
       if (before.status === status) return;
       if (status === 'disabled' && target.isOwner) await this.access.assertAnotherOwnerRemains(tx, targetId);
       await tx.user.update({ where: { id: targetId }, data: { status, version: { increment: 1 } } });
-      if (status === 'disabled') await this.sessions.revokeAllForUser(tx, targetId, 'user_disabled');
+      if (status === 'disabled') {
+        await this.sessions.revokeAllForUser(tx, targetId, 'user_disabled');
+        await revokeOwnerApiKeys(tx, this.audit, actor, targetId, 'owner_disabled');
+      }
       await this.audit.record(tx, { actor, action: status === 'disabled' ? 'access.user.disabled' : 'access.user.enabled', entityType: 'User', entityId: targetId, reason, before, after: { status } });
     });
   }
