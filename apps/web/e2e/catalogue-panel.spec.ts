@@ -33,6 +33,23 @@ const searchRaces = async (page: Page, text: string) => {
 const label = (text: string) => new RegExp(`^${text}(?: \\*)?$`);
 const publicRace = (page: Page, slug: string) => page.request.get(`/api/catalogue/races/${slug}`);
 
+const STATE = { 'X-MT-CSRF': '1', Origin: 'http://localhost:3000' };
+/** Creates a draft price version, fills every missing rate with 10 000 cents and publishes it (task 2.1). */
+async function publishPricesThroughApi(page: Page, packageId: string) {
+  const draft = await (await page.request.post(`/api/admin/pricing/packages/${packageId}/price-versions`, { headers: STATE, data: { label: 'E2E prices' } })).json();
+  const amount = '10000';
+  const rates = { roomRates: [] as object[], participationRates: [] as object[], extraRates: [] as object[] };
+  for (const m of draft.missing as Array<Record<string, unknown>>) {
+    if (m.kind === 'room') rates.roomRates.push({ roomOptionId: m.roomOptionId, occupancy: m.occupancy, pricePerPersonMinor: amount, extraNightPerPersonMinor: amount });
+    if (m.kind === 'participation') rates.participationRates.push({ participationType: m.participationType, raceDistanceId: m.raceDistanceId, amountPerPersonMinor: amount });
+    if (m.kind === 'extra') rates.extraRates.push({ extraId: m.extraId, amountMinor: amount });
+  }
+  const set = await page.request.put(`/api/admin/pricing/price-versions/${draft.id}/rates`, { headers: STATE, data: { version: draft.version, ...rates } });
+  expect(set.status()).toBe(200);
+  const published = await page.request.post(`/api/admin/pricing/price-versions/${draft.id}/publish`, { headers: STATE, data: { version: (await set.json()).version, replacesVersionId: null } });
+  expect(published.status()).toBe(200);
+}
+
 // Phase 1 criterion: create a race with an edition, package, hotel and extra in the panel, publish it and see it on the website.
 // The public pages are task 1.3, so "see it" is checked on the public catalogue API that those pages read.
 test('create_publish_and_view_race', async ({ page }) => {
@@ -164,6 +181,9 @@ test('create_publish_and_view_race', async ({ page }) => {
   await page.goto(packageUrl);
   expect((await publicRace(page, slug)).status()).toBe(200);
   expect((await (await publicRace(page, slug)).json()).editions[0].packages).toEqual([]); // the package is still a draft
+  // Since task 2.1 a package opens only with complete prices in force. There is no price screen yet, so publish
+  // them through the pricing API (every missing rate at A$100), the way a future panel screen will.
+  await publishPricesThroughApi(page, packageUrl.split('/').pop()!);
   await page.getByRole('button', { name: 'Open for booking' }).click();
   await expect(page.getByText('Current status: Open for booking.')).toBeVisible();
   const body = await (await publicRace(page, slug)).json();

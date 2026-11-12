@@ -34,6 +34,22 @@ export async function orConflict<T>(code: string, message: string, run: () => Pr
   }
 }
 
+/** Runs a removal and turns a foreign-key failure into a 409: something still points at the row (plan 2.1, G1). */
+export async function orInUse<T>(code: string, message: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') throw conflict(code, message);
+    throw err;
+  }
+}
+
+/** Row lock on a package: FOR SHARE for changes to its options, FOR UPDATE for its sale status and price versions. */
+export async function lockPackage(tx: Tx, id: string, mode: 'share' | 'update'): Promise<void> {
+  if (mode === 'share') await tx.$queryRaw`SELECT 1 FROM packages WHERE id = ${id}::uuid FOR SHARE`;
+  else await tx.$queryRaw`SELECT 1 FROM packages WHERE id = ${id}::uuid FOR UPDATE`;
+}
+
 export const versionConflict = (): ApiError => conflict('version_conflict', 'Someone else changed this. Reload and try again.');
 
 /** Throws 404 when the row is missing, 409 when its version is not the one the caller read. */

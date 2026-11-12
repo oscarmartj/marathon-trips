@@ -1,0 +1,108 @@
+// Pricing (task 2.1, plan docs/plans/2.1-pricing-engine.md; plan 0.1, section 5.3). Rules, promo codes and their
+// redemptions are task 2.2. The CHECK constraints, the EXCLUDE that keeps published versions of a package from
+// overlapping, NULLS NOT DISTINCT and the immutability triggers are SQL in the migration (Prisma cannot express them).
+
+enum PriceVersionStatus {
+  draft
+  published
+  archived
+}
+
+/// A set of rates for one package. A draft is edited freely; a published version is frozen (only its validTo is set,
+/// once, when a successor is published); archived is a discarded draft. Published versions of a package never overlap.
+model PriceVersion {
+  id                 String              @id @default(uuid(7)) @db.Uuid
+  packageId          String              @db.Uuid
+  /// @nopii ISO 4217; always the package's (composite foreign key) and never changed
+  currency           String              @db.Char(3)
+  package            Package             @relation(fields: [packageId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii staff label, never personal data
+  label              String
+  /// @nopii catalogue data
+  status             PriceVersionStatus  @default(draft)
+  /// @nopii null while draft
+  validFrom          DateTime?           @db.Timestamptz(3)
+  /// @nopii null = open-ended
+  validTo            DateTime?           @db.Timestamptz(3)
+  /// @nopii timestamp
+  publishedAt        DateTime?           @db.Timestamptz(3)
+  publishedById      String?             @db.Uuid
+  /// @nopii optimistic lock for the admin panel; setting rates bumps it
+  version            Int                 @default(0)
+  /// @nopii timestamp
+  createdAt          DateTime            @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt          DateTime            @updatedAt @db.Timestamptz(3)
+  roomRates          RoomRate[]
+  participationRates ParticipationRate[]
+  extraRates         ExtraRate[]
+
+  @@unique([id, currency])
+  @@index([packageId, status])
+  @@map("price_versions")
+}
+
+/// Price per person in a room at a given occupancy (every person in the room pays it), and per extra night.
+model RoomRate {
+  id                       String       @id @default(uuid(7)) @db.Uuid
+  priceVersionId           String       @db.Uuid
+  /// @nopii ISO 4217, the version's
+  currency                 String       @db.Char(3)
+  priceVersion             PriceVersion @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  roomOptionId             String       @db.Uuid
+  roomOption               RoomOption   @relation(fields: [roomOptionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  occupancy                Int
+  /// @nopii minor units, in `currency`
+  pricePerPersonMinor      BigInt
+  /// @nopii minor units, in `currency`
+  extraNightPerPersonMinor BigInt
+  /// @nopii timestamp
+  createdAt                DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@unique([priceVersionId, roomOptionId, occupancy])
+  @@index([roomOptionId])
+  @@map("room_rates")
+}
+
+/// The entry (runner with an entry, by distance) or the participation of a runner with their own entry or a supporter.
+model ParticipationRate {
+  id                   String            @id @default(uuid(7)) @db.Uuid
+  priceVersionId       String            @db.Uuid
+  /// @nopii ISO 4217, the version's
+  currency             String            @db.Char(3)
+  priceVersion         PriceVersion      @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii catalogue data
+  participationType    ParticipationType
+  /// Set if and only if participationType is runner_with_entry (CHECK in the migration).
+  raceDistanceId       String?           @db.Uuid
+  raceDistance         RaceDistance?     @relation(fields: [raceDistanceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii minor units, in `currency`
+  amountPerPersonMinor BigInt
+  /// @nopii timestamp
+  createdAt            DateTime          @default(now()) @db.Timestamptz(3)
+
+  // NULLS NOT DISTINCT in the migration: one rate per (version, type) when there is no distance.
+  @@unique([priceVersionId, participationType, raceDistanceId], map: "participation_rates_version_type_distance_key")
+  @@index([raceDistanceId])
+  @@map("participation_rates")
+}
+
+/// Price of one unit of an extra (per person or per booking, as the extra says).
+model ExtraRate {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  priceVersionId String       @db.Uuid
+  /// @nopii ISO 4217, the version's
+  currency       String       @db.Char(3)
+  priceVersion   PriceVersion @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  extraId        String       @db.Uuid
+  extra          Extra        @relation(fields: [extraId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii minor units, in `currency`
+  amountMinor    BigInt
+  /// @nopii timestamp
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@unique([priceVersionId, extraId])
+  @@index([extraId])
+  @@map("extra_rates")
+}

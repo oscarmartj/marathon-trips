@@ -1,9 +1,12 @@
 import { CATALOGUE_PERMISSIONS } from '../../src/modules/catalogue';
+import { PRICING_PERMISSIONS } from '../../src/modules/pricing';
 import { SALE_TRANSITIONS } from '../../src/modules/catalogue/transitions';
 import { STATE_HEADERS, TestApp, createStaff, signInStaff } from './auth';
 
 export const P = CATALOGUE_PERMISSIONS;
 export const ALL_CATALOGUE_PERMISSIONS = Object.values(CATALOGUE_PERMISSIONS);
+/** What the catalogue tests' admin can do: the catalogue, and pricing so that packages can open (2.1). */
+export const CATALOGUE_AND_PRICING = [...ALL_CATALOGUE_PERMISSIONS, ...Object.values(PRICING_PERMISSIONS)];
 
 let n = 0;
 /** A slug that is unique per run, so tests never collide with leftovers in a shared database. */
@@ -19,8 +22,8 @@ const clientFor = (t: TestApp, cookie: string) => ({
   delete: (path: string) => t.http().delete(path).set(STATE_HEADERS).set('Cookie', cookie),
 });
 
-/** A staff client with the given permissions (all catalogue permissions by default). */
-export async function staffClient(t: TestApp, permissions: string[] = ALL_CATALOGUE_PERMISSIONS) {
+/** A staff client with the given permissions (all catalogue and pricing permissions by default). */
+export async function staffClient(t: TestApp, permissions: string[] = CATALOGUE_AND_PRICING) {
   const staff = await createStaff(t, { permissions });
   return { ...clientFor(t, await signInStaff(t, staff)), staff };
 }
@@ -48,8 +51,43 @@ export interface World {
   pkg: { id: string; slug: string; version: number };
 }
 
-/** A race (draft), edition, distance, three pools and a draft package with an entry option, a hotel, a room and an extra. */
-export async function buildWorld(admin: Client, opts: { year?: number; packageOver?: Record<string, unknown> } = {}): Promise<World> {
+/**
+ * Gives a package a published price version that prices everything it offers (each missing rate at `amountMinor`),
+ * unless it already has one in force that is complete. Since 2.1 a package opens only with such a version.
+ */
+export async function pricePackageFully(admin: Client, packageId: string, amountMinor = '10000'): Promise<string> {
+  const list = (await admin.get(`/admin/pricing/packages/${packageId}/price-versions`)).body;
+  if (list.currentId) {
+    const current = (await admin.get(`/admin/pricing/price-versions/${list.currentId}`)).body;
+    if (current.missing.length === 0) return list.currentId as string;
+  }
+  const draft = (await admin.post(`/admin/pricing/packages/${packageId}/price-versions`, { label: 'Test prices', copyCurrent: true })).body;
+  if (!draft.id) throw new Error(`create price version failed: ${JSON.stringify(draft)}`);
+  const rooms = [...draft.rates.roomRates];
+  const participation = [...draft.rates.participationRates];
+  const extras = [...draft.rates.extraRates];
+  for (const m of draft.missing as Array<Record<string, unknown>>) {
+    if (m.kind === 'room') rooms.push({ roomOptionId: m.roomOptionId, occupancy: m.occupancy, pricePerPersonMinor: amountMinor, extraNightPerPersonMinor: amountMinor });
+    if (m.kind === 'extra_night') {
+      const r = rooms.find((x) => x.roomOptionId === m.roomOptionId && x.occupancy === m.occupancy);
+      if (r) r.extraNightPerPersonMinor = amountMinor;
+    }
+    if (m.kind === 'participation') participation.push({ participationType: m.participationType, raceDistanceId: m.raceDistanceId, amountPerPersonMinor: amountMinor });
+    if (m.kind === 'extra') extras.push({ extraId: m.extraId, amountMinor });
+  }
+  const strip = <T extends Record<string, unknown>>(xs: T[]) => xs.map(({ currency: _c, ...x }) => x);
+  const set = await admin.put(`/admin/pricing/price-versions/${draft.id}/rates`, { version: draft.version, roomRates: strip(rooms), participationRates: strip(participation), extraRates: strip(extras) });
+  if (set.status !== 200) throw new Error(`set rates failed: ${set.status} ${JSON.stringify(set.body)}`);
+  const pub = await admin.post(`/admin/pricing/price-versions/${draft.id}/publish`, { version: set.body.version, replacesVersionId: list.currentId ?? null });
+  if (pub.status !== 200) throw new Error(`publish failed: ${pub.status} ${JSON.stringify(pub.body)}`);
+  return draft.id as string;
+}
+
+/**
+ * A race (draft), edition, distance, three pools and a draft package with an entry option, a hotel, a room and an extra,
+ * with its prices published (unless `priced: false`).
+ */
+export async function buildWorld(admin: Client, opts: { year?: number; packageOver?: Record<string, unknown>; priced?: boolean } = {}): Promise<World> {
   const must = <T extends { status: number; body: unknown }>(r: T, what: string): T => {
     if (r.status >= 300) throw new Error(`${what} failed: ${r.status} ${JSON.stringify(r.body)}`);
     return r;
@@ -67,6 +105,7 @@ export async function buildWorld(admin: Client, opts: { year?: number; packageOv
   const linked = must(await admin.post(`/admin/catalogue/packages/${pkg.id}/hotels`, { hotelId: hotel.id }), 'link hotel').body;
   must(await admin.post(`/admin/catalogue/packages/${pkg.id}/hotels/${linked.hotels[0].id}/rooms`, { roomType: 'double', name: text('Double room'), minOccupancy: 1, maxOccupancy: 2, roomPoolId }), 'room');
   must(await admin.post(`/admin/catalogue/packages/${pkg.id}/extras`, { kind: 'excursion', name: text('City tour'), pricingUnit: 'per_person', poolId: extraPoolId }), 'extra');
+  if (opts.priced !== false) await pricePackageFully(admin, pkg.id);
   const full = must(await admin.get(`/admin/catalogue/packages/${pkg.id}`), 'get package').body;
   return {
     race: { id: race.id, slug: race.slug, version: race.version }, edition: { id: edition.id, year }, distanceId: distance.id, entryPoolId, roomPoolId, extraPoolId,
@@ -98,7 +137,9 @@ export async function setSale(admin: Client, packageId: string, status: string, 
 }
 
 export async function driveTo(admin: Client, packageId: string, status: string): Promise<void> {
-  for (const step of pathTo(status)) {
+  const path = pathTo(status);
+  if (path.includes('open')) await pricePackageFully(admin, packageId);
+  for (const step of path) {
     const r = await setSale(admin, packageId, step);
     if (r.status !== 200) throw new Error(`could not reach ${step}: ${r.status} ${JSON.stringify(r.body)}`);
   }
@@ -111,7 +152,7 @@ export async function announceEdition(admin: Client, editionId: string): Promise
 
 /** Closes the app after removing the events catalogue tests leave behind, so other test files start clean. */
 export async function closeCatalogue(t: TestApp): Promise<void> {
-  await t.prisma.$executeRawUnsafe(`DELETE FROM event_deliveries WHERE "eventId" IN (SELECT id FROM outbox_events WHERE type LIKE 'catalogue.%')`);
-  await t.prisma.$executeRawUnsafe(`DELETE FROM outbox_events WHERE type LIKE 'catalogue.%'`);
+  await t.prisma.$executeRawUnsafe(`DELETE FROM event_deliveries WHERE "eventId" IN (SELECT id FROM outbox_events WHERE type LIKE 'catalogue.%' OR type LIKE 'pricing.%')`);
+  await t.prisma.$executeRawUnsafe(`DELETE FROM outbox_events WHERE type LIKE 'catalogue.%' OR type LIKE 'pricing.%'`);
   await t.close();
 }

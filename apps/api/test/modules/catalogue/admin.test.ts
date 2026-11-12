@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SALE_STATUSES } from '@mt/shared';
 import { SALE_TRANSITIONS, RACE_TRANSITIONS, EDITION_TRANSITIONS } from '../../../src/modules/catalogue/transitions';
 import { TestApp, makeApp } from '../../support/auth';
-import { Client, buildWorld, driveTo, packageBody, raceBody, setSale, staffClient, closeCatalogue } from '../../support/catalogue';
+import { Client, buildWorld, driveTo, packageBody, pricePackageFully, raceBody, setSale, staffClient, closeCatalogue } from '../../support/catalogue';
 
 // These tests make many HTTP and database calls; a loaded machine must not fail them on the 5 s default.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -104,6 +104,8 @@ describe('sale status (plan 6.1)', () => {
     const w = await buildWorld(admin);
     const fresh = async (from: string) => {
       const pkg = (await admin.post(`/admin/catalogue/editions/${w.edition.id}/packages`, packageBody())).body;
+      // Since 2.1 a package opens only with complete prices in force; give every fresh package its prices.
+      await pricePackageFully(admin, pkg.id);
       await driveTo(admin, pkg.id, from);
       return pkg.id as string;
     };

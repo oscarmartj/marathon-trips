@@ -98,6 +98,14 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  ExtraRate: {
+    id: 'nopii',
+    priceVersionId: 'nopii',
+    currency: 'nopii',
+    extraId: 'nopii',
+    amountMinor: 'nopii',
+    createdAt: 'nopii'
+  },
   FeatureFlag: {
     id: 'nopii',
     key: 'nopii',
@@ -281,12 +289,35 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  ParticipationRate: {
+    id: 'nopii',
+    priceVersionId: 'nopii',
+    currency: 'nopii',
+    participationType: 'nopii',
+    raceDistanceId: 'nopii',
+    amountPerPersonMinor: 'nopii',
+    createdAt: 'nopii'
+  },
   Permission: {
     id: 'nopii',
     key: 'nopii',
     module: 'nopii',
     description: 'nopii',
     requiresStepUp: 'nopii',
+    updatedAt: 'nopii'
+  },
+  PriceVersion: {
+    id: 'nopii',
+    packageId: 'nopii',
+    currency: 'nopii',
+    label: 'nopii',
+    status: 'nopii',
+    validFrom: 'nopii',
+    validTo: 'nopii',
+    publishedAt: 'nopii',
+    publishedById: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
     updatedAt: 'nopii'
   },
   Race: {
@@ -380,6 +411,16 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     roomPoolId: 'nopii',
     createdAt: 'nopii',
     updatedAt: 'nopii'
+  },
+  RoomRate: {
+    id: 'nopii',
+    priceVersionId: 'nopii',
+    currency: 'nopii',
+    roomOptionId: 'nopii',
+    occupancy: 'nopii',
+    pricePerPersonMinor: 'nopii',
+    extraNightPerPersonMinor: 'nopii',
+    createdAt: 'nopii'
   },
   SavedView: {
     id: 'nopii',
