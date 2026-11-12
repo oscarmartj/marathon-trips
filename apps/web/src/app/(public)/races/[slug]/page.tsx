@@ -3,10 +3,13 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { AlertForm } from '@/components/alerts/alert-form';
 import { DateNotice } from '@/components/catalogue/date-notice';
+import { ContentImage } from '@/components/content-image';
 import { PageHeader } from '@/components/page-header';
+import { Prose } from '@/components/prose';
 import { PlaceholderImage } from '@/components/placeholder-image';
 import { countryName, editionDateText, formatDate, formatDistance, hasOpenPackage, monthName } from '@/lib/catalogue-format';
 import { getRace, listRaceSlugs, localisedText } from '@/lib/catalogue';
+import { getGuide } from '@/lib/content';
 import { JsonLdScript } from '@/components/json-ld';
 import { breadcrumbJsonLd, pageMetadata, raceDescription, raceEventsJsonLd } from '@/lib/seo';
 import { t } from '@/lib/i18n';
@@ -20,15 +23,16 @@ export async function generateStaticParams() {
 type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const race = await getRace((await params).slug);
+  const slug = (await params).slug;
+  const [race, guide] = await Promise.all([getRace(slug), getGuide(slug)]);
   return race
-    ? pageMetadata({ title: localisedText(race.name), description: raceDescription(race), path: `/races/${race.slug}` })
+    ? pageMetadata({ title: guide?.seoTitle || localisedText(race.name), description: guide?.seoDescription || raceDescription(race), path: `/races/${race.slug}` })
     : { title: t('races.detail.notFoundTitle'), robots: { index: false } };
 }
 
 export default async function RacePage({ params }: Props) {
   const { slug } = await params;
-  const race = await getRace(slug);
+  const [race, guide] = await Promise.all([getRace(slug), getGuide(slug)]);
   if (!race) notFound();
   const name = localisedText(race.name);
   const summary = localisedText(race.summary);
@@ -48,7 +52,7 @@ export default async function RacePage({ params }: Props) {
       />
       <PageHeader title={t('races.detail.title', { name })} intro={t('races.location', { city: race.city, country: countryName(race.countryCode) })} />
       <div className="container grid grid--2">
-        <PlaceholderImage alt={t('races.detail.imageAlt')} />
+        {guide?.heroMedia ? <ContentImage media={guide.heroMedia} /> : <PlaceholderImage alt={t('races.detail.imageAlt')} />}
         <section className="stack" aria-labelledby="guide-heading">
           <h2 id="guide-heading">{t('races.detail.guideHeading')}</h2>
           {summary ? <p>{summary}</p> : null}
@@ -70,10 +74,23 @@ export default async function RacePage({ params }: Props) {
               </ul>
             </>
           ) : null}
+          {/* The guide sections come from the content manager; a section staff have not written shows the general wording. */}
+          {guide?.course ? (
+            <>
+              <h3>{t('races.detail.courseHeading')}</h3>
+              <Prose text={guide.course} />
+            </>
+          ) : null}
+          {guide?.climate ? (
+            <>
+              <h3>{t('races.detail.climateHeading')}</h3>
+              <Prose text={guide.climate} />
+            </>
+          ) : null}
           <h3>{t('races.detail.entryHeading')}</h3>
-          <p>{t('races.detail.entryBody')}</p>
+          {guide?.entry ? <Prose text={guide.entry} /> : <p>{t('races.detail.entryBody')}</p>}
           <h3>{t('races.detail.travelHeading')}</h3>
-          <p>{t('races.detail.travelBody')}</p>
+          {guide?.travelTips ? <Prose text={guide.travelTips} /> : <p>{t('races.detail.travelBody')}</p>}
           {race.websiteUrl ? (
             <p>
               <a href={race.websiteUrl} rel="noopener noreferrer">

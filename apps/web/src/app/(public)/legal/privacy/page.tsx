@@ -1,10 +1,15 @@
 import type { Metadata } from 'next';
-import { PlaceholderPage } from '@/components/placeholder-page';
-import { pageMetadata } from '@/lib/seo';
+import { CmsPage, cmsPageMetadata, type PageFallback } from '@/components/cms-page';
 import { t } from '@/lib/i18n';
 
-export const metadata: Metadata = pageMetadata({ title: t('legalPages.privacy.title'), description: t('legalPages.intro'), path: '/legal/privacy' });
+// The words come from the content manager (page "privacy"); the built-in wording is the fallback. Refreshed at most once a minute.
+export const revalidate = 60;
+const fallback = (): PageFallback => ({ title: t('legalPages.privacy.title'), intro: t('legalPages.intro'), legal: true });
 
-export default function Page() {
-  return <PlaceholderPage title={t('legalPages.privacy.title')} intro={t('legalPages.intro')} legal />;
+export async function generateMetadata(): Promise<Metadata> {
+  return cmsPageMetadata('privacy', fallback(), '/legal/privacy');
+}
+
+export default async function Page() {
+  return CmsPage({ slug: 'privacy', fallback: fallback() });
 }
