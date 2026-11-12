@@ -1266,5 +1266,11 @@
       "generic": "Something went wrong working out your price. Please try again."
     },
     "adjustments": "Surcharges and discounts"
+  },
+  "seo": {
+    "raceDescription": "Plan your trip to {name} in {city}, {country}: race details, editions and travel packages.",
+    "shareImageAlt": "{name}: race travel for runners",
+    "shareImageTagline": "Race travel for runners, based in Australia.",
+    "shareImageRaceLine": "{city}, {country}"
   }
 }
