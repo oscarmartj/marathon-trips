@@ -41,10 +41,19 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 | 2026-11-12 | Web pública: filtros del buscador solo los que admite la API (texto, distancia, tipo, mes, año, país); la guía de carrera solo muestra lo que hay en la API; «Construir» solo con el paquete en `open`; `/races/[slug]/build` acepta carreras nuevas (`dynamicParams`) | 1.3; se amplían cuando la API ofrezca más (precio, tipo de entrada, estado, continente) |
 | 2026-11-12 | SEO: la dirección pública es `WEB_ORIGIN` (debe estar también al construir); solo `SportsEvent` con fecha confirmada; sin `Offer` (la API pública no tiene precios) ni `FAQPage` (la FAQ está vacía); el sitemap falla en lugar de publicarse sin carreras si el catálogo no responde, y no lleva `lastmod`; checkout en `noindex`. Sustituye a «sin sitemap ni datos estructurados hasta la fase de SEO» (fila de 0.6) | 1.4; se deshace revirtiendo el PR |
 | 2026-11-12 | Datos demo: tres carreras ficticias con `isDemo`, creadas solo en `development`, `test` y `ci` (no en `staging`), sin precios, imposibles de publicar por los `CHECK` y disparadores de 1.1 | 1.5; más conservador; se quita el paso del seed y las filas se borran a mano |
+| 2026-11-13 | Precios: semántica de reglas y códigos fijada en el motor; «no apilable» excluye todo descuento o recargo de la misma dirección sobre un objetivo solapado; `stackable` es `false` por defecto; cambiar reglas y códigos exige step-up; respuesta pública `invalid` única | 2.1, 2.2; el valor por defecto de `stackable` está pendiente de Oscar |
+| 2026-11-13 | Solicitudes: sin `Traveller` hasta 5.2; caducidad 168 h o inicio del día de salida; 3 solicitudes abiertas y 12 plazas por cliente (`Setting`); ningún permiso de reservas ni de CRM es alcance de clave de API; cancelar exige step-up | 2.4, 2.5; se cambia con otra migración o el ajuste |
+| 2026-11-13 | Aceptar un presupuesto crea la reserva ya `approved` (el precio lo fijó el equipo); validez 14 días por defecto, máximo 60; sin códigos promocionales en presupuestos | 2.5; alternativa: `requested`; se deshace en `createApprovedFromQuote` |
+| 2026-11-13 | Quien declara un país fuera de `salesCountries` entra en lista de espera por la misma ruta de solicitud (decide el servidor); anonimizar redacta la entrada en lugar de borrarla | 2.6; el borrado con `mt_privacy` queda a 5.5 |
+| 2026-11-13 | Campos personalizados: solo Race, Package y Supplier; mostrar un campo a clientes exige `common.customField.publish` con step-up; permisos sin alcance de clave | 7.5; los roles actuales no reciben `publish` solos |
+| 2026-11-13 | Núcleo de pagos: cuentas solo `mode = 'test'` (`CHECK` hasta 4.1); simulador solo en development, test y ci y su cuenta solo por consola; intento de cobro de 60 min; 3.1 absorbe el plan, los intentos y el registro de cobros que eran de 3.2 | 3.1; la fila 3.2 de `docs/autonomous.md` queda con reparto, cobertura, caducidad de aprobaciones, enlaces y recordatorios |
+| 2026-11-13 | Panel de precios: fechas de vigencia en la zona horaria del navegador (se muestra cuál); el panel no calcula importes (texto puro, sin floats) | 2.2b |
+
 
 ## Abiertas
 
 - Orquestador de pagos: **resuelta** (adaptadores propios; fila del 2026-11-12). Alojamiento: **resuelta** (combinación B). Solo tarjeta o también transferencia: **resuelta** (las dos, con interruptor).
 - Nombre de marca definitivo (hoy «Marathon Trips», en `brand.config.ts`).
+- Valor por defecto de `stackable` (`false`) en reglas y códigos (2.2).
 - Cuándo retomar el dinero (Oscar quita la etiqueta «aparcada» de `docs/autonomous.md`).
 - Si el límite por IP en memoria basta con más de una instancia de API (hoy una; con más, mover los contadores a PostgreSQL).

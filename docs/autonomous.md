@@ -126,7 +126,7 @@ Una tarea puede empezar cuando todas las de "Depende de" están hechas. La tarea
 | 2.5 | 2.4, 2.3, 0.5 | Medio |
 | 2.6 | 2.4 | Bajo |
 | 3.1 | 2.4, 0.7 | Arquitectura · parcial: interfaz `PaymentProvider`, estados de adaptador y plan de pagos contra el simulador; sin libro contable real |
-| 3.2 | 3.1 | Alto · parcial: plan de depósito y saldo, idempotencia y registro de cobros del simulador; sin libro contable real |
+| 3.2 | 3.1 | Alto · parcial: lo que 3.1 no absorbió (reparto de cobros, cobertura, caducidad de aprobaciones con gancho `expire`, enlaces de pago y recordatorios); el plan de depósito y saldo, la idempotencia y el registro de cobros del simulador ya están en 3.1; sin libro contable real |
 | 3.6 | 3.2 | Alto |
 | 3.3 | 3.2, 3.6 | Alto · aparcada (dinero) |
 | 3.4 | 3.2 | Medio · aparcada (dinero) |
