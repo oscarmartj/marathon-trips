@@ -4,10 +4,10 @@ import type { z } from 'zod';
 import { OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
 import { PrismaService } from '../../platform/database/prisma.service';
-import { unprocessable, notFound } from '../../platform/http/api-error';
+import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
-import { IdempotencyService } from '../../platform/idempotency/idempotency.service';
+import { IdempotencyInProgressError, IdempotencyKeyReuseError, IdempotencyService } from '../../platform/idempotency/idempotency.service';
 import { PromoAttemptGuard } from '../pricing';
 import { BookingAdminService } from './admin.service';
 import { BOOKINGS_PERMISSIONS as P } from './manifest';
@@ -39,6 +39,11 @@ export class BookingRequestsController {
     const outcome = await this.idempotency.run({ actorType: 'customer', actorId: user.id, route: 'POST /booking-requests', key, body: b }, async () => {
       const r = await this.requests.create(user, b, key, actor);
       return { status: 201, resourceType: 'Booking', resourceId: r.bookingId };
+    }).catch((err: unknown) => {
+      // The platform's idempotency errors, as this API's error codes.
+      if (err instanceof IdempotencyKeyReuseError) throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
+      if (err instanceof IdempotencyInProgressError) throw conflict('idempotency_in_progress', 'A request with this Idempotency-Key is still being processed');
+      throw err;
     });
     // No response body is stored: a repeat gets the current representation of the same booking (plan 0.1, 5.1).
     const view = await customerView(this.prisma, { id: outcome.result.resourceId! });
