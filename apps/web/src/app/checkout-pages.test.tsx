@@ -29,6 +29,16 @@ describe('checkout page', () => {
     expect(t).not.toContain('$1,325.00');
   });
 
+  it('a_live_attempt_is_shown_and_its_method_preselected', () => {
+    const live = { status: 'requires_action' as const, method: 'payid_transfer' as const, amountMinor: '100000', currency: 'AUD' };
+    const html = renderToStaticMarkup(<CheckoutForm plan={plan({ liveAttempt: live })} initialTerms={terms()} />);
+    expect(text(html)).toContain('A payment is already waiting for you.');
+    const radios = html.match(/<input[^>]*type="radio"[^>]*>/g) ?? [];
+    expect(radios.filter((r) => /checked/.test(r)).map((r) => /value="([a-z_]+)"/.exec(r)![1])).toEqual(['payid_transfer']);
+    const pending = text(renderToStaticMarkup(<CheckoutForm plan={plan({ liveAttempt: { ...live, status: 'pending' } })} initialTerms={terms()} />));
+    expect(pending).toContain('is being processed');
+  });
+
   it('a_changed_amount_from_the_api_is_shown_as_sent', () => {
     const t = text(renderToStaticMarkup(<CheckoutForm plan={plan({ nextPayable: { sequence: 1, amountMinor: '98765' } })} initialTerms={terms()} />));
     expect(t).toContain('You will pay $987.65 now.');

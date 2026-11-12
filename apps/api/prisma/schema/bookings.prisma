@@ -81,6 +81,7 @@ model Customer {
   bookings           Booking[]
   quotes             Quote[]
   promoRedemptions   PromoRedemption[]
+  termsAcceptances    TermsAcceptance[]
   payments           Payment[]
   waitlistEntries    WaitlistEntry[]
   complaints         Complaint[]

@@ -20,7 +20,7 @@ const paragraphs = (body: string): string[] => body.split(/\n{2,}/).map((p) => p
  */
 export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; initialTerms: CheckoutTermsView }) {
   const [terms, setTerms] = useState(initialTerms);
-  const [method, setMethod] = useState<PaymentMethod | ''>(plan.methods.includes('card') ? 'card' : (plan.methods[0] ?? ''));
+  const [method, setMethod] = useState<PaymentMethod | ''>(plan.liveAttempt && plan.methods.includes(plan.liveAttempt.method) ? plan.liveAttempt.method : plan.methods.includes('card') ? 'card' : (plan.methods[0] ?? ''));
   const [accepted, setAccepted] = useState(initialTerms.acceptedAt !== null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -108,6 +108,7 @@ export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; in
           ))}
         </dl>
         {plan.nextPayable ? <p><strong>{t('checkout.payNow', { amount: formatMoney(plan.nextPayable.amountMinor, plan.currency) })}</strong></p> : null}
+        {plan.liveAttempt ? <p className="notice" role="status">{t(plan.liveAttempt.status === 'requires_action' ? 'checkout.attempt.open' : 'checkout.attempt.pending')}</p> : null}
         {plan.depositDueBy ? <p>{t('checkout.payNowUntil', { when: formatInstant(plan.depositDueBy) })}</p> : null}
       </section>
 

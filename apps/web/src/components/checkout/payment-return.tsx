@@ -8,7 +8,7 @@ import { api } from '@/lib/api-client';
 import { REFRESH_EVERY_MS, REFRESH_MAX_TRIES, outcomeOf } from '@/lib/checkout';
 import { t } from '@/lib/i18n';
 
-type Answer = { view: PaymentRefreshView } | { error: 'signedOut' | 'network' | 'delayed' };
+type Answer = { view: PaymentRefreshView } | { error: 'signedOut' | 'network' | 'delayed' | 'unavailable' };
 
 /**
  * Where the customer lands after the provider's page (task 3.5). The address only names the booking; what is said about
@@ -27,7 +27,8 @@ export function PaymentReturn({ reference }: { reference: string }) {
       const r = await api<PaymentRefreshView>(`/booking-requests/${encodeURIComponent(reference)}/payments/refresh`, { method: 'POST', body: {} });
       if (r.status === 200) setAnswer({ view: r.body as PaymentRefreshView });
       else if (r.status === 401 || r.status === 404) setAnswer({ error: 'signedOut' });
-      else if (r.status === 503) setAnswer({ error: 'delayed' });
+      else if (r.status === 503) setAnswer({ error: r.body.code === 'payment_processing_delayed' ? 'delayed' : 'unavailable' });
+      else if (r.status === 409) setAnswer({ error: 'unavailable' });
       else setAnswer({ error: 'network' });
     } catch {
       setAnswer({ error: 'network' });
@@ -58,7 +59,8 @@ export function PaymentReturn({ reference }: { reference: string }) {
   if ('error' in answer) {
     return (
       <div className="stack">
-        <Status message={t(answer.error === 'signedOut' ? 'paymentReturn.signedOut' : answer.error === 'delayed' ? 'paymentReturn.delayed' : 'paymentReturn.network')} />
+        <Status message={t(answer.error === 'signedOut' ? 'paymentReturn.signedOut' : answer.error === 'delayed' ? 'paymentReturn.delayed' : answer.error === 'unavailable' ? 'paymentReturn.unavailable' : 'paymentReturn.network')} />
+        {answer.error === 'unavailable' || answer.error === 'network' ? <p><button className="btn" type="button" disabled={checking} onClick={() => void check()}>{t('paymentReturn.checkAgain')}</button></p> : null}
         <p><Link href={answer.error === 'signedOut' ? '/account/sign-in' : booking}>{t(answer.error === 'signedOut' ? 'paymentReturn.signIn' : 'paymentReturn.viewBooking')}</Link></p>
       </div>
     );

@@ -69,7 +69,7 @@ export class TermsService {
       if (!terms) throw unavailable();
       if (terms.version !== body.version || terms.digest !== body.digest) throw conflict('terms_changed', 'The booking terms have changed since you opened this page. Read them again.');
       const inserted = await tx.termsAcceptance.createManyAndReturn({
-        data: [{ bookingId: b.id, documentSlug: terms.slug, locale: terms.locale, contentVersion: terms.version, textDigest: terms.digest, title: terms.title, intro: terms.intro, body: terms.body }],
+        data: [{ bookingId: b.id, customerId: b.customerId, documentSlug: terms.slug, locale: terms.locale, contentVersion: terms.version, textDigest: terms.digest, title: terms.title, intro: terms.intro, body: terms.body }],
         skipDuplicates: true,
         select: { id: true, acceptedAt: true },
       });

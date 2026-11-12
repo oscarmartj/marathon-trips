@@ -28,9 +28,9 @@ export const PAYMENT_ENTITIES: EntityDef[] = [
     },
   })),
   {
-    entityType: 'TermsAcceptance', model: 'TermsAcceptance', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    entityType: 'TermsAcceptance', model: 'TermsAcceptance', customerLink: { kind: 'column', column: 'customerId' },
     handlers: {
-      export: (tx: Tx, customerId) => tx.termsAcceptance.findMany({ where: { booking: { customerId } }, select: { bookingId: true, documentSlug: true, locale: true, contentVersion: true, textDigest: true, acceptedAt: true } }),
+      export: (tx: Tx, customerId) => tx.termsAcceptance.findMany({ where: { customerId }, select: { bookingId: true, documentSlug: true, locale: true, contentVersion: true, textDigest: true, acceptedAt: true } }),
       anonymise: async () => undefined,
     },
   },

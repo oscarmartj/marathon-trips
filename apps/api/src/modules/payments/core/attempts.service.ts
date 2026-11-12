@@ -113,12 +113,13 @@ export class PaymentAttemptsService {
   async start(user: { id: string }, reference: string, body: StartPayment, key: string, actor: AuditActor): Promise<PaymentAttemptView> {
     const booking = await readBookingForPayments(this.prisma, { reference });
     if (!booking) throw notFound();
-    // The current booking terms must have been accepted for this booking (task 3.5); nothing is stored when they were not.
-    // A booking that cannot take a payment at all keeps its own error (booking_not_payable and the like).
-    if (PAYABLE_STATES.includes(booking.status)) await this.terms.assertAccepted(booking.id);
     // The route of the record carries the booking id, so one key on two bookings is two records (plan 3.1, 14.4).
     const outcome = await this.idempotency.run({ actorType: 'customer', actorId: user.id, route: `POST /booking-requests/${booking.id}/payments`, key, body }, async () => {
       try {
+        // The current booking terms must have been accepted (task 3.5). Inside the record, so a retry of a payment that
+        // was already created replays it even if the terms changed since; a refusal deletes the record: nothing stored.
+        // A booking that cannot take a payment at all keeps its own error (booking_not_payable and the like).
+        if (PAYABLE_STATES.includes(booking.status)) await this.terms.assertAccepted(booking.id);
         const paymentId = await this.createOrReplace(booking.id, body, actor);
         return { status: 201, resourceType: 'Payment', resourceId: paymentId };
       } catch (err) {
@@ -299,7 +300,7 @@ export class PaymentAttemptsService {
    * What a customer sees of a gateway problem: a 503 for the gateway, and for the gateway wrapper's own refusals
    * (account paused, adapter blocked…) the neutral "payment in progress", never the internal code (review round 2, 4).
    */
-  private forCustomer(err: unknown): unknown {
+  forCustomer(err: unknown): unknown {
     if (err instanceof ProviderError) return providerUnavailable();
     if (err instanceof ApiError && err.status === 409) return conflict('payment_attempt_in_progress', 'This payment cannot continue right now. Try again later.');
     return err;

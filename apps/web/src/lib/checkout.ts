@@ -18,10 +18,10 @@ export function acceptTermsBody(terms: Pick<CheckoutTermsView, 'digest'> & { ver
 }
 
 /**
- * Where to send the browser for the provider's page: only an absolute https address, or http on this machine (the
- * simulator in development). Anything else, such as a relative path, javascript: or data:, is refused.
+ * Where to send the browser for the provider's page: only an absolute https address, or http on this machine, and only while this page is itself served from this machine (the
+ * simulator in development and in the end-to-end run; a deployed site never sends a browser to http). Anything else, such as a relative path, javascript: or data:, is refused.
  */
-export function safeRedirect(url: unknown): string | null {
+export function safeRedirect(url: unknown, here: string | undefined = typeof window === 'undefined' ? undefined : window.location.hostname): string | null {
   if (typeof url !== 'string' || url.length > 2048) return null;
   let parsed: URL;
   try {
@@ -31,7 +31,8 @@ export function safeRedirect(url: unknown): string | null {
   }
   if (parsed.username || parsed.password) return null;
   if (parsed.protocol === 'https:') return parsed.toString();
-  if (parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')) return parsed.toString();
+  const local = (h: string | undefined) => h === 'localhost' || h === '127.0.0.1';
+  if (parsed.protocol === 'http:' && local(parsed.hostname) && local(here)) return parsed.toString();
   return null;
 }
 

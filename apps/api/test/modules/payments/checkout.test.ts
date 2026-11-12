@@ -3,7 +3,11 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { PaymentAttemptSyncService } from '../../../src/modules/payments/core/attempt-sync.service';
+import { BookingCoverage } from '../../../src/modules/bookings/coverage';
+import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
+import { ProviderError } from '../../../src/modules/payments/core/provider';
+import { conflict } from '../../../src/platform/http/api-error';
+import { AppError } from '../../../src/platform/errors/safe-error';
 import { termsDigest } from '../../../src/modules/payments/core/terms.service';
 import { STATE_HEADERS } from '../../support/auth';
 import { TestApp, makeApp } from '../../support/auth';
@@ -78,8 +82,9 @@ describe('booking terms with version and date', () => {
     expect(res.status).toBe(200);
     expect(res.body.version).toBe(page.version);
     const [row] = await rowsOf(bookingId);
-    expect(rowsOf(bookingId)).resolves.toHaveLength(1);
-    expect(row).toMatchObject({ documentSlug: 'terms', locale: 'en-AU', contentVersion: page.version, title: 'Terms v-snapshot', intro: 'Intro.', body: 'The words that were accepted.' });
+    await expect(rowsOf(bookingId)).resolves.toHaveLength(1);
+    const owner = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, select: { customerId: true } });
+    expect(row).toMatchObject({ customerId: owner.customerId, documentSlug: 'terms', locale: 'en-AU', contentVersion: page.version, title: 'Terms v-snapshot', intro: 'Intro.', body: 'The words that were accepted.' });
     expect(row!.textDigest).toBe(termsDigest({ slug: 'terms', locale: 'en-AU', title: 'Terms v-snapshot', intro: 'Intro.', body: 'The words that were accepted.' }));
     expect(row!.acceptedAt.getTime()).toBeGreaterThanOrEqual(before - 2_000);
     expect(res.body.acceptedAt).toBe(row!.acceptedAt.toISOString());
@@ -138,6 +143,27 @@ describe('booking terms with version and date', () => {
     expect((await acceptCurrent(reference)).status).toBe(200);
     const ok = await c.pay(reference, { method: 'card' }, key);
     expect([ok.status, ok.body.status]).toEqual([201, 'requires_action']);
+    expect(await paymentsOf(bookingId)).toHaveLength(1);
+  });
+
+  it('same_key_retry_replays_the_created_payment_even_if_the_terms_changed_or_were_unpublished', async () => {
+    const { reference, bookingId } = await unaccepted();
+    await acceptCurrent(reference);
+    const key = randomUUID();
+    const first = await c.pay(reference, { method: 'card' }, key);
+    expect(first.status).toBe(201);
+    await ensureTerms(t, { body: `Changed after paying ${randomUUID()}.` });
+    const edited = await c.pay(reference, { method: 'card' }, key);
+    expect([edited.status, edited.body.status, edited.body.nextAction?.url]).toEqual([201, 'requires_action', first.body.nextAction.url]);
+    await pageStatus('draft');
+    try {
+      const unpublished = await c.pay(reference, { method: 'card' }, key);
+      expect([unpublished.status, unpublished.body.nextAction?.url]).toEqual([201, first.body.nextAction.url]);
+      // A different key is a new request and is refused.
+      expect((await c.pay(reference, { method: 'card' })).body.code).toBe('terms_unavailable');
+    } finally {
+      await pageStatus('published');
+    }
     expect(await paymentsOf(bookingId)).toHaveLength(1);
   });
 
@@ -243,17 +269,51 @@ describe('where does my payment stand (POST payments/refresh)', () => {
     expect((await c.plan(reference)).body.payable).toBe(true);
   });
 
-  it('refresh_when_the_gateway_cannot_be_read_changes_nothing and is not an error', async () => {
+  it('refresh_when_the_gateway_cannot_be_read is the neutral 503 and changes nothing', async () => {
     const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
     await c.pay(reference, { method: 'card' });
-    const spy = vi.spyOn(t.app.get(PaymentAttemptSyncService), 'run').mockRejectedValue(new (await import('../../../src/modules/payments/core/provider')).ProviderError('provider_unavailable', true));
+    const spy = vi.spyOn(t.app.get(ProviderGateway), 'call').mockRejectedValue(new ProviderError('provider_unavailable', true));
     try {
       const res = await refresh(reference);
-      expect([res.status, res.body.attempt.status]).toEqual([200, 'requires_action']);
+      expect([res.status, res.body.code]).toEqual([503, 'provider_unavailable']);
     } finally {
       spy.mockRestore();
     }
     expect((await paymentsOf(bookingId))[0]!.status).toBe('requires_action');
+  });
+
+  it('refresh_when_the_gateway_wrapper_refuses (a 409 of its own) is the neutral 409, never the internal reason', async () => {
+    const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+    await c.pay(reference, { method: 'card' });
+    const spy = vi.spyOn(t.app.get(ProviderGateway), 'call').mockRejectedValue(conflict('provider_account_blocked', 'internal reason: adapter blocked'));
+    try {
+      const res = await refresh(reference);
+      expect([res.status, res.body.code]).toEqual([409, 'payment_attempt_in_progress']);
+      expect(JSON.stringify(res.body)).not.toContain('blocked');
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await paymentsOf(bookingId))[0]!.status).toBe('requires_action');
+  });
+
+  it('refresh_when_coverage_fails is 503 payment_processing_delayed, and while the task is open it is not retried', async () => {
+    const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+    await c.pay(reference, { method: 'card' });
+    const [p] = await paymentsOf(bookingId);
+    sim.settle(acc.id, p!.providerPaymentRef!, 'succeeded');
+    const cover = vi.spyOn(t.app.get(BookingCoverage), 'apply').mockRejectedValue(new AppError('boom', 'injected'));
+    try {
+      const first = await refresh(reference);
+      expect([first.status, first.body.code]).toEqual([503, 'payment_processing_delayed']);
+      expect((await paymentsOf(bookingId))[0]!.status).toBe('requires_action');
+      expect(await t.prisma.task.count({ where: { sourceRef: `payments:coverage_failed:${p!.id}`, status: 'open' } })).toBe(1);
+      const calls = cover.mock.calls.length;
+      const again = await refresh(reference);
+      expect([again.status, again.body.attempt.status]).toEqual([200, 'requires_action']);
+      expect(cover.mock.calls.length).toBe(calls);
+    } finally {
+      cover.mockRestore();
+    }
   });
 
   it('refresh_takes_no_body_that_matters: an amount in the body is ignored, not used', async () => {

@@ -5,6 +5,7 @@
 CREATE TABLE "terms_acceptances" (
     "id" UUID NOT NULL,
     "bookingId" UUID NOT NULL,
+    "customerId" UUID NOT NULL,
     "documentSlug" TEXT NOT NULL,
     "locale" TEXT NOT NULL,
     "contentVersion" INTEGER NOT NULL,
@@ -22,6 +23,8 @@ CREATE UNIQUE INDEX "terms_acceptances_bookingId_documentSlug_locale_textDigest_
 
 -- AddForeignKey
 ALTER TABLE "terms_acceptances" ADD CONSTRAINT "terms_acceptances_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "bookings"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+ALTER TABLE "terms_acceptances" ADD CONSTRAINT "terms_acceptances_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "customers"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- Constraints that Prisma cannot express.
 ALTER TABLE "terms_acceptances"

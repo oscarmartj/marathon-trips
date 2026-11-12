@@ -23,17 +23,28 @@ describe('where the browser may be sent', () => {
     ['https://pay.example.com/c/abc', 'https://pay.example.com/c/abc'],
     ['http://localhost:3000/api/payments/simulator/checkout/tok', 'http://localhost:3000/api/payments/simulator/checkout/tok'],
     ['http://127.0.0.1:4000/x', 'http://127.0.0.1:4000/x'],
-  ])('redirect_allows %s', (url, expected) => expect(safeRedirect(url)).toBe(expected));
+  ])('redirect_allows %s', (url, expected) => expect(safeRedirect(url, 'localhost')).toBe(expected));
 
   it.each([
     'javascript:alert(1)', 'data:text/html,<script>1</script>', '/relative/path', '//evil.example/x', 'http://evil.example/x', 'http://localhost.evil.example/x',
     'https://user:pass@pay.example.com/x', 'ftp://pay.example.com', '', 'not a url',
-  ])('redirect_refuses %s', (url) => expect(safeRedirect(url)).toBeNull());
+  ])('redirect_refuses %s', (url) => expect(safeRedirect(url, 'localhost')).toBeNull());
 
   it('redirect_refuses_non_strings_and_very_long_addresses', () => {
     expect(safeRedirect(undefined)).toBeNull();
     expect(safeRedirect(42)).toBeNull();
     expect(safeRedirect(`https://pay.example.com/${'a'.repeat(3000)}`)).toBeNull();
+  });
+});
+
+describe('a deployed site never sends the browser to http', () => {
+  it('redirect_to_http_localhost_only_from_a_page_served_from_localhost', () => {
+    const sim = 'http://localhost:3000/api/payments/simulator/checkout/tok';
+    expect(safeRedirect(sim, 'pay.example.com')).toBeNull();
+    expect(safeRedirect(sim, undefined)).toBeNull();
+    expect(safeRedirect('http://127.0.0.1:4000/x', 'shop.example.com')).toBeNull();
+    expect(safeRedirect(sim, 'localhost')).toBe(sim);
+    expect(safeRedirect('https://pay.example.com/c/abc', 'shop.example.com')).toBe('https://pay.example.com/c/abc');
   });
 });
 

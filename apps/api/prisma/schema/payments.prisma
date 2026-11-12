@@ -293,6 +293,9 @@ model TermsAcceptance {
   id             String   @id @default(uuid(7)) @db.Uuid
   bookingId      String   @db.Uuid
   booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// who accepted: the booking's customer, read inside the same transaction
+  customerId     String   @db.Uuid
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii content page address, such as terms
   documentSlug   String
   /// @nopii language tag such as en-AU
