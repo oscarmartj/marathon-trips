@@ -42,7 +42,7 @@ interface Note {
 }
 
 /** Internal notes on a booking or a customer, through the shared table routes (task 0.5). Never shown to the customer. */
-export function RecordNotes({ entityType, id }: { entityType: 'Booking' | 'Customer'; id: string }) {
+export function RecordNotes({ entityType, id }: { entityType: 'Booking' | 'Customer' | 'Complaint'; id: string }) {
   const [notes, setNotes] = useState<Note[] | null>(null);
   const [body, setBody] = useState('');
   const [message, setMessage] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
