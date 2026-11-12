@@ -173,7 +173,7 @@ export function ComplaintDetail({ id }: { id: string }) {
       </Section>
 
       <Section id="complaint-status" title={t('admin.complaints.status.title')}>
-        <StatusActions key={`${c.status}-${c.version}`} c={c} done={reload} />
+        <StatusActions c={c} done={reload} />
       </Section>
 
       {c.outcome ? (
