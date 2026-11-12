@@ -4,7 +4,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { ApiError, conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import { PackagePricingReader } from '../catalogue';
-import { NOT_READY_CODES, PricingError, price } from './engine';
+import { INTERNAL_CODES, NOT_READY_CODES, PricingError, price } from './engine';
 import type { PriceBreakdown, PromoInput } from './engine';
 import { engineView, loadRates, toJson, versionInForce } from './rates';
 
@@ -17,7 +17,12 @@ const UNKNOWN_CODE: PromoInput = {
   effectMode: 'percent', valueBps: 0, valueMinor: null, currency: null, per: 'booking', appliesTo: 'subtotal',
 };
 
-const asApiError = (e: PricingError): ApiError => (NOT_READY_CODES.has(e.code) ? conflict(e.code, e.message) : unprocessable(e.code, e.message));
+/**
+ * The HTTP answer for an engine failure: prices not ready → 409, a wrong configuration → 422, a broken invariant of
+ * the engine itself → null, so the error stays unexpected (500, logged) and is never blamed on the caller.
+ */
+export const pricingErrorToHttp = (e: PricingError): ApiError | null =>
+  INTERNAL_CODES.has(e.code) ? null : NOT_READY_CODES.has(e.code) ? conflict(e.code, e.message) : unprocessable(e.code, e.message);
 
 /**
  * Quotes (plan 2.1, section 4). Reads the package and its rates in one REPEATABLE READ transaction, takes `now` from
@@ -54,7 +59,7 @@ export class QuoteService {
         engineView(view), rates, [], req.promoCode ? UNKNOWN_CODE : null, opts.now,
       );
     } catch (e) {
-      if (e instanceof PricingError) throw asApiError(e);
+      if (e instanceof PricingError) throw pricingErrorToHttp(e) ?? e;
       throw e;
     }
   }

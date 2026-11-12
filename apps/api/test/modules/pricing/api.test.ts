@@ -51,7 +51,7 @@ describe('public quotes', () => {
     expect((await publicQuote(base)).status).toBe(200);
   });
 
-  it('public_quote_only_for_open_packages: draft, coming soon, closed, unpublished race or deleted all answer the same 404', async () => {
+  it('public_quote_only_for_open_packages: draft, coming soon, closed, sold out, waitlist, unpublished race, deleted or unknown all answer the same 404', async () => {
     const draft = await pricedWorld(admin, { open: false });
     const bodies: object[] = [];
     bodies.push(quoteBody(draft));
@@ -64,6 +64,15 @@ describe('public quotes', () => {
     const hidden = await pricedWorld(admin);
     await must(admin.post(`/admin/catalogue/races/${hidden.race.id}/status`, { status: 'draft', version: hidden.race.version + 1 }), 'unpublish race');
     bodies.push(quoteBody(hidden));
+    const soldOut = await pricedWorld(admin);
+    await must(setSale(admin, soldOut.pkg.id, 'sold_out'), 'sold out');
+    bodies.push(quoteBody(soldOut));
+    const waitlist = await pricedWorld(admin);
+    await must(setSale(admin, waitlist.pkg.id, 'waitlist'), 'waitlist');
+    bodies.push(quoteBody(waitlist));
+    const deleted = await pricedWorld(admin, { open: false });
+    await must(admin.delete(`/admin/catalogue/packages/${deleted.pkg.id}`), 'delete package', 204);
+    bodies.push(quoteBody(deleted));
     bodies.push(quoteBody({ ...draft, pkg: { id: crypto.randomUUID() } }));
     const answers = await Promise.all(bodies.map((b) => publicQuote(b)));
     for (const a of answers) expect([a.status, a.body]).toEqual([404, { code: 'package_not_found', message: 'Package not found' }]);
@@ -97,11 +106,31 @@ describe('versions and the price in force', () => {
     expect((await admin.get(`/admin/pricing/packages/${w.pkg.id}/price-versions`)).body.currentId).toBe(v2);
   });
 
-  it('copyCurrent starts a draft from the rates in force', async () => {
+  it('copyCurrent starts a draft from the rates in force, leaves out deleted extras and audits what it copied', async () => {
     const w = await pricedWorld(admin);
     const d = (await admin.post(`/admin/pricing/packages/${w.pkg.id}/price-versions`, { label: 'Copy', copyCurrent: true })).body;
     expect(d.rates.roomRates).toHaveLength(2);
     expect(d.missing).toEqual([]);
+    const log = await t.prisma.auditLog.findFirstOrThrow({ where: { action: 'pricing.price_version.created', entityId: d.id } });
+    expect(log.changes).toMatchObject({ extraRates: { before: null, after: [{ extraId: w.extraId, amountMinor: '12000' }] } });
+    const closed = await pricedWorld(admin);
+    await must(setSale(admin, closed.pkg.id, 'closed'), 'close');
+    await must(admin.delete(`/admin/catalogue/packages/${closed.pkg.id}/extras/${closed.extraId}`), 'delete extra');
+    const d2 = (await admin.post(`/admin/pricing/packages/${closed.pkg.id}/price-versions`, { label: 'Copy', copyCurrent: true })).body;
+    expect([d2.rates.extraRates, d2.rates.roomRates.length]).toEqual([[], 2]);
+  });
+
+  it('a version starts exactly where the previous one ends; the closing is audited; quotes switch at that instant', async () => {
+    const w = await pricedWorld(admin);
+    const v2 = await publishWith(admin, w.pkg.id, w.rates, 'Second');
+    const [first, second] = await Promise.all([w.versionId, v2].map((id) => t.prisma.priceVersion.findUniqueOrThrow({ where: { id } })));
+    expect(first!.validTo!.getTime()).toBe(second!.validFrom!.getTime());
+    const { versionInForce } = await import('../../../src/modules/pricing/rates');
+    const at = second!.validFrom!;
+    expect((await versionInForce(t.prisma, w.pkg.id, at))!.id).toBe(v2);
+    expect((await versionInForce(t.prisma, w.pkg.id, new Date(at.getTime() - 1)))!.id).toBe(w.versionId);
+    const closing = await t.prisma.auditLog.findFirstOrThrow({ where: { action: 'pricing.price_version.closed', entityId: w.versionId } });
+    expect(closing.changes).toMatchObject({ validTo: { before: null, after: at.toISOString() }, _context: { successorVersionId: v2 } });
   });
 
   it('publish_incomplete_version_rejected (any package, and one on sale); the panel sees what is missing', async () => {
@@ -178,7 +207,13 @@ describe('rates', () => {
     expect((await publishDraft(admin, w.pkg.id, { id: w.versionId, version: pub.version })).body.code).toBe('price_version_not_draft');
     const d = await draftWith(admin, w.pkg.id, w.rates);
     expect((await admin.delete(`/admin/pricing/price-versions/${d.id}`)).status).toBe(204);
-    expect((await admin.get(`/admin/pricing/price-versions/${d.id}`)).status).toBe(404);
+    // discarding archives: the row and its rates stay, frozen, and it is never priced or published
+    const archived = (await admin.get(`/admin/pricing/price-versions/${d.id}`)).body;
+    expect([archived.status, archived.rates.extraRates.length]).toEqual(['archived', 1]);
+    expect((await admin.put(`/admin/pricing/price-versions/${d.id}/rates`, { version: archived.version, ...w.rates })).body.code).toBe('price_version_not_draft');
+    expect((await publishDraft(admin, w.pkg.id, { id: d.id, version: archived.version })).body.code).toBe('price_version_not_draft');
+    expect((await admin.post('/admin/pricing/quotes', quoteBody(w, { priceVersionId: d.id }))).status).toBe(404);
+    expect(await t.prisma.auditLog.count({ where: { action: 'pricing.price_version.discarded', entityId: d.id } })).toBe(1);
   });
 });
 
@@ -214,6 +249,20 @@ describe('publishing', () => {
   });
 });
 
+describe('price_version_overlap: the database constraint behind publishing', () => {
+  it('a publish that would overlap a later published version is a 409, not a 500 (23P01)', async () => {
+    const w = await buildWorld(admin, { priced: false });
+    const pkg = (await admin.get(`/admin/catalogue/packages/${w.pkg.id}`)).body;
+    const rates = { ...cardFor({ roomId: pkg.hotels[0].rooms[0].id, extraId: pkg.extras[0].id, distanceId: w.distanceId }), participationRates: [] };
+    const future = await draftWith(admin, w.pkg.id, rates, 'From next week');
+    // 2.2 will schedule versions; here one is put in the future straight in the database
+    await t.prisma.$executeRawUnsafe(`UPDATE price_versions SET status = 'published', "validFrom" = now() + interval '7 days' WHERE id = $1::uuid`, future.id);
+    const now = await draftWith(admin, w.pkg.id, rates, 'From now');
+    const res = await publishDraft(admin, w.pkg.id, now);
+    expect([res.status, res.body.code]).toEqual([409, 'price_version_overlap']);
+  });
+});
+
 describe('a package on sale always prices (G1)', () => {
   it('catalogue_change_breaking_completeness_rejected_while_open: extra, occupancy, participation and entry', async () => {
     const w = await pricedWorld(admin);
@@ -243,6 +292,30 @@ describe('a package on sale always prices (G1)', () => {
     expect((await widen()).status).toBe(200);
     expect((await types()).status).toBe(200);
     expect((await entry()).status).toBe(201);
+  });
+
+  it('extra_has_rates: the pricing unit of a priced extra never changes; who takes it only changes off sale', async () => {
+    const w = await pricedWorld(admin);
+    const extraVersion = async (pkgId: string) => (await admin.get(`/admin/catalogue/packages/${pkgId}`)).body.extras[0].version as number;
+    const patch = async (pkgId: string, body: object) => admin.patch(`/admin/catalogue/packages/${pkgId}/extras/${w.extraId}`, { ...body, version: await extraVersion(pkgId) });
+    // the reviewer's case: per person at 12 000 would become per booking (or the reverse) under the same price version
+    const unit = await patch(w.pkg.id, { pricingUnit: 'per_booking' });
+    expect([unit.status, unit.body.code]).toEqual([409, 'extra_has_rates']);
+    expect((await patch(w.pkg.id, { mandatory: true })).body.code).toBe('extra_has_rates');
+    expect((await patch(w.pkg.id, { availableTo: 'runners' })).body.code).toBe('extra_has_rates');
+    expect((await patch(w.pkg.id, { maxPerBooking: 3 })).status).toBe(200);
+    const q = (await publicQuote(quoteBody(w, { extras: [{ extraId: w.extraId, travellerSlots: [1, 2] }] }))).body;
+    expect([q.totalMinor, q.lines.filter((l: { kind: string }) => l.kind === 'extra').length]).toEqual(['156500', 2]);
+    // off sale: who takes it may change; the unit still may not
+    await must(setSale(admin, w.pkg.id, 'closed'), 'close');
+    expect((await patch(w.pkg.id, { mandatory: true })).status).toBe(200);
+    expect((await patch(w.pkg.id, { pricingUnit: 'per_booking' })).body.code).toBe('extra_has_rates');
+    // an extra priced only in a draft is still free to change
+    const other = await pricedWorld(admin, { open: false });
+    const free = await admin.post(`/admin/catalogue/packages/${other.pkg.id}/extras`, { kind: 'meal', name: text('Pasta night'), pricingUnit: 'per_person' });
+    const freeId = (free.body.extras as Array<{ id: string; version: number }>).find((e) => e.id !== other.extraId)!;
+    await draftWith(admin, other.pkg.id, { ...other.rates, extraRates: [...other.rates.extraRates, { extraId: freeId.id, amountMinor: '4500' }] });
+    expect((await admin.patch(`/admin/catalogue/packages/${other.pkg.id}/extras/${freeId.id}`, { pricingUnit: 'per_booking', version: freeId.version })).status).toBe(200);
   });
 
   it('remove_room_with_rates_returns_409_not_500, and distances and entry options with rates are 409 too', async () => {

@@ -1,5 +1,6 @@
 // What the database guarantees on its own, whatever the code does (plan 2.1, G3, M1, M2, M13): SQL straight to
 // PostgreSQL as the API role.
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TestApp, makeApp } from '../../support/auth';
 import { Client, closeCatalogue, staffClient } from '../../support/catalogue';
@@ -28,9 +29,10 @@ describe('published_rates_immutable', () => {
   it('rates of a published version cannot be inserted, changed or deleted', async () => {
     await expect(sql(`UPDATE room_rates SET "pricePerPersonMinor" = 1 WHERE "priceVersionId" = $1::uuid`, w.versionId)).rejects.toThrow(/only the rates of a draft/);
     await expect(sql(`DELETE FROM extra_rates WHERE "priceVersionId" = $1::uuid`, w.versionId)).rejects.toThrow(/only the rates of a draft/);
-    await expect(sql(`INSERT INTO extra_rates (id, "priceVersionId", currency, "extraId", "amountMinor") VALUES ($1::uuid, $2::uuid, 'AUD', $3::uuid, 1)`, id(), w.versionId, w.extraId)).rejects.toThrow(/only the rates of a draft|duplicate/);
-    await expect(sql(`TRUNCATE room_rates`)).rejects.toThrow();
-    await expect(sql(`TRUNCATE price_versions`)).rejects.toThrow();
+    // an extra with no rate yet, so only the trigger (not the unique index) can refuse the insert
+    const unpriced = await t.prisma.extra.create({ data: { packageId: w.pkg.id, kind: 'meal', name: { 'en-AU': 'Pasta' }, description: {}, pricingUnit: 'per_person' } });
+    await expect(sql(`INSERT INTO extra_rates (id, "priceVersionId", currency, "extraId", "amountMinor") VALUES ($1::uuid, $2::uuid, 'AUD', $3::uuid, 1)`, id(), w.versionId, unpriced.id)).rejects.toThrow(/only the rates of a draft/);
+    await t.prisma.extra.update({ where: { id: unpriced.id }, data: { deletedAt: new Date() } });
     const r = await t.prisma.roomRate.findMany({ where: { priceVersionId: w.versionId }, orderBy: { occupancy: 'asc' } });
     expect(r.map((x) => x.pricePerPersonMinor)).toEqual([80_000n, 50_000n]);
   });
@@ -61,6 +63,21 @@ describe('published_rates_immutable', () => {
     });
     await other;
     expect(order).toEqual(['rate side commits', 'publish side']);
+  });
+});
+
+describe('no TRUNCATE, even for the owner role (BEFORE TRUNCATE triggers)', () => {
+  it.each(['price_versions', 'room_rates', 'participation_rates', 'extra_rates'])('%s', async (table) => {
+    // mt_app has no TRUNCATE privilege at all; the owner has it, so only the trigger stops it. Rolled back regardless.
+    const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await owner.connect();
+    try {
+      await owner.query('BEGIN');
+      await expect(owner.query(`TRUNCATE ${table} CASCADE`)).rejects.toThrow(/append-only/);
+    } finally {
+      await owner.query('ROLLBACK');
+      await owner.end();
+    }
   });
 });
 

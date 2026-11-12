@@ -39,27 +39,30 @@ export class PackageOpenGates {
   }
 }
 
-/** Something about to be removed from the catalogue; ids only. */
-export type RemovalTarget =
+/** Something about to be removed or changed in the catalogue; ids and flags only. */
+export type ChangeTarget =
   | { kind: 'room'; roomOptionId: string; packageId: string }
   | { kind: 'entry_option'; packageId: string; raceDistanceId: string }
-  | { kind: 'distance'; raceDistanceId: string };
-export type RemovalGuard = (tx: Tx, target: RemovalTarget) => Promise<OpenGateResult>;
+  | { kind: 'distance'; raceDistanceId: string }
+  /** An extra whose price meaning changes: per person ↔ per booking, or who must or may take it. */
+  | { kind: 'extra_terms'; extraId: string; packageId: string; pricingUnitChanged: boolean; termsChanged: boolean; onSale: boolean };
+export type ChangeGuard = (tx: Tx, target: ChangeTarget) => Promise<OpenGateResult>;
 
 /**
- * Checks other modules register before the catalogue removes a room, an entry option or a distance (plan 2.1, G1):
- * pricing refuses while rates point at it, so a removal is a clear 409 and never a foreign-key error.
+ * Checks other modules register before the catalogue removes a room, an entry option or a distance, or changes how an
+ * extra is priced (plan 2.1, G1 and code review round 1): pricing refuses while rates depend on it, so the answer is a
+ * clear 409, never a foreign-key error and never a price that changes without a new price version.
  */
 @Injectable()
-export class CatalogueRemovalGuards {
-  private readonly guards = new Map<string, RemovalGuard>();
+export class CatalogueChangeGuards {
+  private readonly guards = new Map<string, ChangeGuard>();
 
-  register(name: string, guard: RemovalGuard): void {
-    if (this.guards.has(name)) throw new AppError('removal_guard_duplicate', `Removal guard ${name} is already registered`);
+  register(name: string, guard: ChangeGuard): void {
+    if (this.guards.has(name)) throw new AppError('change_guard_duplicate', `Change guard ${name} is already registered`);
     this.guards.set(name, guard);
   }
 
-  async firstFailure(tx: Tx, target: RemovalTarget): Promise<OpenGateResult> {
+  async firstFailure(tx: Tx, target: ChangeTarget): Promise<OpenGateResult> {
     for (const guard of this.guards.values()) {
       const r = await guard(tx, target);
       if (r) return r;

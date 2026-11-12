@@ -10,7 +10,7 @@ import type { AuditActor, AuditContext } from '../../platform/audit/audit.servic
 import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
-import { CatalogueRemovalGuards, PackageOpenGates } from './open-gates';
+import { CatalogueChangeGuards, PackageOpenGates } from './open-gates';
 import { LIVE_SALE_STATUSES, SALE_TRANSITIONS, canMove } from './transitions';
 import { Tx, assertVersion, defined, fromDate, lockPackage, orConflict, orInUse, toDate, versionConflict, view } from './support';
 
@@ -44,7 +44,7 @@ export class PackageService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(PackageOpenGates) private readonly gates: PackageOpenGates,
-    @Inject(CatalogueRemovalGuards) private readonly removalGuards: CatalogueRemovalGuards,
+    @Inject(CatalogueChangeGuards) private readonly changeGuards: CatalogueChangeGuards,
   ) {}
 
   // ---- Packages ----
@@ -242,8 +242,8 @@ export class PackageService {
     if (failed) throw conflict(failed.code, failed.message);
   }
 
-  private async refuseRemoval(tx: Tx, target: Parameters<CatalogueRemovalGuards['firstFailure']>[1]): Promise<void> {
-    const failed = await this.removalGuards.firstFailure(tx, target);
+  private async refuseChange(tx: Tx, target: Parameters<CatalogueChangeGuards['firstFailure']>[1]): Promise<void> {
+    const failed = await this.changeGuards.firstFailure(tx, target);
     if (failed) throw conflict(failed.code, failed.message);
   }
 
@@ -302,7 +302,7 @@ export class PackageService {
       const pkg = await this.livePackage(tx, packageId);
       const row = await tx.packageEntryOption.findFirst({ where: { id, packageId } });
       if (!row) throw notFound('entry_option_not_found', 'Entry option not found');
-      await this.refuseRemoval(tx, { kind: 'entry_option', packageId, raceDistanceId: row.raceDistanceId });
+      await this.refuseChange(tx, { kind: 'entry_option', packageId, raceDistanceId: row.raceDistanceId });
       await orInUse('entry_option_in_use', 'Something still uses this entry option', () => tx.packageEntryOption.delete({ where: { id } }));
       await this.audit.record(tx, { actor, action: 'catalogue.entry_option.deleted', entityType: 'PackageEntryOption', entityId: id, before: view(row) });
       await this.recheckOnSale(tx, pkg);
@@ -373,7 +373,7 @@ export class PackageService {
       const pkg = await this.livePackage(tx, packageId);
       const before = await tx.roomOption.findFirst({ where: { id: roomId, packageHotel: { packageId } } });
       if (!before) throw notFound('room_not_found', 'Room not found');
-      await this.refuseRemoval(tx, { kind: 'room', roomOptionId: roomId, packageId });
+      await this.refuseChange(tx, { kind: 'room', roomOptionId: roomId, packageId });
       await orInUse('room_in_use', 'Something still uses this room', () => tx.roomOption.delete({ where: { id: roomId } }));
       await this.audit.record(tx, { actor, action: 'catalogue.room.deleted', entityType: 'RoomOption', entityId: roomId, before: view(before) });
       await this.recheckOnSale(tx, pkg);
@@ -408,6 +408,11 @@ export class PackageService {
       });
       if (res.count !== 1) throw versionConflict();
       const after = await tx.extra.findUniqueOrThrow({ where: { id: extraId } });
+      const pricingUnitChanged = after.pricingUnit !== before.pricingUnit;
+      const termsChanged = after.mandatory !== before.mandatory || after.availableTo !== before.availableTo;
+      if (pricingUnitChanged || termsChanged) {
+        await this.refuseChange(tx, { kind: 'extra_terms', extraId, packageId, pricingUnitChanged, termsChanged, onSale: LIVE_SALE_STATUSES.includes(pkg.saleStatus as SaleStatus) });
+      }
       await this.audit.record(tx, { actor, action: 'catalogue.extra.updated', entityType: 'Extra', entityId: extraId, before: view(before), after: view(after) });
       await this.recheckOnSale(tx, pkg);
     });

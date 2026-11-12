@@ -258,6 +258,13 @@ describe('promo_codes (base 165 000)', () => {
     expect(b.promo.status).toBe(status);
   });
 
+  it('a code with a traveller filter also works on what the rules left (60 % rule, then 50 % code for rooms of two)', () => {
+    // 60 000 off the 100 000 of rooms; the code takes 50 % of the 40 000 left, not of the 100 000 base
+    const b = run(DOUBLE_2M, { rules: [rule({ valueBps: 6000 })], promo: promo({ appliesTo: 'accommodation', valueBps: 5000, conditions: { occupancies: [2] } }) });
+    expect(b.lines.find((l) => l.kind === 'promo')!.amountMinor).toBe(20_000n);
+    expect(b.totalMinor).toBe(85_000n);
+  });
+
   it('a per-person code shows unit and quantity', () => {
     const b = run(DOUBLE_2M, { promo: promo({ appliesTo: 'participation', ...fixed(2_000n, { per: 'person' }) } as Partial<PromoInput>) });
     expect(b.lines.find((l) => l.kind === 'promo')).toMatchObject({ unitAmountMinor: 2_000n, quantity: 2, amountMinor: 4_000n, direction: 'discount' });
@@ -359,5 +366,14 @@ describe('quote_is_deterministic, breakdown_carries_engine_and_price_version, br
     const second = run(DOUBLE_2M, { rates: { ...RATES, priceVersionId: '00000000-0000-7000-8000-000000000002', roomRates: RATES.roomRates.map((r) => ({ ...r, pricePerPersonMinor: r.pricePerPersonMinor + 1_000n })) } });
     expect(second.totalMinor).toBe(167_000n);
     expect(first).toEqual(frozen);
+  });
+});
+
+describe('engine failures as HTTP answers', () => {
+  it('not ready → 409, wrong configuration → 422, a broken invariant → no HTTP answer (stays a logged 500)', async () => {
+    const { pricingErrorToHttp } = await import('../../../../src/modules/pricing/quote.service');
+    expect(pricingErrorToHttp(new PricingError('rate_missing', 'x'))?.status).toBe(409);
+    expect(pricingErrorToHttp(new PricingError('occupancy_out_of_range', 'x'))?.status).toBe(422);
+    for (const code of ['total_negative', 'total_inconsistent', 'rounding_invalid', 'amount_negative']) expect(pricingErrorToHttp(new PricingError(code, 'x'))).toBeNull();
   });
 });

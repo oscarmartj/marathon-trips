@@ -8,7 +8,7 @@ import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import { PackagePricingReader, lockPackage } from '../catalogue';
-import type { PackagePricingView } from '../catalogue';
+import type { ChangeTarget, PackagePricingView } from '../catalogue';
 import { missingRates } from './engine';
 import { engineView, loadRates, toJson, versionInForce } from './rates';
 
@@ -71,14 +71,28 @@ export class PriceVersionService {
     const id = await this.prisma.$transaction(async (tx) => {
       const view = await this.packageOrNotFound(tx, packageId);
       const created = await tx.priceVersion.create({ data: { packageId, currency: view.currency, label: input.label, status: 'draft' } });
+      let copied: Pick<Awaited<ReturnType<typeof loadRates>>, 'roomRates' | 'participationRates' | 'extraRates'> = { roomRates: [], participationRates: [], extraRates: [] };
       if (input.copyCurrent) {
         const current = await versionInForce(tx, packageId, new Date());
         if (current) {
+          // Only what the package still has: deleted extras and removed rooms or distances are not copied.
           const rates = await loadRates(tx, current.id, current.currency);
-          await this.writeRates(tx, created.id, created.currency, rates);
+          const rooms = new Set(view.rooms.map((r) => r.id));
+          const extras = new Set(view.extras.map((e) => e.id));
+          const distances = new Set(view.raceDistanceIds);
+          copied = {
+            roomRates: rates.roomRates.filter((r) => rooms.has(r.roomOptionId)),
+            participationRates: rates.participationRates.filter((r) => r.raceDistanceId === null || distances.has(r.raceDistanceId)),
+            extraRates: rates.extraRates.filter((r) => extras.has(r.extraId)),
+          };
+          await this.writeRates(tx, created.id, created.currency, copied);
         }
       }
-      await this.audit.record(tx, { actor, action: 'pricing.price_version.created', entityType: 'PriceVersion', entityId: created.id, reason: input.reason, after: toJson(created) as Record<string, unknown> });
+      await this.audit.record(tx, {
+        actor, action: 'pricing.price_version.created', entityType: 'PriceVersion', entityId: created.id, reason: input.reason,
+        after: { ...(toJson(created) as Record<string, unknown>), ...(toJson(copied) as Record<string, unknown>) },
+        fieldClasses: { roomRates: 'nopii', participationRates: 'nopii', extraRates: 'nopii' },
+      });
       return created.id;
     });
     return this.get(id);
@@ -162,20 +176,28 @@ export class PriceVersionService {
         if (view.currency !== v.currency) throw conflict('currency_mismatch', 'The price version is in another currency');
         const missing = missingRates(engineView(view), await loadRates(tx, id, v.currency));
         if (missing.length > 0) throw conflict('price_version_incomplete', 'This version lacks rates for some rooms, travellers or extras');
+        // One instant for both ends, read from the database clock after the locks (not now(), which is the start of the
+        // transaction and may be before a lock wait) and cut to the millisecond the columns keep (code review, M2 of round 1).
+        const at = (await tx.$queryRaw<Array<{ at: Date }>>`SELECT date_trunc('milliseconds', clock_timestamp()) AS at`)[0]!.at;
         // Compare-and-set on the version in force: of two drafts published at once, only one wins (M3).
-        const inForce = await versionInForce(tx, v.packageId, new Date());
+        const inForce = await versionInForce(tx, v.packageId, at);
         if ((inForce?.id ?? null) !== input.replacesVersionId) throw conflict('current_version_changed', 'The prices in force changed since you looked. Reload and try again.');
-        const previous = await tx.$queryRaw<Array<{ id: string }>>`
-          UPDATE price_versions SET "validTo" = now(), "updatedAt" = now()
-          WHERE "packageId" = ${v.packageId}::uuid AND status = 'published' AND "validTo" IS NULL RETURNING id`;
+        if (inForce) {
+          await tx.$executeRaw`UPDATE price_versions SET "validTo" = ${at}, "updatedAt" = ${at} WHERE id = ${inForce.id}::uuid AND status = 'published' AND "validTo" IS NULL`;
+          await this.audit.record(tx, {
+            actor, action: 'pricing.price_version.closed', entityType: 'PriceVersion', entityId: inForce.id, reason: input.reason,
+            before: { validTo: null }, after: { validTo: at }, context: { successorVersionId: id },
+          });
+        }
         const published = await tx.$executeRaw`
-          UPDATE price_versions SET status = 'published', "validFrom" = now(), "publishedAt" = now(), "publishedById" = ${actor.id}::uuid,
-            version = version + 1, "updatedAt" = now()
+          UPDATE price_versions SET status = 'published', "validFrom" = ${at}, "publishedAt" = ${at}, "publishedById" = ${actor.id}::uuid,
+            version = version + 1, "updatedAt" = ${at}
           WHERE id = ${id}::uuid AND status = 'draft' AND version = ${input.version}`;
         if (published !== 1) throw versionConflict();
+        const previous = inForce ? [{ id: inForce.id }] : [];
         await this.audit.record(tx, {
           actor, action: 'pricing.price_version.published', entityType: 'PriceVersion', entityId: id, reason: input.reason,
-          before: { status: 'draft' }, after: { status: 'published' }, context: { previousVersionId: previous[0]?.id ?? null },
+          before: { status: 'draft', validFrom: null }, after: { status: 'published', validFrom: at }, context: { previousVersionId: previous[0]?.id ?? null },
         });
         await this.outbox.publish(tx, {
           type: 'pricing.price_version.published', aggregateType: 'PriceVersion', aggregateId: id, aggregateVersion: input.version + 1,
@@ -190,16 +212,17 @@ export class PriceVersionService {
     return this.get(id);
   }
 
-  /** Discards a draft: its rates and the row go; a published or archived version is never deleted. */
+  /**
+   * Discards a draft by archiving it (plan 2.1, M1): the row and its rates stay, frozen, so the audit trail can show
+   * what was discarded. An archived version is never priced, published or changed again.
+   */
   async discard(actor: Actor, id: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const v = await this.lockVersion(tx, id);
       if (v.status !== 'draft') throw conflict('price_version_not_draft', 'Only a draft price version can be discarded');
-      await tx.roomRate.deleteMany({ where: { priceVersionId: id } });
-      await tx.participationRate.deleteMany({ where: { priceVersionId: id } });
-      await tx.extraRate.deleteMany({ where: { priceVersionId: id } });
-      await tx.priceVersion.delete({ where: { id } });
-      await this.audit.record(tx, { actor, action: 'pricing.price_version.discarded', entityType: 'PriceVersion', entityId: id, before: { status: 'draft' }, after: null });
+      const res = await tx.priceVersion.updateMany({ where: { id, status: 'draft' }, data: { status: 'archived' } });
+      if (res.count !== 1) throw versionConflict();
+      await this.audit.record(tx, { actor, action: 'pricing.price_version.discarded', entityType: 'PriceVersion', entityId: id, before: { status: 'draft' }, after: { status: 'archived' } });
     });
   }
 
@@ -216,12 +239,21 @@ export class PriceVersionService {
     return null;
   }
 
-  async removalGate(tx: Tx, target: { kind: 'room'; roomOptionId: string } | { kind: 'entry_option'; packageId: string; raceDistanceId: string } | { kind: 'distance'; raceDistanceId: string }) {
+  async changeGate(tx: Tx, target: ChangeTarget): Promise<{ code: string; message: string } | null> {
     if (target.kind === 'room') {
       return (await tx.roomRate.count({ where: { roomOptionId: target.roomOptionId } })) > 0 ? { code: 'room_has_rates', message: 'This room has prices and cannot be removed' } : null;
     }
     if (target.kind === 'distance') {
       return (await tx.participationRate.count({ where: { raceDistanceId: target.raceDistanceId } })) > 0 ? { code: 'distance_has_rates', message: 'This distance has prices and cannot be removed' } : null;
+    }
+    if (target.kind === 'extra_terms') {
+      // A published rate means "this much per person" or "this much per booking": changing the unit would change what
+      // every later quote charges under the same price version, without a publish or its step-up (code review, round 1).
+      const published = await tx.extraRate.count({ where: { extraId: target.extraId, priceVersion: { status: 'published', OR: [{ validTo: null }, { validTo: { gt: new Date() } }] } } });
+      if (published === 0) return null;
+      if (target.pricingUnitChanged) return { code: 'extra_has_rates', message: 'This extra has published prices; its pricing unit cannot change. Add a new extra instead.' };
+      if (target.termsChanged && target.onSale) return { code: 'extra_has_rates', message: 'Take the package off sale before changing who must or may take a priced extra.' };
+      return null;
     }
     const inDraft = await tx.participationRate.count({ where: { raceDistanceId: target.raceDistanceId, priceVersion: { packageId: target.packageId, status: 'draft' } } });
     return inDraft > 0 ? { code: 'entry_option_has_rates', message: 'A draft price version prices this distance. Remove that rate first.' } : null;

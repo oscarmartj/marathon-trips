@@ -15,3 +15,6 @@ export class PricingError extends Error {
 
 /** Codes that mean "the catalogue or its prices are not ready", not "the request is wrong". */
 export const NOT_READY_CODES: ReadonlySet<string> = new Set(['rate_missing', 'no_current_price_version', 'deposit_not_configured', 'currency_mismatch', 'rule_invalid']);
+
+/** Codes that mean the engine itself broke an invariant: a bug, answered as a logged 500, never as the caller's fault. */
+export const INTERNAL_CODES: ReadonlySet<string> = new Set(['total_negative', 'total_inconsistent', 'rounding_invalid', 'amount_negative']);

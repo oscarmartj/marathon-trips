@@ -10,7 +10,7 @@ import type { AuditActor, AuditContext } from '../../platform/audit/audit.servic
 import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
-import { CatalogueRemovalGuards } from './open-gates';
+import { CatalogueChangeGuards } from './open-gates';
 import { EDITION_TRANSITIONS, RACE_TRANSITIONS, canMove } from './transitions';
 import { Tx, assertVersion, defined, fromDate, orConflict, orInUse, toDate, versionConflict, view } from './support';
 
@@ -23,7 +23,7 @@ export class RaceService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
-    @Inject(CatalogueRemovalGuards) private readonly removalGuards: CatalogueRemovalGuards,
+    @Inject(CatalogueChangeGuards) private readonly changeGuards: CatalogueChangeGuards,
   ) {}
 
   // ---- Races ----
@@ -149,7 +149,7 @@ export class RaceService {
       const before = await tx.raceDistance.findFirst({ where: { id, race: { deletedAt: null } }, include: { _count: { select: { entryOptions: true } } } });
       if (!before) throw notFound('distance_not_found', 'Distance not found');
       if (before._count.entryOptions > 0) throw conflict('distance_in_use', 'A package uses this distance for its race entries');
-      const guard = await this.removalGuards.firstFailure(tx, { kind: 'distance', raceDistanceId: id });
+      const guard = await this.changeGuards.firstFailure(tx, { kind: 'distance', raceDistanceId: id });
       if (guard) throw conflict(guard.code, guard.message);
       const { _count, ...row } = before;
       await orInUse('distance_in_use', 'Something still uses this distance', () => tx.raceDistance.delete({ where: { id } }));

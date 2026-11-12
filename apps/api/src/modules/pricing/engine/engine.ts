@@ -310,7 +310,10 @@ export function price(req: EngineRequest, view: CatalogueView, rates: RatesView,
         const filteredBase = slots === null ? null : baseOf(target, slots);
         const left = target === 'subtotal' ? netTotal : net[target];
         const persons = slots === null ? travellers.length : slots.size;
-        const wanted = amountOf(promo, filteredBase ?? left, persons, MAX_DISCOUNT_BPS);
+        // On what is left of the target after the rules (plan 2.1, section 4, step 7). Rules are not split by traveller, so
+        // with a traveller filter the code works on the smaller of the filtered base and what is left of the target.
+        const on = filteredBase !== null && filteredBase < left ? filteredBase : left;
+        const wanted = amountOf(promo, on, persons, MAX_DISCOUNT_BPS);
         apply(promo.id, 'promo', 'promo_code', 'discount', promo, persons, wanted, filteredBase);
         promoStatus = 'applied';
       }
