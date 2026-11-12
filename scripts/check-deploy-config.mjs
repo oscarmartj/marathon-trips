@@ -59,8 +59,14 @@ export function checkDeployConfig(compose, caddyfile) {
   if (!trust || trust === 'false' || trust === 'true') errors.push('api TRUST_PROXY must name the web container\'s network (not unset, false or true)');
   if (value(s.api, 'COOKIE_SECURE') !== 'true') errors.push('api COOKIE_SECURE must be "true"');
   for (const key of ['EMAIL_HASH_KEY', 'FILE_SIGNING_KEY', 'APP_ENCRYPTION_KEY', 'AUTH_HMAC_KEY', 'WEB_ORIGIN', 'MT_APP_PASSWORD', 'MT_OWNER_PASSWORD']) {
-    if (!new RegExp(`\\$\\{${key}:\\?`).test(s.api)) errors.push(`api ${key} must be required (\${${key}:?...})`);
+    if (!new RegExp(`\\$\\{${key}:\\?`).test(s.api.replace(/^\s+build:.*$/m, ''))) errors.push(`api ${key} must be required (\${${key}:?...})`);
   }
+  // Task 1.fix-1: the web build bakes WEB_ORIGIN into static pages (canonical, Open Graph, hreflang, JSON-LD), so the
+  // production compose must pass it at build time and run time, and it must never fall back to a local or http address.
+  const originRule = /\$\{WEB_ORIGIN:\?/;
+  if (!originRule.test(s.web.replace(/^\s+build:.*$/m, ""))) errors.push('web WEB_ORIGIN must be required at run time (${WEB_ORIGIN:?...})');
+  if (!/^\s+build:.*\bargs:\s*\{[^}]*\bWEB_ORIGIN:\s*"?\$\{WEB_ORIGIN:\?/m.test(s.web)) errors.push('web build must pass WEB_ORIGIN as a required build arg (${WEB_ORIGIN:?...})');
+  if (/(localhost|127\.0\.0\.1|http:\/\/)/.test(compose.split('\n').filter((l) => /WEB_ORIGIN/.test(l) && !/\$\{WEB_ORIGIN:\?/.test(l)).join('\n'))) errors.push('WEB_ORIGIN must not be set to localhost or http:// in the production compose');
   const hops = Number(value(s.web, 'WEB_TRUSTED_PROXY_HOPS'));
   if (!Number.isInteger(hops) || hops < 1 || hops > 5) errors.push('web WEB_TRUSTED_PROXY_HOPS must be an integer from 1 to 5 (the hosting proxy count)');
   if (!/reverse_proxy\s+web:3000/.test(caddyfile)) errors.push('Caddyfile must reverse_proxy to web:3000');
