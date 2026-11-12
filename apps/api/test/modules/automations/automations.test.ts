@@ -32,7 +32,6 @@ let owner: Client & { staff: StaffFixture };
 let engine: AutomationEngine;
 let w: PricedWorld;
 let tagId: string;
-let otherTagId: string;
 let hookId: string;
 
 const q = async (sql: string): Promise<number> => Number((await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(sql))[0]!.n);
@@ -115,7 +114,6 @@ beforeAll(async () => {
   const catalogue = await bookingStaff(t);
   w = await pricedWorld(catalogue);
   tagId = (await t.prisma.tag.create({ data: { name: `vip-${randomUUID().slice(0, 8)}`, colour: '#336699', entityTypes: ['Booking'] } })).id;
-  otherTagId = (await t.prisma.tag.create({ data: { name: `seen-${randomUUID().slice(0, 8)}`, colour: '#336699', entityTypes: [] } })).id;
   await t.prisma.messageTemplate.deleteMany({ where: { key: { in: TEMPLATE_KEYS } } });
   for (const key of TEMPLATE_KEYS) {
     await t.prisma.messageTemplate.create({
