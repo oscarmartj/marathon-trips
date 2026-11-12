@@ -74,7 +74,7 @@ export async function pricePackageFully(admin: Client, packageId: string, amount
   const strip = <T extends Record<string, unknown>>(xs: T[]) => xs.map(({ currency: _c, ...x }) => x);
   const set = await admin.put(`/admin/pricing/price-versions/${draft.id}/rates`, { version: draft.version, roomRates: strip(rooms), participationRates: strip(participation), extraRates: strip(extras) });
   if (set.status !== 200) throw new Error(`set rates failed: ${set.status} ${JSON.stringify(set.body)}`);
-  const pub = await admin.post(`/admin/pricing/price-versions/${draft.id}/publish`, { version: set.body.version });
+  const pub = await admin.post(`/admin/pricing/price-versions/${draft.id}/publish`, { version: set.body.version, replacesVersionId: list.currentId ?? null });
   if (pub.status !== 200) throw new Error(`publish failed: ${pub.status} ${JSON.stringify(pub.body)}`);
   return draft.id as string;
 }

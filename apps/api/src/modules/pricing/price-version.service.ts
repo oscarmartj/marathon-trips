@@ -144,8 +144,9 @@ export class PriceVersionService {
   }
 
   /**
-   * Publishes a draft now (plan 2.1, section 12): the package is locked FOR UPDATE (M3), the draft must be complete
-   * against the catalogue (G1), the version in force gets its end and the draft starts at the same instant, then the
+   * Publishes a draft now (plan 2.1, section 12): the package is locked FOR UPDATE (M3), the version in force must be
+   * the one the publisher saw, the draft must be complete against the catalogue (G1), the version in force gets its
+   * end and the draft starts at the same instant, then the
    * audit entry and the pricing.price_version.published event, all in one transaction.
    */
   async publish(actor: Actor, id: string, input: z.infer<typeof publishPriceVersionSchema>) {
@@ -161,6 +162,9 @@ export class PriceVersionService {
         if (view.currency !== v.currency) throw conflict('currency_mismatch', 'The price version is in another currency');
         const missing = missingRates(engineView(view), await loadRates(tx, id, v.currency));
         if (missing.length > 0) throw conflict('price_version_incomplete', 'This version lacks rates for some rooms, travellers or extras');
+        // Compare-and-set on the version in force: of two drafts published at once, only one wins (M3).
+        const inForce = await versionInForce(tx, v.packageId, new Date());
+        if ((inForce?.id ?? null) !== input.replacesVersionId) throw conflict('current_version_changed', 'The prices in force changed since you looked. Reload and try again.');
         const previous = await tx.$queryRaw<Array<{ id: string }>>`
           UPDATE price_versions SET "validTo" = now(), "updatedAt" = now()
           WHERE "packageId" = ${v.packageId}::uuid AND status = 'published' AND "validTo" IS NULL RETURNING id`;
@@ -180,7 +184,6 @@ export class PriceVersionService {
         });
       });
     } catch (err) {
-      if (process.env.MT_DEBUG) console.error("DEBUG", (err as Error).message);
       if (isExclusionViolation(err)) throw conflict('price_version_overlap', 'Another version was published at the same time. Reload and try again.');
       throw err;
     }

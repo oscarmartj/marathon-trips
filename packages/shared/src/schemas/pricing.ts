@@ -20,7 +20,8 @@ const reason = z.string().trim().min(1).max(500).optional();
 export const rateAmountSchema = z
   .string()
   .regex(/^\d{1,12}$/)
-  .refine((s) => BigInt(s) <= MAX_LINE_MINOR, { message: 'Amount is above the allowed limit' });
+  // zod 4 runs every check, so the refinement must not trust the regex: BigInt('1.5') would throw.
+  .refine((s) => /^\d{1,12}$/.test(s) && BigInt(s) <= MAX_LINE_MINOR, { message: 'Amount is above the allowed limit' });
 
 // ---- What a client may ask for ----
 
@@ -96,7 +97,11 @@ export const setRatesSchema = z.strictObject({
   reason,
 });
 
-export const publishPriceVersionSchema = z.strictObject({ version: versionSchema, reason });
+/**
+ * `replacesVersionId` is the version in force the publisher saw (null if none): publishing is a compare-and-set on it,
+ * so of two drafts published at once only one wins (M3).
+ */
+export const publishPriceVersionSchema = z.strictObject({ version: versionSchema, replacesVersionId: uuidSchema.nullable(), reason });
 
 // ---- What the API answers ----
 
