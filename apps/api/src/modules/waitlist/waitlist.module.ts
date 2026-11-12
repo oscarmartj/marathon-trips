@@ -37,7 +37,8 @@ export class WaitlistModule implements OnModuleInit {
       handlers: {
         export: (tx, customerId) => tx.waitlistEntry.findMany({ where: { customerId }, select: { email: true, packageId: true, reason: true, status: true, countryOfResidence: true, travellers: true, createdAt: true } }),
         // Erasing a customer takes them off the list: nobody gets an offer for an erased person. The API role cannot
-        // delete (only mt_privacy can), so the entry is withdrawn and redacted here; task 5.5's purge may delete it.
+        // delete (only mt_privacy can), so the entry is withdrawn and redacted here. It is not deleted: claims are never deleted and reference it, so an entry
+        // that ever had an offer cannot be purged (a never-offered one could be).
         anonymise: async (tx, customerId) => {
           // Lock every live entry first: a promotion that is offering one commits before we look (no offer is missed). An
           // offer holds places, so bookings gives them back (and offers them on) before the entry is withdrawn.

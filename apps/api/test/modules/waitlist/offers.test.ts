@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BookingExpiryService } from '../../../src/modules/bookings/expiry.service';
+import { WaitlistService } from '../../../src/modules/waitlist';
 import { MailService } from '../../../src/platform/mail/mail.service';
 import { EntityRegistry } from '../../../src/platform/entities/entity-registry';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
@@ -355,6 +356,19 @@ describe('offers respect the package and where the person lives', () => {
     expect(await t.prisma.outboundEmail.count({ where: { dedupeKey: `waitlist:offer:${id}` } })).toBe(0);
   });
 
+  it('accept_on_closed_package_409: with an offer open and the package then closed, accepting is refused and the places stay held until expiry', async () => {
+    const s = await soldOutWorld(t, admin);
+    const a = await customerClient(t);
+    const id = await joinList(t, a, s.w);
+    await cancelHolder(t, s);
+    expect((await entry(id)).status).toBe('offered');
+    expect((await setSale(admin, s.w.pkg.id, 'closed')).status).toBe(200);
+    const res = await act(t, a, id, 'accept');
+    expect([res.status, res.body.code]).toEqual([409, 'package_not_open']);
+    expect([(await entry(id)).status, (await heldBy(id)).length > 0]).toEqual(['offered', true]);
+    expect(await t.prisma.booking.count({ where: { customer: { userId: a.userId } } })).toBe(0);
+  });
+
   it('a person who no longer lives in a sales country keeps the place but is not offered one, and cannot accept an offer', async () => {
     const s = await soldOutWorld(t, admin, undefined, 2);
     const [a, b] = [await customerClient(t), await customerClient(t)];
@@ -371,16 +385,39 @@ describe('offers respect the package and where the person lives', () => {
 });
 
 describe('erasure_never_leaks_an_offer', () => {
-  it('erasing a customer while a cancellation offers them a place never leaves held places behind', async () => {
-    for (let i = 0; i < 4; i++) {
+  it('erasing a customer while a cancellation is offering them a place never leaves held places behind', async () => {
+    // A barrier inside the promotion forces the interleaving: the erasure starts while the offer is being made
+    // (the entry is locked and the places are about to be held), and only then is the promotion let go on.
+    const original = WaitlistService.prototype.offerIn;
+    for (let i = 0; i < 2; i++) {
       const s = await soldOutWorld(t, admin);
       const a = await customerClient(t);
       const id = await joinList(t, a, s.w);
       const customerId = (await entry(id)).customerId;
       const def = t.app.get(EntityRegistry).get('WaitlistEntry')!;
-      await Promise.all([cancelHolder(t, s), t.prisma.$transaction((tx) => def.handlers!.anonymise(tx, customerId))]);
-      const e = await entry(id);
-      expect(e.status).toBe('withdrawn');
+      let inside!: () => void;
+      let release!: () => void;
+      const entered = new Promise<void>((r) => (inside = r));
+      const gate = new Promise<void>((r) => (release = r));
+      const spy = vi.spyOn(WaitlistService.prototype, 'offerIn').mockImplementation(async function (this: WaitlistService, ...args: Parameters<typeof original>) {
+        inside();
+        await gate;
+        return original.apply(this, args);
+      });
+      let calls = 0;
+      try {
+        const cancel = cancelHolder(t, s);
+        await entered;
+        const erase = t.prisma.$transaction((tx) => def.handlers!.anonymise(tx, customerId));
+        await new Promise((r) => setTimeout(r, 400)); // the erasure is now waiting on the entry the promotion holds
+        release();
+        await Promise.all([cancel, erase]);
+        calls = spy.mock.calls.length;
+      } finally {
+        spy.mockRestore();
+      }
+      expect(calls).toBe(1);
+      expect((await entry(id)).status).toBe('withdrawn');
       expect(await heldBy(id)).toEqual([]);
       // Every place went back to the pool: nothing consumed is left without an owner.
       expect(Object.values(await consumed(s.pools)).reduce((n, v) => n + v, 0)).toBe(0);

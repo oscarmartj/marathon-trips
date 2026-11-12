@@ -19,6 +19,8 @@ CREATE UNIQUE INDEX "inventory_claims_waitlistEntryId_poolId_key" ON "inventory_
 ALTER TABLE "waitlist_entries" ADD CONSTRAINT "waitlist_entries_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "bookings"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- AddForeignKey
+-- RESTRICT, and claims are never deleted: an entry that ever held places can never be deleted. Erasure redacts it
+-- (status withdrawn, email and country overwritten); it is not purged.
 ALTER TABLE "inventory_claims" ADD CONSTRAINT "inventory_claims_waitlistEntryId_fkey" FOREIGN KEY ("waitlistEntryId") REFERENCES "waitlist_entries"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- Constraints and triggers that Prisma cannot express.
