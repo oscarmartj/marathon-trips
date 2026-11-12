@@ -1,12 +1,6 @@
 import type { Metadata } from 'next';
 import { PlaceholderPage } from '@/components/placeholder-page';
-import { placeholderRaceSlugs } from '@/lib/routes';
 import { t } from '@/lib/i18n';
-
-export function generateStaticParams() {
-  return placeholderRaceSlugs.map((slug) => ({ slug }));
-}
-export const dynamicParams = false;
 
 export const metadata: Metadata = { title: t('races.build.title') };
 

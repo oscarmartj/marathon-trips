@@ -1,12 +1,21 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import { adminRoutes, publicRoutes, placeholderRaceSlugs } from '@/lib/routes';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { adminRoutes, publicRoutes } from '@/lib/routes';
+import { SLUG, stubCatalogue } from '@/test/catalogue-fixtures';
 
-type PageModule = { default: (props: { params: Promise<{ slug: string }> }) => unknown };
+type PageModule = { default: (props: { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string>> }) => unknown };
+
+// Catalogue pages read the public API; the tests give them a fixed answer.
+beforeEach(() => {
+  stubCatalogue();
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 async function render(file: string) {
   const mod = (await import(/* @vite-ignore */ `./${file.replace(/\.tsx$/, '')}`)) as PageModule;
-  const element = await mod.default({ params: Promise.resolve({ slug: placeholderRaceSlugs[0] }) });
+  const element = await mod.default({ params: Promise.resolve({ slug: SLUG }), searchParams: Promise.resolve({}) });
   return renderToStaticMarkup(element as never);
 }
 

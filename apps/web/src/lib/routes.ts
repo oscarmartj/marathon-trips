@@ -49,6 +49,3 @@ export const adminRoutes: readonly RouteDef[] = [
   { path: '/admin/sign-in', file: 'admin/(auth)/sign-in/page.tsx', labelKey: 'admin.nav.signIn' },
   { path: '/admin/enrol', file: 'admin/(auth)/enrol/page.tsx', labelKey: 'admin.nav.enrol' },
 ];
-
-/** Placeholder race used until the API provides races (public pages are statically generated). */
-export const placeholderRaceSlugs = ['sample-marathon'] as const;
