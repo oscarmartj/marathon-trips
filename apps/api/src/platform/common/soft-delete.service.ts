@@ -34,7 +34,7 @@ export class SoftDeleteService {
       before: { deletedAt: row.deletedAt ?? null }, after: { deletedAt: updated.deletedAt ?? null },
     });
     await this.outbox.publish(tx, {
-      type: `common.${snake(def.entityType)}.${verb}`, aggregateType: def.entityType, aggregateId: id, actorType: 'staff', actorId: actor.id,
+      type: `common.${snake(def.entityType)}.${verb}`, aggregateType: def.entityType, aggregateId: id, actorType: actor.type, actorId: actor.id,
       payload: { entityType: def.entityType, entityId: id },
     });
     await this.search.sync(tx, def, updated);

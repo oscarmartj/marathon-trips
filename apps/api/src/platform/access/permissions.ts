@@ -8,7 +8,15 @@ export interface PermissionDef {
   description: string;
   /** A TOTP check in the last 5 minutes is required to use it (plan 4.2, 4.3). */
   requiresStepUp?: boolean;
+  /**
+   * May be a scope of an API key (task 8.4). Off unless a manifest says so; never together with requiresStepUp, and
+   * never for platform, access, audit or integrations permissions.
+   */
+  apiKeyScopable?: boolean;
 }
+
+/** Modules whose permissions never become API key scopes: they change access, settings or integrations, or reveal them. */
+const NEVER_SCOPABLE = /^(platform|access|audit|integrations)\./;
 
 const KEY = /^[a-z][a-zA-Z]*\.[a-z][a-zA-Z]*\.[a-z][a-zA-Z]*$/;
 
@@ -54,7 +62,10 @@ export class PermissionRegistry {
     for (const d of defs) {
       if (!KEY.test(d.key)) throw new AppError('permission_bad_key', `Permission ${d.key} must be <module>.<resource>.<action>`);
       if (this.defs.has(d.key)) throw new AppError('permission_duplicate', `Permission ${d.key} is declared twice`);
-      this.defs.set(d.key, { ...d, requiresStepUp: d.requiresStepUp ?? false });
+      if (d.apiKeyScopable && (d.requiresStepUp || NEVER_SCOPABLE.test(d.key))) {
+        throw new AppError('permission_not_scopable', `Permission ${d.key} cannot be an API key scope`);
+      }
+      this.defs.set(d.key, { ...d, requiresStepUp: d.requiresStepUp ?? false, apiKeyScopable: d.apiKeyScopable ?? false });
     }
   }
 
