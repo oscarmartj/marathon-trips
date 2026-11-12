@@ -1,4 +1,4 @@
-import { MAX_LINE_MINOR, MAX_TOTAL_MINOR } from '@mt/shared';
+import { MAX_FIXED_PER_PERSON_MINOR, MAX_LINE_MINOR, MAX_TOTAL_MINOR } from '@mt/shared';
 import { BUSINESS_TIME_ZONE, addDays, calendarDateIn, daysBetween } from './calendar';
 import { PricingError } from './errors';
 import { MAX_DISCOUNT_BPS, MAX_SURCHARGE_BPS, applyBps, mulDivHalfUp } from './rounding';
@@ -11,10 +11,19 @@ import {
  * Bumped whenever the order or the meaning of any step changes (plan 2.1, section 4). Bookings keep the version that
  * priced them and are never recalculated.
  */
-export const ENGINE_VERSION = 'pricing-2.1.0';
+export const ENGINE_VERSION = 'pricing-2.2.0';
 
 const RUNNER_TYPES: readonly ParticipationType[] = ['runner_with_entry', 'runner_own_entry'];
 const TARGETS: readonly Target[] = ['accommodation', 'participation', 'extras', 'subtotal'];
+
+/** Where a configuration error comes from: a stored rule or the promo code (plan 2.2, section 15, point 1). */
+export type ConfigOrigin = 'rule' | 'promo';
+
+/**
+ * Two targets overlap when they are the same or one of them is the subtotal, which holds every component (plan 2.2,
+ * section 2). "Not stackable" means: combines with no other discount (or surcharge) on an overlapping target.
+ */
+export const targetsOverlap = (a: Target, b: Target): boolean => a === b || a === 'subtotal' || b === 'subtotal';
 
 interface Traveller {
   slot: number;
@@ -119,8 +128,9 @@ function validate(req: EngineRequest, view: CatalogueView): { travellers: Travel
 
 // ---- Effects of rules and promo codes ----
 
-function validateEffect(e: Effect & { direction: 'discount' | 'surcharge' }, id: string): void {
-  const bad = (why: string) => fail('rule_invalid', `Rule or code ${why}`, { id });
+/** Checks the effect of a rule or code; the same function runs when one is saved (plan 2.2, section 3). */
+export function validateEffect(e: Effect & { direction: 'discount' | 'surcharge' }, id: string, origin: ConfigOrigin = 'rule'): void {
+  const bad = (why: string) => fail('rule_invalid', `Rule or code ${why}`, { id, origin });
   if (!TARGETS.includes(e.appliesTo)) bad('has an unknown target');
   if (e.effectMode === 'percent') {
     if (e.valueBps === null || e.valueMinor !== null) bad('mixes percent and fixed');
@@ -129,12 +139,13 @@ function validateEffect(e: Effect & { direction: 'discount' | 'surcharge' }, id:
     if (e.per === 'person') bad('is a percentage per person');
   } else {
     if (e.valueMinor === null || e.valueBps !== null || e.currency === null) bad('needs an amount and its currency');
-    if (e.valueMinor! < 0n || e.valueMinor! > MAX_LINE_MINOR) bad('has an amount out of range');
+    if (e.valueMinor! < 0n || e.valueMinor! > (e.per === 'person' ? MAX_FIXED_PER_PERSON_MINOR : MAX_LINE_MINOR)) bad('has an amount out of range');
   }
 }
 
-function validateConditions(c: RuleConditions, kind: string, id: string): void {
-  const bad = (why: string) => fail('rule_invalid', `Rule ${why}`, { id });
+/** Checks the conditions of a rule or code against what its kind needs; also run when one is saved. */
+export function validateConditions(c: RuleConditions, kind: string, id: string, origin: ConfigOrigin = 'rule'): void {
+  const bad = (why: string) => fail('rule_invalid', `Rule ${why}`, { id, origin });
   const nonNegInt = (x: number | undefined) => x === undefined || (Number.isInteger(x) && x >= 0);
   if (!nonNegInt(c.minDaysBeforeCheckIn) || !nonNegInt(c.maxDaysBeforeCheckIn) || !nonNegInt(c.minTravellers) || !nonNegInt(c.maxTravellers)) bad('has an invalid number');
   if (c.occupancies && (c.occupancies.length === 0 || c.occupancies.some((o) => !Number.isInteger(o) || o < 1 || o > 4))) bad('has invalid occupancies');
@@ -167,10 +178,10 @@ const inScope = (e: { scopeType: string; scopeId: string | null }, view: Catalog
  * A fixed effect in another currency is never applied (plan 0.1, 5.3): global ones are skipped, package and edition
  * ones are a configuration error.
  */
-function currencyOk(e: Effect & { scopeType: string }, view: CatalogueView, id: string): boolean {
+function currencyOk(e: Effect & { scopeType: string }, view: CatalogueView, id: string, origin: ConfigOrigin): boolean {
   if (e.effectMode !== 'fixed' || e.currency === view.currency) return true;
   if (e.scopeType === 'global') return false;
-  return fail('currency_mismatch', 'A rule or code is in another currency', { id });
+  return fail('currency_mismatch', 'A rule or code is in another currency', { id, origin });
 }
 
 // ---- The engine ----
@@ -243,6 +254,8 @@ export function price(req: EngineRequest, view: CatalogueView, rates: RatesView,
       netTotal += amount;
     }
     const key = `${kind}:${id}`;
+    // A rule or code line above the limit is a configuration problem, not the customer's (plan 2.2, point 10).
+    if (amount > MAX_LINE_MINOR) fail('adjustment_above_limit', 'A rule or code gives a line above the allowed amount', { id, origin: kind === 'promo' ? 'promo' : 'rule' });
     lines.push({
       key, component: target, kind, direction, travellerSlot: null, refId: id,
       unitAmountMinor: perPerson ? e.valueMinor! : wanted, quantity: perPerson ? persons : 1, amountMinor: checkLine(amount, key),
@@ -256,12 +269,12 @@ export function price(req: EngineRequest, view: CatalogueView, rates: RatesView,
   const trace: RuleTrace[] = [];
   const applicable: Array<{ rule: RuleInput; slots: Set<number> | null }> = [];
   for (const rule of rules) {
-    validateEffect(rule, rule.id);
-    validateConditions(rule.conditions, rule.kind, rule.id);
+    validateEffect(rule, rule.id, 'rule');
+    validateConditions(rule.conditions, rule.kind, rule.id, 'rule');
     if (!rule.enabled) { trace.push({ ruleId: rule.id, outcome: 'disabled' }); continue; }
     if ((rule.validFrom && now.getTime() < rule.validFrom.getTime()) || (rule.validTo && now.getTime() >= rule.validTo.getTime())) { trace.push({ ruleId: rule.id, outcome: 'out_of_validity' }); continue; }
     if (!inScope(rule, view)) { trace.push({ ruleId: rule.id, outcome: 'out_of_scope' }); continue; }
-    if (!currencyOk(rule, view, rule.id)) { trace.push({ ruleId: rule.id, outcome: 'other_currency' }); continue; }
+    if (!currencyOk(rule, view, rule.id, 'rule')) { trace.push({ ruleId: rule.id, outcome: 'other_currency' }); continue; }
     if (!conditionsHold(rule.conditions, today, view, travellers.length)) { trace.push({ ruleId: rule.id, outcome: 'conditions_not_met' }); continue; }
     let slots: Set<number> | null = null;
     if (hasFilter(rule.conditions)) {
@@ -274,21 +287,19 @@ export function price(req: EngineRequest, view: CatalogueView, rates: RatesView,
     a.rule.direction !== b.rule.direction ? (a.rule.direction === 'surcharge' ? -1 : 1)
       : a.rule.priority !== b.rule.priority ? a.rule.priority - b.rule.priority
         : a.rule.id < b.rule.id ? -1 : a.rule.id > b.rule.id ? 1 : 0);
-  // Stacking by group (direction, target): a non-stackable rule applies only to an empty group and closes it.
-  const groups = new Map<string, { count: number; closed: boolean }>();
-  const discountedTargets = new Set<Target>();
+  // Stacking (plan 2.2, section 2): a rule is blocked by an applied rule of the same direction on an overlapping target
+  // when either of the two is not stackable.
+  const applied: Array<{ direction: 'discount' | 'surcharge'; target: Target; stackable: boolean }> = [];
+  const clashes = (direction: 'discount' | 'surcharge', target: Target, stackable: boolean) =>
+    applied.some((a) => a.direction === direction && targetsOverlap(a.target, target) && (!a.stackable || !stackable));
   for (const { rule, slots } of applicable) {
-    const g = groups.get(`${rule.direction}:${rule.appliesTo}`) ?? { count: 0, closed: false };
-    if (g.closed || (!rule.stackable && g.count > 0)) { trace.push({ ruleId: rule.id, outcome: 'blocked_by_non_stackable' }); continue; }
+    if (clashes(rule.direction, rule.appliesTo, rule.stackable)) { trace.push({ ruleId: rule.id, outcome: 'blocked_by_non_stackable' }); continue; }
     const filteredBase = slots === null ? null : baseOf(rule.appliesTo, slots);
     const onAmount = filteredBase ?? subtotals[rule.appliesTo];
     const persons = slots === null ? travellers.length : slots.size;
     const wanted = amountOf(rule, onAmount, persons, rule.direction === 'discount' ? MAX_DISCOUNT_BPS : MAX_SURCHARGE_BPS);
     apply(rule.id, 'rule', rule.kind, rule.direction, rule, persons, wanted, rule.direction === 'discount' ? filteredBase : null);
-    g.count += 1;
-    if (!rule.stackable) g.closed = true;
-    groups.set(`${rule.direction}:${rule.appliesTo}`, g);
-    if (rule.direction === 'discount') discountedTargets.add(rule.appliesTo);
+    applied.push({ direction: rule.direction, target: rule.appliesTo, stackable: rule.stackable });
     trace.push({ ruleId: rule.id, outcome: 'applied' });
   }
 
@@ -296,15 +307,16 @@ export function price(req: EngineRequest, view: CatalogueView, rates: RatesView,
   let promoStatus: PromoStatus = 'none';
   if (promo) {
     if (promo.usable) {
-      validateEffect({ ...promo, direction: 'discount' }, promo.id);
-      validateConditions(promo.conditions, 'custom', promo.id);
+      validateEffect({ ...promo, direction: 'discount' }, promo.id, 'promo');
+      validateConditions(promo.conditions, 'custom', promo.id, 'promo');
     }
-    if (!promo.usable || !inScope(promo, view) || !currencyOk(promo, view, promo.id)) promoStatus = 'invalid';
+    if (!promo.usable || !inScope(promo, view) || !currencyOk(promo, view, promo.id, 'promo')) promoStatus = 'invalid';
     else if (!conditionsHold(promo.conditions, today, view, travellers.length)) promoStatus = 'conditions_not_met';
     else {
       const slots = hasFilter(promo.conditions) ? new Set(travellers.filter((t) => matches(promo.conditions, t)).map((t) => t.slot)) : null;
       if (slots !== null && slots.size === 0) promoStatus = 'conditions_not_met';
-      else if (!promo.stackable && discountedTargets.has(promo.appliesTo)) promoStatus = 'not_combinable';
+      // The code and every rule discount on an overlapping target must all be stackable (plan 2.2, section 2).
+      else if (clashes('discount', promo.appliesTo, promo.stackable)) promoStatus = 'not_combinable';
       else {
         const target = promo.appliesTo;
         const filteredBase = slots === null ? null : baseOf(target, slots);

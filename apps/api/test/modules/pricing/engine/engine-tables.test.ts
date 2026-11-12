@@ -364,7 +364,7 @@ describe('quote_is_deterministic, breakdown_carries_engine_and_price_version, br
   });
   it('the breakdown names the engine and the price version', () => {
     const b = run(DOUBLE_2M);
-    expect(b.engineVersion).toBe('pricing-2.1.0');
+    expect(b.engineVersion).toBe('pricing-2.2.0');
     expect(b.priceVersionId).toBe(RATES.priceVersionId);
     expect(b.computedAt).toBe(NOW.toISOString());
   });
