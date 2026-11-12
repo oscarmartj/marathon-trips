@@ -65,7 +65,8 @@ describe('access marks (plan 4.1)', () => {
     const { problems, checked } = await checkOwnedRoutes(t, OWNED_ROUTE_FIXTURES, a, b);
     expect(problems).toEqual([]);
     expect(checked).toBeGreaterThanOrEqual(5);
-  });
+    // Customer-resource fixtures build real data (task 2.4: a priced, open package and a booking request).
+  }, 60_000);
 
   it('the owned-route harness catches a leaky route, a missing fixture and self routes that take ids', async () => {
     let db: TestApp['prisma'] | null = null;
@@ -102,7 +103,7 @@ describe('access marks (plan 4.1)', () => {
     } finally {
       await probe.close();
     }
-  });
+  }, 60_000);
 
   it('a handler mark never hides a controller mark: two marks at any level are denied and reported', async () => {
     @Controller('probe2')

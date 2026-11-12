@@ -9,7 +9,7 @@ import { PermissionRegistry } from '../../../src/platform/access/permissions';
 import { SYSTEM_ACTOR } from '../../../src/platform/audit/audit.service';
 import { runTransaction } from '../../../src/platform/database/transaction';
 import { TestApp, makeApp } from '../../support/auth';
-import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
+import { CATALOGUE_AND_PRICING, closeCatalogue, staffClient } from '../../support/catalogue';
 import { createCode, freshCode } from '../../support/adjustments';
 import { bookingStaff, cleanBookingEvents, customerClient, makeBookingFor, requestBody } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
@@ -49,7 +49,7 @@ const STEP_SQL = `
   WHERE id = $1::uuid`;
 
 let t: TestApp;
-let admin: Client;
+let admin: Awaited<ReturnType<typeof bookingStaff>>;
 let w: PricedWorld;
 let app: pg.Client;
 beforeAll(async () => {
@@ -106,7 +106,7 @@ describe('booking_status_trigger_matrix: the database lets through exactly the p
     await expect(t.prisma.$executeRawUnsafe(`UPDATE bookings SET "currentSnapshotVersion" = 3 WHERE id = $1::uuid`, bookingId)).rejects.toThrow(/only goes up by one/);
     const row = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
     await expect(t.prisma.$transaction(async (tx) => {
-      await tx.booking.create({ data: { ...row, id: crypto.randomUUID(), reference: 'MT-ZZZZZZ', requestKeyHash: 'a'.repeat(64), status: 'approved', approvedAt: new Date(), approvalExpiresAt: new Date(Date.now() + 1e6) } });
+      await tx.booking.create({ data: { ...row, customFields: {}, id: crypto.randomUUID(), reference: 'MT-ZZZZZZ', requestKeyHash: 'a'.repeat(64), status: 'approved', approvedAt: new Date(), approvalExpiresAt: new Date(Date.now() + 1e6) } });
     })).rejects.toThrow(/starts as a request/);
   });
 });

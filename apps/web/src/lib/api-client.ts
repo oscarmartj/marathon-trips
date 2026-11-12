@@ -6,11 +6,11 @@ export interface ApiResult<T = Record<string, unknown>> {
   body: T & { code?: string; message?: string };
 }
 
-export async function api<T = Record<string, unknown>>(path: string, init: { method?: string; body?: unknown } = {}): Promise<ApiResult<T>> {
+export async function api<T = Record<string, unknown>>(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<ApiResult<T>> {
   const res = await fetch(`/api${path}`, {
     method: init.method ?? 'GET',
     credentials: 'same-origin',
-    headers: { Accept: 'application/json', ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}), 'X-MT-CSRF': '1' },
+    headers: { Accept: 'application/json', ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}), 'X-MT-CSRF': '1', ...(init.headers ?? {}) },
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   let body: unknown = {};

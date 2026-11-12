@@ -13,7 +13,7 @@ import { OwnedBy } from '../../../src/platform/access/access.decorators';
 import { ApiError } from '../../../src/platform/http/api-error';
 import { ZodPipe } from '../../../src/platform/http/zod.pipe';
 import { TestApp, makeApp, signInCustomer } from '../../support/auth';
-import { Client, closeCatalogue } from '../../support/catalogue';
+import { closeCatalogue } from '../../support/catalogue';
 import { bookingStaff, cleanBookingEvents, customerClient, makeBookingFor, makeCustomer, requestBody } from '../../support/bookings';
 import { checkOwnedRoutes } from '../../support/owned-routes';
 import { OWNED_ROUTE_FIXTURES } from '../../support/owned-route-fixtures';
@@ -23,7 +23,7 @@ import type { PricedWorld } from '../../support/pricing';
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 let t: TestApp;
-let admin: Client;
+let admin: Awaited<ReturnType<typeof bookingStaff>>;
 let w: PricedWorld;
 let owner: pg.Client;
 beforeAll(async () => {
@@ -79,7 +79,7 @@ describe('booking_snapshots_immutable and booking_total_mirrors_snapshot', () =>
     await expect(sql(`UPDATE bookings SET "currentSnapshotVersion" = 2 WHERE id = $1::uuid`, b.id)).rejects.toThrow(/totals must be those of its current snapshot/);
     // a booking without a snapshot cannot commit
     const row = await t.prisma.booking.findUniqueOrThrow({ where: { id: b.id } });
-    await expect(t.prisma.booking.create({ data: { ...row, id: randomUUID(), reference: 'MT-YYYYYY', requestKeyHash: 'b'.repeat(64) } })).rejects.toThrow(/totals must be those of its current snapshot/);
+    await expect(t.prisma.booking.create({ data: { ...row, customFields: {}, id: randomUUID(), reference: 'MT-YYYYYY', requestKeyHash: 'b'.repeat(64) } })).rejects.toThrow(/totals must be those of its current snapshot/);
   });
 
   it('booking_identity_columns_immutable and bookings_never_deleted', async () => {
@@ -100,7 +100,7 @@ describe('booking_snapshots_immutable and booking_total_mirrors_snapshot', () =>
     const other = await pricedWorld(admin);
     const { bookingId } = await makeBookingFor(t, w);
     const row = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-    await expect(t.prisma.booking.create({ data: { ...row, id: randomUUID(), reference: 'MT-WWWWWW', requestKeyHash: 'e'.repeat(64), editionId: other.edition.id } })).rejects.toThrow(/edition is its package's edition/);
+    await expect(t.prisma.booking.create({ data: { ...row, customFields: {}, id: randomUUID(), reference: 'MT-WWWWWW', requestKeyHash: 'e'.repeat(64), editionId: other.edition.id } })).rejects.toThrow(/edition is its package's edition/);
   });
 
   it('inventory_claim_released_once_by_sql: held to released, once, and nothing else; never deleted', async () => {
@@ -128,7 +128,7 @@ describe('booking_snapshots_immutable and booking_total_mirrors_snapshot', () =>
     await expect(sql(`UPDATE customers SET "isDemo" = true WHERE id = $1::uuid`, id)).rejects.toThrow(/never change/);
     expect(await asOwner(`TRUNCATE customers CASCADE`)).toMatch(/append-only/);
     // only a customer user can be linked
-    const staff = admin.staff as { id: string };
+    const staff = admin.staff;
     await expect(sql(`UPDATE customers SET "userId" = $2::uuid WHERE id = $1::uuid`, id, staff.id)).rejects.toThrow(/foreign key/);
   });
 });

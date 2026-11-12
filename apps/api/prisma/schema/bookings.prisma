@@ -170,7 +170,7 @@ model Booking {
 }
 
 /// The configuration and price of a booking as submitted (version 1) or amended (6.3). Never changes: UPDATE, DELETE and
-/// TRUNCATE are refused by triggers (not @appendOnly, because it points at bookings; plan 2.4, section 2.2).
+/// TRUNCATE are refused by triggers (not marked append-only, because it points at bookings; plan 2.4, section 2.2).
 /// No personal data and no free text: travellers are slots, everything else ids, codes, dates and amounts.
 model BookingSnapshot {
   id             String              @id @default(uuid(7)) @db.Uuid

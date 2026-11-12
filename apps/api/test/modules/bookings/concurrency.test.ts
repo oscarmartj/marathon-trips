@@ -6,7 +6,7 @@ import { bookingRequestSchema } from '@mt/shared';
 import { BookingExpiryService } from '../../../src/modules/bookings/expiry.service';
 import { BookingRequestService } from '../../../src/modules/bookings/request.service';
 import { TestApp, makeApp, signInCustomer } from '../../support/auth';
-import { Client, announceEdition, buildWorld, closeCatalogue, pricePackageFully, setSale } from '../../support/catalogue';
+import { announceEdition, buildWorld, closeCatalogue, pricePackageFully, setSale } from '../../support/catalogue';
 import { createCode, freshCode } from '../../support/adjustments';
 import { bookingStaff, cleanBookingEvents, contact, customerClient, makeCustomer, requestBody } from '../../support/bookings';
 import type { CustomerClient } from '../../support/bookings';
@@ -16,7 +16,7 @@ import type { PricedWorld } from '../../support/pricing';
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
 let t: TestApp;
-let admin: Client;
+let admin: Awaited<ReturnType<typeof bookingStaff>>;
 beforeAll(async () => {
   t = await makeApp();
   admin = await bookingStaff(t);

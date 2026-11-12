@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { BOOKINGS_PERMISSIONS } from '../../src/modules/bookings';
 import { STATE_HEADERS, TestApp, signInCustomer, uniqueEmail } from './auth';
+import type { StaffFixture } from './auth';
 import { CATALOGUE_AND_PRICING, Client, staffClient } from './catalogue';
 import { quoteBody } from './pricing';
 import type { PricedWorld } from './pricing';
@@ -67,7 +68,7 @@ export async function customerClient(t: TestApp, email = uniqueEmail('customer')
 }
 
 /** Staff that can manage the catalogue, prices and bookings. */
-export const bookingStaff = (t: TestApp): Promise<Client & { staff: { id: string } }> => staffClient(t, [...CATALOGUE_AND_PRICING, ...ALL_BOOKING_PERMISSIONS]) as never;
+export const bookingStaff = (t: TestApp): Promise<Client & { staff: StaffFixture }> => staffClient(t, [...CATALOGUE_AND_PRICING, ...ALL_BOOKING_PERMISSIONS]);
 
 /** Removes the events booking tests leave behind, so other test files start clean. */
 export async function cleanBookingEvents(t: TestApp): Promise<void> {

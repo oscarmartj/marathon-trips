@@ -7,7 +7,7 @@ import { BOOKING_SETTINGS } from '../../../src/modules/bookings/settings';
 import { jsonOf } from '../../../src/modules/bookings/support';
 import { SettingsService } from '../../../src/platform/flags/flags.service';
 import { STATE_HEADERS, TestApp, makeApp, signInStaff } from '../../support/auth';
-import { Client, closeCatalogue, setSale } from '../../support/catalogue';
+import { closeCatalogue, setSale } from '../../support/catalogue';
 import { createCode, createRule, freshCode, richWorld } from '../../support/adjustments';
 import type { RichWorld } from '../../support/adjustments';
 import { bookingStaff, cleanBookingEvents, contact, customerClient, requestBody } from '../../support/bookings';
@@ -17,7 +17,7 @@ import type { PricedWorld } from '../../support/pricing';
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 let t: TestApp;
-let admin: Client;
+let admin: Awaited<ReturnType<typeof bookingStaff>>;
 beforeAll(async () => {
   t = await makeApp();
   admin = await bookingStaff(t);
@@ -73,7 +73,8 @@ describe('request_snapshot_matches_engine: the request stores exactly what the e
     const b = await bookingByRef(res.body.reference);
     const snap = b.snapshots[0]!;
     // The engine, asked again with the same configuration at the request's instant, gives the stored snapshot.
-    const { contact: _c, ...configuration } = body;
+    const { contact: _c, ...rest } = body;
+    const configuration = rest as unknown as Record<string, unknown> & { rooms: Array<{ travellers: unknown[] }> };
     const again = await t.prisma.$transaction((tx) => t.app.get(QuoteService).priceWithPromoRef(tx, quoteRequestSchema.parse(configuration), { audience: 'public', now: b.requestedAt }));
     expect(snap.priceBreakdown).toEqual(jsonOf(again.breakdown));
     expect(snap.configuration).toEqual(jsonOf(again.breakdown.configuration));
@@ -150,7 +151,7 @@ describe('what a request may carry', () => {
   it('request_requires_customer_session and staff_session_cannot_request', async () => {
     const anon = await t.http().post('/booking-requests').set(STATE_HEADERS).set('Idempotency-Key', randomUUID()).send(requestBody(w));
     expect(anon.status).toBe(401);
-    const staffCookie = await signInStaff(t, admin.staff as never);
+    const staffCookie = await signInStaff(t, admin.staff);
     const staff = await t.http().post('/booking-requests').set(STATE_HEADERS).set('Cookie', staffCookie).set('Idempotency-Key', randomUUID()).send(requestBody(w));
     expect(staff.status).toBe(401);
     expect(await t.prisma.booking.count({ where: { packageId: w.pkg.id } })).toBe(0);
