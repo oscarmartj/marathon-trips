@@ -161,6 +161,19 @@ export const setParticipationSchema = z.strictObject({
   types: z.array(z.enum(PARTICIPATION_TYPES)).max(3).refine((a) => new Set(a).size === a.length, { message: 'Duplicate type' }),
 });
 export const entryOptionSchema = z.strictObject({ raceDistanceId: uuidSchema, entryPoolId: uuidSchema });
+/**
+ * Copy a package to another edition of the same race (task 1.2). The dates are required because they differ every
+ * year; stock pools are created afresh in the target edition (empty and unconfirmed). The copy is always a draft.
+ */
+export const duplicatePackageSchema = z.strictObject({
+  targetEditionId: uuidSchema,
+  slug: slugSchema,
+  name: localisedTextSchema(150).optional(),
+  checkInDate: isoDateSchema,
+  checkOutDate: isoDateSchema,
+  balanceDueDate: isoDateSchema,
+  reason,
+});
 export const addPackageHotelSchema = z.strictObject({ hotelId: uuidSchema, displayOrder: z.number().int().min(0).max(100).default(0) });
 
 export const roomOptionSchema = z
@@ -267,6 +280,16 @@ export const adminRaceQuerySchema = z.strictObject({
   page,
   pageSize,
 });
+
+export const adminPackageQuerySchema = z.strictObject({
+  q: z.string().trim().min(1).max(80).optional(),
+  saleStatus: z.enum(SALE_STATUSES).optional(),
+  editionId: uuidSchema.optional(),
+  page,
+  pageSize,
+});
+/** CSV export of the catalogue takes no options; the body is an empty object. */
+export const catalogueExportBodySchema = z.strictObject({});
 
 export type CreateRace = z.infer<typeof createRaceSchema>;
 export type CreatePackage = z.infer<typeof createPackageSchema>;
