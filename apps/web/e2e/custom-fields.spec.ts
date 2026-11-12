@@ -7,7 +7,7 @@ interface Staff {
   secret: string;
 }
 // Each spec file signs in with an owner of its own where it can: the API refuses a TOTP code it has already accepted.
-const owner = (): Staff => JSON.parse(process.env.E2E_STAFF_6 ?? '{}') as Staff;
+const owner = (): Staff => JSON.parse(process.env.E2E_STAFF_8 ?? '{}') as Staff;
 const code = (secret: string) => new TOTP({ secret: Secret.fromBase32(secret), digits: 6, period: 30, algorithm: 'SHA1' }).generate();
 
 async function signIn(page: Page, s: Staff) {
