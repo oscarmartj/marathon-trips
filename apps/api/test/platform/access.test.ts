@@ -91,7 +91,8 @@ describe('access marks (plan 4.1)', () => {
           return { asOwner: () => tt.http().get(`/probe/${path}/${id}`).set('Cookie', owner.cookie), asOther: () => tt.http().get(`/probe/${path}/${id}`).set('Cookie', other.cookie) };
         },
       });
-      const { problems } = await checkOwnedRoutes(probe, { probeSession: fixture('sessions'), probeLeaky: fixture('leaky') }, a, b);
+      // The app's own customer-resource routes (task 2.4 on) bring their fixtures; the probes add theirs.
+      const { problems } = await checkOwnedRoutes(probe, { ...OWNED_ROUTE_FIXTURES, probeSession: fixture('sessions'), probeLeaky: fixture('leaky') }, a, b);
       expect(problems.sort()).toEqual([
         'GET /probe/leaky/:id: other customer got 200, expected 404',
         'GET /probe/self-query: self route reads the query',

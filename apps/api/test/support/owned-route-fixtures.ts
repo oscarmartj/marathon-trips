@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type { Test } from 'supertest';
+import { STATE_HEADERS } from './auth';
 import type { TestApp } from './auth';
 
 export interface CustomerSession {
@@ -16,4 +18,17 @@ export interface OwnedRouteFixture {
 }
 
 /** Task 0.3 has only `self` routes; later tasks add one entry per customer-resource route. */
-export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {};
+export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
+  // Task 2.4: GET /booking-requests/:reference. Customer A sends a request for an open package; B asks for it.
+  'booking-request': {
+    async create(t, a, b) {
+      const { bookingStaff, requestBody } = await import('./bookings');
+      const { pricedWorld } = await import('./pricing');
+      const w = await pricedWorld(await bookingStaff(t));
+      const res = await t.http().post('/booking-requests').set(STATE_HEADERS).set('Cookie', a.cookie).set('Idempotency-Key', randomUUID()).send(requestBody(w));
+      if (res.status !== 201) throw new Error(`booking request failed: ${res.status} ${JSON.stringify(res.body)}`);
+      const path = `/booking-requests/${res.body.reference as string}`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
+};
