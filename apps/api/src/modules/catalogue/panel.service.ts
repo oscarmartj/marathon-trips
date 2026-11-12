@@ -2,10 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { z } from 'zod';
 import type { adminPackageQuerySchema } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
+import { CustomFieldsService } from '../../platform/common/custom-fields/custom-fields.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { notFound } from '../../platform/http/api-error';
 import { stockOf } from './inventory.service';
-import { PACKAGE_VIEW_INCLUDE, packageView } from './public.service';
+import { PACKAGE_VIEW_INCLUDE, PublicCatalogueService, packageView } from './public.service';
 import { view } from './support';
 
 const enAU = (v: unknown): string => (v && typeof v === 'object' && typeof (v as Record<string, unknown>)['en-AU'] === 'string' ? ((v as Record<string, string>)['en-AU'] as string) : '');
@@ -13,11 +14,17 @@ const enAU = (v: unknown): string => (v && typeof v === 'object' && typeof (v as
 /** Read models for the panel: the package list, the preview and the low-stock warning (task 1.2). */
 @Injectable()
 export class CataloguePanelService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CustomFieldsService) private readonly customFields: CustomFieldsService,
+    @Inject(PublicCatalogueService) private readonly publicCatalogue: PublicCatalogueService,
+  ) {}
 
   async listPackages(q: z.infer<typeof adminPackageQuerySchema>) {
+    const cf = await this.customFields.filterWhere('Package', q.cf);
     const where: Prisma.PackageWhereInput = {
       deletedAt: null,
+      ...(cf.length ? { AND: cf as Prisma.PackageWhereInput[] } : {}),
       edition: { race: { deletedAt: null } },
       ...(q.saleStatus ? { saleStatus: q.saleStatus } : {}),
       ...(q.editionId ? { editionId: q.editionId } : {}),
@@ -45,7 +52,7 @@ export class CataloguePanelService {
     const pkg = await this.prisma.package.findFirst({ where: { id, deletedAt: null, edition: { race: { deletedAt: null } } }, include: PACKAGE_VIEW_INCLUDE });
     if (!pkg) throw notFound('package_not_found', 'Package not found');
     const race = await this.prisma.race.findUniqueOrThrow({ where: { id: pkg.edition.raceId }, include: { claims: true } });
-    return view({ ...packageView(race, pkg), preview: true as const, raceStatus: race.status, editionStatus: pkg.edition.status, isDemo: race.isDemo });
+    return view({ ...packageView(race, pkg, await this.publicCatalogue.packageCustomFields(pkg)), preview: true as const, raceStatus: race.status, editionStatus: pkg.edition.status, isDemo: race.isDemo });
   }
 
   /** Pools of live editions that are running low or have run out (capacity above zero). Panel only: it shows numbers. */

@@ -285,6 +285,23 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  CustomFieldDefinition: {
+    id: 'nopii',
+    entityType: 'nopii',
+    key: 'nopii',
+    label: 'nopii',
+    type: 'nopii',
+    options: 'nopii',
+    validation: 'nopii',
+    required: 'nopii',
+    visibleToCustomer: 'nopii',
+    editableByCustomer: 'nopii',
+    displayOrder: 'nopii',
+    archivedAt: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   EmailSuppression: {
     id: 'nopii',
     emailHash: 'secret',

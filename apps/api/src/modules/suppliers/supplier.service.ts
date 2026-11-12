@@ -6,6 +6,7 @@ import type {
 import type { Prisma } from '../../generated/prisma/client';
 import { AuditService } from '../../platform/audit/audit.service';
 import type { AuditActor } from '../../platform/audit/audit.service';
+import { CustomFieldsService } from '../../platform/common/custom-fields/custom-fields.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { Tx, assertVersion, defined, orConflict, toDate, versionConflict, view } from './support';
@@ -24,11 +25,14 @@ export class SupplierService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(CustomFieldsService) private readonly customFields: CustomFieldsService,
   ) {}
 
   async list(q: z.infer<typeof supplierQuerySchema>) {
+    const cf = await this.customFields.filterWhere('Supplier', q.cf);
     const where: Prisma.SupplierWhereInput = {
       deletedAt: null,
+      ...(cf.length ? { AND: cf as Prisma.SupplierWhereInput[] } : {}),
       ...(q.kind ? { kind: q.kind } : {}),
       ...(q.q ? { name: { contains: q.q, mode: 'insensitive' } } : {}),
     };
@@ -49,9 +53,10 @@ export class SupplierService {
   }
 
   async create(actor: Actor, input: z.infer<typeof createSupplierSchema>) {
-    const { reason, ...data } = input;
+    const { reason, customFields, ...data } = input;
     const row = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.supplier.create({ data: { ...data, isDemo: false } });
+      const customValues = await this.customFields.forWrite(tx, 'Supplier', customFields, null, true);
+      const created = await tx.supplier.create({ data: { ...data, customFields: customValues, isDemo: false } });
       await this.audit.record(tx, { actor, action: 'suppliers.supplier.created', entityType: 'Supplier', entityId: created.id, reason, after: view(created) });
       return created;
     });
@@ -59,11 +64,12 @@ export class SupplierService {
   }
 
   async update(actor: Actor, id: string, input: z.infer<typeof updateSupplierSchema>) {
-    const { version, reason, ...rest } = input;
+    const { version, reason, customFields, ...rest } = input;
     await this.prisma.$transaction(async (tx) => {
       const before = await tx.supplier.findFirst({ where: { id, deletedAt: null } });
       assertVersion(before, version, 'Supplier not found');
-      const res = await tx.supplier.updateMany({ where: { id, version, deletedAt: null }, data: { ...defined(rest), version: { increment: 1 } } });
+      const customValues = await this.customFields.forWrite(tx, 'Supplier', customFields, before.customFields, false);
+      const res = await tx.supplier.updateMany({ where: { id, version, deletedAt: null }, data: { ...defined(rest), ...(customValues ? { customFields: customValues } : {}), version: { increment: 1 } } });
       if (res.count !== 1) throw versionConflict();
       const after = await tx.supplier.findUniqueOrThrow({ where: { id } });
       await this.audit.record(tx, { actor, action: 'suppliers.supplier.updated', entityType: 'Supplier', entityId: id, reason, before: view(before), after: view(after) });

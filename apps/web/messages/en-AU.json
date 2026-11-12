@@ -229,6 +229,7 @@
       "content": "Content",
       "contentKind": "Content list",
       "integrations": "Integrations",
+      "customFields": "Custom fields",
       "packagePrices": "Package prices",
       "priceVersion": "Price version",
       "pricing": "Pricing rules"
@@ -256,7 +257,9 @@
     },
     "settings": {
       "title": "Settings",
-      "intro": "Brand, payment methods and site settings."
+      "intro": "Brand, payment methods and site settings.",
+      "customFieldsLink": "Custom fields",
+      "customFieldsHelp": "Add your own fields to races, packages and suppliers."
     },
     "flags": {
       "title": "Feature flags",
@@ -594,7 +597,19 @@
         "redirect_chain_too_long": "That redirect would form a chain that is too long. Point it at the final address.",
         "redirect_path_reserved": "The panel, the API and the site files cannot be redirected.",
         "content_status_unchanged": "It is already in that state. Reload and try again.",
-        "content_not_found": "That item no longer exists."
+        "content_not_found": "That item no longer exists.",
+        "custom_field_invalid": "A custom field value is not valid. Check the custom fields on this form.",
+        "custom_field_unknown": "One of the custom fields no longer exists. Reload the page and try again.",
+        "custom_filter_invalid": "That custom field filter is not valid.",
+        "custom_field_key_taken": "There is already a custom field with that key for this kind of record.",
+        "custom_field_not_found": "That custom field was not found.",
+        "custom_field_already_archived": "That custom field is already archived.",
+        "custom_field_not_archived": "That custom field is not archived.",
+        "custom_field_definition_invalid": "The options or limits of this custom field do not fit its type.",
+        "custom_field_not_customer_visible": "Customers cannot see this kind of record, so the field cannot be shown to them.",
+        "custom_field_not_customer_editable": "Customers cannot edit this kind of record.",
+        "custom_field_not_visible": "A field customers edit must also be visible to them.",
+        "option_cannot_be_removed": "An option cannot be removed once it exists. Mark it as retired instead."
       },
       "common": {
         "search": "Search",
@@ -1118,7 +1133,8 @@
           "paid": "Paid",
           "cancelled": "Called off"
         }
-      }
+      },
+      "filterLabel": "Filter suppliers by a custom field"
     },
     "content": {
       "title": "Content",
@@ -1293,6 +1309,130 @@
       "newHook": "New webhook",
       "createHook": "Create webhook",
       "invalid": "Check the details: the address must be public and use https, and you can only choose permissions and events you have."
+    },
+    "customFields": {
+      "title": "Custom fields",
+      "intro": "Add your own fields to races, packages and suppliers. They show up on the forms, in the filters and in the CSV files straight away.",
+      "backToSettings": "Back to settings",
+      "recordType": "Kind of record",
+      "entities": {
+        "Race": "Races",
+        "Package": "Packages",
+        "Supplier": "Suppliers"
+      },
+      "types": {
+        "text": "Text",
+        "number": "Number",
+        "date": "Date",
+        "boolean": "Yes or no",
+        "select": "Choose one",
+        "multiselect": "Choose several"
+      },
+      "ops": {
+        "eq": "is",
+        "contains": "contains",
+        "gt": "is after or above",
+        "gte": "is at least",
+        "lt": "is before or below",
+        "lte": "is at most",
+        "in": "is one of",
+        "has": "includes"
+      },
+      "listTitle": "Fields for this kind of record",
+      "listCaption": "Custom fields, in the order they appear on forms",
+      "empty": "There are no custom fields for this kind of record yet.",
+      "columns": {
+        "label": "Label",
+        "key": "Key",
+        "type": "Type",
+        "rules": "Rules",
+        "order": "Order",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "required": "Required",
+      "optional": "Optional",
+      "customerVisible": "Shown to customers",
+      "archived": "Archived",
+      "active": "Active",
+      "edit": "Edit",
+      "archive": "Archive",
+      "restore": "Restore",
+      "close": "Close",
+      "editTitle": "Edit \"{label}\"",
+      "editHelp": "The key and the type cannot change. To use a different type, archive this field and add a new one.",
+      "newTitle": "Add a field",
+      "create": "Add field",
+      "created": "Field added.",
+      "saved": "Saved.",
+      "archiveHelp": "Archiving hides a field from forms, filters, CSV files and the website. The values already saved are kept, and they come back if you restore the field.",
+      "fields": {
+        "label": "Label",
+        "labelHint": "What staff see next to the field.",
+        "key": "Key",
+        "keyHint": "Lower case letters, digits and underscores, such as bib_colour. Leave blank to make one from the label. It cannot change later.",
+        "type": "Type",
+        "options": "Choices",
+        "optionsHint": "Only for the two \"choose\" types. One per line: a short code, a bar, then the label, such as small | Small. Add \"| retired\" to stop offering a choice without losing the values already saved.",
+        "required": "Required when a record is created",
+        "visibleToCustomer": "Show to customers on the website",
+        "displayOrder": "Order",
+        "displayOrderHint": "Lower numbers come first.",
+        "minLength": "Shortest text (characters)",
+        "maxLength": "Longest text (characters)",
+        "min": "Smallest number",
+        "max": "Largest number",
+        "integer": "Whole numbers only",
+        "minDate": "Earliest date",
+        "maxDate": "Latest date",
+        "minItems": "Fewest choices",
+        "maxItems": "Most choices"
+      },
+      "rules": {
+        "none": "No limits",
+        "minLength": "at least {value} characters",
+        "maxLength": "up to {value} characters",
+        "min": "from {value}",
+        "max": "up to {value}",
+        "integer": "whole numbers",
+        "minDate": "from {value}",
+        "maxDate": "until {value}",
+        "minItems": "at least {value} choices",
+        "maxItems": "up to {value} choices"
+      },
+      "formErrors": {
+        "label": "Enter a label.",
+        "key": "Enter a key, or a label to make one from.",
+        "rule": "One of the limits is not a valid number or date.",
+        "options": "Check the choices: one per line as code | Label, with lower case codes that are not repeated."
+      },
+      "publish": {
+        "title": "Show \"{label}\" to customers?",
+        "countUnknown": "We could not count the records that already hold a value for this field. Customers will see every value already saved as soon as you confirm.",
+        "countNone": "No record holds a value for this field yet.",
+        "countOne": "1 record already holds a value for this field. Customers will see that value on the public site as soon as you confirm.",
+        "countMany": "{count} records already hold a value for this field. Customers will see those values on the public site as soon as you confirm.",
+        "help": "Values saved while the field was internal are included. You will be asked for your authenticator code.",
+        "confirm": "Show to customers",
+        "cancel": "Keep it internal",
+        "confirmBelow": "Confirm in the box above the list to make this field visible to customers."
+      },
+      "form": {
+        "legend": "Custom fields",
+        "requiredHint": "required",
+        "notSet": "Not set",
+        "yes": "Yes",
+        "no": "No",
+        "invalidNumber": "Enter a number for \"{label}\".",
+        "invalidChoice": "Choose yes or no for \"{label}\"."
+      },
+      "filter": {
+        "legend": "Custom field filter",
+        "field": "Field",
+        "none": "No custom field filter",
+        "operator": "Condition",
+        "value": "Value"
+      }
     },
     "pricing": {
       "title": "Pricing rules and promo codes",

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { customFieldValuesSchema, customFiltersParamSchema } from './custom-field-values';
 
 // Request bodies and queries of the catalogue routes (task 1.1), shared by the API (validation) and the panel.
 // Strict objects: an unknown field is a 422. `isDemo` is in none of them, so the API cannot set or change it.
@@ -60,6 +61,8 @@ const raceFields = {
   latitudeE7: latitudeE7.nullable(),
   longitudeE7: longitudeE7.nullable(),
   seo: seoSchema,
+  /** Values of the custom fields defined in the panel (task 7.5): `{ key: value }`, null clears. */
+  customFields: customFieldValuesSchema,
 };
 
 export const createRaceSchema = z
@@ -70,6 +73,7 @@ export const createRaceSchema = z
     latitudeE7: raceFields.latitudeE7.default(null),
     longitudeE7: raceFields.longitudeE7.default(null),
     seo: raceFields.seo.default({}),
+    customFields: raceFields.customFields.optional(),
     externalSource: text(40).optional(),
     externalId: text(100).optional(),
     reason,
@@ -136,6 +140,7 @@ const packageFields = {
   maxExtraNightsBefore: z.number().int().min(0).max(30),
   maxExtraNightsAfter: z.number().int().min(0).max(30),
   seo: seoSchema,
+  customFields: customFieldValuesSchema,
 };
 export const createPackageSchema = z.strictObject({
   ...packageFields,
@@ -148,6 +153,7 @@ export const createPackageSchema = z.strictObject({
   maxExtraNightsBefore: packageFields.maxExtraNightsBefore.default(0),
   maxExtraNightsAfter: packageFields.maxExtraNightsAfter.default(0),
   seo: packageFields.seo.default({}),
+  customFields: packageFields.customFields.optional(),
   currency: z.enum(SUPPORTED_CURRENCIES).default('AUD'),
   reason,
 });
@@ -278,6 +284,7 @@ export const publicRaceQuerySchema = z.strictObject({
 export const adminRaceQuerySchema = z.strictObject({
   q: z.string().trim().min(1).max(80).optional(),
   status: z.enum(RACE_STATUSES).optional(),
+  cf: customFiltersParamSchema.optional(),
   page,
   pageSize,
 });
@@ -286,6 +293,7 @@ export const adminPackageQuerySchema = z.strictObject({
   q: z.string().trim().min(1).max(80).optional(),
   saleStatus: z.enum(SALE_STATUSES).optional(),
   editionId: uuidSchema.optional(),
+  cf: customFiltersParamSchema.optional(),
   page,
   pageSize,
 });

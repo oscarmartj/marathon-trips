@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isoDateSchema, versionSchema } from './catalogue';
+import { customFieldValuesSchema, customFiltersParamSchema } from './custom-field-values';
 
 // Request bodies and queries of the supplier routes (task 6.1), shared by the API and the panel.
 // Strict objects: an unknown field is a 422. Amounts travel as strings of digits in minor units, with their currency.
@@ -32,6 +33,8 @@ const optionalDate = isoDateSchema.nullable();
 // ---- Suppliers and contacts ----
 
 const supplierFields = {
+  /** Values of the custom fields defined in the panel (task 7.5). */
+  customFields: customFieldValuesSchema,
   kind: z.enum(SUPPLIER_KINDS),
   name: text(150),
   countryCode,
@@ -39,11 +42,12 @@ const supplierFields = {
   paymentTerms: freeText(1000),
   notes: freeText(4000),
 };
-export const createSupplierSchema = z.strictObject({ ...supplierFields, paymentTerms: supplierFields.paymentTerms.default(''), notes: supplierFields.notes.default(''), reason });
+export const createSupplierSchema = z.strictObject({ ...supplierFields, customFields: supplierFields.customFields.optional(), paymentTerms: supplierFields.paymentTerms.default(''), notes: supplierFields.notes.default(''), reason });
 export const updateSupplierSchema = z.strictObject({ ...Object.fromEntries(Object.entries(supplierFields).map(([k, v]) => [k, v.optional()])) as { [K in keyof typeof supplierFields]: z.ZodOptional<(typeof supplierFields)[K]> }, version: versionSchema, reason });
 export const supplierQuerySchema = z.strictObject({
   q: z.string().trim().min(1).max(100).optional(),
   kind: z.enum(SUPPLIER_KINDS).optional(),
+  cf: customFiltersParamSchema.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });

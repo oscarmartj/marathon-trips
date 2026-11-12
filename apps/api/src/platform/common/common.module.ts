@@ -4,6 +4,8 @@ import { EntityRegistry } from '../entities/entity-registry';
 import { BulkService } from './bulk.service';
 import { CommonController } from './common.controller';
 import { CsvService } from './csv.service';
+import { CustomFieldsController } from './custom-fields/custom-fields.controller';
+import { CustomFieldsService } from './custom-fields/custom-fields.service';
 import { HistoryService } from './history.service';
 import { NotesService } from './notes.service';
 import { COMMON_PERMISSIONS } from './permissions';
@@ -19,11 +21,11 @@ import { ViewsService } from './views.service';
 
 /** The shared table capabilities and their example table (task 0.5). PlatformModule is global, so nothing is imported. */
 @Module({
-  controllers: [CommonController, TasksController],
+  controllers: [CommonController, TasksController, CustomFieldsController],
   providers: [
-    TableAccessService, SearchIndexService, SoftDeleteService, TagsService, NotesService, TablesService, ViewsService, BulkService, CsvService, HistoryService, TasksService,
+    TableAccessService, SearchIndexService, SoftDeleteService, TagsService, NotesService, TablesService, ViewsService, BulkService, CsvService, HistoryService, TasksService, CustomFieldsService,
   ],
-  exports: [TableAccessService, SearchIndexService, SoftDeleteService, TagsService, TasksService],
+  exports: [TableAccessService, SearchIndexService, SoftDeleteService, TagsService, TasksService, CustomFieldsService],
 })
 export class CommonModule implements OnModuleInit {
   constructor(

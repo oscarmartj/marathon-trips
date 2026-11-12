@@ -2,9 +2,12 @@
 
 import Link from 'next/link';
 import { SUPPLIER_KINDS } from '@mt/shared';
+import { useState } from 'react';
 import { api } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
+import { CustomFieldFilter } from '../custom-fields/custom-field-filter';
+import { problemMessage, useCustomFieldDefs, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { EntityForm, type FieldDef, Section, formatDay, outcome, useLoad } from '../catalogue/kit';
 
 interface SupplierRow {
@@ -40,7 +43,11 @@ export const supplierBody = (v: Record<string, string | boolean>) => ({
 
 /** Suppliers: the list, the release dates coming up, and a form to add one. Amounts are shown by the detail page. */
 export function SuppliersPanel() {
-  const list = useLoad<{ items: SupplierRow[] }>('/admin/suppliers?pageSize=100');
+  const [appliedCf, setAppliedCf] = useState<string | null>(null);
+  const [cfPick, setCfPick] = useState<string | null>(null);
+  const cfDefs = useCustomFieldDefs('Supplier');
+  const newCf = useCustomFieldForm('Supplier', undefined, true, 'new-supplier-cf');
+  const list = useLoad<{ items: SupplierRow[] }>(`/admin/suppliers?${new URLSearchParams({ pageSize: '100', ...(appliedCf ? { cf: appliedCf } : {}) }).toString()}`);
   const releases = useLoad<{ items: ReleaseRow[] }>('/admin/suppliers/releases?withinDays=60');
   return (
     <div className="stack">
@@ -66,6 +73,22 @@ export function SuppliersPanel() {
         )}
       </Section>
       <Section id="suppliers-list" title={t('admin.suppliers.listTitle')}>
+        {cfDefs && cfDefs.length > 0 ? (
+          <form
+            className="inline-form"
+            role="search"
+            aria-label={t('admin.suppliers.filterLabel')}
+            onSubmit={(e) => {
+              e.preventDefault();
+              setAppliedCf(cfPick);
+            }}
+          >
+            <CustomFieldFilter entityType="Supplier" idPrefix="suppliers-cf" onChange={setCfPick} />
+            <button className="btn" type="submit">
+              {t('admin.catalogue.common.searchButton')}
+            </button>
+          </form>
+        ) : null}
         <Status message={list.error} />
         {list.data ? (
           list.data.items.length === 0 ? (
@@ -92,9 +115,15 @@ export function SuppliersPanel() {
           initial={{ name: '', kind: 'hotel', countryCode: 'AU', defaultCurrency: 'AUD', paymentTerms: '', notes: '' }}
           submit={t('admin.suppliers.create')}
           resetOnSuccess
+          extra={newCf.extra}
           onSubmit={async (v) => {
-            const out = await outcome(() => api('/admin/suppliers', { method: 'POST', body: supplierBody(v) }), t('admin.suppliers.created'));
-            if (out.ok) void list.reload();
+            const custom = newCf.body();
+            if (custom.problem) return { ok: false, message: problemMessage(custom.problem) };
+            const out = await outcome(() => api('/admin/suppliers', { method: 'POST', body: { ...supplierBody(v), ...custom.body } }), t('admin.suppliers.created'));
+            if (out.ok) {
+              newCf.reset();
+              void list.reload();
+            }
             return out;
           }}
         />

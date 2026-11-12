@@ -7,6 +7,8 @@ import { api } from '@/lib/api-client';
 import { enAU, slugify, wholeNumber, withEnAU } from '@/lib/catalogue-panel';
 import { t } from '@/lib/i18n';
 import { RaceCsv } from './catalogue-csv';
+import { CustomFieldFilter } from '../custom-fields/custom-field-filter';
+import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { EntityForm, type FieldDef, Section, catalogueError, useLoad } from './kit';
 import { LowStockNotice } from './low-stock-notice';
 import { Status } from '../../auth/field';
@@ -81,10 +83,12 @@ function useSubscriberCounts(): Map<string, number> | null {
 /** Races list: search, filter by status, create, CSV and the low-stock warning. */
 export function RacesPanel() {
   const [q, setQ] = useState('');
-  const [applied, setApplied] = useState({ q: '', status: '' });
+  const [applied, setApplied] = useState<{ q: string; status: string; cf: string | null }>({ q: '', status: '', cf: null });
   const [status, setStatus] = useState('');
+  const [cfPick, setCfPick] = useState<string | null>(null);
+  const newCf = useCustomFieldForm('Race', undefined, true, 'new-race-cf');
   const [page, setPage] = useState(1);
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), ...(applied.q ? { q: applied.q } : {}), ...(applied.status ? { status: applied.status } : {}) });
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), ...(applied.q ? { q: applied.q } : {}), ...(applied.status ? { status: applied.status } : {}), ...(applied.cf ? { cf: applied.cf } : {}) });
   const { data, error, reload } = useLoad<Page>(`/admin/catalogue/races?${params.toString()}`);
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
   // Subscriber counts need their own permission: without it the column is left out rather than showing an error.
@@ -100,7 +104,7 @@ export function RacesPanel() {
           aria-label={t('admin.catalogue.races.searchLabel')}
           onSubmit={(e) => {
             e.preventDefault();
-            setApplied({ q: q.trim(), status });
+            setApplied({ q: q.trim(), status, cf: cfPick });
             setPage(1);
           }}
         >
@@ -119,6 +123,7 @@ export function RacesPanel() {
               ))}
             </select>
           </div>
+          <CustomFieldFilter entityType="Race" idPrefix="races-cf" onChange={setCfPick} />
           <button className="btn" type="submit">
             {t('admin.catalogue.common.searchButton')}
           </button>
@@ -179,8 +184,11 @@ export function RacesPanel() {
           fields={raceFields()}
           initial={newRaceValues}
           submit={t('admin.catalogue.races.create')}
+          extra={newCf.extra}
           onSubmit={async (v) => {
-            const r = await api<{ id: string }>('/admin/catalogue/races', { method: 'POST', body: raceBody(v) });
+            const custom = newCf.body();
+            if (custom.problem) return { ok: false, message: problemMessage(custom.problem) };
+            const r = await api<{ id: string }>('/admin/catalogue/races', { method: 'POST', body: { ...raceBody(v), ...custom.body } });
             if (r.status === 201) {
               window.location.assign(`/admin/races/${r.body.id}`);
               return { ok: true, message: t('admin.catalogue.races.created') };

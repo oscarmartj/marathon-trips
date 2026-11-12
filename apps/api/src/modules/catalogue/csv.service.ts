@@ -1,8 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { MAX_IMPORT_ROWS, createPackageSchema, createRaceSchema, RACE_TYPES } from '@mt/shared';
+import { MAX_IMPORT_ROWS, createPackageSchema, createRaceSchema, RACE_TYPES, type CustomFieldValues } from '@mt/shared';
 import type { z } from 'zod';
 import type { AuditActor } from '../../platform/audit/audit.service';
 import { CsvParseError, parseCsv, toCsv, unguardCell } from '../../platform/common/csv';
+import { CustomFieldsService } from '../../platform/common/custom-fields/custom-fields.service';
+import type { RuleDef } from '../../platform/common/custom-fields/values';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { notFound } from '../../platform/http/api-error';
 import { orConflict, fromDate } from './support';
@@ -68,22 +70,40 @@ export class CatalogueCsvService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(RaceService) private readonly races: RaceService,
     @Inject(PackageService) private readonly packages: PackageService,
+    @Inject(CustomFieldsService) private readonly customFields: CustomFieldsService,
   ) {}
+
+  // ---- Custom fields (task 7.5): one `cf:<key>` column per active definition, in both directions ----
+
+  /** Reads the custom field cells of one row. Blank cells are skipped; a bad cell is reported by column and code, never by value. */
+  private readCustomFields(cols: Array<{ column: string; def: RuleDef }>, c: Cells): { values: CustomFieldValues; issues: CsvIssue[] } {
+    const values: CustomFieldValues = {};
+    const issues: CsvIssue[] = [];
+    for (const { column, def } of cols) {
+      const res = this.customFields.csvParse(def, c[column] ?? '');
+      if ('blank' in res) continue;
+      if (res.ok) values[def.key] = res.value;
+      else issues.push({ column, code: `custom_field_${res.code}` });
+    }
+    return { values, issues };
+  }
 
   // ---- Races ----
 
   async exportRaces(): Promise<{ csv: string; rows: number }> {
     const rows = await this.prisma.race.findMany({ where: { deletedAt: null }, orderBy: [{ slug: 'asc' }], take: 5000, include: { _count: { select: { editions: true } } } });
-    const header = ['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'typicalMonth', 'summary', 'websiteUrl', 'status', 'editionCount'];
-    const body = rows.map((r) => [r.slug, enAU(r.name), r.countryCode, r.city, r.timeZone, r.raceType, r.typicalMonth, enAU(r.summary), r.websiteUrl, r.status, r._count.editions]);
+    const cf = await this.customFields.csvColumns('Race');
+    const header = ['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'typicalMonth', 'summary', 'websiteUrl', 'status', 'editionCount', ...cf.map((c) => c.column)];
+    const body = rows.map((r) => [r.slug, enAU(r.name), r.countryCode, r.city, r.timeZone, r.raceType, r.typicalMonth, enAU(r.summary), r.websiteUrl, r.status, r._count.editions, ...cf.map((c) => this.customFields.csvCell(c.def, r.customFields))]);
     return { csv: toCsv(header, body), rows: rows.length };
   }
 
-  importRaces(actor: Actor, input: { csv: string; dryRun: boolean }): Promise<ImportResult> {
+  async importRaces(actor: Actor, input: { csv: string; dryRun: boolean }): Promise<ImportResult> {
+    const cf = await this.customFields.csvColumns('Race');
     const spec: Spec<z.infer<typeof createRaceSchema>> = {
-      columns: ['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'typicalMonth', 'summary', 'websiteUrl'],
+      columns: ['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'typicalMonth', 'summary', 'websiteUrl', ...cf.map((c) => c.column)],
       ignored: ['status', 'editionCount'],
-      required: ['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'summary'],
+      required: ['slug', 'name', 'countryCode', 'city', 'timeZone', 'raceType', 'summary', ...cf.filter((c) => c.def.required).map((c) => c.column)],
       parse: (c) => {
         const month = orNull(c.typicalMonth);
         if (month !== null && !/^\d{1,2}$/.test(month)) return { issues: [{ column: 'typicalMonth', code: 'invalid_value' }] };
@@ -92,7 +112,9 @@ export class CatalogueCsvService {
           slug: c.slug, name: text(c.name ?? ''), countryCode: c.countryCode, city: c.city, timeZone: c.timeZone, raceType: c.raceType,
           typicalMonth: month === null ? null : Number(month), summary: text(c.summary ?? ''), websiteUrl: orNull(c.websiteUrl),
         });
-        return parsed.success ? { value: parsed.data, issues: [] } : { issues: zodIssues(parsed.error, (k) => k) };
+        if (!parsed.success) return { issues: zodIssues(parsed.error, (k) => k) };
+        const custom = this.readCustomFields(cf, c);
+        return custom.issues.length > 0 ? { issues: custom.issues } : { value: { ...parsed.data, customFields: custom.values }, issues: [] };
       },
       slugOf: (v) => v.slug,
       taken: async (slugs) => new Set((await this.prisma.race.findMany({ where: { slug: { in: slugs } }, select: { slug: true } })).map((r) => r.slug)),
@@ -108,13 +130,15 @@ export class CatalogueCsvService {
   async exportPackages(editionId: string): Promise<{ csv: string; rows: number }> {
     await this.edition(editionId);
     const rows = await this.prisma.package.findMany({ where: { editionId, deletedAt: null }, orderBy: [{ slug: 'asc' }], take: 5000 });
+    const cf = await this.customFields.csvColumns('Package');
     const header = [
       'slug', 'name', 'checkInDate', 'checkOutDate', 'balanceDueDate', 'minTravellers', 'maxTravellers', 'maxExtraNightsBefore', 'maxExtraNightsAfter', 'instantBooking', 'autoConfirmOnDeposit',
-      'saleStatus', 'depositMode', 'depositAmountMinor', 'depositBps',
+      'saleStatus', 'depositMode', 'depositAmountMinor', 'depositBps', ...cf.map((c) => c.column),
     ];
     const body = rows.map((p) => [
       p.slug, enAU(p.name), fromDate(p.checkInDate), fromDate(p.checkOutDate), fromDate(p.balanceDueDate), p.minTravellers, p.maxTravellers, p.maxExtraNightsBefore, p.maxExtraNightsAfter,
       p.instantBooking, p.autoConfirmOnDeposit, p.saleStatus, p.depositMode, p.depositAmountMinor === null ? null : p.depositAmountMinor.toString(), p.depositBps,
+      ...cf.map((c) => this.customFields.csvCell(c.def, p.customFields)),
     ]);
     return { csv: toCsv(header, body), rows: rows.length };
   }
@@ -122,12 +146,13 @@ export class CatalogueCsvService {
   /** Packages arrive as drafts without a deposit: the deposit is money, so it is set in the panel, not from a file. */
   async importPackages(actor: Actor, editionId: string, input: { csv: string; dryRun: boolean }): Promise<ImportResult> {
     await this.edition(editionId);
+    const cf = await this.customFields.csvColumns('Package');
     const int = (s: string | undefined): number | undefined => (s === undefined || s === '' ? undefined : /^\d{1,3}$/.test(s) ? Number(s) : Number.NaN);
     const bool = (s: string | undefined): boolean | undefined | null => (s === undefined || s === '' ? undefined : s === 'true' ? true : s === 'false' ? false : null);
     const spec: Spec<z.infer<typeof createPackageSchema>> = {
-      columns: ['slug', 'name', 'checkInDate', 'checkOutDate', 'balanceDueDate', 'minTravellers', 'maxTravellers', 'maxExtraNightsBefore', 'maxExtraNightsAfter', 'instantBooking', 'autoConfirmOnDeposit'],
+      columns: ['slug', 'name', 'checkInDate', 'checkOutDate', 'balanceDueDate', 'minTravellers', 'maxTravellers', 'maxExtraNightsBefore', 'maxExtraNightsAfter', 'instantBooking', 'autoConfirmOnDeposit', ...cf.map((c) => c.column)],
       ignored: ['saleStatus', 'depositMode', 'depositAmountMinor', 'depositBps'],
-      required: ['slug', 'name', 'checkInDate', 'checkOutDate', 'balanceDueDate', 'maxTravellers'],
+      required: ['slug', 'name', 'checkInDate', 'checkOutDate', 'balanceDueDate', 'maxTravellers', ...cf.filter((c) => c.def.required).map((c) => c.column)],
       parse: (c) => {
         const bad: CsvIssue[] = [];
         for (const k of ['minTravellers', 'maxTravellers', 'maxExtraNightsBefore', 'maxExtraNightsAfter'] as const) if (Number.isNaN(int(c[k]))) bad.push({ column: k, code: 'invalid_value' });
@@ -144,7 +169,9 @@ export class CatalogueCsvService {
         if (v.checkOutDate <= v.checkInDate) issues.push({ column: 'checkOutDate', code: 'package_dates_invalid' });
         if (v.balanceDueDate > v.checkInDate) issues.push({ column: 'balanceDueDate', code: 'balance_due_after_check_in' });
         if (v.maxTravellers < v.minTravellers) issues.push({ column: 'maxTravellers', code: 'travellers_range_invalid' });
-        return issues.length > 0 ? { issues } : { value: v, issues: [] };
+        const custom = this.readCustomFields(cf, c);
+        issues.push(...custom.issues);
+        return issues.length > 0 ? { issues } : { value: { ...v, customFields: custom.values }, issues: [] };
       },
       slugOf: (v) => v.slug,
       taken: async (slugs) => new Set((await this.prisma.package.findMany({ where: { editionId, slug: { in: slugs } }, select: { slug: true } })).map((r) => r.slug)),
