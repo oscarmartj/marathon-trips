@@ -72,7 +72,11 @@ test('template_draft_preview_pdf_publish_and_permission', async ({ page, browser
     await page.getByLabel('Body', { exact: true }).fill('Voucher for {{customerName}}, booking {{reference}}.');
     await page.getByRole('button', { name: 'Save as a new draft', exact: true }).click();
     await expect(page.getByText(/Saved as draft revision \d+\./)).toBeVisible();
-    const pdfLink = page.getByRole('link', { name: 'Open PDF preview' }).first();
+    // The revisions table reloads after the save: take the link from the draft row, not from an older revision still listed.
+    const revisions = page.getByRole('table', { name: 'Revisions of this template, newest first' });
+    const draftRow = revisions.getByRole('row').filter({ hasText: 'Draft' }).first();
+    await expect(draftRow).toBeVisible();
+    const pdfLink = draftRow.getByRole('link', { name: 'Open PDF preview' });
     const href = await pdfLink.getAttribute('href');
     expect(href).toMatch(/^\/api\/admin\/templates\/document\/[0-9a-f-]{36}\/pdf$/);
     const pdf = await page.request.get(href!);
@@ -84,8 +88,7 @@ test('template_draft_preview_pdf_publish_and_permission', async ({ page, browser
     expect(bytes).toContain('Voucher for Alex Sample, booking BK-7QX4MD.');
 
     // Put the document into use: the row says so.
-    const docRow = page.getByRole('table', { name: 'Revisions of this template, newest first' }).getByRole('row').filter({ hasText: 'Draft' }).first();
-    await docRow.getByRole('button', { name: 'Put into use' }).click();
+    await draftRow.getByRole('button', { name: 'Put into use' }).click();
     await expect(page.getByText(/Revision \d+ is now in use\./)).toBeVisible();
     await expect(page.getByRole('table', { name: 'Revisions of this template, newest first' }).getByRole('row').filter({ hasText: 'In use' })).toHaveCount(1);
 

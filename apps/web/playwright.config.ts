@@ -8,6 +8,9 @@ const API_ENV = {
   JOBS_WORKERS: 'off',
   WEB_ORIGIN: 'http://localhost:3000',
   API_PORT: '4000',
+  // All specs share one IP, and the sign-in limit is per minute and IP: the suite signs in more often than a person would.
+  // The limit itself is covered by the API's own tests.
+  AUTH_RATE_LIMIT_PER_MINUTE: '120',
 };
 
 export default defineConfig({
