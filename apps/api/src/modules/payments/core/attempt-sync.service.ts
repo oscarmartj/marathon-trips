@@ -2,14 +2,15 @@ import { Inject, Injectable } from '@nestjs/common';
 import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
-import { notFound } from '../../../platform/http/api-error';
+import { ApiError, notFound } from '../../../platform/http/api-error';
 import { LIVE_STATUSES, PaymentStateMachine, lockPayment } from './attempt-state';
 import type { AttemptEvent } from './attempt-state';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import { ProviderGateway } from './gateway';
 import type { ProviderPayment } from './provider';
+import { ProviderError } from './provider';
 
-export type SyncAction = 'sync' | 'cancel' | 'expire';
+export type SyncAction = 'sync' | 'cancel' | 'expire' | 'cancel_orphan';
 export type SyncOutcome = 'not_live' | 'not_due' | 'applied' | 'unresolved' | 'still_pending';
 
 /** An attempt still unresolved this long after its expiry gets a task for Oscar (plan 3.1, section 14, point 3). */
@@ -33,17 +34,46 @@ export class PaymentAttemptSyncService {
   async run(paymentId: string, action: SyncAction, now: Date = new Date()): Promise<SyncOutcome> {
     const p = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { id: true, status: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, pendingExpiresAt: true } });
     if (!p) throw notFound();
+    if (action === 'cancel_orphan') return this.cancelOrphan(p.id, p.providerAccountId, p.providerPaymentRef);
     if (!LIVE_STATUSES.includes(p.status)) return 'not_live';
     if (action === 'expire' && p.pendingExpiresAt.getTime() > now.getTime()) return 'not_due';
 
-    // ProviderError (retryable or not) propagates: the job retries, and the sweep picks the attempt up again.
-    const remote = await this.gateway.call(p.providerAccountId, 'retrieve', (provider, ctx) =>
-      provider.retrievePayment(ctx, p.providerPaymentRef ? { ref: p.providerPaymentRef } : { idempotencyKey: p.idempotencyKey }));
-
     if (action === 'sync') {
+      const remote = await this.retrieve(p);
       if (remote) await this.attempts.record(p.id, remote, 'sweep');
       return remote ? 'applied' : 'unresolved';
     }
+    try {
+      return await this.settle(p, action, now);
+    } catch (err) {
+      // A gateway that keeps failing (rotated credentials…) must not hide a blocked booking: past 24 hours the task is
+      // opened anyway, then the error goes back to the job and the sweep tries again (review round 2, point 1).
+      if ((err instanceof ProviderError || err instanceof ApiError) && now.getTime() - p.pendingExpiresAt.getTime() >= UNRESOLVED_AFTER_MS) {
+        await this.unresolved(p.id, p.pendingExpiresAt, now);
+      }
+      throw err;
+    }
+  }
+
+  private retrieve(p: { providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string }): Promise<ProviderPayment | null> {
+    return this.gateway.call(p.providerAccountId, 'retrieve', (provider, ctx) =>
+      provider.retrievePayment(ctx, p.providerPaymentRef ? { ref: p.providerPaymentRef } : { idempotencyKey: p.idempotencyKey }));
+  }
+
+  /** Cancels at the gateway an object left payable by an attempt that already ended; a late success is recorded. */
+  private async cancelOrphan(paymentId: string, accountId: string, ref: string | null): Promise<SyncOutcome> {
+    if (!ref) return 'unresolved';
+    const remote = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { ref }));
+    if (!remote) return 'unresolved';
+    const after = remote.status === 'requires_action'
+      ? await this.gateway.call(accountId, 'cancel', (provider, ctx) => provider.cancelPayment(ctx, ref, `orphan:${paymentId}:cancel`))
+      : remote;
+    if (after.status === 'succeeded') await this.attempts.record(paymentId, after, 'sweep');
+    return after.status === 'cancelled' || after.status === 'failed' || after.status === 'succeeded' ? 'applied' : 'still_pending';
+  }
+
+  private async settle(p: { id: string; providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string; pendingExpiresAt: Date }, action: 'cancel' | 'expire', now: Date): Promise<SyncOutcome> {
+    const remote = await this.retrieve(p);
     if (!remote) return this.unresolved(p.id, p.pendingExpiresAt, now);
     if (remote.status === 'requires_action') {
       const after = await this.gateway.call(p.providerAccountId, 'cancel', (provider, ctx) => provider.cancelPayment(ctx, remote.ref, `${p.idempotencyKey}:cancel`));

@@ -186,10 +186,13 @@ describe('matching events to payments (plan 0.1, P5)', () => {
     // A failure that stays is visible: the sweep opens one task for it (review M2).
     const flagged = await t.app.get(PaymentsMaintenanceService).run(new Date(Date.now() + 31 * 60_000));
     expect(flagged.failedFlagged).toContain(ev.id);
-    await t.app.get(PaymentsMaintenanceService).run(new Date(Date.now() + 41 * 60_000));
+    // Already flagged: left out of the next batch, so a backlog never starves newer failures (review round 2, 3b).
+    expect((await t.app.get(PaymentsMaintenanceService).run(new Date(Date.now() + 41 * 60_000))).failedFlagged).not.toContain(ev.id);
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:webhook_failed:${ev.id}` } })).toBe(1);
     expect(await svc().process(ev.id)).toBe('processed');
     expect(await statusOf(p.id)).toBe('succeeded');
+    // Processed after all: the task is closed (review round 2, point 3a).
+    expect((await t.prisma.task.findFirstOrThrow({ where: { sourceRef: `payments:webhook_failed:${ev.id}` } })).status).toBe('done');
   });
 
   it('paused_account_still_processes_webhook', async () => {

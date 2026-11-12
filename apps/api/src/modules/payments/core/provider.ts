@@ -96,10 +96,16 @@ export interface PaymentProvider {
   readonly signatureHeaders: readonly string[];
 }
 
-export const PROVIDER_ERROR_CODES = ['provider_unavailable', 'provider_timeout', 'provider_rejected', 'provider_auth_failed', 'provider_not_found'] as const;
+export const PROVIDER_ERROR_CODES = ['provider_unavailable', 'provider_timeout', 'provider_busy', 'provider_rejected', 'provider_auth_failed', 'provider_not_found'] as const;
 export type ProviderErrorCode = (typeof PROVIDER_ERROR_CODES)[number];
 
-/** The only error an adapter throws: a code from a closed list, never the gateway's message or response. */
+/**
+ * The only error an adapter throws: a code from a closed list, never the gateway's message or response.
+ *
+ * Contract for createPayment (plan 3.1, section 16): a NON-retryable error means that no object exists, and none ever
+ * will, under that idempotency key. A gateway's "idempotency key in use" (another request with the same key still in
+ * flight) is `provider_busy` and retryable: the object may be about to exist.
+ */
 export class ProviderError extends Error {
   constructor(
     readonly code: ProviderErrorCode,

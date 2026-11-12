@@ -48,7 +48,12 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     const stuck = await this.prisma.webhookEvent.findMany({ where: { status: 'received', receivedAt: { lte: new Date(now.getTime() - STUCK_EVENT_MINUTES * 60_000) } }, select: { id: true }, take: 200 });
     for (const { id } of stuck) await this.jobs.send(QUEUES.paymentsWebhooks, { webhookEventId: id }, { singletonKey: `webhook:${id}` });
     // Events whose processing kept failing are visible as tasks (review M2): one per event while it is open.
-    const failed = await this.prisma.webhookEvent.findMany({ where: { status: 'failed', updatedAt: { lte: new Date(now.getTime() - FAILED_EVENT_MINUTES * 60_000) } }, select: { id: true, errorCode: true }, take: 200 });
+    // Oldest first, and only those without an open task yet, so a backlog of failures never hides the new ones.
+    const failed = await this.prisma.$queryRaw<Array<{ id: string; errorCode: string | null }>>`
+      SELECT e.id::text AS id, e."errorCode" FROM webhook_events e
+      WHERE e.status = 'failed' AND e."updatedAt" <= ${new Date(now.getTime() - FAILED_EVENT_MINUTES * 60_000)}
+        AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t."sourceRef" = 'payments:webhook_failed:' || e.id::text AND t.status = 'open' AND t."deletedAt" IS NULL)
+      ORDER BY e."updatedAt", e.id LIMIT 200`;
     for (const ev of failed) {
       await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
         title: 'Payment webhook could not be processed',

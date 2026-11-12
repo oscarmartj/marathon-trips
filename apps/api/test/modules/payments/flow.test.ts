@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PaymentAttemptSyncService } from '../../../src/modules/payments/core/attempt-sync.service';
+import { PaymentAttemptsService } from '../../../src/modules/payments/core/attempts.service';
 import { ProviderGateway, modeForEnv } from '../../../src/modules/payments/core/gateway';
 import { PaymentRouting } from '../../../src/modules/payments/core/routing';
 import { PaymentScheduleService } from '../../../src/modules/payments/core/schedule.service';
@@ -471,16 +472,71 @@ describe('gateway errors never end a live attempt by themselves (review G1)', ()
     expect((await paymentsOf(bookingId))[0]!.status).toBe('pending');
   });
 
-  it('idempotency key in use at the gateway: the refusal is checked by key and the existing object is used, never failed', async () => {
+  it('idempotency key in use at the gateway is retryable: the attempt stays live, nothing is failed, one object in the end', async () => {
     const { reference, bookingId } = await fresh();
     const before = sim.objectCount(acc.id);
-    sim.queue(acc.id, 'in_use_after_create');
-    const res = await c.pay(reference, { method: 'card' });
-    expect([res.status, res.body.status]).toEqual([201, 'requires_action']);
-    expect(res.body.nextAction).toBeDefined();
-    const [p] = await paymentsOf(bookingId);
-    expect(p!.providerPaymentRef).toBe(sim.find(acc.id, { paymentId: p!.id })!.ref);
+    const key = randomUUID();
+    // The other tab's request with the same gateway key is still in flight: nothing exists yet at the gateway.
+    sim.queue(acc.id, 'in_use');
+    const res = await c.pay(reference, { method: 'card' }, key);
+    expect([res.status, res.body.code]).toEqual([503, 'provider_unavailable']);
+    expect((await paymentsOf(bookingId))[0]).toMatchObject({ status: 'created', liveBookingId: bookingId, providerPaymentRef: null });
+    expect(sim.objectCount(acc.id) - before).toBe(0);
+    const again = await c.pay(reference, { method: 'card' }, key);
+    expect([again.status, again.body.status]).toEqual([201, 'requires_action']);
+    expect(again.body.nextAction).toBeDefined();
     expect(sim.objectCount(acc.id) - before).toBe(1);
+  });
+
+  it('an object left payable by an ended attempt is cancelled at the gateway and flagged (review round 2, point 2)', async () => {
+    const { reference, bookingId } = await fresh();
+    sim.queue(acc.id, 'timeout_after_create');
+    expect((await c.pay(reference, { method: 'card' })).status).toBe(503);
+    const [p] = await paymentsOf(bookingId);
+    const remote = sim.find(acc.id, { paymentId: p!.id })!;
+    // Our row ended (a failure reported for it) while the gateway object is still waiting for the customer.
+    await deliver(t, acc, sim.paymentEvent(acc.secret, { ref: remote.ref, status: 'failed', amountMinor: p!.amountMinor, currency: 'AUD', paymentId: p!.id }));
+    expect((await paymentsOf(bookingId))[0]!.status).toBe('failed');
+    expect(remote.status).toBe('requires_action');
+    expect(await t.app.get(PaymentAttemptsService).record(p!.id, { ...remote, status: 'requires_action' }, 'api')).toBe(false);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:orphan:${p!.id}` } })).toBe(1);
+    const jobs = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*) AS n FROM pgboss.job WHERE name = 'payments.attempts' AND data->>'paymentId' = $1 AND data->>'action' = 'cancel_orphan'`, p!.id);
+    expect(Number(jobs[0]!.n)).toBe(1);
+    expect(await sync().run(p!.id, 'cancel_orphan')).toBe('applied');
+    expect(sim.find(acc.id, { ref: remote.ref })!.status).toBe('cancelled');
+    expect((await paymentsOf(bookingId))[0]!.status).toBe('failed');
+  });
+
+  it('a gateway that keeps refusing during expiry still opens the 24-hour task (review round 2, point 1)', async () => {
+    const { reference, bookingId } = await fresh();
+    await c.pay(reference, { method: 'card' });
+    const [p] = await paymentsOf(bookingId);
+    await expireNow(p!.id);
+    sim.failNextRetrieve(acc.id, 'auth_failed');
+    await expect(sync().run(p!.id, 'expire')).rejects.toMatchObject({ code: 'provider_auth_failed' });
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:unresolved:${p!.id}` } })).toBe(0);
+    for (const hours of [25, 26]) {
+      sim.failNextRetrieve(acc.id, 'auth_failed');
+      await expect(sync().run(p!.id, 'expire', new Date(Date.now() + hours * 3_600_000))).rejects.toMatchObject({ code: 'provider_auth_failed' });
+    }
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:unresolved:${p!.id}`, status: 'open' } })).toBe(1);
+    expect((await paymentsOf(bookingId))[0]!.liveBookingId).toBe(bookingId);
+  });
+
+  it('a gateway-wrapper refusal reaches the customer as a neutral code (review round 2, point 4)', async () => {
+    const { reference, bookingId } = await fresh();
+    sim.queue(acc.id, 'timeout');
+    const key = randomUUID();
+    expect((await c.pay(reference, { method: 'card' }, key)).status).toBe(503);
+    await t.prisma.providerAccount.update({ where: { id: acc.id }, data: { status: 'paused' } });
+    try {
+      const res = await c.pay(reference, { method: 'card' }, key);
+      expect([res.status, res.body.code]).toEqual([409, 'payment_attempt_in_progress']);
+      expect(JSON.stringify(res.body)).not.toMatch(/account_not_accepting_charges|paused/);
+      expect((await paymentsOf(bookingId))[0]!.status).toBe('created');
+    } finally {
+      await t.prisma.providerAccount.update({ where: { id: acc.id }, data: { status: 'active' } });
+    }
   });
 
   it('a refusal on create fails the attempt only when the gateway holds nothing under our key; doubt is a 503', async () => {
@@ -510,6 +566,10 @@ describe('gateway errors never end a live attempt by themselves (review G1)', ()
     expect((await paymentsOf(bookingId)).map((p) => p.status)).toEqual(['succeeded', 'succeeded']);
     // No overpayment (two deposits are under the total), yet the late success is flagged.
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:overpaid:${p1!.id}` } })).toBe(0);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:late_success:${p1!.id}` } })).toBe(1);
+    expect(await t.prisma.outboxEvent.count({ where: { type: 'payments.payment.late_succeeded', aggregateId: p1!.id } })).toBe(1);
+    // A second, different event saying the same: still one task and one event (review round 2, point 5).
+    expect((await deliver(t, acc, await eventFor(t, acc, p1!.id, { status: 'succeeded' }))).outcome).toBe('processed');
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:late_success:${p1!.id}` } })).toBe(1);
     expect(await t.prisma.outboxEvent.count({ where: { type: 'payments.payment.late_succeeded', aggregateId: p1!.id } })).toBe(1);
   });

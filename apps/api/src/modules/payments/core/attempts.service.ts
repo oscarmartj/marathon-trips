@@ -5,6 +5,7 @@ import { AuditService } from '../../../platform/audit/audit.service';
 import type { AuditActor } from '../../../platform/audit/audit.service';
 import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import type { AppConfig } from '../../../platform/config/config';
+import { bossDb } from '../../../platform/database/boss-db';
 import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
 import { OutboxService } from '../../../platform/events/outbox.service';
@@ -187,8 +188,7 @@ export class PaymentAttemptsService {
       try {
         remote = await this.gateway.call(p.providerAccountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { ref: p.providerPaymentRef! }));
       } catch (err) {
-        if (err instanceof ProviderError) throw providerUnavailable();
-        throw err;
+        throw this.forCustomer(err);
       }
     } else {
       try {
@@ -197,7 +197,7 @@ export class PaymentAttemptsService {
           metadata: { paymentId: p.id, bookingId: p.bookingId }, returnUrl: `${this.config.WEB_ORIGIN}/payments/return`, customerCountry: p.payerCustomer.countryOfResidence,
         }));
       } catch (err) {
-        if (!(err instanceof ProviderError)) throw err;
+        if (!(err instanceof ProviderError)) throw this.forCustomer(err);
         if (err.retryable) throw providerUnavailable();
         remote = await this.lookupAfterRefusal(p.providerAccountId, p.idempotencyKey);
         if (remote === null) {
@@ -224,9 +224,18 @@ export class PaymentAttemptsService {
     try {
       return await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { idempotencyKey }));
     } catch (err) {
-      if (err instanceof ProviderError) throw providerUnavailable();
-      throw err;
+      throw this.forCustomer(err);
     }
+  }
+
+  /**
+   * What a customer sees of a gateway problem: a 503 for the gateway, and for the gateway wrapper's own refusals
+   * (account paused, adapter blocked…) the neutral "payment in progress", never the internal code (review round 2, 4).
+   */
+  private forCustomer(err: unknown): unknown {
+    if (err instanceof ProviderError) return providerUnavailable();
+    if (err instanceof ApiError && err.status === 409) return conflict('payment_attempt_in_progress', 'This payment cannot continue right now. Try again later.');
+    return err;
   }
 
   /**
@@ -247,6 +256,17 @@ export class PaymentAttemptsService {
       await this.machine.setReference(tx, p, remote.ref);
       if (remote.amount.amountMinor !== p.amountMinor || remote.amount.currency !== p.currency) {
         await this.mismatchTask(tx, p, b.reference);
+        return false;
+      }
+      if (!LIVE_STATUSES.includes(p.status) && (remote.status === 'requires_action' || remote.status === 'pending')) {
+        // Our attempt already ended but the gateway holds an object that could still be paid: cancel it after this
+        // commits and tell Oscar (review round 2, point 2). A late success is still recorded by the state machine.
+        await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: p.id, action: 'cancel_orphan' }, { db: bossDb(tx), singletonKey: `orphan:${p.id}` });
+        await this.tasks.createSystemIn(tx, {
+          title: `Open gateway payment for an ended attempt on booking ${b.reference}`,
+          description: 'The payment gateway still has a payable object for a payment attempt that had ended. It is being cancelled; check it was.',
+          entityType: 'Payment', entityId: p.id, sourceRef: `payments:orphan:${p.id}`,
+        });
         return false;
       }
       await this.machine.apply(tx, p, remote.status, { source, failureCode: remote.failureCode, bookingReference: b.reference });

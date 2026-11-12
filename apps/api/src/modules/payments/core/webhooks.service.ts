@@ -149,6 +149,8 @@ export class PaymentWebhooksService {
       await this.machine.setReference(tx, p, remote.ref);
       await this.machine.apply(tx, p, remote.status, { source: 'webhook', failureCode: remote.failureCode, bookingReference: b.reference });
       await tx.webhookEvent.update({ where: { id: ev.id }, data: { status: 'processed', processedAt: new Date(), attempts: { increment: 1 }, errorCode: null } });
+      // A task opened while it kept failing is closed now that it went through (review round 2, point 3a).
+      await this.tasks.closeSystemIn(tx, `payments:webhook_failed:${ev.id}`);
       return 'processed' as const;
     }, PAYMENT_TX_OPTIONS);
   }
@@ -159,6 +161,7 @@ export class PaymentWebhooksService {
 
   private async ignoreIn(tx: Prisma.TransactionClient, id: string, code: string): Promise<'ignored'> {
     await tx.webhookEvent.update({ where: { id }, data: { status: 'ignored', processedAt: new Date(), attempts: { increment: 1 }, errorCode: code } });
+    await this.tasks.closeSystemIn(tx, `payments:webhook_failed:${id}`);
     return 'ignored';
   }
 }

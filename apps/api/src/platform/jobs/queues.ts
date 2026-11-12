@@ -61,7 +61,7 @@ export const QUEUES = {
   },
   paymentsAttempts: {
     name: 'payments.attempts',
-    data: z.object({ paymentId: uuid, action: z.enum(['sync', 'cancel', 'expire']) }).strict(),
+    data: z.object({ paymentId: uuid, action: z.enum(['sync', 'cancel', 'expire', 'cancel_orphan']) }).strict(),
     options: { policy: 'short', retryLimit: 5, retryDelay: 60, retryBackoff: true, expireInSeconds: 300, deleteAfterSeconds: 604800 },
   },
   paymentsMaintenance: {

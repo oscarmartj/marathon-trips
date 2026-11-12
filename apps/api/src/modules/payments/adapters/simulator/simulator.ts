@@ -43,8 +43,8 @@ export type SimulatorOutcome =
   | 'requires_action' | 'pending' | 'succeeded' | 'decline' | 'timeout' | 'timeout_after_create' | 'unavailable'
   /** Definitive refusals with no object created (bad request, rotated credentials). */
   | 'rejected' | 'auth_failed'
-  /** A definitive refusal after the object was created, like a gateway's "idempotency key in use" during a race. */
-  | 'in_use_after_create';
+  /** "Idempotency key in use": another request with the same key is still in flight; nothing exists yet. Retryable. */
+  | 'in_use';
 export type SimulatorRetrieveFault = 'unavailable' | 'not_found' | 'not_found_error' | 'auth_failed';
 
 class SimAccount {
@@ -121,11 +121,12 @@ export class SimulatorProvider implements PaymentProvider {
     if (outcome === 'unavailable') throw new ProviderError('provider_unavailable', true);
     if (outcome === 'rejected') throw new ProviderError('provider_rejected', false);
     if (outcome === 'auth_failed') throw new ProviderError('provider_auth_failed', false);
+    if (outcome === 'in_use') throw new ProviderError('provider_busy', true);
     if (!simulatorManifest.currencies.includes(input.amount.currency) || input.amount.amountMinor <= 0n) throw new ProviderError('provider_rejected', false);
     const p: SimPayment = {
       ref: `sim_pay_${randomBytes(12).toString('hex')}`,
       idempotencyKey: input.idempotencyKey,
-      status: outcome === 'decline' ? 'failed' : outcome === 'timeout_after_create' || outcome === 'in_use_after_create' ? 'requires_action' : outcome,
+      status: outcome === 'decline' ? 'failed' : outcome === 'timeout_after_create' ? 'requires_action' : outcome,
       amount: { ...input.amount },
       method: input.method,
       paymentId: input.metadata.paymentId,
@@ -134,7 +135,6 @@ export class SimulatorProvider implements PaymentProvider {
     acc.payments.set(p.ref, p);
     acc.byKey.set(p.idempotencyKey, p.ref);
     if (outcome === 'timeout_after_create') throw new ProviderError('provider_timeout', true);
-    if (outcome === 'in_use_after_create') throw new ProviderError('provider_rejected', false);
     return view(p, true);
   }
 

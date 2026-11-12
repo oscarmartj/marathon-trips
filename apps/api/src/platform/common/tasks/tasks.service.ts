@@ -72,6 +72,17 @@ export class TasksService {
     return task;
   }
 
+  /** Closes (done) the open system task with this `sourceRef`, if any, when what it was about has resolved itself. */
+  async closeSystemIn(tx: Prisma.TransactionClient, sourceRef: string): Promise<number> {
+    const open = await tx.task.findMany({ where: { sourceRef, source: 'system', status: 'open', deletedAt: null }, select: { id: true } });
+    for (const t of open) {
+      const done = await tx.task.update({ where: { id: t.id }, data: { status: 'done', version: { increment: 1 } } });
+      await this.audit.record(tx, { actor: SYSTEM_ACTOR, action: 'common.task.updated', entityType: 'Task', entityId: t.id, before: { status: 'open' }, after: { status: 'done' }, context: { sourceRef } });
+      await this.search.sync(tx, this.table, done as unknown as Record<string, unknown>);
+    }
+    return open.length;
+  }
+
   async create(caller: Caller, input: { title: string; description?: string | null; dueAt?: string | null; assigneeId?: string | null }) {
     await this.access.assertKey(caller, K.taskWrite);
     const task = await this.prisma.$transaction((tx) => this.createIn(tx, caller.actor, { ...input, dueAt: input.dueAt ? new Date(input.dueAt) : null }));
