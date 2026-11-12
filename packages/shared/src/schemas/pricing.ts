@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PARTICIPATION_TYPES, isoDateSchema, uuidSchema, versionSchema } from './catalogue';
+import { PARTICIPATION_TYPES, SUPPORTED_CURRENCIES, isoDateSchema, uuidSchema, versionSchema } from './catalogue';
 
 // Pricing (task 2.1, plan docs/plans/2.1-pricing-engine.md). The API's pricing engine is the only place a total is
 // computed: these schemas describe what a client may ask for (a configuration, never an amount) and what the API
@@ -161,7 +161,7 @@ const effectFields = {
   effectMode: z.enum(EFFECT_MODES),
   valueBps: z.number().int().min(0).max(MAX_SURCHARGE_BPS).nullable().default(null),
   valueMinor: rateAmountSchema.nullable().default(null),
-  currency: z.string().regex(/^[A-Z]{3}$/).nullable().default(null),
+  currency: z.enum(SUPPORTED_CURRENCIES).nullable().default(null),
   per: z.enum(EFFECT_PER).default('booking'),
   appliesTo: z.enum(RULE_TARGETS),
 };

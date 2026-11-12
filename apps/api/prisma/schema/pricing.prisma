@@ -1,5 +1,5 @@
-// Pricing (task 2.1, plan docs/plans/2.1-pricing-engine.md; plan 0.1, section 5.3). Rules, promo codes and their
-// redemptions are task 2.2. The CHECK constraints, the EXCLUDE that keeps published versions of a package from
+// Pricing (task 2.1, plan docs/plans/2.1-pricing-engine.md; plan 0.1, section 5.3). Rules, promo codes, their
+// redemptions and scheduled versions are task 2.2 (plan docs/plans/2.2-pricing-rules-promo-codes.md). The CHECK constraints, the EXCLUDE that keeps published versions of a package from
 // overlapping, NULLS NOT DISTINCT and the immutability triggers are SQL in the migration (Prisma cannot express them).
 
 enum PriceVersionStatus {
@@ -29,6 +29,9 @@ model PriceVersion {
   publishedById      String?             @db.Uuid
   /// @nopii optimistic lock for the admin panel; setting rates bumps it
   version            Int                 @default(0)
+  /// @nopii the price terms of the package's extras when published (ids and enums only); the open gate compares them
+  /// with the catalogue so a total never changes without a new version (plan 2.2, section 6). Null while draft.
+  pricedTerms        Json?
   /// @nopii timestamp
   createdAt          DateTime            @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
@@ -105,4 +108,174 @@ model ExtraRate {
   @@unique([priceVersionId, extraId])
   @@index([extraId])
   @@map("extra_rates")
+}
+
+enum PriceRuleScope {
+  global
+  edition
+  package
+}
+
+enum PriceRuleKind {
+  early_bird
+  late_supplement
+  group_discount
+  occupancy_supplement
+  custom
+}
+
+enum PriceRuleDirection {
+  discount
+  surcharge
+}
+
+enum PriceEffectMode {
+  percent
+  fixed
+}
+
+enum PriceEffectPer {
+  person
+  booking
+}
+
+enum PriceEffectTarget {
+  accommodation
+  participation
+  extras
+  subtotal
+}
+
+/// An automatic adjustment (plan 2.2, section 3): a discount or surcharge that applies when its conditions hold.
+/// Never deleted (archived instead); an archived rule never changes. The scope is global, an edition or a package.
+model PriceRule {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  /// @nopii staff label, never personal data
+  label       String
+  /// @nopii configuration
+  scopeType   PriceRuleScope
+  /// Set if and only if scopeType is edition (CHECK in the migration).
+  editionId   String?            @db.Uuid
+  edition     RaceEdition?       @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Set if and only if scopeType is package (CHECK in the migration).
+  packageId   String?            @db.Uuid
+  package     Package?           @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii configuration
+  kind        PriceRuleKind
+  /// @nopii configuration
+  direction   PriceRuleDirection
+  /// @nopii numbers, calendar dates and enums only (ruleConditionsSchema), never free text
+  conditions  Json               @default("{}")
+  /// @nopii configuration
+  effectMode  PriceEffectMode
+  /// @nopii basis points, percent rules only
+  valueBps    Int?
+  /// @nopii minor units in `currency`, fixed rules only
+  valueMinor  BigInt?
+  /// @nopii ISO 4217, set if and only if valueMinor is
+  currency    String?            @db.Char(3)
+  /// @nopii configuration
+  per         PriceEffectPer
+  /// @nopii configuration
+  appliesTo   PriceEffectTarget
+  /// @nopii configuration
+  priority    Int
+  /// @nopii configuration
+  stackable   Boolean            @default(false)
+  /// @nopii configuration
+  enabled     Boolean
+  /// @nopii inclusive
+  validFrom   DateTime?          @db.Timestamptz(3)
+  /// @nopii exclusive
+  validTo     DateTime?          @db.Timestamptz(3)
+  /// @nopii timestamp; an archived rule is never applied or changed again
+  archivedAt  DateTime?          @db.Timestamptz(3)
+  /// @nopii optimistic lock for the admin panel
+  version     Int                @default(0)
+  /// @nopii timestamp
+  createdAt   DateTime           @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt   DateTime           @updatedAt @db.Timestamptz(3)
+
+  @@index([scopeType])
+  @@index([editionId])
+  @@index([packageId])
+  @@map("price_rules")
+}
+
+/// A promo code (plan 2.2, section 4): the effect of a rule, always a discount, with usage limits. The code text and
+/// the scope never change; a code is never reused, even archived. redeemedCount only moves through redemptions.
+model PromoCode {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  /// @nopii chosen by staff: upper-case letters, digits and hyphens (PROMO_CODE_PATTERN), never personal data
+  code           String            @unique @db.Citext
+  /// @nopii staff label, never personal data
+  label          String
+  /// @nopii configuration
+  scopeType      PriceRuleScope
+  editionId      String?           @db.Uuid
+  edition        RaceEdition?      @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  packageId      String?           @db.Uuid
+  package        Package?          @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii numbers, calendar dates and enums only (ruleConditionsSchema), never free text
+  conditions     Json              @default("{}")
+  /// @nopii configuration
+  effectMode     PriceEffectMode
+  /// @nopii basis points, percent codes only
+  valueBps       Int?
+  /// @nopii minor units in `currency`, fixed codes only
+  valueMinor     BigInt?
+  /// @nopii ISO 4217, set if and only if valueMinor is
+  currency       String?           @db.Char(3)
+  /// @nopii configuration
+  per            PriceEffectPer
+  /// @nopii configuration
+  appliesTo      PriceEffectTarget
+  /// @nopii configuration
+  stackable      Boolean           @default(false)
+  /// @nopii configuration
+  enabled        Boolean
+  /// @nopii inclusive
+  validFrom      DateTime?         @db.Timestamptz(3)
+  /// @nopii exclusive
+  validTo        DateTime?         @db.Timestamptz(3)
+  /// @nopii null = no limit
+  maxRedemptions Int?
+  /// @nopii null = no limit
+  maxPerCustomer Int?
+  /// @nopii active redemptions; CHECK 0 ≤ redeemedCount ≤ maxRedemptions
+  redeemedCount  Int               @default(0)
+  /// @nopii timestamp; an archived code is never applied again
+  archivedAt     DateTime?         @db.Timestamptz(3)
+  /// @nopii optimistic lock for the admin panel; redemptions do not bump it
+  version        Int               @default(0)
+  /// @nopii timestamp
+  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt      DateTime          @updatedAt @db.Timestamptz(3)
+  redemptions    PromoRedemption[]
+
+  @@index([editionId])
+  @@index([packageId])
+  @@map("promo_codes")
+}
+
+/// One use of a code by one booking (plan 2.2, section 8). Only releasedAt (and activeBookingId with it) changes, once.
+/// bookingId and customerId get their foreign keys from task 2.4, which creates Booking and Customer.
+model PromoRedemption {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  promoCodeId     String    @db.Uuid
+  promoCode       PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  bookingId       String    @db.Uuid
+  customerId      String    @db.Uuid
+  /// The booking while the redemption is active, null once released: one active redemption per booking (unique).
+  activeBookingId String?   @unique @db.Uuid
+  /// @nopii timestamp
+  redeemedAt      DateTime  @db.Timestamptz(3)
+  /// @nopii timestamp; set once
+  releasedAt      DateTime? @db.Timestamptz(3)
+
+  @@unique([promoCodeId, bookingId])
+  @@index([promoCodeId, customerId])
+  @@map("promo_redemptions")
 }

@@ -71,4 +71,13 @@ export class PackagePricingReader {
       extras: p.extras.map((e) => ({ id: e.id, pricingUnit: e.pricingUnit, availableTo: e.availableTo, mandatory: e.mandatory, maxPerBooking: e.maxPerBooking })),
     };
   }
+
+  /** The currencies of the edition's packages that are not deleted, or null if the edition does not exist (plan 2.2, section 3). */
+  async editionCurrencies(tx: Tx, editionId: string): Promise<string[] | null> {
+    const e = await tx.raceEdition.findFirst({
+      where: { id: editionId, race: { deletedAt: null } },
+      select: { packages: { where: { deletedAt: null }, select: { currency: true } } },
+    });
+    return e ? [...new Set(e.packages.map((p) => p.currency))].sort() : null;
+  }
 }

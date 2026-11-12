@@ -26,7 +26,7 @@ describe('public quotes', () => {
     const res = await publicQuote(quoteBody(w));
     expect(res.status).toBe(200);
     // double room for two (2 × 50 000) + marathon 30 000 + supporter 2 500
-    expect(res.body).toMatchObject({ currency: 'AUD', totalMinor: '132500', depositMinor: '100000', balanceMinor: '32500', priceVersionId: w.versionId, engineVersion: 'pricing-2.1.0', promo: { status: 'none' } });
+    expect(res.body).toMatchObject({ currency: 'AUD', totalMinor: '132500', depositMinor: '100000', balanceMinor: '32500', priceVersionId: w.versionId, engineVersion: 'pricing-2.2.0', promo: { status: 'none' } });
     expect(res.body.trace).toBeUndefined();
     expect(res.body.lines.every((l: { amountMinor: unknown }) => typeof l.amountMinor === 'string')).toBe(true);
     const { priceBreakdownSchema } = await import('@mt/shared');
@@ -251,17 +251,19 @@ describe('publishing', () => {
   });
 });
 
-describe('price_version_overlap: the database constraint behind publishing', () => {
-  it('a publish that would overlap a later published version is a 409, not a 500 (23P01)', async () => {
+describe('a scheduled version ahead of a publish (2.2 replaces the 2.1 test that forced one in by SQL)', () => {
+  it('publishing now with a version scheduled later: 409 later_version_scheduled, or current_version_changed if the publisher did not see it', async () => {
     const w = await buildWorld(admin, { priced: false });
     const pkg = (await admin.get(`/admin/catalogue/packages/${w.pkg.id}`)).body;
     const rates = { ...cardFor({ roomId: pkg.hotels[0].rooms[0].id, extraId: pkg.extras[0].id, distanceId: w.distanceId }), participationRates: [] };
     const future = await draftWith(admin, w.pkg.id, rates, 'From next week');
-    // 2.2 will schedule versions; here one is put in the future straight in the database
-    await t.prisma.$executeRawUnsafe(`UPDATE price_versions SET status = 'published', "validFrom" = now() + interval '7 days' WHERE id = $1::uuid`, future.id);
+    const at = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+    await must(admin.post(`/admin/pricing/price-versions/${future.id}/publish`, { version: future.version, replacesVersionId: null, validFrom: at }), 'schedule');
     const now = await draftWith(admin, w.pkg.id, rates, 'From now');
-    const res = await publishDraft(admin, w.pkg.id, now);
-    expect([res.status, res.body.code]).toEqual([409, 'price_version_overlap']);
+    const blind = await admin.post(`/admin/pricing/price-versions/${now.id}/publish`, { version: now.version, replacesVersionId: null });
+    expect([blind.status, blind.body.code]).toEqual([409, 'current_version_changed']);
+    const seen = await admin.post(`/admin/pricing/price-versions/${now.id}/publish`, { version: now.version, replacesVersionId: future.id });
+    expect([seen.status, seen.body.code]).toEqual([409, 'later_version_scheduled']);
   });
 });
 
@@ -386,9 +388,9 @@ describe('permissions', () => {
 
   it('price_version_routes_require_permission: 401 without a session, 403 without the permission', async () => {
     const nobody = await staffClient(t, [P.packageRead]);
-    expect(routes().length).toBe(7);
+    expect(routes().length).toBe(18);
     for (const r of routes()) {
-      const method = r.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
+      const method = r.method.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
       expect((await t.http()[method](fill(r.path)).set(STATE_HEADERS).send({})).status, `${r.method} ${r.path}`).toBe(401);
       const denied = method === 'get' ? await nobody.get(fill(r.path)) : await nobody[method](fill(r.path), {} as never);
       expect(denied.status, `${r.method} ${r.path}`).toBe(403);
