@@ -1,5 +1,6 @@
 import type { Type } from '@nestjs/common';
+import { AlertsModule } from './modules/alerts';
 import { CatalogueModule } from './modules/catalogue';
 
 // The single list of business modules. Adding a module = a folder, its .prisma file and one line here.
-export const MODULES: ReadonlyArray<Type<unknown>> = [CatalogueModule];
+export const MODULES: ReadonlyArray<Type<unknown>> = [CatalogueModule, AlertsModule];

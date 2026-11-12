@@ -1,0 +1,42 @@
+// ---- Task 5.3: opening alerts (double opt-in subscriptions per race or edition) ----
+// Plan: docs/plans/5.3-opening-alerts.md. CHECKs live in migration 0008.
+
+enum AlertStatus {
+  pending
+  confirmed
+  unsubscribed
+}
+
+model AlertSubscription {
+  id                    String       @id @default(uuid(7)) @db.Uuid
+  /// @pii address the alerts go to
+  email                 String       @db.Citext
+  raceId                String       @db.Uuid
+  race                  Race         @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  editionId             String?      @db.Uuid
+  edition               RaceEdition? @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii race for the whole race, edition:<id> for one edition; makes the unique key work with a missing edition
+  scope                 String
+  customerId            String?      @db.Uuid
+  /// @nopii pending, confirmed or unsubscribed
+  status                AlertStatus  @default(pending)
+  /// @secret SHA-256 of the one-time confirmation token, set when the confirmation email is sent
+  confirmTokenHash      String?      @unique
+  /// @nopii timestamp
+  confirmTokenExpiresAt DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  confirmedAt           DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  unsubscribedAt        DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  lastNotifiedAt        DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  createdAt             DateTime     @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt             DateTime     @updatedAt @db.Timestamptz(3)
+
+  @@unique([email, raceId, scope])
+  @@index([raceId, status])
+  @@index([customerId])
+  @@map("alert_subscriptions")
+}

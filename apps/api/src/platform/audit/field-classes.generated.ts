@@ -3,6 +3,22 @@
 export type FieldClass = 'pii' | 'nopii' | 'secret';
 
 export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, FieldClass>>>> = {
+  AlertSubscription: {
+    id: 'nopii',
+    email: 'pii',
+    raceId: 'nopii',
+    editionId: 'nopii',
+    scope: 'nopii',
+    customerId: 'nopii',
+    status: 'nopii',
+    confirmTokenHash: 'secret',
+    confirmTokenExpiresAt: 'nopii',
+    confirmedAt: 'nopii',
+    unsubscribedAt: 'nopii',
+    lastNotifiedAt: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   AuditLog: {
     id: 'nopii',
     occurredAt: 'nopii',
