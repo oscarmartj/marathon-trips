@@ -140,10 +140,7 @@ export async function eventFor(t: TestApp, a: SimAccount, paymentId: string, ove
 /** Sends a signed webhook through HTTP, then runs its job as the worker would. Returns the HTTP status and the outcome. */
 export async function deliver(t: TestApp, a: SimAccount, w: SignedWebhook): Promise<{ status: number; outcome?: string }> {
   const res = await sendWebhook(t, a, w);
-  if (res.status !== 200) {
-    if (process.env.DEBUG_WEBHOOKS) console.log('webhook', res.status, JSON.stringify(res.body));
-    return { status: res.status };
-  }
+  if (res.status !== 200) return { status: res.status };
   const ev = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: a.id, providerEventId: w.eventId } } });
   const { PaymentWebhooksService } = await import('../../src/modules/payments/core/webhooks.service');
   return { status: 200, outcome: await t.app.get(PaymentWebhooksService).process(ev.id) };
