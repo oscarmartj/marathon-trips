@@ -121,7 +121,7 @@ class Harness {
   }
 
   /** A normalised payment; with `input`, also its amount, our id and the redirect origin. */
-  expectPayment(p: ProviderPayment | null, input?: CreatePaymentInput): asserts p is ProviderPayment {
+  expectPayment(p: ProviderPayment | null, input?: CreatePaymentInput): ProviderPayment {
     expect(p, 'payment').not.toBeNull();
     const q = p!;
     expect(typeof q.ref === 'string' && q.ref.length > 0, 'ref is a non-empty string').toBe(true);
@@ -137,6 +137,7 @@ class Harness {
       expect(q.nextAction.type).toBe('redirect');
       expect(q.nextAction.url.startsWith(`${this.p.manifest.checkoutOrigin}/`), 'redirect under the manifest checkout origin').toBe(true);
     }
+    return q;
   }
 }
 
@@ -229,10 +230,8 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const ctx = await h.s.context();
     const input = h.input();
     const p = await h.create(ctx, input);
-    const byRef = await h.retrieve(ctx, { ref: p.ref });
-    const byKey = await h.retrieve(ctx, { idempotencyKey: input.idempotencyKey });
-    h.expectPayment(byRef, input);
-    h.expectPayment(byKey, input);
+    const byRef = h.expectPayment(await h.retrieve(ctx, { ref: p.ref }), input);
+    const byKey = h.expectPayment(await h.retrieve(ctx, { idempotencyKey: input.idempotencyKey }), input);
     expect(byKey.ref).toBe(p.ref);
     expect(byRef.ref).toBe(p.ref);
     expect(byKey.status).toBe(byRef.status);
@@ -252,8 +251,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const p = await h.create(ctx, input);
     await h.s.customerCompletes(ctx, p, 'pay');
     for (const by of [{ ref: p.ref }, { idempotencyKey: input.idempotencyKey }]) {
-      const q = await h.retrieve(ctx, by);
-      h.expectPayment(q, input);
+      const q = h.expectPayment(await h.retrieve(ctx, by), input);
       expect(q.status).toBe('succeeded');
     }
   },
@@ -366,7 +364,8 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const w = await h.s.webhookFor(ctx, p.ref, at);
     const verify = (label: string, c: ProviderContext, body: Buffer, headers: Record<string, string>, when: Date) => h.value(label, () => h.p.verifyWebhook(c, body, headers, when));
     const tampered = Buffer.from(w.body);
-    tampered[Math.floor(tampered.length / 2)] ^= 0x01;
+    const mid = Math.floor(tampered.length / 2);
+    tampered[mid] = tampered[mid]! ^ 0x01;
     expect(await verify('tampered body', ctx, tampered, w.headers, at)).toMatchObject({ ok: false, code: 'bad_signature' });
     expect(await verify('other secret', { ...ctx, webhookSecret: randomBytes(32).toString('hex') }, w.body, w.headers, at)).toMatchObject({ ok: false, code: 'bad_signature' });
     const unsigned = Object.fromEntries(Object.entries(w.headers).filter(([k]) => !h.p.signatureHeaders.includes(k.toLowerCase())));

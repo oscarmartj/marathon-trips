@@ -2,7 +2,8 @@
 // finishes a simulated payment, as on a gateway's hosted page. It lives outside adapters/ because it uses the platform
 // (config, logging, HTTP); the gateway side of the work is the adapter's own completeCheckout. Development, test and
 // ci only, in two layers: the controller is not registered elsewhere, and if it were it answers 404 before anything.
-import { Body, Controller, Get, Header, HttpCode, Inject, Injectable, Logger, Param, Post, Type } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Injectable, Logger, Param, Post, Res, Type } from '@nestjs/common';
+import type { Response } from 'express';
 import { z } from 'zod';
 import type { AppEnv } from '@mt/shared';
 import { Public } from '../../../platform/access/access.decorators';
@@ -72,28 +73,30 @@ export class SimulatorCheckoutService {
   }
 }
 
+/** HTML headers only on a page: an error keeps the API's JSON (and its 404 stays the same as any unknown route's). */
+function asHtml(res: Response, page: string): string {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  return page;
+}
+
 @Controller('payments/simulator/checkout')
 export class SimulatorCheckoutController {
   constructor(@Inject(SimulatorCheckoutService) private readonly checkout: SimulatorCheckoutService) {}
 
   @Get(':token')
   @Public('simulator hosted checkout, development, test and ci only: the checkout token in the path is the credential')
-  @Header('Content-Type', 'text/html; charset=utf-8')
-  @Header('Cache-Control', 'no-store')
-  @Header('Referrer-Policy', 'no-referrer')
-  show(@Param('token') token: string): string {
-    return this.checkout.page(token);
+  show(@Param('token') token: string, @Res({ passthrough: true }) res: Response): string {
+    return asHtml(res, this.checkout.page(token));
   }
 
   @Post(':token')
   @HttpCode(200)
   @Public('simulator hosted checkout, development, test and ci only: the checkout token in the path is the credential')
   @CsrfExempt('simulator hosted checkout: a form on a gateway page, protected by the unguessable checkout token')
-  @Header('Content-Type', 'text/html; charset=utf-8')
-  @Header('Cache-Control', 'no-store')
-  @Header('Referrer-Policy', 'no-referrer')
-  submit(@Param('token') token: string, @Body(new ZodPipe(checkoutSubmitSchema)) body: z.infer<typeof checkoutSubmitSchema>): Promise<string> {
-    return this.checkout.submit(token, body.outcome);
+  async submit(@Param('token') token: string, @Body(new ZodPipe(checkoutSubmitSchema)) body: z.infer<typeof checkoutSubmitSchema>, @Res({ passthrough: true }) res: Response): Promise<string> {
+    return asHtml(res, await this.checkout.submit(token, body.outcome));
   }
 }
 
