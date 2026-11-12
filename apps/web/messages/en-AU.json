@@ -1459,7 +1459,7 @@
       "applied": "A promotion has been applied.",
       "not_combinable": "That promotion cannot be combined with the other offers on this booking.",
       "conditions_not_met": "That promotion does not apply to this booking.",
-      "invalid": "That code is not valid."
+      "invalid": "That code can't be applied to this booking."
     },
     "requestNote": "Showing a price does not hold your places. Nothing is booked until we confirm it with you.",
     "errors": {

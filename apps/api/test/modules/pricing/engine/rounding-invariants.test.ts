@@ -68,6 +68,7 @@ describe('breakdown_invariants (500 seeded configurations)', () => {
   }
 
   const results: PriceBreakdown[] = [];
+  const inputs: Array<{ rules: RuleInput[]; code: PromoInput | null }> = [];
   for (let i = 0; i < 500; i++) {
     const rooms: EngineRequest['rooms'] = Array.from({ length: int(1, 3) }, () => {
       const id = pick(Object.keys(ranges));
@@ -83,6 +84,7 @@ describe('breakdown_invariants (500 seeded configurations)', () => {
       const b = price(request, VIEW, RATES, rules, code, NOW);
       expect(price(request, VIEW, RATES, rules, code, NOW)).toEqual(b);
       results.push(b);
+      inputs.push({ rules, code });
     } catch (e) {
       if (!(e instanceof PricingError) || !['travellers_out_of_range'].includes(e.code)) throw e;
     }
@@ -100,6 +102,22 @@ describe('breakdown_invariants (500 seeded configurations)', () => {
       expect(b.perTraveller.reduce((a, p) => a + p.amountMinor, 0n) + b.unattributedMinor).toBe(b.totalMinor);
       expect(b.lines.every((l) => l.amountMinor >= 0n)).toBe(true);
     }
+  });
+
+  it('no two applied adjustments of one direction on overlapping targets where either is not stackable (plan 2.2, section 2)', () => {
+    const overlap = (a: string, b: string) => a === b || a === 'subtotal' || b === 'subtotal';
+    results.forEach((b, i) => {
+      const { rules, code } = inputs[i]!;
+      const stackable = new Map<string, boolean>(rules.map((x) => [x.id, x.stackable]));
+      if (code) stackable.set(code.id, code.stackable);
+      const adj = b.lines.filter((l) => l.kind === 'rule' || l.kind === 'promo');
+      for (const x of adj) {
+        for (const y of adj) {
+          if (x === y || x.direction !== y.direction || !overlap(x.component, y.component)) continue;
+          expect(stackable.get(x.refId!) && stackable.get(y.refId!), `${x.key} with ${y.key}`).toBe(true);
+        }
+      }
+    });
   });
 
   it('no component is discounted below zero, and discounts never exceed what they apply to', () => {
