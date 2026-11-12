@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { WaitlistConfirmation } from '@/components/booking/waitlist-confirmation';
 import { RequestConfirmation, dateInBrisbane, lastHeldDay, type RequestView } from '@/components/booking/request-confirmation';
 import { formatDate } from '@/lib/catalogue-format';
 
@@ -42,5 +43,20 @@ describe('confirmation page', () => {
     expect(lastHeldDay('2026-11-18T14:00:00.001Z')).toBe('2026-11-19');
     const text = renderToStaticMarkup(<RequestConfirmation view={view({ requestExpiresAt: '2026-11-18T14:00:00.000Z', departureDate: '2026-11-19' })} />);
     expect(text).toContain(`held until the end of ${formatDate('2026-11-18')}`);
+  });
+});
+
+describe('waiting list confirmation', () => {
+  const joined = { outcome: 'waitlisted' as const, status: 'waiting', travellers: 2, package: { name: { 'en-AU': 'Race weekend' } } };
+
+  it('waitlist_page_says_waiting_list_not_booking: it says plainly that this is a waiting list, not a request or a booking, with nothing charged and nothing held', () => {
+    const html = renderToStaticMarkup(<WaitlistConfirmation joined={joined} />);
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    expect(text).toMatch(/You are on the waiting list: this is not a booking request/);
+    expect(text).toMatch(/waiting list for Race weekend\. This is not a booking request and it is not a booking\./);
+    expect(text).toMatch(/We have not charged you anything, and we are not holding any places for you\./);
+    expect(html).toContain('role="status"');
+    // No price, no reference, and no promise of a place or of official standing.
+    expect(text).not.toMatch(/\$|AUD|MT-[0-9A-Z]{6}|guarantee|official|accredit|held until/i);
   });
 });

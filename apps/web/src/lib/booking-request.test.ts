@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bookingRequestSchema } from '@mt/shared';
-import { IdempotencyKeys, RETURN_TO_KEY, rememberReturnTo, requestErrorKey, safeReturnTo, takeReturnTo, toBookingRequest } from './booking-request';
+import { IdempotencyKeys, RETURN_TO_KEY, parseWaitlistJoined, rememberReturnTo, requestErrorKey, safeReturnTo, takeReturnTo, toBookingRequest } from './booking-request';
 import { messageCatalogue } from './i18n';
 
 const quote = {
@@ -85,5 +85,21 @@ describe('error messages', () => {
       expect(catalogue.bookingRequest.errors[key], `${status} ${code}`).toBeTruthy();
     }
     expect(requestErrorKey(409, 'inventory_unavailable')).toBe('bookingRequest.errors.soldOut');
+  });
+});
+
+describe('waiting list answer', () => {
+  const joined = { outcome: 'waitlisted', status: 'waiting', joinedAt: '2026-11-13T00:00:00.000Z', travellers: 2, package: { id: 'x', name: { 'en-AU': 'Race weekend' } } };
+
+  it('waitlist_answer_recognised: only an answer marked as waitlisted is the waiting list', () => {
+    expect(parseWaitlistJoined(joined)?.package.name).toEqual({ 'en-AU': 'Race weekend' });
+    // A booking request answer has a reference and no outcome: it must never be taken for a waiting list entry.
+    expect(parseWaitlistJoined({ reference: 'MT-4YRAQQ', status: 'requested', isRequest: true, package: { name: {} } })).toBeNull();
+    for (const bad of [null, undefined, 'waitlisted', 3, {}, { ...joined, outcome: 'requested' }, { ...joined, package: undefined }, { ...joined, travellers: '2' }]) expect(parseWaitlistJoined(bad)).toBeNull();
+  });
+
+  it('a country the API does not serve is no longer an error the form shows: it answers 201 with the waiting list', () => {
+    // The 409 country_not_served code stays mapped (a settings change could bring it back), but the form no longer expects it.
+    expect(requestErrorKey(409, 'country_not_served')).toBe('bookingRequest.errors.country');
   });
 });

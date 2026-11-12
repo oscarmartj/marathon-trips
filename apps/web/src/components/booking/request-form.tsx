@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { PriceBreakdownJson } from '@mt/shared';
 import { Field, Status } from '@/components/auth/field';
+import { WaitlistConfirmation } from '@/components/booking/waitlist-confirmation';
 import { QuoteSummary } from '@/components/builder/quote-summary';
 import { api } from '@/lib/api-client';
 import { toQuoteRequest, type BuilderState } from '@/lib/builder';
-import { IdempotencyKeys, rememberReturnTo, requestErrorKey, toBookingRequest } from '@/lib/booking-request';
+import { IdempotencyKeys, parseWaitlistJoined, rememberReturnTo, requestErrorKey, toBookingRequest, type WaitlistJoined } from '@/lib/booking-request';
 import type { PackageDetail } from '@/lib/catalogue';
 import { t } from '@/lib/i18n';
 import { isBreakdown } from '@/lib/quote-loader';
@@ -14,7 +15,8 @@ import { isBreakdown } from '@/lib/quote-loader';
 type Session = 'checking' | 'signed-out' | 'signed-in';
 
 /**
- * Sends a booking request (task 2.4): shows the API's current price for the configuration, asks for the lead contact,
+ * Sends a booking request (task 2.4), or joins the waiting list when the API says the contact lives outside the
+ * countries we sell to (task 2.6): shows the API's current price for the configuration, asks for the lead contact,
  * and posts the configuration and the contact. Never an amount: the API prices it again and keeps that price.
  */
 export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; state: BuilderState; here: string }) {
@@ -22,6 +24,7 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
   const [breakdown, setBreakdown] = useState<PriceBreakdownJson | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [joined, setJoined] = useState<WaitlistJoined | null>(null);
   const keys = useRef(new IdempotencyKeys());
   const quote = useMemo(() => toQuoteRequest(pkg, state), [pkg, state]);
 
@@ -43,6 +46,12 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
     setError(null);
     try {
       const r = await api<{ reference: string }>('/booking-requests', { method: 'POST', body, headers: { 'Idempotency-Key': keys.current.keyFor(body) } });
+      // Outside the countries we sell to the API answers with a waiting list entry, not a request (task 2.6).
+      const waitlisted = r.status === 201 ? parseWaitlistJoined(r.body) : null;
+      if (waitlisted) {
+        setJoined(waitlisted);
+        return;
+      }
       if (r.status === 201 && typeof r.body.reference === 'string') {
         window.location.assign(`/trips/requests/${encodeURIComponent(r.body.reference)}`);
         return;
@@ -56,6 +65,7 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
     }
   }
 
+  if (joined) return <WaitlistConfirmation joined={joined} />;
   return (
     <div className="stack">
       <p className="notice">{t('bookingRequest.notABooking')}</p>
@@ -77,6 +87,7 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
           <Field label={t('bookingRequest.familyName')} id="familyName" autoComplete="family-name" required maxLength={100} />
           <Field label={t('bookingRequest.phone')} id="phone" type="tel" autoComplete="tel" maxLength={20} />
           <Field label={t('bookingRequest.country')} id="countryOfResidence" autoComplete="country" required maxLength={2} defaultValue="AU" />
+          <p>{t('bookingRequest.countryHint')}</p>
           <p>{t('bookingRequest.whatHappensNext')}</p>
           <button className="btn" type="submit" disabled={sending || !breakdown} aria-disabled={sending || !breakdown}>
             {sending ? t('bookingRequest.sending') : t('bookingRequest.send')}

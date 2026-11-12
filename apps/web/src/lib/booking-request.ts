@@ -39,6 +39,23 @@ export class IdempotencyKeys {
   }
 }
 
+/** What the API answers when the contact lives outside the countries we sell to: a waiting list entry, not a request (task 2.6). */
+export interface WaitlistJoined {
+  outcome: 'waitlisted';
+  status: string;
+  travellers: number;
+  package: { name: Record<string, string> };
+}
+
+/** The waiting list answer, or null for anything else (a booking request answer has a reference and no outcome). */
+export function parseWaitlistJoined(body: unknown): WaitlistJoined | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  const pkg = b.package as { name?: unknown } | undefined;
+  if (b.outcome !== 'waitlisted' || typeof b.status !== 'string' || typeof b.travellers !== 'number' || !pkg || typeof pkg.name !== 'object' || pkg.name === null) return null;
+  return b as unknown as WaitlistJoined;
+}
+
 /** Where to go back after signing in: only a booking request page of this site, never another site or another path. */
 export const RETURN_TO_KEY = 'mt.bookingRequestReturnTo';
 const RETURN_TO = /^\/races\/[a-z0-9-]{1,100}\/request\?[A-Za-z0-9%=&~:,._-]{0,2000}$/;
