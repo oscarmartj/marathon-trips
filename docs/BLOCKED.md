@@ -2,7 +2,7 @@
 
 Lo que no se puede terminar sin Oscar o sin un tercero. No detiene el resto del trabajo. Lo actualiza el hilo de cierre de cada fase a partir de `docs/done/`.
 
-Actualizado al cerrar la fase 0 (2026-11-12).
+Actualizado al cerrar la fase 1 (2026-11-12).
 
 | Qué falta | Quién lo desbloquea | Qué se hizo mientras tanto | Tarea |
 |---|---|---|---|
@@ -16,3 +16,6 @@ Actualizado al cerrar la fase 0 (2026-11-12).
 | Cuenta de AWS, servidor, dominio y proveedor de SMTP | Oscar | Guía `docs/deploy/guide.md`; correo en `catch` hasta que haya SMTP | 8.7 |
 | Docker no existe en el entorno de los hilos | Nadie (limitación del entorno); si Oscar quiere comprobarlo en local, `docker compose up` | `compose-smoke` solo corre en CI; `docker compose`, Caddy, la imagen de copias y `rclone` no se ejecutaron en ningún hilo | 0.2, 8.6, 8.7 |
 | `binaries.prisma.sh` denegado en el entorno de los hilos | Nadie | Local: `PRISMA_SCHEMA_ENGINE_BINARY=/bin/true` y migraciones con `psql`; CI usa `prisma migrate deploy` y `migrate diff` | 0.2 |
+| Pruebas con lector de pantalla y navegador real de las páginas públicas y del panel de catálogo (contraste, foco, teclado completo, 320 px); solo hay marcado, etiquetas y roles, y una e2e de flujo | Oscar (o una persona con lector de pantalla) | Pruebas de roles y etiquetas en 0.5, 0.6, 1.2 y 1.3; la e2e `create_publish_and_view_race` recorre el panel y la página pública | 1.2, 1.3 |
+| Validadores externos de datos estructurados y Open Graph (Rich Results Test de Google, depurador de Open Graph) sobre una página desplegada | Oscar, cuando haya dominio y despliegue | JSON-LD, etiquetas `og:*`, `robots.txt`, sitemap e imagen 1200x630 comprobados con curl contra la web real en el cierre de la fase 1 | 1.4 |
+| `WEB_ORIGIN` fijo también al construir la imagen de la web (y en ejecución): hoy las páginas estáticas saldrían con `http://localhost:3000` en canónicas, Open Graph y JSON-LD | Hilo de la tarea propuesta `1.fix-1` (ver `docs/FINAL-REVIEW.md`); Oscar solo pone la dirección pública en `deploy/production.env` | Variable ya existente (`WEB_ORIGIN`); `robots.txt` sí la lee por petición | 1.4, 8.7 |
