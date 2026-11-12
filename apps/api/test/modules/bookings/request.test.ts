@@ -188,11 +188,15 @@ describe('what a request may carry', () => {
     expect(JSON.stringify(logs.map((l) => l.changes))).not.toContain(marker);
   });
 
-  it('country_not_served_409: only the sales countries may ask; nothing is written', async () => {
+  it('country_not_served_waitlists (task 2.6, was country_not_served_409): outside the sales countries the request becomes a waiting list entry; no booking, nothing held', async () => {
     const c = await customerClient(t);
+    const pools = await consumed([w.roomPoolId, w.entryPoolId]);
     const res = await c.request(requestBody(w, { contact: contact({ countryOfResidence: 'NZ' }) }));
-    expect([res.status, res.body.code]).toEqual([409, 'country_not_served']);
-    expect(await t.prisma.customer.count({ where: { userId: c.userId } })).toBe(0);
+    expect([res.status, res.body.outcome]).toEqual([201, 'waitlisted']);
+    const customer = await t.prisma.customer.findUniqueOrThrow({ where: { userId: c.userId } });
+    expect(await t.prisma.booking.count({ where: { customerId: customer.id } })).toBe(0);
+    expect(await t.prisma.waitlistEntry.count({ where: { customerId: customer.id } })).toBe(1);
+    expect(await consumed([w.roomPoolId, w.entryPoolId])).toEqual(pools);
   });
 
   it('foreign_option_ids_rejected: a room or a distance of another package is a 422 and holds nothing', async () => {

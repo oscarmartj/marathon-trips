@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ISO_COUNTRY_CODES } from '../iso-countries';
 import { uuidSchema, versionSchema } from './catalogue';
 import { quoteRequestSchema } from './pricing';
 
@@ -21,7 +22,8 @@ export const bookingContactSchema = z.strictObject({
   givenName: nameSchema,
   familyName: nameSchema,
   phone: z.string().trim().regex(/^\+?[0-9 ]{6,20}$/).optional(),
-  countryOfResidence: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+  // An assigned ISO 3166-1 alpha-2 code: ZZ marks an erased customer, so it (and XX, AA...) is never accepted.
+  countryOfResidence: z.string().trim().toUpperCase().refine((c) => ISO_COUNTRY_CODES.has(c), 'Use a two-letter ISO 3166-1 country code, such as AU'),
 });
 export type BookingContact = z.infer<typeof bookingContactSchema>;
 

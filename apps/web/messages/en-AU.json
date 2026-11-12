@@ -2268,6 +2268,12 @@
   "pages": {
     "notFoundTitle": "Page not found"
   },
+  "waitlist": {
+    "heading": "You are on the waiting list: this is not a booking request",
+    "notABooking": "We have added you to the waiting list for {name}. This is not a booking request and it is not a booking.",
+    "nothingCharged": "We have not charged you anything, and we are not holding any places for you.",
+    "next": "We do not yet take bookings from where you live. You are on the list in case that changes."
+  },
   "bookingRequest": {
     "title": "Request this trip",
     "requestThisTrip": "Request this trip",
@@ -2281,7 +2287,8 @@
     "familyName": "Family name",
     "phone": "Mobile number (optional)",
     "country": "Country of residence (two-letter code, such as AU)",
-    "whatHappensNext": "We check availability with our hotels and the race, then get back to you. Places are held for you while we look.",
+    "countryHint": "We take booking requests from residents of the countries we sell to. If yours is not one of them yet, we will add you to the waiting list for this trip instead.",
+    "whatHappensNext": "We check availability with our hotels and the race, then get back to you.",
     "send": "Send booking request",
     "sending": "Sending…",
     "errors": {
@@ -2292,7 +2299,9 @@
       "tooMany": "Too many attempts. Wait a little and try again.",
       "soldOut": "Some of what you chose has just sold out. Go back to your trip and change it.",
       "promo": "That code can no longer be used. Remove it to continue.",
-      "country": "For now we can only take requests from residents of Australia.",
+      "countryInvalid": "That is not a valid country code. Use the two-letter code for where you live, such as AU for Australia or NZ for New Zealand.",
+      "countrySuggest": "{code} is not a valid country code. Did you mean {suggestion}?",
+      "country": "We cannot take booking requests from where you live yet.",
       "tooManyOpen": "You already have open requests with us. We will be in touch about them first.",
       "tooManyPlaces": "This request would hold more places than we can keep for one person. Contact us for a group booking.",
       "changed": "This trip changed while you were booking. Check the price and try again.",
