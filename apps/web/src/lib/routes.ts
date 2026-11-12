@@ -23,6 +23,8 @@ export const publicRoutes: readonly RouteDef[] = [
   { path: '/waitlist/[id]', file: '(public)/waitlist/[id]/page.tsx', labelKey: 'nav.waitlistOffer' },
   { path: '/quotes/[reference]', file: '(public)/quotes/[reference]/page.tsx', labelKey: 'nav.quote' },
   { path: '/checkout', file: '(public)/checkout/page.tsx', labelKey: 'nav.checkout' },
+  { path: '/checkout/[reference]', file: '(public)/checkout/[reference]/page.tsx', labelKey: 'nav.checkoutBooking' },
+  { path: '/payments/return', file: '(public)/payments/return/page.tsx', labelKey: 'nav.paymentReturn' },
   { path: '/about', file: '(public)/about/page.tsx', labelKey: 'nav.about', nav: true, footer: 'company' },
   { path: '/pages/[slug]', file: '(public)/pages/[slug]/page.tsx', labelKey: 'nav.page' },
   { path: '/faq', file: '(public)/faq/page.tsx', labelKey: 'nav.faq', nav: true, footer: 'company' },

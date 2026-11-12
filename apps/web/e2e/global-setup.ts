@@ -27,4 +27,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_15 = create();
   // Key dates calendar (key-dates.spec.ts): an owner.
   process.env.E2E_STAFF_16 = create();
+  // Checkout with the payment simulator (checkout.spec.ts): an owner.
+  process.env.E2E_STAFF_17 = create();
 }
