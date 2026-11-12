@@ -6,9 +6,9 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Ahora
 
-- **Fase 0:** hecha: 0.1 a 0.7 y 0.fix-1 en `main`, CI en verde en `4d83a4c`. Se da por cerrada al fusionar 0.fix-2 (único criterio parcial: datos demo comprobados dentro de `docker compose up`).
-- **Hechas fuera de fase:** 8.6 (copias y monitor), 8.7 (guía de despliegue) y 1.1 (API de catálogo).
-- **Siguiente tarea:** 0.fix-2; en paralelo 1.2 y 1.3 (en curso), 1.5 y 2.1 (dependen solo de 1.1). Dinero aparcado desde el 2026-11-12.
+- **Fases 0 y 1 cerradas** (1.1 a 1.5 en `main`, CI en verde en `6897121`; los 6 criterios de la fase 1 comprobados, ver el PR "Phase 1 close"). Fuera de fase ya en `main`: 2.1, 2.3, 5.3, 6.1, 8.6, 8.7.
+- **En marcha:** 2.2 (reglas y códigos, en implementación) y 8.4 (claves de API y webhooks, en revisión de plan). Dinero aparcado desde el 2026-11-12.
+- **Siguiente:** 2.4 cuando 2.2 se fusione; propuestas `1.fix-1` (`WEB_ORIGIN` al construir la imagen) y `2.2b` (pantallas de precios, reglas y códigos) en `docs/FINAL-REVIEW.md`.
 - **Bloqueos:** ninguno que detenga el trabajo; lo externo está en `docs/BLOCKED.md`.
 
 ## Pendiente de Oscar
@@ -17,7 +17,7 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Hecho
 
-Fase 0 (salvo 0.fix-2), 8.6, 8.7 y 1.1: ver `docs/done/`.
+Fases 0 y 1, 2.1, 2.3, 5.3, 6.1, 8.6 y 8.7: ver `docs/done/`.
 
 ## Sin verificar
 
