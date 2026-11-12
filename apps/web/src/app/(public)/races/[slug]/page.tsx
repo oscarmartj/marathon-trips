@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { AlertForm } from '@/components/alerts/alert-form';
 import { DateNotice } from '@/components/catalogue/date-notice';
 import { PageHeader } from '@/components/page-header';
 import { PlaceholderImage } from '@/components/placeholder-image';
-import { countryName, editionDateText, formatDate, formatDistance, monthName } from '@/lib/catalogue-format';
+import { countryName, editionDateText, formatDate, formatDistance, hasOpenPackage, monthName } from '@/lib/catalogue-format';
 import { getRace, listRaceSlugs, localisedText } from '@/lib/catalogue';
 import { t } from '@/lib/i18n';
 
@@ -27,6 +28,8 @@ export default async function RacePage({ params }: Props) {
   if (!race) notFound();
   const name = localisedText(race.name);
   const summary = localisedText(race.summary);
+  // The alert is for people who cannot book yet: it goes away once a package is open.
+  const anyOpen = hasOpenPackage(race);
   return (
     <>
       <PageHeader title={t('races.detail.title', { name })} intro={t('races.location', { city: race.city, country: countryName(race.countryCode) })} />
@@ -66,6 +69,13 @@ export default async function RacePage({ params }: Props) {
           ) : null}
         </section>
       </div>
+      {anyOpen ? null : (
+        <section className="container stack section" aria-labelledby="alert-heading">
+          <h2 id="alert-heading">{t('alerts.heading')}</h2>
+          <p>{t('alerts.intro')}</p>
+          <AlertForm raceSlug={race.slug} />
+        </section>
+      )}
       <div className="container stack section" aria-labelledby="editions-heading">
         <h2 id="editions-heading">{t('races.detail.editionsHeading')}</h2>
         {race.editions.map((e) => (

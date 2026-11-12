@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { RACE_STATUSES, RACE_TYPES } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { enAU, slugify, wholeNumber, withEnAU } from '@/lib/catalogue-panel';
@@ -67,6 +67,17 @@ export function raceBody(v: Record<string, string | boolean>, previous?: { name?
 
 export const newRaceValues = { name: '', slug: '', countryCode: 'AU', city: '', timeZone: 'Australia/Brisbane', raceType: 'road', typicalMonth: '', summary: '', websiteUrl: '' };
 
+/** Confirmed alert subscribers per race id, or null when the staff member may not see them. */
+function useSubscriberCounts(): Map<string, number> | null {
+  const [counts, setCounts] = useState<Map<string, number> | null>(null);
+  useEffect(() => {
+    api<{ items: Array<{ raceId: string; confirmed: number }> }>('/admin/alerts/subscribers').then((r) => {
+      if (r.status === 200) setCounts(new Map(r.body.items.map((i) => [i.raceId, i.confirmed])));
+    });
+  }, []);
+  return counts;
+}
+
 /** Races list: search, filter by status, create, CSV and the low-stock warning. */
 export function RacesPanel() {
   const [q, setQ] = useState('');
@@ -76,6 +87,8 @@ export function RacesPanel() {
   const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), ...(applied.q ? { q: applied.q } : {}), ...(applied.status ? { status: applied.status } : {}) });
   const { data, error, reload } = useLoad<Page>(`/admin/catalogue/races?${params.toString()}`);
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+  // Subscriber counts need their own permission: without it the column is left out rather than showing an error.
+  const subscribers = useSubscriberCounts();
 
   return (
     <div className="stack">
@@ -125,6 +138,7 @@ export function RacesPanel() {
                     <th scope="col">{t('admin.catalogue.races.columns.location')}</th>
                     <th scope="col">{t('admin.catalogue.races.fields.status')}</th>
                     <th scope="col">{t('admin.catalogue.races.columns.editions')}</th>
+                    {subscribers ? <th scope="col" title={t('admin.catalogue.races.columns.alertsHint')}>{t('admin.catalogue.races.columns.alerts')}</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -138,6 +152,7 @@ export function RacesPanel() {
                       <td>{r.city}, {r.countryCode}</td>
                       <td>{t(`admin.catalogue.raceStatuses.${r.status}`)}</td>
                       <td>{r.editionCount}</td>
+                      {subscribers ? <td>{subscribers.get(r.id) ?? 0}</td> : null}
                     </tr>
                   ))}
                 </tbody>

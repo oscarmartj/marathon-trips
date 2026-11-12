@@ -155,6 +155,7 @@ model Race {
   distances      RaceDistance[]
   claims         RaceClaim[]
   editions       RaceEdition[]
+  alerts         AlertSubscription[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -228,6 +229,7 @@ model RaceEdition {
   updatedAt  DateTime        @updatedAt @db.Timestamptz(3)
   packages   Package[]
   pools      InventoryPool[]
+  alerts     AlertSubscription[]
 
   @@unique([raceId, year])
   @@index([status])

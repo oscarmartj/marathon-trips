@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import Races from './(public)/races/page';
 import RacePage from './(public)/races/[slug]/page';
 import Home from './(public)/page';
+import ConfirmPage from './(public)/alerts/confirm/page';
+import UnsubscribePage from './(public)/alerts/unsubscribe/page';
 import { detail, SLUG, stubCatalogue, summary } from '@/test/catalogue-fixtures';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -93,6 +95,34 @@ describe('race page', () => {
   it('returns not found for an unknown race', async () => {
     stubCatalogue({ race: null });
     await expect(race()).rejects.toThrow(/NEXT_HTTP_ERROR_FALLBACK;404|NEXT_NOT_FOUND/);
+  });
+});
+
+describe('opening alerts', () => {
+  it('offers the alert form when no package is open, and not when one is', async () => {
+    const closed = detail();
+    closed.editions[0]!.packages[0]!.saleStatus = 'coming_soon';
+    stubCatalogue({ race: closed });
+    const html = await race();
+    expect(html).toContain('Be first to know when packages open');
+    expect(html).toMatch(/<input[^>]*type="email"[^>]*required/);
+    expect(html).toContain('Alert me');
+    stubCatalogue();
+    expect(await race()).not.toContain('Alert me');
+  });
+
+  it('offers the alert form for a race with no editions yet', async () => {
+    const d = detail();
+    d.editions = [];
+    stubCatalogue({ race: d });
+    expect(await race()).toContain('Alert me');
+  });
+
+  it('has confirm and unsubscribe pages that start in a neutral state and stay out of search results', () => {
+    const confirm = renderToStaticMarkup(ConfirmPage());
+    expect(confirm).toContain('Confirm your alert');
+    expect(confirm).not.toContain('Confirm my alert'); // the button appears only once a token is found in the link
+    expect(renderToStaticMarkup(UnsubscribePage())).toContain('Unsubscribing');
   });
 });
 

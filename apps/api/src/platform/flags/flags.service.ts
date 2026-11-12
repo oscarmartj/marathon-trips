@@ -7,7 +7,7 @@ import { PrismaService } from '../database/prisma.service';
 type Db = Prisma.TransactionClient | PrismaService;
 
 /** Modules without a feature flag: they cannot be switched off (plan 3.1). */
-export const ALWAYS_ON_MODULES: ReadonlySet<string> = new Set(['platform', 'catalogue', 'pricing', 'bookings', 'payments']);
+export const ALWAYS_ON_MODULES: ReadonlySet<string> = new Set(['platform', 'catalogue', 'pricing', 'bookings', 'payments', 'alerts']);
 
 export const moduleFlagKey = (module: string): string => `module.${module}`;
 
