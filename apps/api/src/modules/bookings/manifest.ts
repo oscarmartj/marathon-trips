@@ -9,6 +9,11 @@ export const BOOKINGS_PERMISSIONS = {
   approve: 'bookings.booking.approve',
   decline: 'bookings.booking.decline',
   cancel: 'bookings.booking.cancel',
+  /** Task 2.5: notes and tags on a booking (the shared table tools of task 0.5). */
+  annotate: 'bookings.booking.annotate',
+  customerRead: 'bookings.customer.read',
+  customerWrite: 'bookings.customer.write',
+  customerAnnotate: 'bookings.customer.annotate',
 } as const;
 
 const def = (key: string, description: string, requiresStepUp = false): PermissionDef => ({ key, module: 'bookings', description, requiresStepUp, apiKeyScopable: false });
@@ -30,6 +35,10 @@ export const bookingsManifest = {
     def(BOOKINGS_PERMISSIONS.approve, 'Approve a booking request'),
     def(BOOKINGS_PERMISSIONS.decline, 'Decline a booking request, which gives its stock and promo code back'),
     def(BOOKINGS_PERMISSIONS.cancel, 'Cancel a request or an approved booking, which gives its stock and promo code back; cannot be undone', true),
+    def(BOOKINGS_PERMISSIONS.annotate, 'Add notes and tags to a booking'),
+    def(BOOKINGS_PERMISSIONS.customerRead, 'See customers with their contact details and history of bookings, quotes and emails'),
+    def(BOOKINGS_PERMISSIONS.customerWrite, 'Add a customer and change a customer\'s contact details'),
+    def(BOOKINGS_PERMISSIONS.customerAnnotate, 'Add notes and tags to a customer'),
   ] satisfies PermissionDef[],
   publishes: Object.values(BOOKING_EVENTS),
   subscribes: [] as string[],

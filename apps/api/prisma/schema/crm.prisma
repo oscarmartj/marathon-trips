@@ -1,0 +1,72 @@
+// Quotes (task 2.5; plan docs/plans/2.5-booking-crm.md and plan 0.1, 5.4). A quote is a priced configuration that staff
+// prepare for one customer. It keeps the engine's result and holds it until `expiresAt`. No money moves here.
+// CHECKs, triggers and the queue live in the migration 0015_crm.
+
+enum QuoteStatus {
+  draft
+  sent
+  accepted
+  expired
+  withdrawn
+}
+
+model Quote {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  /// @nopii human reference QT-XXXXXX, random (Crockford base32)
+  reference      String       @unique
+  customerId     String       @db.Uuid
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  packageId      String       @db.Uuid
+  package        Package      @relation(fields: [packageId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  editionId      String       @db.Uuid
+  edition        RaceEdition  @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii draft, sent, accepted, expired or withdrawn
+  status         QuoteStatus  @default(draft)
+  /// @nopii PricedConfiguration from the engine: ids, slots and counts only
+  configuration  Json
+  /// @nopii PriceBreakdown from the engine: lines, totals, rule trace (ids and outcomes); no free text
+  priceBreakdown Json
+  /// @nopii minor units, in `currency`
+  totalMinor     BigInt
+  /// @nopii minor units, in `currency`
+  depositMinor   BigInt
+  /// @nopii ISO 4217
+  currency       String       @db.Char(3)
+  priceVersionId String       @db.Uuid
+  priceVersion   PriceVersion @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii engine version that priced it
+  engineVersion  String
+  /// @nopii calendar date, extra nights included
+  departureDate  DateTime     @db.Date
+  /// @nopii calendar date, extra nights included
+  returnDate     DateTime     @db.Date
+  /// @nopii calendar date
+  balanceDueDate DateTime     @db.Date
+  /// @nopii days the quote is held once sent
+  validForDays   Int
+  /// @nopii set when the quote is sent
+  expiresAt      DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  sentAt         DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  acceptedAt     DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  expiredAt      DateTime?    @db.Timestamptz(3)
+  /// @nopii timestamp
+  withdrawnAt    DateTime?    @db.Timestamptz(3)
+  bookingId      String?      @unique @db.Uuid
+  booking        Booking?     @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii staff user who prepared it (no foreign key, like all staff ids)
+  createdById    String       @db.Uuid
+  /// @nopii optimistic lock for the admin panel
+  version        Int          @default(0)
+  /// @nopii timestamp
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(3)
+
+  @@unique([bookingId, currency])
+  @@index([customerId, status])
+  @@index([status, expiresAt])
+  @@map("quotes")
+}

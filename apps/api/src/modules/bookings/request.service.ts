@@ -17,6 +17,7 @@ import { CustomerService } from './customer.service';
 import { BOOKING_EVENTS } from './manifest';
 import { BookingLimits, readBookingLimits } from './settings';
 import { snapshotBreakdownSchema, snapshotConfigurationSchema } from './snapshot-schema';
+import type { SnapshotConfiguration } from './snapshot-schema';
 import { ReferenceGenerator, Tx, dbNow, jsonOf, toDate } from './support';
 
 /** How long the request transaction may wait for a connection and run (plan 2.4, section 16, point 7). */
@@ -36,8 +37,8 @@ export function mapLoadError(err: unknown): unknown {
 
 /** The business time zone has no daylight saving (plan 0.1, assumption 1): the start of a day there is UTC+10. */
 const BRISBANE_OFFSET = '+10:00';
-const todayInBrisbane = (at: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
-const startOfDayInBrisbane = (date: string): Date => new Date(`${date}T00:00:00.000${BRISBANE_OFFSET}`);
+export const todayInBrisbane = (at: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+export const startOfDayInBrisbane = (date: string): Date => new Date(`${date}T00:00:00.000${BRISBANE_OFFSET}`);
 
 export interface CreatedRequest {
   bookingId: string;
@@ -161,7 +162,7 @@ export class BookingRequestService {
   }
 
   /** A fresh random reference; a collision is skipped with ON CONFLICT DO NOTHING (a 23505 would abort the transaction). */
-  private async insertBooking(tx: Tx, data: Omit<Prisma.BookingCreateManyInput, 'reference'>): Promise<string> {
+  async insertBooking(tx: Tx, data: Omit<Prisma.BookingCreateManyInput, 'reference'>): Promise<string> {
     for (let attempt = 0; attempt < 5; attempt++) {
       const rows = await tx.booking.createManyAndReturn({ data: [{ ...data, reference: this.references.next() }], skipDuplicates: true, select: { id: true } });
       if (rows.length === 1) return rows[0]!.id;
@@ -182,7 +183,7 @@ export class BookingRequestService {
   }
 
   /** Places, rooms and extras as they stand, from the engine's configuration (the lead is place 1). */
-  private async insertParts(tx: Tx, bookingId: string, customerId: string, b: PriceBreakdown): Promise<void> {
+  async insertParts(tx: Tx, bookingId: string, customerId: string, b: { configuration: SnapshotConfiguration }): Promise<void> {
     const c = b.configuration;
     const travellers = c.rooms.flatMap((r) => r.travellers);
     await tx.bookingTraveller.createMany({

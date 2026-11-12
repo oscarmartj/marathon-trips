@@ -40,6 +40,7 @@ model PriceVersion {
   participationRates ParticipationRate[]
   extraRates         ExtraRate[]
   bookingSnapshots   BookingSnapshot[]
+  quotes             Quote[]
 
   @@unique([id, currency])
   @@index([packageId, status])
@@ -150,53 +151,53 @@ enum PriceEffectTarget {
 /// An automatic adjustment (plan 2.2, section 3): a discount or surcharge that applies when its conditions hold.
 /// Never deleted (archived instead); an archived rule never changes. The scope is global, an edition or a package.
 model PriceRule {
-  id          String             @id @default(uuid(7)) @db.Uuid
+  id         String             @id @default(uuid(7)) @db.Uuid
   /// @nopii staff label, never personal data
-  label       String
+  label      String
   /// @nopii configuration
-  scopeType   PriceRuleScope
+  scopeType  PriceRuleScope
   /// Set if and only if scopeType is edition (CHECK in the migration).
-  editionId   String?            @db.Uuid
-  edition     RaceEdition?       @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  editionId  String?            @db.Uuid
+  edition    RaceEdition?       @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// Set if and only if scopeType is package (CHECK in the migration).
-  packageId   String?            @db.Uuid
-  package     Package?           @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  packageId  String?            @db.Uuid
+  package    Package?           @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii configuration
-  kind        PriceRuleKind
+  kind       PriceRuleKind
   /// @nopii configuration
-  direction   PriceRuleDirection
+  direction  PriceRuleDirection
   /// @nopii numbers, calendar dates and enums only (ruleConditionsSchema), never free text
-  conditions  Json               @default("{}")
+  conditions Json               @default("{}")
   /// @nopii configuration
-  effectMode  PriceEffectMode
+  effectMode PriceEffectMode
   /// @nopii basis points, percent rules only
-  valueBps    Int?
+  valueBps   Int?
   /// @nopii minor units in `currency`, fixed rules only
-  valueMinor  BigInt?
+  valueMinor BigInt?
   /// @nopii ISO 4217, set if and only if valueMinor is
-  currency    String?            @db.Char(3)
+  currency   String?            @db.Char(3)
   /// @nopii configuration
-  per         PriceEffectPer
+  per        PriceEffectPer
   /// @nopii configuration
-  appliesTo   PriceEffectTarget
+  appliesTo  PriceEffectTarget
   /// @nopii configuration
-  priority    Int
+  priority   Int
   /// @nopii configuration
-  stackable   Boolean            @default(false)
+  stackable  Boolean            @default(false)
   /// @nopii configuration
-  enabled     Boolean
+  enabled    Boolean
   /// @nopii inclusive
-  validFrom   DateTime?          @db.Timestamptz(3)
+  validFrom  DateTime?          @db.Timestamptz(3)
   /// @nopii exclusive
-  validTo     DateTime?          @db.Timestamptz(3)
+  validTo    DateTime?          @db.Timestamptz(3)
   /// @nopii timestamp; an archived rule is never applied or changed again
-  archivedAt  DateTime?          @db.Timestamptz(3)
+  archivedAt DateTime?          @db.Timestamptz(3)
   /// @nopii optimistic lock for the admin panel
-  version     Int                @default(0)
+  version    Int                @default(0)
   /// @nopii timestamp
-  createdAt   DateTime           @default(now()) @db.Timestamptz(3)
+  createdAt  DateTime           @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt   DateTime           @updatedAt @db.Timestamptz(3)
+  updatedAt  DateTime           @updatedAt @db.Timestamptz(3)
 
   @@index([scopeType])
   @@index([editionId])

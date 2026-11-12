@@ -236,6 +236,7 @@ model RaceEdition {
   alerts            AlertSubscription[]
   supplierContracts SupplierContract[]
   bookings          Booking[]
+  quotes            Quote[]
 
   @@unique([raceId, year])
   @@index([status])
@@ -306,6 +307,7 @@ model Package {
   priceRules           PriceRule[]
   promoCodes           PromoCode[]
   bookings             Booking[]
+  quotes               Quote[]
 
   @@unique([editionId, slug])
   @@unique([id, currency])

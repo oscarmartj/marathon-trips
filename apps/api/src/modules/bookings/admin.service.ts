@@ -10,7 +10,10 @@ import { BookingEvent, BookingStateMachine } from './state-machine';
 import { jsonOf } from './support';
 import { staffView } from './views';
 
-/** The panel's API for bookings (plan 2.4, section 7). The inbox with screens is task 2.5. */
+/** Words of a search box matched against the customer's names and address (every word must match one of them). */
+const searchCustomer = (text: string) => [{ customer: { is: { AND: text.split(/\s+/).filter(Boolean).map((w) => ({ OR: [{ givenName: { contains: w, mode: 'insensitive' as const } }, { familyName: { contains: w, mode: 'insensitive' as const } }, { email: { contains: w, mode: 'insensitive' as const } }] })) } } }];
+
+/** The panel's API for bookings (plan 2.4, section 7), with the inbox's search and counts (task 2.5). */
 @Injectable()
 export class BookingAdminService {
   constructor(
@@ -20,7 +23,11 @@ export class BookingAdminService {
 
   async list(q: z.infer<typeof listBookingsQuerySchema>) {
     const rows = await this.prisma.booking.findMany({
-      where: { status: q.status, packageId: q.packageId, editionId: q.editionId, ...(q.cursor ? { id: { lt: q.cursor } } : {}) },
+      where: {
+        status: q.status, packageId: q.packageId, editionId: q.editionId, customerId: q.customerId,
+        ...(q.q ? { OR: [{ reference: { contains: q.q, mode: 'insensitive' as const } }, ...searchCustomer(q.q)] } : {}),
+        ...(q.cursor ? { id: { lt: q.cursor } } : {}),
+      },
       orderBy: { id: 'desc' },
       take: q.limit + 1,
       select: {
@@ -31,6 +38,12 @@ export class BookingAdminService {
     const more = rows.length > q.limit;
     const items = more ? rows.slice(0, q.limit) : rows;
     return { items: jsonOf(items), nextCursor: more ? items[items.length - 1]!.id : null };
+  }
+
+  /** How many bookings are in each state, for the inbox's tabs. */
+  async summary() {
+    const rows = await this.prisma.booking.groupBy({ by: ['status'], _count: { _all: true } });
+    return { counts: Object.fromEntries(rows.map((r) => [r.status, r._count._all])) as Record<string, number> };
   }
 
   async get(id: string) {

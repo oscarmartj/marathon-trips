@@ -1,4 +1,5 @@
 import type { EntityDef } from '../../platform/entities/entity-registry';
+import { bookingTable, customerTable } from './tables';
 import type { Tx } from './support';
 
 const ERASED = '[redacted]';
@@ -9,7 +10,7 @@ const ERASED = '[redacted]';
  */
 export const BOOKING_ENTITIES: EntityDef[] = [
   {
-    entityType: 'Customer', model: 'Customer', customerLink: { kind: 'self' },
+    entityType: 'Customer', model: 'Customer', customerLink: { kind: 'self' }, table: customerTable,
     handlers: {
       export: (tx: Tx, customerId) => tx.customer.findMany({ where: { id: customerId }, select: { email: true, givenName: true, familyName: true, phone: true, countryOfResidence: true, preferredLocale: true, createdAt: true } }),
       anonymise: async (tx: Tx, customerId) => {
@@ -21,7 +22,7 @@ export const BOOKING_ENTITIES: EntityDef[] = [
     },
   },
   {
-    entityType: 'Booking', model: 'Booking', customerLink: { kind: 'column', column: 'customerId' },
+    entityType: 'Booking', model: 'Booking', customerLink: { kind: 'column', column: 'customerId' }, table: bookingTable,
     handlers: {
       export: (tx: Tx, customerId) => tx.booking.findMany({ where: { customerId }, select: { reference: true, status: true, departureDate: true, returnDate: true, residenceCountry: true, requestedAt: true } }),
       anonymise: async (tx: Tx, customerId) => {

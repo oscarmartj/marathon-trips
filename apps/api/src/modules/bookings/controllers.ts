@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { approveBookingSchema, bookingRequestSchema, closeBookingSchema, listBookingsQuerySchema } from '@mt/shared';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { approveBookingSchema, bookingRequestSchema, closeBookingSchema, createCustomerSchema, listBookingsQuerySchema, listCustomersQuerySchema, updateCustomerSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
@@ -10,6 +10,7 @@ import { ZodPipe } from '../../platform/http/zod.pipe';
 import { IdempotencyInProgressError, IdempotencyKeyReuseError, IdempotencyService } from '../../platform/idempotency/idempotency.service';
 import { PromoAttemptGuard } from '../pricing';
 import { BookingAdminService } from './admin.service';
+import { CustomerAdminService } from './customer-admin.service';
 import { BOOKINGS_PERMISSIONS as P } from './manifest';
 import { ownsBookingReference } from './ownership';
 import { BookingRequestRateLimitGuard } from './rate-limit.guard';
@@ -68,6 +69,9 @@ export class BookingsAdminController {
   @Get() @RequirePermission(P.read)
   list(@Query(new ZodPipe(listBookingsQuerySchema)) q: In<typeof listBookingsQuerySchema>) { return this.bookings.list(q); }
 
+  @Get('summary') @RequirePermission(P.read)
+  summary() { return this.bookings.summary(); }
+
   @Get(':id') @RequirePermission(P.read)
   get(@Param('id', uuid()) id: string) { return this.bookings.get(id); }
 
@@ -85,4 +89,22 @@ export class BookingsAdminController {
   cancel(@Param('id', uuid()) id: string, @Body(new ZodPipe(closeBookingSchema)) b: In<typeof closeBookingSchema>, @Req() req: ApiRequest) {
     return this.bookings.transition(id, 'cancel', { actor: actorOf(req), version: b.version, reason: b.reason });
   }
+}
+
+/** The panel's customers (task 2.5). Notes, tags and history come from the shared table routes of task 0.5. */
+@Controller('admin/customers')
+export class CustomersAdminController {
+  constructor(@Inject(CustomerAdminService) private readonly customers: CustomerAdminService) {}
+
+  @Get() @RequirePermission(P.customerRead)
+  list(@Query(new ZodPipe(listCustomersQuerySchema)) q: In<typeof listCustomersQuerySchema>) { return this.customers.list(q); }
+
+  @Post() @RequirePermission(P.customerWrite)
+  create(@Body(new ZodPipe(createCustomerSchema)) b: In<typeof createCustomerSchema>, @Req() req: ApiRequest) { return this.customers.create(actorOf(req), b); }
+
+  @Get(':id') @RequirePermission(P.customerRead)
+  get(@Param('id', uuid()) id: string) { return this.customers.get(id); }
+
+  @Patch(':id') @RequirePermission(P.customerWrite)
+  update(@Param('id', uuid()) id: string, @Body(new ZodPipe(updateCustomerSchema)) b: In<typeof updateCustomerSchema>, @Req() req: ApiRequest) { return this.customers.update(actorOf(req), id, b); }
 }
