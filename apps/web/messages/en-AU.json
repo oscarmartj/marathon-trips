@@ -45,7 +45,9 @@
     "complaints": "Complaints",
     "account": "Your account",
     "signIn": "Sign in",
-    "verifySignIn": "Finish signing in"
+    "verifySignIn": "Finish signing in",
+    "alertsConfirm": "Confirm your alert",
+    "alertsUnsubscribe": "Unsubscribe from alerts"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -684,7 +686,9 @@
         "created": "Race added.",
         "columns": {
           "location": "Location",
-          "editions": "Editions"
+          "editions": "Editions",
+          "alerts": "Alert subscribers",
+          "alertsHint": "Confirmed subscribers who will be emailed when a package opens. Unconfirmed sign-ups are not counted."
         },
         "fields": {
           "name": "Name",
@@ -993,6 +997,33 @@
       "signInLink": "Sign in",
       "signOut": "Sign out",
       "error": "Something went wrong. Try again."
+    }
+  },
+  "alerts": {
+    "heading": "Be first to know when packages open",
+    "intro": "Tell us your email and we will write once when a package for this race opens. We will ask you to confirm your address first, and you can unsubscribe in one click from any email.",
+    "email": "Email address",
+    "submit": "Alert me",
+    "sending": "Sending",
+    "sent": "Check your inbox. We have sent a link to confirm your alert. If it does not arrive in a few minutes, check your spam folder.",
+    "failed": "We could not save your alert just now. Please try again.",
+    "invalidEmail": "Enter a valid email address.",
+    "tooMany": "Too many requests. Please wait a minute and try again.",
+    "confirm": {
+      "title": "Confirm your alert",
+      "intro": "One more step so we know the address is yours.",
+      "checking": "Checking your link",
+      "button": "Confirm my alert",
+      "done": "Thanks, your alert is confirmed. We will email you when a package opens.",
+      "invalid": "This link has expired or has already been used. Subscribe again from the race page to get a new one.",
+      "browse": "Browse races"
+    },
+    "unsubscribe": {
+      "title": "Unsubscribe from alerts",
+      "working": "Unsubscribing",
+      "done": "You are unsubscribed. We will not send you any more alerts for this race. You can subscribe again from the race page whenever you like.",
+      "invalid": "This unsubscribe link is not valid. Use the link in the latest email we sent you.",
+      "browse": "Browse races"
     }
   }
 }

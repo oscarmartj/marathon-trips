@@ -1,5 +1,5 @@
 import { t } from './i18n';
-import { localisedText, type EditionSummary, type RaceSummary } from './catalogue';
+import { localisedText, type EditionSummary, type RaceDetail, type RaceSummary } from './catalogue';
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'] as const;
 export const monthName = (m: number): string => t(`races.months.${MONTHS[m - 1]}`);
@@ -36,3 +36,6 @@ export function nextEdition(race: Pick<RaceSummary, 'editions'>): EditionSummary
   const live = race.editions.filter((e) => e.status !== 'cancelled' && e.status !== 'completed');
   return [...live].sort((a, b) => a.year - b.year)[0] ?? race.editions[0];
 }
+
+/** True when any edition has a package that is open for booking. The alert form is for the time before that. */
+export const hasOpenPackage = (race: Pick<RaceDetail, 'editions'>): boolean => race.editions.some((e) => e.packages.some((p) => p.saleStatus === 'open'));

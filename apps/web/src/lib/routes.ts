@@ -25,6 +25,8 @@ export const publicRoutes: readonly RouteDef[] = [
   { path: '/legal/terms', file: '(public)/legal/terms/page.tsx', labelKey: 'nav.terms', footer: 'legal' },
   { path: '/legal/privacy', file: '(public)/legal/privacy/page.tsx', labelKey: 'nav.privacy', footer: 'legal' },
   { path: '/legal/complaints', file: '(public)/legal/complaints/page.tsx', labelKey: 'nav.complaints', footer: 'legal' },
+  { path: '/alerts/confirm', file: '(public)/alerts/confirm/page.tsx', labelKey: 'nav.alertsConfirm' },
+  { path: '/alerts/unsubscribe', file: '(public)/alerts/unsubscribe/page.tsx', labelKey: 'nav.alertsUnsubscribe' },
   { path: '/account', file: '(public)/account/page.tsx', labelKey: 'nav.account' },
   { path: '/account/sign-in', file: '(public)/account/sign-in/page.tsx', labelKey: 'nav.signIn' },
   { path: '/account/sign-in/verify', file: '(public)/account/sign-in/verify/page.tsx', labelKey: 'nav.verifySignIn' },
