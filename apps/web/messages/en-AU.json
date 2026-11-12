@@ -2130,6 +2130,8 @@
       "tooMany": "Too many attempts. Wait a little and try again.",
       "soldOut": "Some of what you chose has just sold out. Go back to your trip and change it.",
       "promo": "That code can no longer be used. Remove it to continue.",
+      "countryInvalid": "That is not a valid country code. Use the two-letter code for where you live, such as AU for Australia or NZ for New Zealand.",
+      "countrySuggest": "{code} is not a valid country code. Did you mean {suggestion}?",
       "country": "We cannot take booking requests from where you live yet.",
       "tooManyOpen": "You already have open requests with us. We will be in touch about them first.",
       "tooManyPlaces": "This request would hold more places than we can keep for one person. Contact us for a group booking.",

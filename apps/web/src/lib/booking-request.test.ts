@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bookingRequestSchema } from '@mt/shared';
-import { IdempotencyKeys, RETURN_TO_KEY, parseWaitlistJoined, rememberReturnTo, requestErrorKey, safeReturnTo, takeReturnTo, toBookingRequest } from './booking-request';
-import { messageCatalogue } from './i18n';
+import { IdempotencyKeys, countryProblem, RETURN_TO_KEY, parseWaitlistJoined, rememberReturnTo, requestErrorKey, safeReturnTo, takeReturnTo, toBookingRequest } from './booking-request';
+import { messageCatalogue, t } from './i18n';
 
 const quote = {
   packageId: '01a1cf11-cb7b-761b-83fd-12200ee98fc6',
@@ -101,5 +101,16 @@ describe('waiting list answer', () => {
   it('a country the API does not serve is no longer an error the form shows: it answers 201 with the waiting list', () => {
     // The 409 country_not_served code stays mapped (a settings change could bring it back), but the form no longer expects it.
     expect(requestErrorKey(409, 'country_not_served')).toBe('bookingRequest.errors.country');
+  });
+});
+
+describe('country code on the form', () => {
+  it('country_code_checked_like_the_api: assigned ISO codes pass in any case; UK suggests GB; made-up codes are named as invalid', () => {
+    for (const ok of ['AU', 'nz', ' gb ', 'ES']) expect(countryProblem(ok), ok).toBeNull();
+    expect(countryProblem('UK')).toEqual({ key: 'bookingRequest.errors.countrySuggest', params: { code: 'UK', suggestion: 'GB' } });
+    expect(countryProblem('usa')?.params).toEqual({ code: 'USA', suggestion: 'US' });
+    for (const bad of ['ZZ', 'XX', 'AUS', '', 'A1']) expect(countryProblem(bad)?.key, bad).toBe('bookingRequest.errors.countryInvalid');
+    // Every message it can return exists and fills its parameters.
+    for (const c of ['UK', 'ZZ', '']) { const p = countryProblem(c)!; expect(t(p.key, p.params)).toMatch(/country code/); }
   });
 });

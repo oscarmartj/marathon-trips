@@ -1,4 +1,4 @@
-import type { BookingContact, QuoteRequest } from '@mt/shared';
+import { ISO_COUNTRY_CODES, type BookingContact, type QuoteRequest } from '@mt/shared';
 
 // Booking requests from the web (task 2.4, plan docs/plans/2.4-booking-requests.md, section 9). The body is the
 // configuration and the lead contact: never an amount, a currency, a date or a status. The API prices it.
@@ -12,6 +12,21 @@ export function toBookingRequest(quote: QuoteRequest, contact: { givenName: stri
     ...quote,
     contact: { givenName: contact.givenName.trim(), familyName: contact.familyName.trim(), ...(phone ? { phone } : {}), countryOfResidence: contact.countryOfResidence.trim().toUpperCase() },
   };
+}
+
+/** Common wrong codes and the ISO code people mean by them. */
+const COUNTRY_SUGGESTIONS: Record<string, string> = { UK: 'GB', EN: 'GB', USA: 'US', UAE: 'AE' };
+
+/**
+ * The message key and parameters for a country code the API would refuse (it takes assigned ISO 3166-1 alpha-2 codes
+ * only), or null when it is fine. Uses the same set as the API, so the form and the API agree.
+ */
+export function countryProblem(value: string): { key: string; params: Record<string, string> } | null {
+  const code = value.trim().toUpperCase();
+  if (ISO_COUNTRY_CODES.has(code)) return null;
+  const suggestion = COUNTRY_SUGGESTIONS[code];
+  if (suggestion) return { key: 'bookingRequest.errors.countrySuggest', params: { code, suggestion } };
+  return { key: 'bookingRequest.errors.countryInvalid', params: { code: code || '' } };
 }
 
 /** Sorted-key JSON, so two equal bodies compare equal whatever the key order. */

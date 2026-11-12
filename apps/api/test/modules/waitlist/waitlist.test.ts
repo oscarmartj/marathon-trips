@@ -158,6 +158,19 @@ describe('country_must_be_an_assigned_iso_code: a made-up code is a 422, never a
   });
 });
 
+describe('sales_countries_setting_takes_assigned_iso_codes_only', () => {
+  it('ZZ, UK, lower case and an empty list are refused; real codes are kept', async () => {
+    const settings = t.app.get(SettingsService);
+    for (const bad of [['ZZ'], ['AU', 'UK'], ['au'], ['AUS'], []]) await expect(settings.set(BOOKING_SETTINGS.salesCountries.key, bad), JSON.stringify(bad)).rejects.toThrow();
+    try {
+      await settings.set(BOOKING_SETTINGS.salesCountries.key, ['AU', 'GB']);
+      expect(await settings.get(BOOKING_SETTINGS.salesCountries.key, ['AU'])).toEqual(['AU', 'GB']);
+    } finally {
+      await t.prisma.setting.deleteMany({ where: { key: BOOKING_SETTINGS.salesCountries.key } });
+    }
+  });
+});
+
 describe('waitlist_checks_the_package: the engine still validates what it is asked for', () => {
   it('a closed, unknown or departed package, and a bad configuration, are refused as for a request, and nothing is written', async () => {
     const closed = await pricedWorld(admin);
@@ -419,7 +432,9 @@ describe('waitlist_panel: only staff with the permission read the list', () => {
       } while (cursor);
       expect(seen, `limit ${limit}`).toEqual(all);
     }
-    expect((await reader.get('/admin/waitlist?cursor=not-a-cursor')).status).toBe(422);
+    const id = randomUUID();
+    for (const bad of ['not-a-cursor', `${id}:9999999999`, `${id}:2147483648`, `${id}:`, `${id}:-1`, ':5']) expect((await reader.get(`/admin/waitlist?cursor=${bad}`)).status, bad).toBe(422);
+    expect((await reader.get(`/admin/waitlist?cursor=${id}:2147483647`)).status).toBe(200);
   });
 
   it('the permission is not an API key scope: it exposes customers\' contact details', () => {
