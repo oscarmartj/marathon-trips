@@ -1,0 +1,56 @@
+import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import type { AppConfig } from '../../../platform/config/config';
+import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
+import { safeError } from '../../../platform/errors/safe-error';
+import { JobsService } from '../../../platform/jobs/jobs.service';
+import { QUEUES } from '../../../platform/jobs/queues';
+import { PaymentAttemptSyncService } from './attempt-sync.service';
+import type { SyncAction } from './attempt-sync.service';
+import { PaymentWebhooksService } from './webhooks.service';
+
+export const RAW_BODY_RETENTION_DAYS = 180;
+export const REJECTION_RETENTION_DAYS = 30;
+export const STUCK_EVENT_MINUTES = 10;
+const DAY = 86_400_000;
+
+/**
+ * The payments sweep, every ten minutes (plan 3.1, sections 5.3, 6 and 14.6): live attempts past their expiry go to
+ * the attempts queue (one job each), events stuck in `received` are queued again, raw bodies older than 180 days are
+ * emptied and rejections older than 30 days deleted. Also runs the workers of the three payments queues.
+ */
+@Injectable()
+export class PaymentsMaintenanceService implements OnApplicationBootstrap {
+  private readonly logger = new Logger('Payments');
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(JobsService) private readonly jobs: JobsService,
+    @Inject(PaymentAttemptSyncService) private readonly sync: PaymentAttemptSyncService,
+    @Inject(PaymentWebhooksService) private readonly webhooks: PaymentWebhooksService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+  ) {}
+
+  async onApplicationBootstrap(): Promise<void> {
+    if (this.config.JOBS_WORKERS !== 'on') return;
+    await this.jobs.work<{ webhookEventId: string }>(QUEUES.paymentsWebhooks, async (d) => void (await this.webhooks.process(d.webhookEventId)));
+    await this.jobs.work<{ paymentId: string; action: SyncAction }>(QUEUES.paymentsAttempts, async (d) => void (await this.sync.run(d.paymentId, d.action)));
+    await this.jobs.work(QUEUES.paymentsMaintenance, async () => void (await this.run()));
+    await this.jobs.schedule(QUEUES.paymentsMaintenance, '*/10 * * * *');
+  }
+
+  async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; bodiesPurged: number; rejectionsPurged: number }> {
+    const due = await this.prisma.payment.findMany({ where: { liveBookingId: { not: null }, pendingExpiresAt: { lte: now } }, select: { id: true }, orderBy: { pendingExpiresAt: 'asc' }, take: 200 });
+    for (const { id } of due) await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: id, action: 'expire' }, { singletonKey: `expire:${id}` });
+    const stuck = await this.prisma.webhookEvent.findMany({ where: { status: 'received', receivedAt: { lte: new Date(now.getTime() - STUCK_EVENT_MINUTES * 60_000) } }, select: { id: true }, take: 200 });
+    for (const { id } of stuck) await this.jobs.send(QUEUES.paymentsWebhooks, { webhookEventId: id }, { singletonKey: `webhook:${id}` });
+    let bodiesPurged = 0;
+    let rejectionsPurged = 0;
+    try {
+      bodiesPurged = (await this.prisma.webhookEvent.updateMany({ where: { rawBody: { not: null }, receivedAt: { lt: new Date(now.getTime() - RAW_BODY_RETENTION_DAYS * DAY) } }, data: { rawBody: null } })).count;
+      rejectionsPurged = (await this.prisma.webhookRejection.deleteMany({ where: { receivedAt: { lt: new Date(now.getTime() - REJECTION_RETENTION_DAYS * DAY) } } })).count;
+    } catch (err) {
+      this.logger.error(`payments retention failed: ${safeError(err).code}`);
+    }
+    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), bodiesPurged, rejectionsPurged };
+  }
+}

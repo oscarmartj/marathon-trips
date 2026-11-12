@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { AppConfig } from '../config/config';
 import { ApiErrorFilter } from './error.filter';
+import { RawBodyRoutes } from './raw-body';
 import { requestContext } from './request-context';
 
 /** Applied by main.ts and by tests, so both run the same HTTP stack. */
@@ -11,6 +12,8 @@ export function configureApp(app: INestApplication, config: AppConfig): void {
   express.set('trust proxy', config.TRUST_PROXY);
   express.disable('x-powered-by');
   app.use(requestContext);
+  // Before the body parsers and every guard: the exact bytes, rate and size limits of the raw-body routes (task 3.1).
+  app.use(app.get(RawBodyRoutes).middleware());
   app.useGlobalFilters(new ApiErrorFilter());
   // No CORS: the browser only talks to the web app, which proxies /api on the same origin (plan 4.1).
 }

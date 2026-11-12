@@ -3,8 +3,9 @@ import { AlertsModule } from './modules/alerts';
 import { BookingsModule } from './modules/bookings';
 import { CatalogueModule } from './modules/catalogue';
 import { ContentModule } from './modules/content';
+import { PaymentsModule } from './modules/payments';
 import { PricingModule } from './modules/pricing';
 import { SuppliersModule } from './modules/suppliers';
 
 // The single list of business modules. Adding a module = a folder, its .prisma file and one line here.
-export const MODULES: ReadonlyArray<Type<unknown>> = [CatalogueModule, PricingModule, AlertsModule, SuppliersModule, ContentModule, BookingsModule];
+export const MODULES: ReadonlyArray<Type<unknown>> = [CatalogueModule, PricingModule, AlertsModule, SuppliersModule, ContentModule, BookingsModule, PaymentsModule];

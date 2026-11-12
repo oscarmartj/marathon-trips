@@ -12,7 +12,14 @@ export interface HookedBooking {
   from: string;
 }
 
-export type BookingHook = (tx: Prisma.TransactionClient, booking: HookedBooking, ctx: { actor: AuditActor; at: Date }) => Promise<void>;
+export interface BookingHookContext {
+  actor: AuditActor;
+  at: Date;
+  /** On approval: when the approval will expire (task 3.1 dates the deposit from it). */
+  approvalExpiresAt?: Date | null;
+}
+
+export type BookingHook = (tx: Prisma.TransactionClient, booking: HookedBooking, ctx: BookingHookContext) => Promise<void>;
 
 /**
  * Synchronous steps another module runs inside a booking transition, in its transaction, with the booking locked
@@ -29,7 +36,7 @@ export class BookingTransitionHooks {
     map.set(name, hook);
   }
 
-  async run(event: 'approve' | 'cancel', tx: Prisma.TransactionClient, booking: HookedBooking, ctx: { actor: AuditActor; at: Date }): Promise<void> {
+  async run(event: 'approve' | 'cancel', tx: Prisma.TransactionClient, booking: HookedBooking, ctx: BookingHookContext): Promise<void> {
     for (const hook of this.hooks[event].values()) await hook(tx, booking, ctx);
   }
 }
