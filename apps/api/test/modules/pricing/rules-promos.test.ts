@@ -182,7 +182,7 @@ describe('persisted_rules_priced_like_engine', () => {
       const v = await tx.priceVersion.findFirstOrThrow({ where: { packageId: w.pkg.id, status: 'published', validTo: null } });
       const rates = await loadRates(tx, v.id, v.currency);
       const rows = await tx.priceRule.findMany({ where: { archivedAt: null, OR: [{ scopeType: 'global' }, { packageId: w.pkg.id }, { editionId: w.edition.id }] }, orderBy: [{ priority: 'asc' }, { id: 'asc' }] });
-      const r = req as { rooms: Array<{ roomOptionId: string; travellers: never[] }>; extraNightsAfter?: number };
+      const r = req as unknown as { rooms: Array<{ roomOptionId: string; travellers: never[] }>; extraNightsAfter?: number };
       return price({ rooms: r.rooms, extraNightsBefore: 0, extraNightsAfter: r.extraNightsAfter ?? 0, extras: [] }, engineView(view), rates, rows.map(ruleInputOf), null, new Date()).totalMinor.toString();
     });
   }
@@ -308,7 +308,7 @@ describe('promo codes', () => {
       ['not combinable', (await createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id, appliesTo: 'accommodation' })).code, 'not_combinable'],
       ['badly formed', 'x!', 'invalid'],
     ];
-    const strip = (b: Record<string, unknown>) => ({ ...b, computedAt: undefined });
+    const strip = (b: Record<string, unknown>): Record<string, unknown> => ({ ...b, computedAt: undefined });
     const none = strip((await publicQuote(quoteBody(w))).body);
     expect(none.promo).toEqual({ status: 'none' });
     for (const [name, code, real] of cases) {
