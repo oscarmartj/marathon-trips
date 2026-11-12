@@ -21,6 +21,8 @@ export async function seed(prisma: PrismaClient, appEnv: string, given?: AppConf
         for (const f of PLATFORM_FLAGS) {
           await prisma.featureFlag.upsert({ where: { key: f.key }, create: { key: f.key, enabled: f.seedEnabled, description: f.description }, update: {} });
         }
+        // 6.1: business modules with a flag are on in demo data (a missing flag is off everywhere else).
+        await prisma.featureFlag.upsert({ where: { key: 'module.suppliers' }, create: { key: 'module.suppliers', enabled: true, description: 'Suppliers, contracts, contracted allotments and supplier cost prices' }, update: {} });
       },
     });
     // 0.3: a demo owner with random credentials, printed once and only in development (M11). Running the seed again
