@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { EDITION_STATUSES, POOL_KINDS } from '@mt/shared';
 import { api } from '@/lib/api-client';
-import { enAU, nightsBetween, slugify, wholeNumber, withEnAU } from '@/lib/catalogue';
+import { enAU, nightsBetween, slugify, wholeNumber, withEnAU } from '@/lib/catalogue-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { PackageCsv } from './catalogue-csv';

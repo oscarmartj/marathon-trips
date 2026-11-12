@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { CLAIM_KINDS, DISTANCE_KINDS, RACE_STATUSES, type ClaimKind } from '@mt/shared';
 import { api } from '@/lib/api-client';
-import { enAU, withEnAU, wholeNumber } from '@/lib/catalogue';
+import { enAU, withEnAU, wholeNumber } from '@/lib/catalogue-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { useStepUp } from '../step-up';

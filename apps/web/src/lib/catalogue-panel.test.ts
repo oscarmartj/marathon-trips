@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bpsToPercent, dollarsToMinor, enAU, minorToDollars, nightsBetween, percentToBps, slugify, wholeNumber, withEnAU, withOptionalEnAU } from './catalogue';
+import { bpsToPercent, dollarsToMinor, enAU, minorToDollars, nightsBetween, percentToBps, slugify, wholeNumber, withEnAU, withOptionalEnAU } from './catalogue-panel';
 
 describe('localised text', () => {
   it('reads en-AU and keeps other languages when it changes', () => {

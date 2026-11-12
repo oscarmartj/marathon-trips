@@ -1,7 +1,7 @@
 'use client';
 
 import { api } from '@/lib/api-client';
-import { enAU, wholeNumber, withOptionalEnAU } from '@/lib/catalogue';
+import { enAU, wholeNumber, withOptionalEnAU } from '@/lib/catalogue-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { ActionButton, EntityForm, type FieldDef, Section, outcome, useLoad } from './kit';

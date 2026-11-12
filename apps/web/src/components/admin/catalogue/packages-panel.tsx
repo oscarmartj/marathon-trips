@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { SALE_STATUSES } from '@mt/shared';
-import { enAU } from '@/lib/catalogue';
+import { enAU } from '@/lib/catalogue-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { Section, formatDay, useLoad } from './kit';
