@@ -14,7 +14,7 @@ Todo lo que en modo autónomo se decidió, se dejó sin verificar o necesita tus
 
 ## Recorridos que conviene hacer a mano
 
-- [ ] Como administrador: crear una carrera con paquete, publicarla, gestionar una solicitud.
+- [ ] Como administrador: crear una carrera con paquete, publicarla, gestionar una solicitud. (Fase 1: el alta y la publicación hasta verla en la web ya las recorre la e2e `create_publish_and_view_race`; falta a mano la solicitud.)
 - [ ] Como cliente: alerta, configuración, solicitud, depósito, datos de viajeros, saldo y documentos.
 - [ ] Entrar como propietario con contraseña y TOTP con `docker compose up` (el log de `api` imprime las credenciales demo) y probar `/admin/tasks`.
 - [ ] Antes de abrir al público: seguir `docs/deploy/guide.md` en un entorno de pruebas, comprobar la IP real tras Caddy y repetir `verify-restore.sh` en el servidor.
@@ -28,6 +28,7 @@ Lista completa, con motivo, en `docs/decisions.md` (filas del 2026-11-12) y, con
 - Fase 0: Docker no existe en el entorno de los hilos, así que `compose-smoke` solo se ha visto pasar en CI (servicios sanos); el contenido de los datos demo dentro del compose se comprueba en 0.fix-2. Envío real del enlace mágico a Mailpit (solo emisor falso y servidor SMTP falso en proceso). Adaptador S3 de archivos no construido. Migraciones 0002 a 0006 escritas sin motor de Prisma local; `prisma migrate diff` de CI las valida.
 - 8.6 y 8.7: `docker compose` de producción, Caddy, la imagen de copias, `rclone` y la subida real; los pasos de la guía no se han seguido en un servidor.
 - Accesibilidad: contraste y foco comprobados en cifras y marcado; las e2e de Playwright usan roles y etiquetas, pero **nada se ha probado con lector de pantalla** (0.3, 0.5, 0.6).
+- Fase 1: lector de pantalla, teclado completo, contraste, foco y 320 px de las páginas públicas y del panel nuevo, solo comprobados en marcado, etiquetas y roles (1.2, 1.3). Rich Results Test de Google y depurador de Open Graph sin ejecutar (1.4: sin salida a esos servicios; solo curl del JSON-LD, las etiquetas y la imagen 1200x630). La migración 0006 se escribió sin motor de Prisma; la validó CI (`migrate diff`).
 
 ## Riesgos aceptados y pendientes (fase 0)
 
@@ -51,3 +52,22 @@ Sección «Revisión de Oscar» de `docs/phases/phase-0.md`, con su estado:
 - Leer el informe del `reviewer` de 0.3: ronda 1 aprobar con cambios (corregidos, plan §10); ronda 2 pendiente según su `done`. Ver el riesgo 3.
 - Decidir orquestador de pagos y alojamiento con la investigación de 0.7: propuesto adaptadores propios y servidor único en Sídney (`docs/decisions.md`); confirmar o cambiar.
 - Pedir a Stripe confirmación escrita sobre «travel reservation services»; preguntar a Pin y eWAY por sole trader y viajes.
+
+### Fase 1 (cerrada)
+
+Sección «Revisión de Oscar» de `docs/phases/phase-1.md` y menores abiertos, tal como constan en `docs/done/`:
+
+- Cargar tres carreras reales de ejemplo a mano en el panel y anotar qué resulta lento o confuso (criterio de la fase; 1.2). Mirar también las tres carreras demo tras `pnpm db:seed`: deben verse claramente como demo (1.5).
+- Mirar el buscador y la página de carrera con carreras cargadas (1.3), y una carrera compartida por enlace cuando haya despliegue; la imagen para compartir es provisional, marca sobre fondo oscuro y sin fotos (1.4).
+- Contenido pendiente por falta de modelo o de datos: la guía de carrera solo muestra lo que hay en la API (sin recorrido, clima ni consejos; 1.3); `FAQPage` sin preguntas y `Offer` sin precios públicos (1.4); filtros por precio, tipo de entrada, estado y continente (1.3); el panel no edita otros idiomas que `en-AU` y no hay botón de alerta en la web, que es de 5.3 (1.2, 1.3).
+- **`WEB_ORIGIN` también al construir.** Hallazgo del cierre: `docker/Dockerfile` construye la web sin `WEB_ORIGIN` y `deploy/docker-compose.prod.yml` no lo pasa a la web en ejecución, así que las canónicas, `hreflang`, Open Graph y JSON-LD de las páginas estáticas saldrían con `http://localhost:3000` (`apps/web/src/lib/site.ts`; solo `robots.txt` lo lee por petición). Propuesta de tarea **1.fix-1** (bajo, Sonnet): `ARG`/`ENV WEB_ORIGIN` en la etapa de construcción, `build.args` y `environment` en el compose de producción, ampliar `scripts/check-deploy-config.mjs` y una prueba que falle si falta. No es un criterio de la fase 1; sin Docker en los hilos solo la comprobará CI.
+- El sitemap falla (error de construcción o de petición) si el catálogo no responde, en lugar de publicarse sin carreras (decisión de 1.4): la guía de despliegue debería avisar de que la API debe estar sana al construir la web.
+- Limitaciones locales vistas en el cierre: `test/ops/backup.test.ts` pide un superusuario de PostgreSQL y no corre en los hilos (12 omitidas, por eso `pnpm check:no-skipped` falla en local); lo cubre CI, que está en verde en `main`.
+
+#### Llegados de la tarea 2.1 (motor de precios, fusionada)
+
+- **Riesgo residual M3:** cerrar un paquete, cambiar quién toma un extra o su obligatoriedad y reabrirlo cambia el total sin step-up (dos acciones auditadas; reabrir pasa las puertas). Si 2.2 se fusiona con `pricedTerms` (plan `docs/plans/2.2-pricing-rules-promo-codes.md`, §6; hoy solo en la rama de 2.2), las versiones publicadas guardan los términos de extras con que se fijó el precio y la puerta de apertura los compara, lo que lo resuelve; hasta entonces sigue abierto.
+- **`stackable` por defecto `false`** en reglas y códigos (plan de 2.2, §15 punto 11): es una decisión de negocio para Oscar. Un recargo que deba sumarse a otros (temporada alta y suplemento individual) hay que marcarlo apilable a mano; confirmar o cambiar el valor por defecto.
+- Ronda 3 del revisor del código de 2.1 pendiente según su `done`.
+- Quedan para 2.2: enumeración de códigos (M10: límite por IP ya puesto y respuesta `invalid` única); duplicar paquete (1.2) no copia precios; `depositSchema` del catálogo da 500 con importes no numéricos (zod 4 ejecuta el `refine` aunque falle el `regex`).
+- **Pantallas del panel de precios, reglas y códigos:** no existen (2.1 solo tiene API; ni 1.2 ni 2.2 las incluyen). Propuesta de tarea **2.2b** (medio, Sonnet): pantallas de versiones de precio y tarifas, reglas y códigos promocionales, con vista previa de cotización. Hasta entonces los precios solo se cargan por la API; `Prices are not shown yet` sigue visible en la vista previa.
