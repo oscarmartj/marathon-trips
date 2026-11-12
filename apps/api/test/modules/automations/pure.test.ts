@@ -100,7 +100,7 @@ describe('rule schema', () => {
     [{ schedule: { frequency: 'daily', time: '08:00' } }, 'an event rule with a schedule'],
     [{ name: ' ' }, 'a blank name'],
     [{ actions: [{ type: 'send_email', template: 'marketing_blast' }] }, 'an unknown template'],
-  ])('refuses %j (%s)', (over) => {
+  ] as Array<[Record<string, unknown>, string]>)('refuses %j (%s)', (over) => {
     expect(parse(over).success).toBe(false);
   });
   it.each([
@@ -132,7 +132,7 @@ describe('schedules', () => {
     expect(latestOccurrence(s, at('2026-11-12T21:59:00Z'), 'Australia/Brisbane')?.toISOString()).toBe('2026-11-11T22:00:00.000Z');
   });
   it('weekly only on the chosen weekdays', () => {
-    const s = { frequency: 'weekly', time: '09:30', weekdays: [1] } as const; // Mondays
+    const s = { frequency: 'weekly' as const, time: '09:30', weekdays: [1] }; // Mondays
     // Friday 13 November 2026 in Brisbane: the last Monday was the 9th.
     expect(latestOccurrence(s, at('2026-11-13T05:00:00Z'), 'Australia/Brisbane')?.toISOString()).toBe('2026-11-08T23:30:00.000Z');
   });
@@ -176,7 +176,7 @@ describe('registering_money_or_permission_action_fails', () => {
     [{ declaredPermissions: ['bookings.booking.approve'] }, 'approving'],
     [{ declaredPermissions: ['bookings.booking.decline'] }, 'declining'],
     [{ declaredPermissions: ['bookings.booking.cancel'] }, 'cancelling'],
-  ])('refuses an action %j (%s)', (over) => {
+  ] as Array<[Partial<ActionDef>, string]>)('refuses an action %j (%s)', (over) => {
     expect(() => new ActionRegistry().register(action(over))).toThrow(expect.objectContaining({ code: 'automation_action_forbidden' }));
   });
   it('accepts a harmless action once, and an action asking for an undeclared permission fails when used', () => {
