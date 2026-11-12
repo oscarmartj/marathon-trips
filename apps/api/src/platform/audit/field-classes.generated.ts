@@ -19,6 +19,21 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  Allotment: {
+    id: 'nopii',
+    contractId: 'nopii',
+    poolId: 'nopii',
+    kind: 'nopii',
+    quantity: 'nopii',
+    releaseDate: 'nopii',
+    unitCostMinor: 'nopii',
+    currency: 'nopii',
+    status: 'nopii',
+    releasedAt: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   AuditLog: {
     id: 'nopii',
     occurredAt: 'nopii',
@@ -50,6 +65,23 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     results: 'nopii',
     createdById: 'nopii',
     createdAt: 'nopii'
+  },
+  CostItem: {
+    id: 'nopii',
+    supplierId: 'nopii',
+    contractId: 'nopii',
+    packageId: 'nopii',
+    description: 'pii',
+    basis: 'nopii',
+    quantity: 'nopii',
+    unitAmountMinor: 'nopii',
+    amountMinor: 'nopii',
+    currency: 'nopii',
+    dueDate: 'nopii',
+    status: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   CsvJob: {
     id: 'nopii',
@@ -444,6 +476,47 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     purpose: 'nopii',
     uploadedById: 'nopii',
     createdAt: 'pii'
+  },
+  Supplier: {
+    id: 'nopii',
+    kind: 'nopii',
+    name: 'nopii',
+    countryCode: 'nopii',
+    defaultCurrency: 'nopii',
+    paymentTerms: 'pii',
+    notes: 'pii',
+    customFields: 'pii',
+    isDemo: 'nopii',
+    version: 'nopii',
+    deletedAt: 'nopii',
+    deletedById: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
+  SupplierContact: {
+    id: 'nopii',
+    supplierId: 'nopii',
+    name: 'pii',
+    email: 'pii',
+    phone: 'pii',
+    role: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
+  SupplierContract: {
+    id: 'nopii',
+    supplierId: 'nopii',
+    editionId: 'nopii',
+    reference: 'nopii',
+    signedAt: 'nopii',
+    validFrom: 'nopii',
+    validTo: 'nopii',
+    terms: 'pii',
+    version: 'nopii',
+    deletedAt: 'nopii',
+    deletedById: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   Tag: {
     id: 'nopii',

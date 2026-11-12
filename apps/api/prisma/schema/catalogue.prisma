@@ -106,13 +106,13 @@ enum InventoryReason {
 }
 
 model Race {
-  id             String         @id @default(uuid(7)) @db.Uuid
+  id             String              @id @default(uuid(7)) @db.Uuid
   /// @nopii public URL slug
-  slug           String         @unique
+  slug           String              @unique
   /// @nopii LocalizedText
   name           Json
   /// @nopii ISO 3166 alpha-2
-  countryCode    String         @db.Char(2)
+  countryCode    String              @db.Char(2)
   /// @nopii catalogue data
   city           String
   /// @nopii IANA zone of the race
@@ -130,28 +130,28 @@ model Race {
   /// @nopii degrees x 10^7
   longitudeE7    Int?
   /// @nopii catalogue data
-  seo            Json           @default("{}")
+  seo            Json                @default("{}")
   /// @nopii catalogue data
-  status         RaceStatus     @default(draft)
+  status         RaceStatus          @default(draft)
   /// @nopii timestamp
-  publishedAt    DateTime?      @db.Timestamptz(3)
+  publishedAt    DateTime?           @db.Timestamptz(3)
   /// @nopii source system of an import
   externalSource String?
   /// @nopii id in the source system
   externalId     String?
   /// @pii custom fields are free text
-  customFields   Json           @default("{}")
+  customFields   Json                @default("{}")
   /// @nopii demo data can never be published
-  isDemo         Boolean        @default(false)
+  isDemo         Boolean             @default(false)
   /// @nopii optimistic lock for the admin panel
-  version        Int            @default(0)
+  version        Int                 @default(0)
   /// @nopii soft delete
-  deletedAt      DateTime?      @db.Timestamptz(3)
-  deletedById    String?        @db.Uuid
+  deletedAt      DateTime?           @db.Timestamptz(3)
+  deletedById    String?             @db.Uuid
   /// @nopii timestamp
-  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt      DateTime       @updatedAt @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
   distances      RaceDistance[]
   claims         RaceClaim[]
   editions       RaceEdition[]
@@ -205,30 +205,31 @@ model RaceClaim {
 }
 
 model RaceEdition {
-  id         String          @id @default(uuid(7)) @db.Uuid
-  raceId     String          @db.Uuid
-  race       Race            @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id                String              @id @default(uuid(7)) @db.Uuid
+  raceId            String              @db.Uuid
+  race              Race                @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii catalogue data
-  year       Int
+  year              Int
   /// @nopii calendar date
-  startDate  DateTime?       @db.Date
+  startDate         DateTime?           @db.Date
   /// @nopii calendar date
-  endDate    DateTime?       @db.Date
+  endDate           DateTime?           @db.Date
   /// @nopii catalogue data
-  dateStatus DateStatus      @default(provisional)
+  dateStatus        DateStatus          @default(provisional)
   /// @nopii catalogue data
-  status     EditionStatus   @default(draft)
+  status            EditionStatus       @default(draft)
   /// @nopii LocalizedText
-  notes      Json            @default("{}")
+  notes             Json                @default("{}")
   /// @nopii optimistic lock for the admin panel
-  version    Int             @default(0)
+  version           Int                 @default(0)
   /// @nopii timestamp
-  createdAt  DateTime        @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt  DateTime        @updatedAt @db.Timestamptz(3)
-  packages   Package[]
-  pools      InventoryPool[]
-  alerts     AlertSubscription[]
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+  packages          Package[]
+  pools             InventoryPool[]
+  alerts            AlertSubscription[]
+  supplierContracts SupplierContract[]
 
   @@unique([raceId, year])
   @@index([status])
@@ -294,6 +295,7 @@ model Package {
   entryOptions         PackageEntryOption[]
   hotels               PackageHotel[]
   extras               Extra[]
+  costItems            CostItem[]
 
   @@unique([editionId, slug])
   @@unique([id, currency])
@@ -475,6 +477,7 @@ model InventoryPool {
   roomOptions         RoomOption[]
   extras              Extra[]
   movements           InventoryMovement[]
+  allotments          Allotment[]
 
   @@index([editionId])
   @@map("inventory_pools")

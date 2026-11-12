@@ -1,0 +1,193 @@
+// ---- Task 6.1: suppliers, contracts, contracted allotments and supplier cost prices ----
+// Plan: docs/plans/6.1-suppliers-allotments.md. CHECKs live in migration 0009. Costs are records, never payments.
+
+enum SupplierKind {
+  hotel
+  ground_operator
+  race_organiser
+  other
+}
+
+enum AllotmentKind {
+  room
+  entry
+}
+
+enum AllotmentStatus {
+  held
+  released
+}
+
+enum CostBasis {
+  per_person
+  per_room
+  per_booking
+  fixed
+}
+
+enum CostStatus {
+  planned
+  due
+  paid
+  cancelled
+}
+
+model Supplier {
+  id              String             @id @default(uuid(7)) @db.Uuid
+  /// @nopii supplier type
+  kind            SupplierKind
+  /// @nopii business name of the supplier
+  name            String
+  /// @nopii ISO 3166 alpha-2
+  countryCode     String             @db.Char(2)
+  /// @nopii ISO 4217, the currency this supplier usually invoices in
+  defaultCurrency String             @db.Char(3)
+  /// @pii free text written by staff
+  paymentTerms    String             @default("")
+  /// @pii free text written by staff
+  notes           String             @default("")
+  /// @pii custom fields are free text
+  customFields    Json               @default("{}")
+  /// @nopii demo data
+  isDemo          Boolean            @default(false)
+  /// @nopii optimistic lock for the admin panel
+  version         Int                @default(0)
+  /// @nopii soft delete
+  deletedAt       DateTime?          @db.Timestamptz(3)
+  deletedById     String?            @db.Uuid
+  /// @nopii timestamp
+  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+  contacts        SupplierContact[]
+  contracts       SupplierContract[]
+  costItems       CostItem[]
+
+  @@index([kind])
+  @@map("suppliers")
+}
+
+model SupplierContact {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  supplierId String   @db.Uuid
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @pii a person at the supplier
+  name       String
+  /// @pii
+  email      String?
+  /// @pii
+  phone      String?
+  /// @nopii job title or role at the supplier
+  role       String   @default("")
+  /// @nopii timestamp
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([supplierId])
+  @@map("supplier_contacts")
+}
+
+model SupplierContract {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  supplierId  String       @db.Uuid
+  supplier    Supplier     @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  editionId   String?      @db.Uuid
+  edition     RaceEdition? @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii contract reference
+  reference   String
+  /// @nopii calendar date
+  signedAt    DateTime?    @db.Date
+  /// @nopii calendar date
+  validFrom   DateTime?    @db.Date
+  /// @nopii calendar date
+  validTo     DateTime?    @db.Date
+  /// @pii free text written by staff
+  terms       String       @default("")
+  /// @nopii optimistic lock for the admin panel
+  version     Int          @default(0)
+  /// @nopii soft delete
+  deletedAt   DateTime?    @db.Timestamptz(3)
+  deletedById String?      @db.Uuid
+  /// @nopii timestamp
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+  allotments  Allotment[]
+  costItems   CostItem[]
+
+  @@unique([supplierId, reference])
+  @@index([editionId])
+  @@map("supplier_contracts")
+}
+
+model Allotment {
+  id            String           @id @default(uuid(7)) @db.Uuid
+  contractId    String           @db.Uuid
+  contract      SupplierContract @relation(fields: [contractId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  poolId        String           @db.Uuid
+  pool          InventoryPool    @relation(fields: [poolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii room or entry
+  kind          AllotmentKind
+  /// @nopii places contracted
+  quantity      Int
+  /// @nopii calendar date after which unsold places go back to the supplier
+  releaseDate   DateTime?        @db.Date
+  /// @nopii minor units of `currency`, per place
+  unitCostMinor BigInt
+  /// @nopii ISO 4217
+  currency      String           @db.Char(3)
+  /// @nopii held or released
+  status        AllotmentStatus  @default(held)
+  /// @nopii timestamp
+  releasedAt    DateTime?        @db.Timestamptz(3)
+  /// @nopii optimistic lock for the admin panel
+  version       Int              @default(0)
+  /// @nopii timestamp
+  createdAt     DateTime         @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt     DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@index([contractId])
+  @@index([poolId, status])
+  @@index([status, releaseDate])
+  @@map("allotments")
+}
+
+model CostItem {
+  id              String            @id @default(uuid(7)) @db.Uuid
+  supplierId      String            @db.Uuid
+  supplier        Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  contractId      String?           @db.Uuid
+  contract        SupplierContract? @relation(fields: [contractId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  packageId       String?           @db.Uuid
+  package         Package?          @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @pii free text written by staff, may name travellers
+  description     String
+  /// @nopii how the quantity is counted
+  basis           CostBasis
+  /// @nopii units
+  quantity        Int
+  /// @nopii minor units of `currency`, per unit
+  unitAmountMinor BigInt
+  /// @nopii minor units of `currency`, always quantity x unit, worked out by the server
+  amountMinor     BigInt
+  /// @nopii ISO 4217, the supplier's currency
+  currency        String            @db.Char(3)
+  /// @nopii calendar date the supplier expects payment
+  dueDate         DateTime?         @db.Date
+  /// @nopii planned, due, paid (set only by supplier payments, task 6.2) or cancelled
+  status          CostStatus        @default(planned)
+  /// @nopii optimistic lock for the admin panel
+  version         Int               @default(0)
+  /// @nopii timestamp
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+
+  @@unique([id, currency])
+  @@index([supplierId, status])
+  @@index([packageId])
+  @@index([contractId])
+  @@map("cost_items")
+}
