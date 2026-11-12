@@ -2,7 +2,17 @@
 
 Lo que no se puede terminar sin Oscar o sin un tercero. No detiene el resto del trabajo. Lo actualiza el hilo de cierre de cada fase a partir de `docs/done/`.
 
+Actualizado al cerrar la fase 0 (2026-11-12).
+
 | Qué falta | Quién lo desbloquea | Qué se hizo mientras tanto | Tarea |
 |---|---|---|---|
-| Claves de prueba de Stripe (sandbox) | Oscar: crear la cuenta y poner las claves de prueba como variables del entorno en la nube | Pendiente de la fase 3: se construye contra el simulador y el adaptador queda en `experimental` | 3.3 |
-| Confirmación por escrito de Stripe de que acepta un operador de viajes | Oscar | No afecta al desarrollo; necesaria antes de cobrar en real | — |
+| Claves de prueba de Stripe (sandbox) y de cualquier otra pasarela | Oscar: crear la cuenta y poner las claves de prueba como variables del entorno en la nube | Dinero aparcado (decisión de Oscar, 2026-11-12). Cuando se retome: se construye contra el simulador y cada adaptador queda en `experimental` | 3.1, 3.3, fase 9 |
+| Confirmación por escrito de Stripe de que acepta un operador de viajes («travel reservation services and clubs» es categoría restringida) | Oscar | No afecta al desarrollo; necesaria antes de cobrar en real | — |
+| Política de viajes y aceptación de sole trader con ABN de las pasarelas con la columna «Viajes» en «sin confirmar»: 31 de las 38 filas de `docs/research/payment-providers.md` (sección 5), entre ellas Pin Payments, eWAY, Westpac, Airwallex, Square, Windcave y GoCardless | Oscar, al abrir cada cuenta o preguntando al proveedor; solo de las que quiera activar | Cada fila conserva URL y fecha; ningún adaptador pasa de `experimental` sin esa respuesta | 0.7, fase 9 |
+| Validar el tratamiento del GST (por componente, 1.1; recibos y ajustes en reembolsos) | Oscar, con su contable | Nada de GST se calcula en real mientras el dinero esté aparcado | 1.1, 0.1 |
+| Requisitos vinculantes al retomar el dinero: P1–P12 y los 8 hallazgos abiertos de la ronda 18 de la revisión del plan 0.1 (reembolso manual, webhooks por cuenta, `rateE9` y exponentes por moneda, descuento acotado, cancelación del cliente 409, GST por recibo, penalización mayor que lo cobrado, prueba de enmienda con instantánea original) | Oscar: quitar la etiqueta «aparcada» de `docs/autonomous.md` | Están en el plan, sección «Aparcado: dinero»; nada del dinero real se construye | 0.1, 3.x a 9.x |
+| Fijar `TRUST_PROXY` y `WEB_TRUSTED_PROXY_HOPS` al alojamiento real y comprobar a mano que la API ve la IP real del cliente tras Caddy (hoy el límite por IP de las rutas de entrada cuenta todo el sitio junto) | Oscar, en el servidor de pruebas, antes de abrir al público | Valores por defecto en `deploy/` y comprobación de texto en `scripts/check-deploy-config.mjs`; sin Docker no se ha podido ejecutar | 0.3, 8.7, 8.5 |
+| Copia externa con `rclone`: cuenta y depósito del almacén, clave de aplicación limitada y contraseña de las copias guardada fuera del servidor; repetir `verify-restore.sh` en el servidor | Oscar | Probado con `BACKUP_REMOTE_KIND=dir`; marcadores en `deploy/production.env.example` | 8.6 |
+| Cuenta de AWS, servidor, dominio y proveedor de SMTP | Oscar | Guía `docs/deploy/guide.md`; correo en `catch` hasta que haya SMTP | 8.7 |
+| Docker no existe en el entorno de los hilos | Nadie (limitación del entorno); si Oscar quiere comprobarlo en local, `docker compose up` | `compose-smoke` solo corre en CI; `docker compose`, Caddy, la imagen de copias y `rclone` no se ejecutaron en ningún hilo | 0.2, 8.6, 8.7 |
+| `binaries.prisma.sh` denegado en el entorno de los hilos | Nadie | Local: `PRISMA_SCHEMA_ENGINE_BINARY=/bin/true` y migraciones con `psql`; CI usa `prisma migrate deploy` y `migrate diff` | 0.2 |
