@@ -4,3 +4,5 @@ export { suppliersManifest, SUPPLIERS_PERMISSIONS } from './manifest';
 export { AllotmentService, costByCurrency } from './allotment.service';
 export { CostService, costAmount, COST_TRANSITIONS } from './cost.service';
 export { SupplierService } from './supplier.service';
+export { readHeldReleasesForCalendar } from './key-date-read';
+export type { HeldReleaseForCalendar } from './key-date-read';

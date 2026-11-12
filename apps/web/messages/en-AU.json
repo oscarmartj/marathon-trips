@@ -242,7 +242,8 @@
       "complaints": "Complaints",
       "complaint": "Complaint",
       "automations": "Automations",
-      "automation": "Automation"
+      "automation": "Automation",
+      "keydates": "Key dates"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -548,6 +549,11 @@
       "errors": {
         "validation_failed": "Some details are not valid. Check the fields and try again.",
         "version_conflict": "Someone else changed this. Reload and try again.",
+        "entry_submission_exists": "This edition already has an entry submission deadline. Change that one instead.",
+        "key_date_not_found": "That key date no longer exists. Reload the page.",
+        "label_required": "A custom date needs a name.",
+        "range_invalid": "The last day is before the first day.",
+        "range_too_long": "Choose a range of two years or less.",
         "race_slug_taken": "A race with this web address (slug) already exists.",
         "package_slug_taken": "A package with this web address (slug) already exists in that edition.",
         "race_not_draft": "Only a draft race can be deleted.",
@@ -1017,6 +1023,54 @@
           "none": "Sold out"
         }
       }
+    },
+    "keydates": {
+      "title": "Key dates",
+      "intro": "Release dates for held places, balances falling due, entry submission deadlines and your own dates. A task opens a week before each one.",
+      "filterLabel": "Show dates for",
+      "allEditions": "All editions",
+      "listTitle": "Coming up and overdue",
+      "listCaption": "Key dates, oldest first",
+      "empty": "No key dates in the next four months.",
+      "columns": {
+        "date": "Date",
+        "what": "What",
+        "trip": "Race",
+        "state": "State",
+        "actions": "Actions"
+      },
+      "kinds": {
+        "allotment_release": "Allotment release",
+        "balance_due": "Balances due",
+        "entry_submission": "Entry submission deadline",
+        "custom": "Custom date"
+      },
+      "lines": {
+        "allotment_release": "{count} held by {detail}",
+        "balance_due": "{count} bookings still owe their balance",
+        "entry_submission": "Entries go to the organiser",
+        "custom": "{label}"
+      },
+      "overdue": "Overdue",
+      "upcoming": "Coming up",
+      "taskOpen": "Task open",
+      "noTask": "No task yet",
+      "openTasks": "Open the task list",
+      "readOnlyHint": "Release dates are set on the supplier page and balance dates come from bookings.",
+      "newTitle": "Add a key date",
+      "fields": {
+        "edition": "Race edition",
+        "kind": "Kind of date",
+        "label": "Name",
+        "labelHint": "Needed for a custom date, for example Bib numbers collected.",
+        "dueDate": "Date"
+      },
+      "create": "Add key date",
+      "created": "Key date added.",
+      "changeDate": "New date for {what}",
+      "saveDate": "Save date",
+      "delete": "Delete",
+      "reload": "Show again"
     },
     "suppliers": {
       "title": "Suppliers",

@@ -82,3 +82,21 @@ export async function readBookingForAutomations(tx: Tx, id: string): Promise<Boo
     trip: { raceName: b.edition.race.name, year: b.edition.year, packageName: b.package.name },
   };
 }
+
+/** Bookings whose balance falls due on one date for one edition (task 7.3). Counts only: no customer and no amount. */
+export interface BalancesDueForCalendar {
+  editionId: string;
+  dueDate: string;
+  bookings: number;
+}
+
+/** A plain read, no lock. Bookings with a deposit paid or confirmed still owe their balance; the others do not. */
+export async function readBalancesDueForCalendar(tx: Tx, from: string, to: string, editionId?: string): Promise<BalancesDueForCalendar[]> {
+  const rows = await tx.booking.groupBy({
+    by: ['editionId', 'balanceDueDate'],
+    where: { status: { in: ['deposit_paid', 'confirmed'] }, balanceDueDate: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) }, ...(editionId ? { editionId } : {}) },
+    _count: { _all: true },
+    orderBy: [{ balanceDueDate: 'asc' }, { editionId: 'asc' }],
+  });
+  return rows.map((r) => ({ editionId: r.editionId, dueDate: r.balanceDueDate.toISOString().slice(0, 10), bookings: r._count._all }));
+}

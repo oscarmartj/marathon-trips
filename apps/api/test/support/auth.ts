@@ -50,6 +50,9 @@ export async function makeApp(env: Record<string, string> = {}, opts: { allLogs?
     // Task 7.4: the automations module is on too, for the same reason.
     await app.get(FeatureFlagService).ensure('module.automations', true);
     await prisma.featureFlag.update({ where: { key: 'module.automations' }, data: { enabled: true } });
+    // Task 7.3: and the key dates calendar.
+    await app.get(FeatureFlagService).ensure('module.keydates', true);
+    await prisma.featureFlag.update({ where: { key: 'module.keydates' }, data: { enabled: true } });
     /** Closes the app and removes the jobs and events auth tests leave behind, so other test files start clean. */
     const close = async () => {
       await prisma.$executeRawUnsafe(`DELETE FROM pgboss.job WHERE name = 'mail.send'`);

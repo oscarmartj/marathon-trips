@@ -24,3 +24,32 @@ export async function existingCatalogueIds(tx: Tx, ref: 'package' | 'edition' | 
       : await tx.race.findMany({ where, select: { id: true } });
   return new Set(rows.map((r) => r.id));
 }
+
+/** An edition's race name and year, for lists that mention it (task 7.3). `raceName` is the en-AU text. */
+export interface EditionLabel {
+  id: string;
+  year: number;
+  raceName: string;
+}
+
+const enAu = (v: unknown): string => {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const pick = o['en-AU'] ?? o.en ?? Object.values(o).find((x) => typeof x === 'string');
+    if (typeof pick === 'string') return pick;
+  }
+  return '';
+};
+
+/** A plain read, no lock. Editions of deleted races are left out. */
+export async function readEditionLabels(tx: Tx, ids: readonly string[]): Promise<Map<string, EditionLabel>> {
+  const rows = await tx.raceEdition.findMany({ where: { id: { in: [...ids] }, race: { deletedAt: null } }, select: { id: true, year: true, race: { select: { name: true } } } });
+  return new Map(rows.map((r) => [r.id, { id: r.id, year: r.year, raceName: enAu(r.race.name) }]));
+}
+
+/** Editions a person can attach a key date to: newest year first, then race name. A plain read of at most 300. */
+export async function listEditionLabels(tx: Tx): Promise<EditionLabel[]> {
+  const rows = await tx.raceEdition.findMany({ where: { race: { deletedAt: null } }, orderBy: [{ year: 'desc' }, { id: 'desc' }], take: 300, select: { id: true, year: true, race: { select: { name: true } } } });
+  return rows.map((r) => ({ id: r.id, year: r.year, raceName: enAu(r.race.name) })).sort((a, b) => b.year - a.year || a.raceName.localeCompare(b.raceName));
+}
