@@ -10,4 +10,6 @@ export * from './schemas/suppliers';
 export * from './schemas/content';
 export * from './schemas/integrations';
 export * from './schemas/bookings';
+export * from './schemas/waitlist';
 export * from './schemas/custom-fields';
+export * from './iso-countries';

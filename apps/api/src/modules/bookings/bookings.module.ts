@@ -5,6 +5,7 @@ import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { CatalogueModule } from '../catalogue';
 import { PricingModule } from '../pricing';
+import { WaitlistModule } from '../waitlist';
 import { BookingAdminService } from './admin.service';
 import { BookingRequestsController, BookingsAdminController } from './controllers';
 import { CustomerService } from './customer.service';
@@ -20,7 +21,7 @@ import { BookingStateMachine } from './state-machine';
 import { ReferenceGenerator } from './support';
 
 @Module({
-  imports: [CatalogueModule, PricingModule],
+  imports: [CatalogueModule, PricingModule, WaitlistModule],
   controllers: [BookingRequestsController, BookingsAdminController],
   providers: [
     BookingRequestService, BookingStateMachine, BookingAdminService, BookingExpiryService, BookingTransitionHooks, CustomerService,
