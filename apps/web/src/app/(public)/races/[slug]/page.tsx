@@ -7,6 +7,8 @@ import { PageHeader } from '@/components/page-header';
 import { PlaceholderImage } from '@/components/placeholder-image';
 import { countryName, editionDateText, formatDate, formatDistance, hasOpenPackage, monthName } from '@/lib/catalogue-format';
 import { getRace, listRaceSlugs, localisedText } from '@/lib/catalogue';
+import { JsonLdScript } from '@/components/json-ld';
+import { breadcrumbJsonLd, pageMetadata, raceDescription, raceEventsJsonLd } from '@/lib/seo';
 import { t } from '@/lib/i18n';
 
 // Built ahead for the races known at deploy time, and on first request for new ones; refreshed at most once a minute.
@@ -19,7 +21,9 @@ type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const race = await getRace((await params).slug);
-  return race ? { title: localisedText(race.name), description: localisedText(race.summary) || undefined } : { title: t('races.detail.notFoundTitle') };
+  return race
+    ? pageMetadata({ title: localisedText(race.name), description: raceDescription(race), path: `/races/${race.slug}` })
+    : { title: t('races.detail.notFoundTitle'), robots: { index: false } };
 }
 
 export default async function RacePage({ params }: Props) {
@@ -32,6 +36,16 @@ export default async function RacePage({ params }: Props) {
   const anyOpen = hasOpenPackage(race);
   return (
     <>
+      <JsonLdScript
+        data={[
+          breadcrumbJsonLd([
+            { name: t('nav.home'), path: '/' },
+            { name: t('nav.races'), path: '/races' },
+            { name, path: `/races/${race.slug}` },
+          ]),
+          ...raceEventsJsonLd(race),
+        ]}
+      />
       <PageHeader title={t('races.detail.title', { name })} intro={t('races.location', { city: race.city, country: countryName(race.countryCode) })} />
       <div className="container grid grid--2">
         <PlaceholderImage alt={t('races.detail.imageAlt')} />
