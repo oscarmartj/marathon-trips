@@ -26,15 +26,17 @@ async function signIn(page: Page, s: Staff) {
 const formWith = (page: Page, button: string): Locator => page.locator('form', { has: page.getByRole('button', { name: button, exact: true }) });
 const searchRaces = async (page: Page, text: string) => {
   const search = page.getByRole('search', { name: 'Search races' });
-  await search.getByLabel('Search', { exact: true }).fill(text);
+  await search.getByLabel(label('Search')).fill(text);
   await search.getByRole('button', { name: 'Search', exact: true }).click();
 };
+/** A label with or without the required marker (" *") that the form adds after the text. */
+const label = (text: string) => new RegExp(`^${text}(?: \\*)?$`);
 const publicRace = (page: Page, slug: string) => page.request.get(`/api/catalogue/races/${slug}`);
 
 // Phase 1 criterion: create a race with an edition, package, hotel and extra in the panel, publish it and see it on the website.
 // The public pages are task 1.3, so "see it" is checked on the public catalogue API that those pages read.
 test('create_publish_and_view_race', async ({ page }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(150_000);
   const run = `e2e${Date.now().toString(36)}`;
   const raceName = `${run} Coast Marathon`;
   const slug = `${run}-coast-marathon`;
@@ -44,7 +46,7 @@ test('create_publish_and_view_race', async ({ page }) => {
   await page.goto('/admin/hotels');
   await expect(page.getByRole('heading', { level: 1, name: 'Hotels' })).toBeVisible();
   let f = formWith(page, 'Add hotel');
-  await f.getByLabel('Name', { exact: true }).fill(`${run} Riverside Hotel`);
+  await f.getByLabel(label('Name')).fill(`${run} Riverside Hotel`);
   await f.getByLabel('Address').fill('1 River Street');
   await f.getByLabel('City').fill('Brisbane');
   await f.getByRole('button', { name: 'Add hotel', exact: true }).click();
@@ -54,7 +56,7 @@ test('create_publish_and_view_race', async ({ page }) => {
   await page.goto('/admin/races');
   await expect(page.getByRole('heading', { level: 1, name: 'Races' })).toBeVisible();
   f = formWith(page, 'Add race');
-  await f.getByLabel('Name', { exact: true }).fill(raceName);
+  await f.getByLabel(label('Name')).fill(raceName);
   await f.getByLabel('City').fill('Gold Coast');
   await f.getByLabel('Summary').fill('A flat, fast course by the beach.');
   await f.getByRole('button', { name: 'Add race', exact: true }).click();
@@ -63,7 +65,7 @@ test('create_publish_and_view_race', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 2, name: raceName })).toBeVisible();
 
   f = formWith(page, 'Add distance');
-  await f.getByLabel('Name', { exact: true }).fill('Marathon');
+  await f.getByLabel(label('Name')).fill('Marathon');
   await f.getByRole('button', { name: 'Add distance', exact: true }).click();
   await expect(page.getByRole('table', { name: 'Distances' }).getByRole('cell', { name: '42.195 km' })).toBeVisible();
 
@@ -98,7 +100,7 @@ test('create_publish_and_view_race', async ({ page }) => {
 
   // A package.
   f = formWith(page, 'Add package');
-  await f.getByLabel('Name', { exact: true }).fill('Race weekend');
+  await f.getByLabel(label('Name')).fill('Race weekend');
   await f.getByLabel('Web address (slug)').fill('race-weekend');
   await f.getByLabel('Check-in date').fill('2027-07-02');
   await f.getByLabel('Check-out date').fill('2027-07-06');
@@ -126,7 +128,7 @@ test('create_publish_and_view_race', async ({ page }) => {
   await expect(page.getByText('Marathon, from Entry stock')).toBeVisible();
 
   f = formWith(page, 'Add hotel');
-  await f.getByLabel('Hotel', { exact: true }).selectOption({ label: `${run} Riverside Hotel (Brisbane)` });
+  await f.getByLabel(label('Hotel')).selectOption({ label: `${run} Riverside Hotel (Brisbane)` });
   await f.getByRole('button', { name: 'Add hotel', exact: true }).click();
   await expect(page.getByRole('heading', { level: 3, name: new RegExp(`${run} Riverside Hotel`) })).toBeVisible();
   await page.getByText(/Add a room to/).click();
@@ -137,8 +139,8 @@ test('create_publish_and_view_race', async ({ page }) => {
   await expect(page.getByText(/Double room \(Double\), 1 to 2 people, from Room stock/)).toBeVisible();
 
   f = formWith(page, 'Add extra');
-  await f.getByLabel('Name', { exact: true }).fill('City tour');
-  await f.getByLabel('Stock', { exact: true }).selectOption({ label: 'Extra stock' });
+  await f.getByLabel(label('Name')).fill('City tour');
+  await f.getByLabel(label('Stock')).selectOption({ label: 'Extra stock' });
   await f.getByRole('button', { name: 'Add extra', exact: true }).click();
   await expect(page.getByText(/City tour \(Excursion, per person, Everyone\)/)).toBeVisible();
 
