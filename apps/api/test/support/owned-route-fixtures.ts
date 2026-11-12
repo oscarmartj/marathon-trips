@@ -31,4 +31,38 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
     },
   },
+  // Task 3.1: GET /booking-requests/:reference/payment-plan. A's request, approved by staff (the hook creates the plan).
+  'booking-payment-plan': {
+    async create(t, a, b) {
+      const ref = await approvedRequestOf(t, a);
+      const path = `/booking-requests/${ref}/payment-plan`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
+  // Task 3.1: POST /booking-requests/:reference/payments. A pays the deposit against the simulator; B tries the same.
+  'booking-payment-start': {
+    async create(t, a, b) {
+      const { simulatorAccount } = await import('./payments');
+      await simulatorAccount(t);
+      const ref = await approvedRequestOf(t, a);
+      const path = `/booking-requests/${ref}/payments`;
+      const send = (s: CustomerSession) => t.http().post(path).set(STATE_HEADERS).set('Cookie', s.cookie).set('Idempotency-Key', randomUUID()).send({ method: 'card' });
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
 };
+
+/** A booking request by customer A for a fresh priced package, approved by staff. Returns its reference. */
+async function approvedRequestOf(t: TestApp, a: CustomerSession): Promise<string> {
+  const { requestBody } = await import('./bookings');
+  const { paymentsStaff } = await import('./payments');
+  const { pricedWorld } = await import('./pricing');
+  const admin = await paymentsStaff(t);
+  const w = await pricedWorld(admin);
+  const res = await t.http().post('/booking-requests').set(STATE_HEADERS).set('Cookie', a.cookie).set('Idempotency-Key', randomUUID()).send(requestBody(w));
+  if (res.status !== 201) throw new Error(`booking request failed: ${res.status} ${JSON.stringify(res.body)}`);
+  const booking = await t.prisma.booking.findUniqueOrThrow({ where: { reference: res.body.reference as string } });
+  const ok = await admin.post(`/admin/bookings/${booking.id}/approve`, { version: booking.version });
+  if (ok.status !== 200) throw new Error(`approve failed: ${ok.status} ${JSON.stringify(ok.body)}`);
+  return booking.reference;
+}

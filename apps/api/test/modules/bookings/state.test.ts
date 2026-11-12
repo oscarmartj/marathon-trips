@@ -15,6 +15,7 @@ import { bookingStaff, cleanBookingEvents, customerClient, makeBookingFor, reque
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 import { allRoutes } from '../../support/routes';
+import { insertValidSchedule } from '../../support/payments';
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -65,8 +66,17 @@ afterAll(async () => {
   await closeCatalogue(t);
 });
 
+// Task 3.1: an approved booking has a payment plan at commit, so the step to `approved` writes a valid plan in the same
+// transaction (plan 3.1, section 14, point 1). Every other step, and every assertion, is unchanged.
 const walk = async (id: string, to: State) => {
-  for (const s of PATH[to]) await t.prisma.$executeRawUnsafe(STEP_SQL, id, s);
+  for (const s of PATH[to]) {
+    if (s === 'approved') {
+      await t.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(STEP_SQL, id, s);
+        await insertValidSchedule(tx, id);
+      });
+    } else await t.prisma.$executeRawUnsafe(STEP_SQL, id, s);
+  }
 };
 const statusOf = async (id: string) => (await t.prisma.booking.findUniqueOrThrow({ where: { id } })).status;
 const versionOf = async (id: string) => (await t.prisma.booking.findUniqueOrThrow({ where: { id } })).version;
@@ -108,6 +118,20 @@ describe('booking_status_trigger_matrix: the database lets through exactly the p
     await expect(t.prisma.$transaction(async (tx) => {
       await tx.booking.create({ data: { ...row, customFields: {}, id: crypto.randomUUID(), reference: 'MT-ZZZZZZ', requestKeyHash: 'a'.repeat(64), status: 'approved', approvedAt: new Date(), approvalExpiresAt: new Date(Date.now() + 1e6) } });
     })).rejects.toThrow(/starts as a request/);
+  });
+});
+
+describe('walk_reaches_every_state_with_a_valid_plan (task 3.1): the matrices still start from every state', () => {
+  it.each(STATES)('walk to %s', async (state) => {
+    const { bookingId } = await makeBookingFor(t, w);
+    await walk(bookingId, state);
+    expect(await statusOf(bookingId)).toBe(state);
+    const plan = await t.prisma.paymentSchedule.findUnique({ where: { bookingId }, include: { items: { where: { state: 'active' } } } });
+    expect(plan !== null).toBe(PATH[state].includes('approved'));
+    if (plan) {
+      const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+      expect(plan.items.reduce((s, i) => s + i.amountMinor, 0n)).toBe(b.totalMinor);
+    }
   });
 });
 

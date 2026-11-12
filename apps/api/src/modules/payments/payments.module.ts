@@ -1,6 +1,7 @@
 import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PermissionRegistry } from '../../platform/access/permissions';
 import { AuthModule } from '../../platform/auth/auth.module';
+import { CommonModule } from '../../platform/common/common.module';
 import type { AppConfig } from '../../platform/config/config';
 import { APP_CONFIG } from '../../platform/database/prisma.service';
 import { EntityRegistry } from '../../platform/entities/entity-registry';
@@ -26,7 +27,7 @@ import { paymentsManifest } from './manifest';
 import { PaymentAttemptRateLimitGuard } from './rate-limit.guard';
 
 @Module({
-  imports: [AuthModule, BookingsModule],
+  imports: [AuthModule, CommonModule, BookingsModule],
   controllers: [PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController],
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: () => new PaymentAdapterRegistry(ADAPTERS) },

@@ -58,7 +58,7 @@ export class PaymentWebhooksController {
 export class PaymentsAdminController {
   constructor(@Inject(PaymentAdminService) private readonly admin: PaymentAdminService) {}
 
-  @Get('bookings/:id/payments') @RequirePermission(P.paymentRead)
+  @Get('payments/bookings/:id') @RequirePermission(P.paymentRead)
   bookingPayments(@Param('id', uuid()) id: string) {
     return this.admin.bookingPayments(id);
   }
