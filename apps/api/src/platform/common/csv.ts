@@ -1,6 +1,8 @@
 // CSV for the table capabilities (task 0.5): RFC 4180 quoting, formula guard on text cells, and a small parser.
 
-const FORMULA = /^[=+\-@\t\r]/;
+// Text that starts with a formula character, or with quotes and then one (so a guarded cell and a value that already looks
+// guarded both survive an export and an import).
+const FORMULA = /^'*[=+\-@\t\r]/;
 
 /** A text cell that a spreadsheet could run as a formula gets a leading quote; the import takes it off again. */
 export function guardCell(text: string): string {
@@ -8,7 +10,7 @@ export function guardCell(text: string): string {
 }
 
 export function unguardCell(text: string): string {
-  return /^'[=+\-@\t\r]/.test(text) ? text.slice(1) : text;
+  return /^'+[=+\-@\t\r]/.test(text) ? text.slice(1) : text;
 }
 
 function quote(s: string): string {
@@ -17,11 +19,29 @@ function quote(s: string): string {
 
 export type CsvValue = string | number | boolean | Date | null | undefined;
 
-/** Numbers, booleans and dates are written as they are (a negative number is not a formula); text is guarded. */
+/**
+ * A finite number as plain decimal text, never with an exponent ("1e-7" becomes "0.0000001"), so a spreadsheet and the
+ * import read back exactly the number that was stored. JavaScript prints the shortest text that reads back to the same
+ * double, and this only moves the decimal point of that text.
+ */
+export function plainDecimal(n: number): string {
+  const text = String(n);
+  const m = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (!m) return text === '-0' ? '0' : text;
+  const [, sign, whole, frac = '', exp] = m as unknown as [string, string, string, string | undefined, string];
+  const digits = whole + frac;
+  const point = whole.length + Number(exp);
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/** Numbers (as plain decimals), booleans and dates are written as they are (a negative number is not a formula); text is guarded. */
 export function cell(v: CsvValue): string {
   if (v === null || v === undefined) return '';
   if (v instanceof Date) return v.toISOString();
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'number') return plainDecimal(v);
+  if (typeof v === 'boolean') return String(v);
   return quote(guardCell(v));
 }
 

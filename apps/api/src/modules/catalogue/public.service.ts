@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { z } from 'zod';
 import type { publicRaceQuerySchema } from '@mt/shared';
 import { Prisma } from '../../generated/prisma/client';
+import { CustomFieldsService, type PublicCustomField } from '../../platform/common/custom-fields/custom-fields.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { notFound } from '../../platform/http/api-error';
 import { stockOf } from './inventory.service';
@@ -45,7 +46,7 @@ type ViewPackage = Prisma.PackageGetPayload<{ include: typeof PACKAGE_VIEW_INCLU
  * The package as a visitor sees it (task 1.1), built from rows. `race.claims` may hold all claims; only enabled ones count.
  * It carries no stock numbers, and `guaranteedEntry` follows guaranteedEntryOf. Callers decide which packages may be shown.
  */
-export function packageView(race: ViewRace, pkg: ViewPackage) {
+export function packageView(race: ViewRace, pkg: ViewPackage, customFields: PublicCustomField[] = []) {
   const claims = race.claims.filter((c) => c.enabled);
   const nights = Math.round((pkg.checkOutDate.getTime() - pkg.checkInDate.getTime()) / 86_400_000);
   const guaranteedClaim = claims.some((c) => c.kind === 'guaranteed_entry');
@@ -55,6 +56,8 @@ export function packageView(race: ViewRace, pkg: ViewPackage) {
     edition: { year: pkg.edition.year, startDate: fromDate(pkg.edition.startDate), dateStatus: pkg.edition.dateStatus, dateConfirmed: pkg.edition.dateStatus === 'confirmed' },
     checkInDate: fromDate(pkg.checkInDate), checkOutDate: fromDate(pkg.checkOutDate), nights,
     includes: localised(pkg.includes), excludes: localised(pkg.excludes),
+    // Only fields staff marked visible to customers, with a value; nothing else from the stored object (task 7.5).
+    customFields,
     instantBooking: pkg.instantBooking, deposit: depositView(pkg), balanceDueDate: fromDate(pkg.balanceDueDate),
     minTravellers: pkg.minTravellers, maxTravellers: pkg.maxTravellers, maxExtraNightsBefore: pkg.maxExtraNightsBefore, maxExtraNightsAfter: pkg.maxExtraNightsAfter,
     participation: pkg.participationOptions.map((o) => o.type),
@@ -74,7 +77,15 @@ export function packageView(race: ViewRace, pkg: ViewPackage) {
 /** Public reads. The sitemap and structured data (1.4) use these same methods, so a draft can never leak through them. */
 @Injectable()
 export class PublicCatalogueService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CustomFieldsService) private readonly customFields: CustomFieldsService,
+  ) {}
+
+  /** The customer-visible custom fields of a package, for the public view and for the panel preview. */
+  packageCustomFields(pkg: { customFields: unknown }): Promise<PublicCustomField[]> {
+    return this.customFields.publicView('Package', pkg.customFields);
+  }
 
   async searchRaces(q: z.infer<typeof publicRaceQuerySchema>) {
     const and: Prisma.RaceWhereInput[] = [];
@@ -123,6 +134,7 @@ export class PublicCatalogueService {
     const guaranteedClaim = race.claims.some((c) => c.kind === 'guaranteed_entry');
     return {
       ...this.raceSummary(race),
+      customFields: await this.customFields.publicView('Race', race.customFields),
       editions: race.editions.map((e) => ({
         year: e.year, startDate: fromDate(e.startDate), endDate: fromDate(e.endDate), dateStatus: e.dateStatus, dateConfirmed: e.dateStatus === 'confirmed', status: e.status, notes: localised(e.notes),
         packages: e.packages.map((p) => ({
@@ -141,7 +153,7 @@ export class PublicCatalogueService {
       include: PACKAGE_VIEW_INCLUDE,
     });
     if (!pkg) throw notFound('package_not_found', 'Package not found');
-    return packageView(race, pkg);
+    return packageView(race, pkg, await this.packageCustomFields(pkg));
   }
 
   /** Every URL-worthy public package, for the sitemap (1.4): the same filters as the pages themselves. */

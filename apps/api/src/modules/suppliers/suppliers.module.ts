@@ -1,5 +1,6 @@
 import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PermissionRegistry } from '../../platform/access/permissions';
+import { CommonModule } from '../../platform/common/common.module';
 import { FlagRegistry } from '../../platform/flags/flag-registry';
 import { SuppliersAdminController } from './admin.controller';
 import { AllotmentService } from './allotment.service';
@@ -8,6 +9,7 @@ import { suppliersManifest } from './manifest';
 import { SupplierService } from './supplier.service';
 
 @Module({
+  imports: [CommonModule],
   controllers: [SuppliersAdminController],
   providers: [SupplierService, AllotmentService, CostService],
   exports: [AllotmentService, CostService, SupplierService],

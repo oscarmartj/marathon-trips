@@ -7,6 +7,7 @@ import { enAU } from '@/lib/catalogue-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { Section, formatDay, useLoad } from './kit';
+import { CustomFieldFilter } from '../custom-fields/custom-field-filter';
 import { LowStockNotice } from './low-stock-notice';
 
 interface PackageRow {
@@ -29,9 +30,10 @@ const PAGE_SIZE = 20;
 export function PackagesPanel() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
-  const [applied, setApplied] = useState({ q: '', status: '' });
+  const [applied, setApplied] = useState<{ q: string; status: string; cf: string | null }>({ q: '', status: '', cf: null });
+  const [cfPick, setCfPick] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), ...(applied.q ? { q: applied.q } : {}), ...(applied.status ? { saleStatus: applied.status } : {}) });
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), ...(applied.q ? { q: applied.q } : {}), ...(applied.status ? { saleStatus: applied.status } : {}), ...(applied.cf ? { cf: applied.cf } : {}) });
   const { data, error } = useLoad<Page>(`/admin/catalogue/packages?${params.toString()}`);
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
 
@@ -46,7 +48,7 @@ export function PackagesPanel() {
           aria-label={t('admin.catalogue.packages.searchLabel')}
           onSubmit={(e) => {
             e.preventDefault();
-            setApplied({ q: q.trim(), status });
+            setApplied({ q: q.trim(), status, cf: cfPick });
             setPage(1);
           }}
         >
@@ -65,6 +67,7 @@ export function PackagesPanel() {
               ))}
             </select>
           </div>
+          <CustomFieldFilter entityType="Package" idPrefix="packages-cf" onChange={setCfPick} />
           <button className="btn" type="submit">
             {t('admin.catalogue.common.searchButton')}
           </button>

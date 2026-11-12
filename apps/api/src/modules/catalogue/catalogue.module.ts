@@ -1,5 +1,6 @@
 import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PermissionRegistry } from '../../platform/access/permissions';
+import { CommonModule } from '../../platform/common/common.module';
 import { CatalogueAdminController } from './admin.controller';
 import { CatalogueCsvService } from './csv.service';
 import { InventoryService } from './inventory.service';
@@ -13,6 +14,7 @@ import { PublicCatalogueService } from './public.service';
 import { RaceService } from './race.service';
 
 @Module({
+  imports: [CommonModule],
   controllers: [CatalogueAdminController, CataloguePublicController],
   providers: [RaceService, PackageService, InventoryService, PublicCatalogueService, PackageOpenGates, CatalogueChangeGuards, PackagePricingReader, CataloguePanelService, CatalogueCsvService],
   exports: [InventoryService, PublicCatalogueService, PackageOpenGates, CatalogueChangeGuards, PackagePricingReader],

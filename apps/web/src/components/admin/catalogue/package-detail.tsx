@@ -6,6 +6,7 @@ import { api } from '@/lib/api-client';
 import { bpsToPercent, dollarsToMinor, enAU, minorToDollars, percentToBps, slugify, wholeNumber, withEnAU, withOptionalEnAU } from '@/lib/catalogue-panel';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
+import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { ActionButton, type ApiCall, EntityForm, type Outcome, Section, catalogueError, outcome, useLoad } from './kit';
 import type { RaceView } from './race-detail';
 
@@ -15,6 +16,7 @@ interface PoolRef {
   label: string;
 }
 interface PackageView {
+  customFields?: Record<string, unknown>;
   id: string;
   editionId: string;
   slug: string;
@@ -59,6 +61,7 @@ export function PackageDetail({ id }: { id: string }) {
   const { data: race } = useLoad<RaceView>(pkg ? `/admin/catalogue/races/${pkg.edition.raceId}` : null);
   const { data: pools, reload: reloadPools } = useLoad<PoolView[]>(pkg ? `/admin/catalogue/editions/${pkg.editionId}/pools` : null);
   const { data: hotels } = useLoad<Array<{ id: string; name: string; city: string }>>(pkg ? '/admin/catalogue/hotels' : null);
+  const cf = useCustomFieldForm('Package', pkg?.customFields, false, 'package-cf');
   if (!pkg) return error ? <Status message={error} /> : <p role="status">{t('admin.common.loading')}</p>;
 
   const base = `/admin/catalogue/packages/${id}`;
@@ -122,11 +125,15 @@ export function PackageDetail({ id }: { id: string }) {
             instantBooking: pkg.instantBooking, autoConfirmOnDeposit: pkg.autoConfirmOnDeposit, includes: enAU(pkg.includes), excludes: enAU(pkg.excludes),
           }}
           submit={t('admin.catalogue.common.save')}
-          onSubmit={(v) =>
-            save(() =>
+          extra={cf.extra}
+          onSubmit={async (v) => {
+            const custom = cf.body();
+            if (custom.problem) return { ok: false, message: problemMessage(custom.problem) };
+            return save(() =>
               api(base, {
                 method: 'PATCH',
                 body: {
+                  ...custom.body,
                   name: withEnAU(pkg.name, String(v.name)), slug: String(v.slug).trim(), checkInDate: v.checkInDate, checkOutDate: v.checkOutDate, balanceDueDate: v.balanceDueDate,
                   minTravellers: wholeNumber(String(v.minTravellers)) ?? 0, maxTravellers: wholeNumber(String(v.maxTravellers)) ?? 0,
                   maxExtraNightsBefore: wholeNumber(String(v.maxExtraNightsBefore)) ?? -1, maxExtraNightsAfter: wholeNumber(String(v.maxExtraNightsAfter)) ?? -1,
@@ -134,8 +141,8 @@ export function PackageDetail({ id }: { id: string }) {
                   includes: withOptionalEnAU(pkg.includes, String(v.includes)), excludes: withOptionalEnAU(pkg.excludes, String(v.excludes)), version: pkg.version,
                 },
               }),
-            )
-          }
+            );
+          }}
         />
       </Section>
 

@@ -53,6 +53,7 @@ export const adminRoutes: readonly RouteDef[] = [
   { path: '/admin/tasks', file: 'admin/(panel)/tasks/page.tsx', labelKey: 'admin.nav.tasks', nav: true },
   { path: '/admin/customers', file: 'admin/(panel)/customers/page.tsx', labelKey: 'admin.nav.customers', nav: true },
   { path: '/admin/settings', file: 'admin/(panel)/settings/page.tsx', labelKey: 'admin.nav.settings', nav: true },
+  { path: '/admin/settings/custom-fields', file: 'admin/(panel)/settings/custom-fields/page.tsx', labelKey: 'admin.nav.customFields' },
   { path: '/admin/flags', file: 'admin/(panel)/flags/page.tsx', labelKey: 'admin.nav.flags', nav: true },
   { path: '/admin/integrations', file: 'admin/(panel)/integrations/page.tsx', labelKey: 'admin.nav.integrations', nav: true },
   { path: '/admin/staff', file: 'admin/(panel)/staff/page.tsx', labelKey: 'admin.nav.staff', nav: true },
