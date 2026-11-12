@@ -4,7 +4,15 @@ import type { Prisma } from '../../../generated/prisma/client';
 import { AuditService, SYSTEM_ACTOR } from '../../../platform/audit/audit.service';
 import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { OutboxService } from '../../../platform/events/outbox.service';
+import { bossDb } from '../../../platform/database/boss-db';
+import { isRetryableTransactionError } from '../../../platform/database/transaction';
+import { AppError } from '../../../platform/errors/safe-error';
 import { conflict } from '../../../platform/http/api-error';
+import { JobsService } from '../../../platform/jobs/jobs.service';
+import { QUEUES } from '../../../platform/jobs/queues';
+import { approvalExpiryJob } from '../../bookings';
+import type { LockedBooking } from '../../bookings';
+import { CoverageFailedError, PaymentCoverageService } from './coverage.service';
 import type { ProviderPaymentStatus } from './provider';
 import { succeededPaymentsSource } from './payable';
 
@@ -17,6 +25,9 @@ export const PAYMENT_STATUS_PAIRS: ReadonlyArray<readonly [PaymentStatus, Paymen
   ['pending', 'succeeded'], ['pending', 'failed'],
   ['failed', 'succeeded'], ['cancelled', 'succeeded'], ['expired', 'succeeded'],
 ];
+
+/** The task opened when the coverage rule keeps failing for a payment; the sweep leaves such attempts alone. */
+export const coverageTaskRef = (paymentId: string) => `payments:coverage_failed:${paymentId}`;
 
 export const LIVE_STATUSES: readonly PaymentStatus[] = ['created', 'requires_action', 'pending'];
 
@@ -67,14 +78,22 @@ export interface LockedPayment {
   attemptNumber: number;
 }
 
-/** Locks one payment (after its booking, plan 0.1, 6.3). */
-export async function lockPayment(tx: Tx, paymentId: string): Promise<LockedPayment | null> {
+/**
+ * Locks one payment of a booking the caller has already locked (plan 0.1, 6.3: Booking → Payment). The LockedBooking
+ * argument makes the order a compile-time rule (plan 3.2, section 11, point 11); a payment of another booking is refused.
+ */
+export async function lockPayment(tx: Tx, booking: LockedBooking, paymentId: string): Promise<LockedPayment | null> {
   const rows = await tx.$queryRaw<LockedPayment[]>`
     SELECT id::text AS id, "bookingId"::text AS "bookingId", status::text AS status, version, mode::text AS mode, "amountMinor", currency,
            "providerPaymentRef", "providerAccountId"::text AS "providerAccountId", "attemptNumber"
     FROM payments WHERE id = ${paymentId}::uuid FOR UPDATE`;
-  return rows[0] ?? null;
+  const p = rows[0] ?? null;
+  if (p && p.bookingId !== booking.id) throw new AppError('payment_lock_order', 'A payment can only be locked after its own booking');
+  return p;
 }
+
+/** Ends without money: the attempt no longer holds back the approval expiry (plan 0.1, 6.2). */
+const ENDED_WITHOUT_MONEY: readonly PaymentStatus[] = ['failed', 'cancelled', 'expired'];
 
 /**
  * The only code that writes payments.status (checked by a test). One change, in the caller's transaction, with the
@@ -86,6 +105,8 @@ export class PaymentStateMachine {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(TasksService) private readonly tasks: TasksService,
+    @Inject(PaymentCoverageService) private readonly coverage: PaymentCoverageService,
+    @Inject(JobsService) private readonly jobs: JobsService,
   ) {}
 
   /** Fills in the gateway reference once (the webhook can arrive before the gateway's answer). */
@@ -96,7 +117,9 @@ export class PaymentStateMachine {
     p.providerPaymentRef = ref;
   }
 
-  async apply(tx: Tx, p: LockedPayment, event: AttemptEvent, ctx: { source: 'api' | 'webhook' | 'sweep'; failureCode?: string; bookingReference: string }): Promise<PaymentStatus | null> {
+  async apply(tx: Tx, booking: LockedBooking, p: LockedPayment, event: AttemptEvent, ctx: { source: 'api' | 'webhook' | 'sweep'; failureCode?: string }): Promise<PaymentStatus | null> {
+    if (p.bookingId !== booking.id) throw new AppError('payment_lock_order', 'A payment can only change with its own booking locked');
+    const bookingReference = booking.reference;
     const to = nextStatus(p.status, event);
     if (!to) return null;
     const live = LIVE_STATUSES.includes(to);
@@ -123,9 +146,51 @@ export class PaymentStateMachine {
     }
     // An attempt that leaves the live states closes its "unresolved" task, whoever ended it (review round 3, point 1).
     if (LIVE_STATUSES.includes(from) && !live) await this.tasks.closeSystemIn(tx, `payments:unresolved:${p.id}`);
-    if (to === 'succeeded' && (from === 'failed' || from === 'cancelled' || from === 'expired')) await this.lateSuccess(tx, p, from, ctx.bookingReference);
-    if (to === 'succeeded') await this.checkOverpayment(tx, p, ctx.bookingReference);
+    if (to === 'succeeded' && (from === 'failed' || from === 'cancelled' || from === 'expired')) await this.lateSuccess(tx, p, from, bookingReference);
+    if (to === 'succeeded') {
+      await this.checkOverpayment(tx, p, bookingReference);
+      await this.applyCoverage(tx, booking, p);
+    }
+    if (LIVE_STATUSES.includes(from) && ENDED_WITHOUT_MONEY.includes(to)) await this.requeueApprovalExpiry(tx, booking);
     return to;
+  }
+
+  /**
+   * The coverage rule in the same transaction as the money (plan 0.1, 6.2; plan 3.2, section 1.4). If it fails, the
+   * whole change is undone: a database retry stays a retry, anything else becomes CoverageFailedError, which the callers
+   * turn into a task for Oscar (plan 3.2, section 11, point 8). Once recorded, an earlier such task is closed.
+   */
+  private async applyCoverage(tx: Tx, booking: LockedBooking, p: LockedPayment): Promise<void> {
+    try {
+      await this.coverage.apply(tx, booking, SYSTEM_ACTOR);
+    } catch (err) {
+      if (isRetryableTransactionError(err)) throw err;
+      throw new CoverageFailedError(p.id, err);
+    }
+    await this.tasks.closeSystemIn(tx, coverageTaskRef(p.id));
+  }
+
+  /**
+   * An attempt that ends without money on an approval past its time: the expiry is evaluated again by a job for that
+   * booking, after this commits (plan 0.1, 6.2 and 6.3: this transaction holds a payment and never locks stock after it).
+   */
+  private async requeueApprovalExpiry(tx: Tx, booking: LockedBooking): Promise<void> {
+    if (booking.status !== 'approved') return;
+    const [{ due }] = await tx.$queryRaw<Array<{ due: boolean }>>`SELECT "approvalExpiresAt" <= clock_timestamp() AS due FROM bookings WHERE id = ${booking.id}::uuid` as [{ due: boolean }];
+    if (!due) return;
+    const job = approvalExpiryJob(booking.id);
+    await this.jobs.send(QUEUES.bookingsMaintenance, job.data, { db: bossDb(tx), singletonKey: job.singletonKey });
+  }
+
+  /** Opens, in its own transaction, the task for a payment whose coverage could not be applied (plan 3.2, 11.8). */
+  async coverageFailed(db: { $transaction: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T> }, err: CoverageFailedError, reference: string): Promise<void> {
+    await db.$transaction(async (tx) => {
+      await this.tasks.createSystemIn(tx, {
+        title: `Payment could not be applied to booking ${reference}`,
+        description: 'A payment the gateway reports as collected could not move the booking along its payment states, so it is not recorded yet. Check the booking; the payment is retried once it is fixed.',
+        entityType: 'Payment', entityId: err.paymentId, sourceRef: coverageTaskRef(err.paymentId),
+      });
+    });
   }
 
   /**

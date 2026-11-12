@@ -9,6 +9,7 @@ export const BOOKINGS_PERMISSIONS = {
   approve: 'bookings.booking.approve',
   decline: 'bookings.booking.decline',
   cancel: 'bookings.booking.cancel',
+  confirm: 'bookings.booking.confirm',
 } as const;
 
 /** Task 2.5: the panel's customers, and notes and tags on bookings (the shared table tools of task 0.5). Not API key scopes either. */
@@ -27,6 +28,9 @@ export const BOOKING_EVENTS = {
   declined: 'bookings.booking.declined',
   cancelled: 'bookings.booking.cancelled',
   expired: 'bookings.booking.expired',
+  depositPaid: 'bookings.booking.deposit_paid',
+  confirmed: 'bookings.booking.confirmed',
+  balancePaid: 'bookings.booking.balance_paid',
 } as const;
 
 export const bookingsManifest = {
@@ -37,6 +41,9 @@ export const bookingsManifest = {
     def(BOOKINGS_PERMISSIONS.read, 'See booking requests and bookings with the customer contact, snapshots and held stock'),
     def(BOOKINGS_PERMISSIONS.approve, 'Approve a booking request'),
     def(BOOKINGS_PERMISSIONS.decline, 'Decline a booking request, which gives its stock and promo code back'),
+    // Confirming cannot be undone until refunds and penalties exist (cancelling a confirmed booking is a 409): step-up
+    // (plan 3.2, section 11, point 5).
+    def(BOOKINGS_PERMISSIONS.confirm, 'Confirm a booking whose deposit is paid (it then moves to balance paid if the balance is paid too); cannot be undone', true),
     def(BOOKINGS_PERMISSIONS.cancel, 'Cancel a request or an approved booking, which gives its stock and promo code back; cannot be undone', true),
     def(BOOKINGS_CRM_PERMISSIONS.annotate, 'Add notes and tags to a booking'),
     def(BOOKINGS_CRM_PERMISSIONS.customerRead, 'See customers with their contact details and history of bookings, quotes and emails'),

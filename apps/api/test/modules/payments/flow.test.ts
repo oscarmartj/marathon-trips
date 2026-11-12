@@ -425,7 +425,9 @@ describe('expiry and cancellation of attempts (plan 3.1, 5.3 and 14.3)', () => {
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
     const res = await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'x' });
     expect([res.status, res.body.code]).toEqual([409, 'cancellation_needs_payments']);
-    expect((await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe('approved');
+    // Task 3.2: the deposit now moves the booking on (coverage rule), and the cancellation still changes nothing.
+    expect((await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe(b.status);
+    expect(b.status).toBe('confirmed');
     expect((await t.prisma.paymentSchedule.findUniqueOrThrow({ where: { bookingId } })).version).toBe(1);
   });
 

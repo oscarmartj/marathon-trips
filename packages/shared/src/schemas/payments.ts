@@ -15,6 +15,8 @@ export const startPaymentSchema = z.strictObject({
   method: z.enum(PAYMENT_METHODS),
   /** Pay every active item up to this one (1 = the first). Absent: the first item not yet covered. */
   upToSequence: z.number().int().min(1).max(50).optional(),
+  /** Replace the live attempt (another method, say) once the gateway confirms it is cancelled (plan 3.2, section 4). */
+  replaceLiveAttempt: z.literal(true).optional(),
 });
 export type StartPayment = z.infer<typeof startPaymentSchema>;
 
@@ -26,6 +28,8 @@ export const paymentPlanItemViewSchema = z.object({
   sequence: z.number().int(),
   amountMinor: minor,
   dueDate: z.string(),
+  /** What the money collected covers of this item (plan 3.2, section 2). */
+  paidMinor: minor,
 });
 
 export const paymentAttemptViewSchema = z.object({
@@ -45,6 +49,10 @@ export const paymentPlanViewSchema = z.object({
   items: z.array(paymentPlanItemViewSchema),
   collectedMinor: minor,
   outstandingMinor: minor,
+  /** Collected beyond the plan: to be given back. */
+  overpaidMinor: minor,
+  /** While the booking waits for its deposit: the exact instant (ISO 8601) after which it can no longer be paid. */
+  depositDueBy: z.string().nullable(),
   nextPayable: z.object({ sequence: z.number().int(), amountMinor: minor }).nullable(),
   methods: z.array(z.enum(PAYMENT_METHODS)),
   liveAttempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),

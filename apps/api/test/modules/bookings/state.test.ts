@@ -278,7 +278,7 @@ describe('permissions and the panel', () => {
     const { bookingId } = await makeBookingFor(t, w);
     const routes = allRoutes(t.app).filter((r) => r.path.startsWith('/admin/bookings'));
     expect(routes.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
-      'GET /admin/bookings', 'GET /admin/bookings/:id', 'GET /admin/bookings/summary', 'POST /admin/bookings/:id/approve', 'POST /admin/bookings/:id/cancel', 'POST /admin/bookings/:id/decline',
+      'GET /admin/bookings', 'GET /admin/bookings/:id', 'GET /admin/bookings/summary', 'POST /admin/bookings/:id/approve', 'POST /admin/bookings/:id/cancel', 'POST /admin/bookings/:id/confirm', 'POST /admin/bookings/:id/decline',
     ]);
     for (const r of routes) {
       const path = r.path.replace(':id', bookingId);
@@ -298,11 +298,12 @@ describe('permissions and the panel', () => {
     expect((await staff.post(`/admin/bookings/${bookingId}/decline`, { version: 0, reason: 'Full' })).status).toBe(200);
   });
 
-  it('booking_permissions_not_api_key_scopable; only cancelling needs step-up', () => {
+  it('booking_permissions_not_api_key_scopable; only cancelling and confirming (task 3.2) need step-up', () => {
     const registry = t.app.get(PermissionRegistry);
     const defs = Object.values(BOOKINGS_PERMISSIONS).map((k) => registry.get(k)!);
     expect(defs.map((d) => [d.key, d.apiKeyScopable, d.requiresStepUp])).toEqual([
       ['bookings.booking.read', false, false], ['bookings.booking.approve', false, false], ['bookings.booking.decline', false, false], ['bookings.booking.cancel', false, true],
+      ['bookings.booking.confirm', false, true],
     ]);
   });
 

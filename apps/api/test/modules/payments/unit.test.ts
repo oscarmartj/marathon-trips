@@ -74,7 +74,9 @@ describe('no_surcharge_by_payment_method', () => {
     const amounts = PAYMENT_METHODS.map(() => payable([{ sequence: 1, amountMinor: 12345n }], 0n).next!.amountMinor);
     expect(new Set(amounts)).toEqual(new Set([12345n]));
     // The request body names a method and nothing that could carry a price difference.
-    expect(Object.keys(startPaymentSchema.shape).sort()).toEqual(['method', 'upToSequence']);
+    // Task 3.2 adds the replacement flag, a literal `true`: still nothing that could carry an amount.
+    expect(Object.keys(startPaymentSchema.shape).sort()).toEqual(['method', 'replaceLiveAttempt', 'upToSequence']);
+    expect(startPaymentSchema.safeParse({ method: 'card', replaceLiveAttempt: 1000 }).success).toBe(false);
   });
 });
 

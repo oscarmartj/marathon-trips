@@ -2,12 +2,15 @@
 export { BookingsModule } from './bookings.module';
 export { bookingsManifest, BOOKINGS_PERMISSIONS, BOOKINGS_CRM_PERMISSIONS, BOOKING_EVENTS } from './manifest';
 export { BookingTransitionHooks } from './hooks';
-export type { BookingHook, BookingHookContext, HookedBooking } from './hooks';
+export type { BookingHook, BookingHookContext, HookedBooking, HookedEvent, HookPhase } from './hooks';
+export { BookingCoverage, coverageEvents } from './coverage';
+export type { CoverageFacts } from './coverage';
+export { approvalExpiryJob } from './expiry.service';
 export { ownsBookingReference } from './ownership';
 export { readBookingForPayments } from './read';
-export type { BookingForPayments } from './read';
+export type { BookingForPayments, LockedBooking } from './read';
 export { BookingStateMachine, BOOKING_EVENT_TABLE, BOOKING_STATUS_PAIRS } from './state-machine';
-export type { BookingEvent } from './state-machine';
+export type { BookingEvent, CoverageEvent, StaffBookingEvent } from './state-machine';
 export { QuotedBookingService } from './quoted-booking.service';
 export type { AcceptedQuote, LockedQuoteCustomer } from './quoted-booking.service';
 export { todayInBrisbane, startOfDayInBrisbane } from './request.service';

@@ -7,6 +7,7 @@ import { CatalogueModule } from '../catalogue';
 import { PricingModule } from '../pricing';
 import { WaitlistModule } from '../waitlist';
 import { BookingAdminService } from './admin.service';
+import { BookingCoverage } from './coverage';
 import { BookingRequestsController, BookingsAdminController, CustomersAdminController } from './controllers';
 import { CustomerAdminService } from './customer-admin.service';
 import { QuotedBookingService } from './quoted-booking.service';
@@ -27,9 +28,9 @@ import { ReferenceGenerator } from './support';
   controllers: [BookingRequestsController, BookingsAdminController, CustomersAdminController],
   providers: [
     BookingRequestService, BookingStateMachine, BookingAdminService, BookingExpiryService, BookingTransitionHooks, CustomerService,
-    ReferenceGenerator, BookingRequestRateLimitGuard, CustomerAdminService, QuotedBookingService,
+    ReferenceGenerator, BookingRequestRateLimitGuard, CustomerAdminService, QuotedBookingService, BookingCoverage,
   ],
-  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator],
+  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage],
 })
 export class BookingsModule implements OnModuleInit {
   constructor(

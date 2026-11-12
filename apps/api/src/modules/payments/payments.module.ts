@@ -20,6 +20,7 @@ import { PaymentsMaintenanceService } from './core/maintenance.service';
 import { PaymentAdapterRegistry } from './core/registry';
 import { PaymentRouting } from './core/routing';
 import { PaymentScheduleService } from './core/schedule.service';
+import { PaymentCoverageService } from './core/coverage.service';
 import { definePaymentSettings } from './core/settings';
 import { WEBHOOK_MAX_BYTES, WEBHOOK_PATH_PREFIX, PaymentWebhooksService } from './core/webhooks.service';
 import { PAYMENT_ENTITIES } from './entities';
@@ -32,7 +33,7 @@ import { PaymentAttemptRateLimitGuard } from './rate-limit.guard';
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: () => new PaymentAdapterRegistry(ADAPTERS) },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
-    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard,
+    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, PaymentCoverageService,
   ],
   exports: [ProviderAccountsService, PaymentAttemptsService],
 })
@@ -43,16 +44,18 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(BookingTransitionHooks) private readonly hooks: BookingTransitionHooks,
     @Inject(PaymentScheduleService) private readonly schedule: PaymentScheduleService,
+    @Inject(PaymentCoverageService) private readonly coverage: PaymentCoverageService,
     @Inject(RawBodyRoutes) private readonly rawBody: RawBodyRoutes,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  /** Permissions, settings, entities, the booking hooks (the plan follows approval and cancellation) and the webhook bytes. */
+  /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
   onModuleInit(): void {
     this.permissions.register(paymentsManifest.permissions);
     definePaymentSettings(this.settings);
     for (const e of PAYMENT_ENTITIES) this.entities.register(e);
     this.schedule.register(this.hooks);
+    this.coverage.register(this.hooks);
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });
   }
 }

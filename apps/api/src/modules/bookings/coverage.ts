@@ -1,0 +1,58 @@
+import { Inject, Injectable } from '@nestjs/common';
+import type { BookingStatus } from '@mt/shared';
+import type { AuditActor } from '../../platform/audit/audit.service';
+import { notFound } from '../../platform/http/api-error';
+import { readBookingForPayments } from './read';
+import type { LockedBooking } from './read';
+import { BookingStateMachine } from './state-machine';
+import type { CoverageEvent } from './state-machine';
+import type { Tx } from './support';
+
+/** What the payments module knows about a booking's money (plan 3.2, section 1.1), computed with the booking locked. */
+export interface CoverageFacts {
+  depositCovered: boolean;
+  totalCovered: boolean;
+}
+
+/**
+ * The coverage rule C for money coming in (plan 0.1, 6.2; plan 3.2, section 1.2). Pure: from a status, the facts and
+ * the package's auto-confirmation, the coverage events to apply, in order. `deposit_paid` never jumps to
+ * `balance_paid`: without auto-confirmation it waits for Oscar even when the total is paid. The cells of money going
+ * out (balance_paid → confirmed, cancelled ↔ refunded, a deposit no longer covered) are parked with refunds (4.5).
+ */
+export function coverageEvents(status: BookingStatus, facts: CoverageFacts, autoConfirm: boolean): CoverageEvent[] {
+  const events: CoverageEvent[] = [];
+  let s = status;
+  if (s === 'approved' && facts.depositCovered) {
+    events.push('deposit_covered');
+    s = 'deposit_paid';
+    if (autoConfirm) {
+      events.push('auto_confirm');
+      s = 'confirmed';
+    }
+  }
+  if (s === 'confirmed' && facts.totalCovered) events.push('total_covered');
+  return events;
+}
+
+/**
+ * The only code that applies the coverage events (checked by a test): payments calls it, in the transaction where money
+ * came in or where the booking was approved or confirmed, with the booking already locked. Applying it twice changes
+ * nothing. Coverage events release no stock and no code, so a caller holding a payment lock never locks a pool after it.
+ */
+@Injectable()
+export class BookingCoverage {
+  constructor(@Inject(BookingStateMachine) private readonly machine: BookingStateMachine) {}
+
+  async apply(tx: Tx, booking: LockedBooking, facts: CoverageFacts, actor: AuditActor): Promise<BookingStatus> {
+    // Read again under the lock this transaction already holds: an earlier step may have moved it.
+    const b = await readBookingForPayments(tx, { id: booking.id }, true);
+    if (!b) throw notFound('booking_not_found', 'Booking not found');
+    let status = b.status;
+    for (const event of coverageEvents(b.status, facts, b.autoConfirmOnDeposit)) {
+      const r = await this.machine.transition(tx, b.id, event, { actor });
+      if (r.changed) status = r.to;
+    }
+    return status;
+  }
+}
