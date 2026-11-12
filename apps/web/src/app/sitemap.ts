@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { listAllRaces } from '@/lib/catalogue';
+import { DEDICATED_PAGE_PATHS, listPageSlugs } from '@/lib/content';
 import { publicRoutes } from '@/lib/routes';
 import { absoluteUrl } from '@/lib/site';
 
@@ -17,5 +18,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Only what the public catalogue API returns: draft and demo races and draft packages never reach the web app.
   // Race pages are the only catalogue pages listed; the package builder is an interactive tool and is marked noindex.
   const races = (await listAllRaces()).map((r) => ({ url: absoluteUrl(`/races/${r.slug}`) }));
-  return [...fixed, ...races];
+  // Pages staff publish in the content manager. A content outage leaves them out for a minute; it does not fail the sitemap.
+  // Pages with a route of their own in the code (about, terms...) are already listed above.
+  const pages = (await listPageSlugs()).filter((p) => !Object.hasOwn(DEDICATED_PAGE_PATHS, p.slug)).map((p) => ({ url: absoluteUrl(`/pages/${p.slug}`) }));
+  return [...fixed, ...pages, ...races];
 }

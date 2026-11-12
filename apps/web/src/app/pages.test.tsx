@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminRoutes, publicRoutes } from '@/lib/routes';
 import { SLUG, stubCatalogue } from '@/test/catalogue-fixtures';
 
-type PageModule = { default: (props: { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string>> }) => unknown };
+type PageModule = { default: (props: { params: Promise<{ slug: string; kind: string }>; searchParams: Promise<Record<string, string>> }) => unknown };
 
 // Catalogue pages read the public API; the tests give them a fixed answer. The edition and package parameters are what the builder page needs (other pages ignore them).
 beforeEach(() => {
@@ -15,7 +15,7 @@ afterEach(() => {
 
 async function render(file: string) {
   const mod = (await import(/* @vite-ignore */ `./${file.replace(/\.tsx$/, '')}`)) as PageModule;
-  const element = await mod.default({ params: Promise.resolve({ slug: SLUG }), searchParams: Promise.resolve({ edition: '2027', package: 'classic' }) });
+  const element = await mod.default({ params: Promise.resolve({ slug: SLUG, kind: 'pages' }), searchParams: Promise.resolve({ edition: '2027', package: 'classic' }) });
   return renderToStaticMarkup(element as never);
 }
 

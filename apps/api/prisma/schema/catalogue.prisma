@@ -156,6 +156,7 @@ model Race {
   claims         RaceClaim[]
   editions       RaceEdition[]
   alerts         AlertSubscription[]
+  contentGuides  ContentGuide[]
 
   @@unique([externalSource, externalId])
   @@index([status])

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
-import type { AuthContext, UserKind } from '../access/auth-context';
+import type { SessionAuth, UserKind } from '../access/auth-context';
 import type { AppConfig } from '../config/config';
 import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 import type { RequestMeta } from './request-meta';
@@ -46,7 +46,7 @@ export class SessionService {
   }
 
   /** The session for this cookie, if it is live, of this kind, and its user is active. Pushes the idle expiry forward. */
-  async authenticate(kind: UserKind, token: string | undefined, now: Date = new Date()): Promise<AuthContext | null> {
+  async authenticate(kind: UserKind, token: string | undefined, now: Date = new Date()): Promise<SessionAuth | null> {
     if (!looksLikeToken(token)) return null;
     const s = await this.prisma.session.findUnique({
       where: { tokenHash: tokenHash(token) },
@@ -58,7 +58,7 @@ export class SessionService {
       const idle = new Date(Math.min(now.getTime() + SESSION_LIFETIME[kind].idleMs, s.expiresAt.getTime()));
       await this.prisma.session.updateMany({ where: { id: s.id, revokedAt: null }, data: { lastSeenAt: now, idleExpiresAt: idle } });
     }
-    return { kind, userId: s.userId, sessionId: s.id, mfaVerifiedAt: s.mfaVerifiedAt };
+    return { via: 'session', kind, userId: s.userId, sessionId: s.id, mfaVerifiedAt: s.mfaVerifiedAt };
   }
 
   async revoke(db: Prisma.TransactionClient | PrismaService, sessionId: string, reason: RevokeReason): Promise<void> {

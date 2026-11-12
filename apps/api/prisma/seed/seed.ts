@@ -23,6 +23,8 @@ export async function seed(prisma: PrismaClient, appEnv: string, given?: AppConf
         }
         // 6.1: business modules with a flag are on in demo data (a missing flag is off everywhere else).
         await prisma.featureFlag.upsert({ where: { key: 'module.suppliers' }, create: { key: 'module.suppliers', enabled: true, description: 'Suppliers, contracts, contracted allotments and supplier cost prices' }, update: {} });
+        // 8.4: API keys and outgoing webhooks are on in demo data; off in production until switched on in the panel.
+        await prisma.featureFlag.upsert({ where: { key: 'module.integrations' }, create: { key: 'module.integrations', enabled: true, description: 'API keys and outgoing webhooks: off = no key authenticates and no webhook is sent' }, update: {} });
       },
     });
     // 0.3: a demo owner with random credentials, printed once and only in development (M11). Running the seed again

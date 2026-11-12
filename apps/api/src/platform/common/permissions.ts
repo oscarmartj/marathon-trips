@@ -14,11 +14,11 @@ export const COMMON_PERMISSIONS_KEYS = {
 const K = COMMON_PERMISSIONS_KEYS;
 
 export const COMMON_PERMISSIONS: readonly PermissionDef[] = [
-  { key: K.tableUse, module: 'common', description: 'Use the shared table tools (search, views, tags, notes); each table still needs its own permissions' },
+  { key: K.tableUse, module: 'common', description: 'Use the shared table tools (search, views, tags, notes); each table still needs its own permissions', apiKeyScopable: true },
   { key: K.tagManage, module: 'common', description: 'Create, rename, recolour and delete tags' },
   { key: K.viewManage, module: 'common', description: 'Share saved table views with other staff and manage shared views' },
-  { key: K.taskRead, module: 'common', description: 'See tasks' },
-  { key: K.taskWrite, module: 'common', description: 'Create and change manual tasks' },
+  { key: K.taskRead, module: 'common', description: 'See tasks', apiKeyScopable: true },
+  { key: K.taskWrite, module: 'common', description: 'Create and change manual tasks', apiKeyScopable: true },
   { key: K.taskDelete, module: 'common', description: 'Delete and restore tasks' },
   { key: K.taskExport, module: 'common', description: 'Export tasks to CSV' },
   { key: K.taskImport, module: 'common', description: 'Import tasks from CSV' },

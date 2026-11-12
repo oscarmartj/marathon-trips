@@ -7,7 +7,7 @@ export const alertsManifest = {
   /** alerts is a core module with no feature flag (plan 3.1). */
   flagKey: null,
   permissions: [
-    { key: ALERTS_PERMISSIONS.subscriptionRead, module: 'alerts', description: 'See how many people are subscribed to opening alerts for each race (counts only, never addresses)', requiresStepUp: false },
+    { key: ALERTS_PERMISSIONS.subscriptionRead, module: 'alerts', description: 'See how many people are subscribed to opening alerts for each race (counts only, never addresses)', requiresStepUp: false, apiKeyScopable: true },
   ] satisfies PermissionDef[],
   publishes: ['alerts.subscription.confirmed'],
   subscribes: ['catalogue.package.sale_status_changed'],

@@ -7,3 +7,5 @@ export * from './schemas/tables';
 export * from './schemas/pricing';
 export * from './schemas/alerts';
 export * from './schemas/suppliers';
+export * from './schemas/content';
+export * from './schemas/integrations';
