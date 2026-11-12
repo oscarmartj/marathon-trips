@@ -83,6 +83,7 @@ model Customer {
   promoRedemptions   PromoRedemption[]
   payments           Payment[]
   waitlistEntries    WaitlistEntry[]
+  complaints         Complaint[]
 
   @@unique([userId, userKind])
   @@map("customers")
@@ -165,6 +166,7 @@ model Booking {
   payments               Payment[]
   webhookEvents          WebhookEvent[]
   inventoryMovements     InventoryMovement[]
+  complaints             Complaint[]
 
   @@unique([id, currency])
   @@unique([id, customerId])

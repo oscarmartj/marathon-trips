@@ -16,3 +16,4 @@ export * from './schemas/payments';
 export * from './schemas/crm';
 export * from './schemas/templates';
 export * from './iso-countries';
+export * from './schemas/complaints';
