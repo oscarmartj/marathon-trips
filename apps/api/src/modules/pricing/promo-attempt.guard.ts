@@ -36,7 +36,12 @@ export class DistinctLimiter {
     this.entries = new Lru(10_000, windowMs);
   }
 
-  /** True when `value` was already seen for `key` in the window, or there is room for one more. */
+  /**
+   * True when `value` was already seen for `key` in the window, or there is room for one more. A value keeps the time
+   * it was first seen: once it leaves the window it frees its own slot, so the code a customer keeps using is counted
+   * again but always fits (at most max − 1 others can be left in the window). In memory: the 10 000 most recent keys,
+   * so a flood of addresses can empty it, and a block of addresses wider than a /64 is several keys (code review 2.2).
+   */
   allow(key: string, value: string, now: number = Date.now()): boolean {
     const recent = (this.entries.get(key, now) ?? []).filter((e) => e.at > now - this.windowMs);
     if (recent.some((e) => e.value === value)) {

@@ -1,6 +1,7 @@
 // Price rules and promo codes through HTTP and a real PostgreSQL (plan docs/plans/2.2-pricing-rules-promo-codes.md,
 // sections 3, 4, 7, 9, 11 and 15).
 import { randomInt } from 'node:crypto';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PRICING_PERMISSIONS as PP, QuoteService } from '../../../src/modules/pricing';
 import { price } from '../../../src/modules/pricing/engine';
@@ -99,6 +100,23 @@ describe('rules in the panel', () => {
     expect(created.changes).toMatchObject({ valueBps: { before: null, after: 1000 } });
     const log = await t.prisma.auditLog.findFirstOrThrow({ where: { action: 'pricing.rule.updated', entityId: r.id } });
     expect(log.changes).toMatchObject({ valueBps: { before: 1000, after: 2000 }, _reason: '[pii]' });
+  });
+
+  it('patch_partial_rule_keeps_the_rest: a PATCH changes only what it sends (code review G1)', async () => {
+    const validTo = new Date(Date.now() + 30 * 24 * 3_600_000).toISOString();
+    const r = await createRule(admin, { scopeType: 'package', packageId: w.pkg.id, appliesTo: 'participation', valueBps: 2000, priority: 7, stackable: true, conditions: { participationTypes: ['supporter'] }, validTo, enabled: true });
+    const kept = { appliesTo: 'participation', valueBps: 2000, priority: 7, stackable: true, conditions: { participationTypes: ['supporter'] }, validTo, per: 'booking', kind: 'custom' };
+    const paused = await admin.patch(`/admin/pricing/rules/${r.id}`, { enabled: false, version: r.version });
+    expect(paused.status).toBe(200);
+    expect(paused.body).toMatchObject({ ...kept, enabled: false, label: 'Test rule' });
+    const relabelled = await admin.patch(`/admin/pricing/rules/${r.id}`, { label: 'Supporters half price', enabled: true, version: paused.body.version });
+    expect(relabelled.body).toMatchObject({ ...kept, enabled: true, label: 'Supporters half price' });
+    // null clears a nullable field; the merged rule is checked as a whole
+    const open = await admin.patch(`/admin/pricing/rules/${r.id}`, { validTo: null, version: relabelled.body.version });
+    expect([open.body.validTo, open.body.priority]).toEqual([null, 7]);
+    const broken = await admin.patch(`/admin/pricing/rules/${r.id}`, { effectMode: 'fixed', version: open.body.version });
+    expect([broken.status, broken.body.code]).toEqual([422, 'rule_invalid']);
+    await must(admin.post(`/admin/pricing/rules/${r.id}/archive`, { version: open.body.version }), 'archive');
   });
 
   it('archived_rule_not_applied_and_frozen', async () => {
@@ -265,6 +283,19 @@ describe('promo codes', () => {
     await expect(sql(`DELETE FROM promo_codes WHERE id = $1::uuid`, c.id)).rejects.toThrow(/archived, never deleted/);
   });
 
+  it('patch_without_max_keeps_code_limits: pausing and resuming a code keeps its limits, validity, conditions and stacking (code review G1)', async () => {
+    const validTo = new Date(Date.now() + 30 * 24 * 3_600_000).toISOString();
+    const c = await createCode(admin, freshCode('SUMMER'), { scopeType: 'package', packageId: w.pkg.id, maxRedemptions: 100, maxPerCustomer: 1, validTo, conditions: { occupancies: [2] }, stackable: true });
+    const kept = { maxRedemptions: 100, maxPerCustomer: 1, validTo, conditions: { occupancies: [2] }, stackable: true, valueBps: 1000, appliesTo: 'subtotal' };
+    const paused = await admin.patch(`/admin/pricing/promo-codes/${c.id}`, { enabled: false, version: c.version });
+    expect(paused.status).toBe(200);
+    expect(paused.body).toMatchObject({ ...kept, enabled: false });
+    const resumed = await admin.patch(`/admin/pricing/promo-codes/${c.id}`, { enabled: true, version: paused.body.version });
+    expect(resumed.body).toMatchObject({ ...kept, enabled: true });
+    const unlimited = await admin.patch(`/admin/pricing/promo-codes/${c.id}`, { maxRedemptions: null, version: resumed.body.version });
+    expect([unlimited.body.maxRedemptions, unlimited.body.maxPerCustomer]).toEqual([null, 1]);
+  });
+
   it('promo_max_below_redeemed_rejected: 409 from the API, and the CHECK refuses it in SQL', async () => {
     const c = await createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id, maxRedemptions: 5 });
     await sql(`UPDATE promo_codes SET "redeemedCount" = 3 WHERE id = $1::uuid`, c.id);
@@ -334,6 +365,33 @@ describe('promo codes', () => {
       const panel = await preview(withCode(code));
       expect([panel.status, panel.body.code], code).toEqual([409, 'promo_code_misconfigured']);
     }
+  });
+
+  it('public_promo_config_error_reads_invalid: a package code in another currency and a code line above the limit, too', async () => {
+    const own = await pricedWorld(admin);
+    // only possible with the guard off (it refuses another currency for a package), as after a package changed currency
+    const nzd = freshCode();
+    const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await owner.connect();
+    try {
+      await owner.query('BEGIN');
+      await owner.query('ALTER TABLE "promo_codes" DISABLE TRIGGER "promo_codes_guard"');
+      await owner.query(`INSERT INTO promo_codes (id, code, label, "scopeType", "packageId", "effectMode", "valueMinor", currency, per, "appliesTo", enabled, "updatedAt")
+        VALUES ($1, $2, 'Other currency', 'package', $3, 'fixed', 5000, 'NZD', 'booking', 'subtotal', true, now())`, [crypto.randomUUID(), nzd, own.pkg.id]);
+      await owner.query('ALTER TABLE "promo_codes" ENABLE TRIGGER "promo_codes_guard"');
+      await owner.query('COMMIT');
+    } finally {
+      await owner.end();
+    }
+    const pub = await publicQuote(quoteBody(own, { promoCode: nzd }));
+    expect([pub.status, pub.body.promo, pub.body.totalMinor]).toEqual([200, { status: 'invalid' }, '132500']);
+    expect((await preview(quoteBody(own, { promoCode: nzd }))).body.code).toBe('promo_code_misconfigured');
+    // 100 % off rooms of A$2 000 000: a code line above the A$1 000 000 limit
+    await publishWith(admin, own.pkg.id, { ...own.rates, roomRates: own.rates.roomRates.map((r) => ({ ...r, pricePerPersonMinor: '100000000' })) });
+    const all = await createCode(admin, freshCode(), { scopeType: 'package', packageId: own.pkg.id, appliesTo: 'accommodation', valueBps: 10_000 });
+    const big = await publicQuote(quoteBody(own, { promoCode: all.code }));
+    expect([big.status, big.body.promo, big.body.totalMinor]).toEqual([200, { status: 'invalid' }, '200032500']);
+    expect((await preview(quoteBody(own, { promoCode: all.code }))).body.code).toBe('adjustment_above_limit');
   });
 
   it('promo code validity at the millisecond: validFrom included, validTo excluded (boundary_dates)', async () => {

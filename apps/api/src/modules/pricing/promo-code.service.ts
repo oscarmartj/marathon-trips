@@ -7,7 +7,7 @@ import type { AuditActor } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { PackagePricingReader } from '../catalogue';
-import { assertScope, assertValidAdjustment, effectData, isRedeemedCheckViolation, isUniqueViolation } from './adjustments';
+import { assertScope, assertValidAdjustment, defined, effectData, isRedeemedCheckViolation, isUniqueViolation, storedEffectInput } from './adjustments';
 import { toJson } from './rates';
 
 type Actor = AuditActor & { id: string };
@@ -81,24 +81,30 @@ export class PromoCodeService {
     return row;
   }
 
+  /** A partial update (code review G1): what is left out keeps its value; the merged code is validated as a whole. */
   async update(actor: Actor, id: string, input: z.infer<typeof updatePromoCodeSchema>) {
-    assertValidAdjustment({ ...input, kind: 'custom', direction: 'discount' }, 'promo');
+    const { version, reason, ...changes } = input;
     try {
       await this.prisma.$transaction(async (tx) => {
-        const before = await this.locked(tx, id, input.version);
+        const before = await this.locked(tx, id, version);
+        const merged = {
+          label: before.label, stackable: before.stackable, enabled: before.enabled, maxRedemptions: before.maxRedemptions, maxPerCustomer: before.maxPerCustomer,
+          ...storedEffectInput(before), ...defined(changes),
+        };
+        assertValidAdjustment({ ...merged, kind: 'custom', direction: 'discount' }, 'promo');
         // The row is locked, so redemptions wait; the CHECK is the safety net (plan 2.2, section 15, point 9).
-        if (input.maxRedemptions !== null && input.maxRedemptions < before.redeemedCount) throw belowRedeemed();
-        await assertScope(tx, this.catalogue, { ...before, currency: input.currency });
+        if (merged.maxRedemptions !== null && merged.maxRedemptions < before.redeemedCount) throw belowRedeemed();
+        await assertScope(tx, this.catalogue, { ...before, currency: merged.currency });
         const res = await tx.promoCode.updateMany({
-          where: { id, version: input.version, archivedAt: null },
+          where: { id, version, archivedAt: null },
           data: {
-            label: input.label, stackable: input.stackable, enabled: input.enabled, maxRedemptions: input.maxRedemptions, maxPerCustomer: input.maxPerCustomer,
-            ...effectData({ ...input, kind: 'custom', direction: 'discount' }), version: { increment: 1 },
+            label: merged.label, stackable: merged.stackable, enabled: merged.enabled, maxRedemptions: merged.maxRedemptions, maxPerCustomer: merged.maxPerCustomer,
+            ...effectData({ ...merged, kind: 'custom', direction: 'discount' }), version: { increment: 1 },
           },
         });
         if (res.count !== 1) throw versionConflict();
         const after = await tx.promoCode.findUniqueOrThrow({ where: { id } });
-        await this.audit.record(tx, { actor, action: 'pricing.promo_code.updated', entityType: 'PromoCode', entityId: id, reason: input.reason, before: toJson(before) as Record<string, unknown>, after: toJson(after) as Record<string, unknown> });
+        await this.audit.record(tx, { actor, action: 'pricing.promo_code.updated', entityType: 'PromoCode', entityId: id, reason, before: toJson(before) as Record<string, unknown>, after: toJson(after) as Record<string, unknown> });
       });
     } catch (err) {
       if (isRedeemedCheckViolation(err)) throw belowRedeemed();

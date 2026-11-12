@@ -150,6 +150,27 @@ export async function assertScope(tx: Tx, catalogue: PackagePricingReader, s: { 
   }
 }
 
+/** A field left out of an update keeps its value; `null` is a value (it clears a nullable field). */
+export function defined<T extends Record<string, unknown>>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+/**
+ * A stored rule or code in the shape of the input, so a partial update merges with it and the merged result is validated
+ * as a whole (plan 2.2, code review G1): a PATCH that leaves a field out never resets it.
+ */
+export const storedEffectInput = (row: Pick<PriceRule, 'conditions' | 'effectMode' | 'valueBps' | 'valueMinor' | 'currency' | 'per' | 'appliesTo' | 'validFrom' | 'validTo'>) => ({
+  conditions: row.conditions as RuleConditionsInput,
+  effectMode: row.effectMode,
+  valueBps: row.valueBps,
+  valueMinor: row.valueMinor === null ? null : row.valueMinor.toString(),
+  currency: row.currency as 'AUD' | null,
+  per: row.per,
+  appliesTo: row.appliesTo,
+  validFrom: row.validFrom === null ? null : row.validFrom.toISOString(),
+  validTo: row.validTo === null ? null : row.validTo.toISOString(),
+});
+
 /** What is stored for the effect, from the validated input. */
 export const effectData = (i: EffectInput) => ({
   conditions: i.conditions as Prisma.InputJsonValue,
@@ -163,10 +184,10 @@ export const effectData = (i: EffectInput) => ({
   validTo: i.validTo === null ? null : new Date(i.validTo),
 });
 
-/** True when a database error is the CHECK on a code's redemptions (23514, promo_codes_redeemed_check). */
+/** True when a database error is the CHECK on a code's redemptions, by its name (any other CHECK is not this one). */
 export function isRedeemedCheckViolation(err: unknown): boolean {
   const text = err instanceof Error ? `${err.message} ${JSON.stringify((err as { meta?: unknown }).meta ?? {})}` : '';
-  return /promo_codes_redeemed_check|23514/.test(text);
+  return /promo_codes_redeemed_check/.test(text);
 }
 
 /** True when a database error is a unique violation (P2002 or 23505). */

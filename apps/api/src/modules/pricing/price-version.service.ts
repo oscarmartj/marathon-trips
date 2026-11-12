@@ -32,12 +32,6 @@ async function databaseNow(tx: Tx): Promise<Date> {
   return (await tx.$queryRaw<Array<{ at: Date }>>`SELECT date_trunc('milliseconds', clock_timestamp()) AS at`)[0]!.at;
 }
 
-/** True when a database error is an EXCLUDE (overlapping published versions, 23P01). */
-function isExclusionViolation(err: unknown): boolean {
-  if (!(err instanceof Prisma.PrismaClientKnownRequestError) && !(err instanceof Prisma.PrismaClientUnknownRequestError)) return false;
-  return /23P01|exclusion constraint|price_versions_no_overlap/.test(`${JSON.stringify((err as { meta?: unknown }).meta ?? {})} ${err.message}`);
-}
-
 /** Price versions and their rates (plan 2.1, sections 1 and 12). Published rates are frozen by the database. */
 @Injectable()
 export class PriceVersionService {
@@ -181,58 +175,55 @@ export class PriceVersionService {
    * pricing.price_version.published event go in the same transaction.
    */
   async publish(actor: Actor, id: string, input: z.infer<typeof publishPriceVersionSchema>) {
-    try {
-      await this.prisma.$transaction(async (tx) => {
-        const peek = await tx.priceVersion.findUnique({ where: { id }, select: { packageId: true } });
-        if (!peek) throw notFound('price_version_not_found', 'Price version not found');
-        await lockPackage(tx, peek.packageId, 'update');
-        const v = await this.lockVersion(tx, id);
-        if (v.status !== 'draft') throw conflict('price_version_not_draft', 'Only a draft price version can be published');
-        if (v.version !== input.version) throw versionConflict();
-        const view = await this.packageOrNotFound(tx, v.packageId);
-        if (view.currency !== v.currency) throw conflict('currency_mismatch', 'The price version is in another currency');
-        const missing = missingRates(engineView(view), await loadRates(tx, id, v.currency));
-        if (missing.length > 0) throw conflict('price_version_incomplete', 'This version lacks rates for some rooms, travellers or extras');
-        // Read from the database clock after the locks (not now(), the start of the transaction, which may be before a
-        // lock wait), so the end of one version and the start of the next are the same instant.
-        const at = await databaseNow(tx);
-        const start = input.validFrom === undefined ? at : new Date(input.validFrom);
-        if (start.getTime() < at.getTime()) throw unprocessable('price_version_start_in_past', 'A price version cannot start in the past');
-        // Compare-and-set on the end of the timeline: of two drafts published at once, only one wins (M3).
-        const last = await lastPublished(tx, v.packageId);
-        if ((last?.id ?? null) !== input.replacesVersionId) throw conflict('current_version_changed', 'The prices changed since you looked. Reload and try again.');
-        if (last && start.getTime() <= last.validFrom!.getTime()) {
-          throw conflict('later_version_scheduled', 'A version is already scheduled to start later. Withdraw it first, or start this one after it.');
-        }
-        if (last) {
-          const closed = await tx.$executeRaw`UPDATE price_versions SET "validTo" = ${start}, "updatedAt" = ${at} WHERE id = ${last.id}::uuid AND status = 'published' AND "validTo" IS NULL`;
-          if (closed !== 1) throw conflict('current_version_changed', 'The prices changed since you looked. Reload and try again.');
-          await this.audit.record(tx, {
-            actor, action: 'pricing.price_version.closed', entityType: 'PriceVersion', entityId: last.id, reason: input.reason,
-            before: { validTo: null }, after: { validTo: start }, context: { successorVersionId: id },
-          });
-        }
-        const terms = pricedTermsOf(view);
-        const published = await tx.$executeRaw`
-          UPDATE price_versions SET status = 'published', "validFrom" = ${start}, "publishedAt" = ${at}, "publishedById" = ${actor.id}::uuid,
-            "pricedTerms" = ${JSON.stringify(terms)}::jsonb, version = version + 1, "updatedAt" = ${at}
-          WHERE id = ${id}::uuid AND status = 'draft' AND version = ${input.version}`;
-        if (published !== 1) throw versionConflict();
+    // The package lock and the compare-and-set on the end of the timeline leave the EXCLUDE nothing to catch here (code
+    // review 2.2, M4): it stays as the database's own guarantee, tested in SQL; a breach would be an unexpected 500.
+    await this.prisma.$transaction(async (tx) => {
+      const peek = await tx.priceVersion.findUnique({ where: { id }, select: { packageId: true } });
+      if (!peek) throw notFound('price_version_not_found', 'Price version not found');
+      await lockPackage(tx, peek.packageId, 'update');
+      const v = await this.lockVersion(tx, id);
+      if (v.status !== 'draft') throw conflict('price_version_not_draft', 'Only a draft price version can be published');
+      if (v.version !== input.version) throw versionConflict();
+      const view = await this.packageOrNotFound(tx, v.packageId);
+      if (view.currency !== v.currency) throw conflict('currency_mismatch', 'The price version is in another currency');
+      const missing = missingRates(engineView(view), await loadRates(tx, id, v.currency));
+      if (missing.length > 0) throw conflict('price_version_incomplete', 'This version lacks rates for some rooms, travellers or extras');
+      // Read from the database clock after the locks (not now(), the start of the transaction, which may be before a
+      // lock wait), so the end of one version and the start of the next are the same instant.
+      const at = await databaseNow(tx);
+      const start = input.validFrom === undefined ? at : new Date(input.validFrom);
+      if (start.getTime() < at.getTime()) throw unprocessable('price_version_start_in_past', 'A price version cannot start in the past');
+      // Compare-and-set on the end of the timeline: of two drafts published at once, only one wins (M3).
+      const last = await lastPublished(tx, v.packageId);
+      if ((last?.id ?? null) !== input.replacesVersionId) throw conflict('current_version_changed', 'The prices changed since you looked. Reload and try again.');
+      if (last && start.getTime() <= last.validFrom!.getTime()) {
+        throw conflict('later_version_scheduled', 'A version is already scheduled to start later. Withdraw it first, or start this one after it.');
+      }
+      if (last) {
+        const closed = await tx.$executeRaw`UPDATE price_versions SET "validTo" = ${start}, "updatedAt" = ${at} WHERE id = ${last.id}::uuid AND status = 'published' AND "validTo" IS NULL`;
+        if (closed !== 1) throw conflict('current_version_changed', 'The prices changed since you looked. Reload and try again.');
         await this.audit.record(tx, {
-          actor, action: 'pricing.price_version.published', entityType: 'PriceVersion', entityId: id, reason: input.reason,
-          before: { status: 'draft', validFrom: null }, after: { status: 'published', validFrom: start, pricedTerms: terms },
-          context: { previousVersionId: last?.id ?? null, scheduled: start.getTime() > at.getTime() },
+          actor, action: 'pricing.price_version.closed', entityType: 'PriceVersion', entityId: last.id, reason: input.reason,
+          before: { validTo: null }, after: { validTo: start }, context: { successorVersionId: id },
         });
-        await this.outbox.publish(tx, {
-          type: 'pricing.price_version.published', aggregateType: 'PriceVersion', aggregateId: id, aggregateVersion: input.version + 1,
-          payload: { priceVersionId: id, packageId: v.packageId, previousVersionId: last?.id ?? null, validFrom: start.toISOString() },
-          actorType: actor.type, actorId: actor.id,
-        });
+      }
+      const terms = pricedTermsOf(view);
+      const published = await tx.$executeRaw`
+        UPDATE price_versions SET status = 'published', "validFrom" = ${start}, "publishedAt" = ${at}, "publishedById" = ${actor.id}::uuid,
+          "pricedTerms" = ${JSON.stringify(terms)}::jsonb, version = version + 1, "updatedAt" = ${at}
+        WHERE id = ${id}::uuid AND status = 'draft' AND version = ${input.version}`;
+      if (published !== 1) throw versionConflict();
+      await this.audit.record(tx, {
+        actor, action: 'pricing.price_version.published', entityType: 'PriceVersion', entityId: id, reason: input.reason,
+        before: { status: 'draft', validFrom: null }, after: { status: 'published', validFrom: start, pricedTerms: terms },
+        context: { previousVersionId: last?.id ?? null, scheduled: start.getTime() > at.getTime() },
       });
-    } catch (err) {
-      if (isExclusionViolation(err)) throw conflict('price_version_overlap', 'Another version was published at the same time. Reload and try again.');
-      throw err;
-    }
+      await this.outbox.publish(tx, {
+        type: 'pricing.price_version.published', aggregateType: 'PriceVersion', aggregateId: id, aggregateVersion: input.version + 1,
+        payload: { priceVersionId: id, packageId: v.packageId, previousVersionId: last?.id ?? null, validFrom: start.toISOString() },
+        actorType: actor.type, actorId: actor.id,
+      });
+    });
     return this.get(id);
   }
 

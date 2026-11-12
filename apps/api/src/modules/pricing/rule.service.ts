@@ -7,7 +7,7 @@ import type { AuditActor } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { PackagePricingReader } from '../catalogue';
-import { MAX_RULES_PER_SCOPE, assertScope, assertValidAdjustment, effectData } from './adjustments';
+import { MAX_RULES_PER_SCOPE, assertScope, assertValidAdjustment, defined, effectData, storedEffectInput } from './adjustments';
 import { toJson } from './rates';
 
 type Actor = AuditActor & { id: string };
@@ -84,21 +84,27 @@ export class PriceRuleService {
     return row;
   }
 
+  /** A partial update (code review G1): what is left out keeps its value; the merged rule is validated as a whole. */
   async update(actor: Actor, id: string, input: z.infer<typeof updatePriceRuleSchema>) {
-    assertValidAdjustment(input, 'rule');
+    const { version, reason, ...changes } = input;
     await this.prisma.$transaction(async (tx) => {
-      const before = await this.locked(tx, id, input.version);
-      await assertScope(tx, this.catalogue, { ...before, currency: input.currency });
+      const before = await this.locked(tx, id, version);
+      const merged = {
+        label: before.label, kind: before.kind, direction: before.direction, priority: before.priority, stackable: before.stackable, enabled: before.enabled,
+        ...storedEffectInput(before), ...defined(changes),
+      };
+      assertValidAdjustment(merged, 'rule');
+      await assertScope(tx, this.catalogue, { ...before, currency: merged.currency });
       const res = await tx.priceRule.updateMany({
-        where: { id, version: input.version, archivedAt: null },
+        where: { id, version, archivedAt: null },
         data: {
-          label: input.label, kind: input.kind, direction: input.direction, priority: input.priority, stackable: input.stackable, enabled: input.enabled,
-          ...effectData(input), version: { increment: 1 },
+          label: merged.label, kind: merged.kind, direction: merged.direction, priority: merged.priority, stackable: merged.stackable, enabled: merged.enabled,
+          ...effectData(merged), version: { increment: 1 },
         },
       });
       if (res.count !== 1) throw versionConflict();
       const after = await tx.priceRule.findUniqueOrThrow({ where: { id } });
-      await this.audit.record(tx, { actor, action: 'pricing.rule.updated', entityType: 'PriceRule', entityId: id, reason: input.reason, before: toJson(before) as Record<string, unknown>, after: toJson(after) as Record<string, unknown> });
+      await this.audit.record(tx, { actor, action: 'pricing.rule.updated', entityType: 'PriceRule', entityId: id, reason, before: toJson(before) as Record<string, unknown>, after: toJson(after) as Record<string, unknown> });
     });
     return this.get(id);
   }

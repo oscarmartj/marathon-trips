@@ -42,6 +42,12 @@ describe('attemptKeyOf', () => {
     expect(l.allow('k', 'C', 1001)).toBe(true);
     expect(l.allow('other', 'Z', 40)).toBe(true);
   });
+
+  it('the code a customer keeps using always fits again once its first try leaves the window (code review M2)', () => {
+    const l = new DistinctLimiter(2, 1000);
+    expect([l.allow('k', 'MINE', 0), l.allow('k', 'OTHER', 500), l.allow('k', 'THIRD', 600)]).toEqual([true, true, false]);
+    expect([l.allow('k', 'MINE', 999), l.allow('k', 'MINE', 1001), l.allow('k', 'MINE', 1499)]).toEqual([true, true, true]);
+  });
 });
 
 describe('public_promo_attempts_limited_per_ip', () => {

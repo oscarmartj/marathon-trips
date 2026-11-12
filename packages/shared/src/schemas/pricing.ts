@@ -156,13 +156,16 @@ export type RuleConditionsInput = z.infer<typeof ruleConditionsSchema>;
 const instant = z.iso.datetime({ offset: true }).nullable();
 const label = z.string().trim().min(1).max(80);
 
-/** The effect shared by rules and codes; amounts and basis points are never negative, the direction gives the sign. */
+/**
+ * The effect shared by rules and codes; amounts and basis points are never negative, the direction gives the sign.
+ * No defaults here: creation adds them, and an update leaves out what it does not change (plan 2.2, code review G1).
+ */
 const effectFields = {
   effectMode: z.enum(EFFECT_MODES),
-  valueBps: z.number().int().min(0).max(MAX_SURCHARGE_BPS).nullable().default(null),
-  valueMinor: rateAmountSchema.nullable().default(null),
-  currency: z.enum(SUPPORTED_CURRENCIES).nullable().default(null),
-  per: z.enum(EFFECT_PER).default('booking'),
+  valueBps: z.number().int().min(0).max(MAX_SURCHARGE_BPS).nullable(),
+  valueMinor: rateAmountSchema.nullable(),
+  currency: z.enum(SUPPORTED_CURRENCIES).nullable(),
+  per: z.enum(EFFECT_PER),
   appliesTo: z.enum(RULE_TARGETS),
 };
 
@@ -176,41 +179,58 @@ const ruleFields = {
   label,
   kind: z.enum(RULE_KINDS),
   direction: z.enum(RULE_DIRECTIONS),
-  conditions: ruleConditionsSchema.default({}),
+  conditions: ruleConditionsSchema,
   ...effectFields,
-  priority: z.number().int().min(0).max(1000).default(100),
-  /** Conservative default: a rule combines with nothing that touches the same amounts unless asked to (plan 2.2, point 11). */
-  stackable: z.boolean().default(false),
+  priority: z.number().int().min(0).max(1000),
+  stackable: z.boolean(),
   enabled: z.boolean(),
+  validFrom: instant,
+  validTo: instant,
+};
+
+/** What creation fills in when a field is left out. Conservative: not stackable unless asked (plan 2.2, point 11). */
+const createDefaults = {
+  conditions: ruleFields.conditions.default({}),
+  valueBps: effectFields.valueBps.default(null),
+  valueMinor: effectFields.valueMinor.default(null),
+  currency: effectFields.currency.default(null),
+  per: effectFields.per.default('booking'),
+  stackable: ruleFields.stackable.default(false),
   validFrom: instant.default(null),
   validTo: instant.default(null),
 };
 
-export const createPriceRuleSchema = z.strictObject({ ...scopeFields, ...ruleFields, reason });
-/** Every editable field, as on creation; the scope never changes. */
-export const updatePriceRuleSchema = z.strictObject({ ...ruleFields, version: versionSchema, reason });
+export const createPriceRuleSchema = z.strictObject({ ...scopeFields, ...ruleFields, ...createDefaults, priority: ruleFields.priority.default(100), reason });
+/**
+ * A partial update: a field left out keeps its value, `null` clears a nullable one. The service merges with the stored
+ * rule and validates the result; the scope never changes.
+ */
+export const updatePriceRuleSchema = z.strictObject(ruleFields).partial().extend({ version: versionSchema, reason });
 export const archiveSchema = z.strictObject({ version: versionSchema, reason });
 
 const promoFields = {
   label,
-  conditions: ruleConditionsSchema.default({}),
+  conditions: ruleConditionsSchema,
   ...effectFields,
-  stackable: z.boolean().default(false),
+  stackable: z.boolean(),
   enabled: z.boolean(),
-  validFrom: instant.default(null),
-  validTo: instant.default(null),
-  maxRedemptions: z.number().int().min(1).max(1_000_000).nullable().default(null),
-  maxPerCustomer: z.number().int().min(1).max(1000).nullable().default(null),
+  validFrom: instant,
+  validTo: instant,
+  maxRedemptions: z.number().int().min(1).max(1_000_000).nullable(),
+  maxPerCustomer: z.number().int().min(1).max(1000).nullable(),
 };
 
 export const createPromoCodeSchema = z.strictObject({
   code: z.string().transform(normalisePromoCode).pipe(z.string().regex(PROMO_CODE_PATTERN)),
   ...scopeFields,
   ...promoFields,
+  ...createDefaults,
+  maxRedemptions: promoFields.maxRedemptions.default(null),
+  maxPerCustomer: promoFields.maxPerCustomer.default(null),
   reason,
 });
-/** Every editable field; the code text and the scope never change. */
-export const updatePromoCodeSchema = z.strictObject({ ...promoFields, version: versionSchema, reason });
+/** A partial update, like rules: what is left out keeps its value. The code text and the scope never change. */
+export const updatePromoCodeSchema = z.strictObject(promoFields).partial().extend({ version: versionSchema, reason });
 
 // ---- What the API answers ----
 
