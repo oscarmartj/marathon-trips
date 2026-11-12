@@ -4,6 +4,12 @@ import { localisedText } from '@/lib/catalogue';
 import { formatDate } from '@/lib/catalogue-format';
 import { t } from '@/lib/i18n';
 
+/**
+ * The last day the places are held: the Brisbane day of the instant just before the hold ends, so a hold that ends at
+ * 00:00 on the departure day reads as the day before, never as the departure day.
+ */
+export const lastHeldDay = (iso: string): string => dateInBrisbane(new Date(new Date(iso).getTime() - 1).toISOString());
+
 /** The calendar day of an instant in the business time zone (Australia/Brisbane, no daylight saving), as YYYY-MM-DD. */
 export const dateInBrisbane = (iso: string): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
@@ -36,7 +42,7 @@ export function RequestConfirmation({ view }: { view: RequestView }) {
           <div className="notice" role="status">
             <p>{t('bookingRequest.confirmation.notABooking')}</p>
             <p>{t('bookingRequest.confirmation.nothingCharged')}</p>
-            <p>{t('bookingRequest.confirmation.next', { date: formatDate(dateInBrisbane(view.requestExpiresAt)) })}</p>
+            <p>{t('bookingRequest.confirmation.next', { date: formatDate(lastHeldDay(view.requestExpiresAt)) })}</p>
           </div>
         ) : (
           <p className="notice" role="status">{t(`bookingRequest.status.${view.status}`)}</p>

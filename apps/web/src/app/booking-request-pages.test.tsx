@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { RequestConfirmation, dateInBrisbane, type RequestView } from '@/components/booking/request-confirmation';
+import { RequestConfirmation, dateInBrisbane, lastHeldDay, type RequestView } from '@/components/booking/request-confirmation';
 import { formatDate } from '@/lib/catalogue-format';
 
 const view = (over: Partial<RequestView> = {}): RequestView => ({
@@ -35,5 +35,12 @@ describe('confirmation page', () => {
     expect(text).toContain(formatDate('2026-11-19'));
     expect(text).not.toContain(formatDate('2026-11-18'));
     expect(text).not.toMatch(/email you/i);
+  });
+
+  it('a hold that ends at midnight in Brisbane on the departure day shows the day before as the last held day', () => {
+    expect(lastHeldDay('2026-11-18T14:00:00.000Z')).toBe('2026-11-18');
+    expect(lastHeldDay('2026-11-18T14:00:00.001Z')).toBe('2026-11-19');
+    const text = renderToStaticMarkup(<RequestConfirmation view={view({ requestExpiresAt: '2026-11-18T14:00:00.000Z', departureDate: '2026-11-19' })} />);
+    expect(text).toContain(`held until the end of ${formatDate('2026-11-18')}`);
   });
 });

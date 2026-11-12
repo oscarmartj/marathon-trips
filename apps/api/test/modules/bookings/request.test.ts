@@ -439,13 +439,21 @@ describe('failures write nothing', () => {
     const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
     await owner.connect();
     try {
+      // Atomic: if anything fails, the rollback leaves the trigger as it was.
+      await owner.query('BEGIN');
       await owner.query('ALTER TABLE price_versions DISABLE TRIGGER price_versions_successor');
       await owner.query(`UPDATE price_versions SET "validTo" = clock_timestamp() WHERE id = $1::uuid`, [w.versionId]);
-    } finally {
+      await owner.query('SET CONSTRAINTS ALL IMMEDIATE'); // run the other deferred checks now, so the table can be altered again
       await owner.query('ALTER TABLE price_versions ENABLE TRIGGER price_versions_successor');
+      await owner.query('COMMIT');
+    } catch (err) {
+      await owner.query('ROLLBACK');
+      throw err;
+    } finally {
+      const { rows } = await owner.query<{ tgenabled: string }>(`SELECT tgenabled FROM pg_trigger WHERE tgname = 'price_versions_successor' AND tgrelid = 'price_versions'::regclass`);
       await owner.end();
+      expect(rows).toEqual([{ tgenabled: 'O' }]);
     }
-    await new Promise((r) => setTimeout(r, 20));
     const c = await customerClient(t);
     const res = await c.request(requestBody(w));
     expect([res.status, res.body.code]).toEqual([409, 'no_current_price_version']);

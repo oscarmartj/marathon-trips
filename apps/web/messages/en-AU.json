@@ -2137,7 +2137,7 @@
       "statusHeading": "Your booking request",
       "notABooking": "We have your booking request. It is a request, not a confirmed booking.",
       "nothingCharged": "We have not charged you anything.",
-      "next": "We will check availability and be in touch. Your places are held until {date}.",
+      "next": "We will check availability and be in touch. Your places are held until the end of {date} (Brisbane time).",
       "reference": "Reference",
       "dates": "Dates",
       "dateRange": "{from} to {to}",
