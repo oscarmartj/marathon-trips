@@ -120,7 +120,7 @@ describe('quote summary, the API answer as sent', () => {
   });
 
   it('shows a promo status as the API reports it, and nothing when there is none', () => {
-    expect(html({ promo: { status: 'invalid' } })).toContain('That code is not valid.');
+    expect(html({ promo: { status: 'invalid' } })).toContain('That code can&#x27;t be applied to this booking.');
     expect(html({ promo: { status: 'none' } })).not.toContain('role="status"');
   });
 

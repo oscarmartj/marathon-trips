@@ -46,9 +46,14 @@ export async function currentOf(admin: Client, packageId: string): Promise<strin
   return (await must(admin.get(`/admin/pricing/packages/${packageId}/price-versions`), 'list versions')).body.currentId;
 }
 
-/** Publishes a draft over whatever is in force now. */
+/** The id of the last published version of a package's timeline (in force or scheduled), or null (2.2). */
+export async function lastOf(admin: Client, packageId: string): Promise<string | null> {
+  return (await must(admin.get(`/admin/pricing/packages/${packageId}/price-versions`), 'list versions')).body.lastId;
+}
+
+/** Publishes a draft now, after whatever is last in the package's timeline (in force, unless something is scheduled). */
 export const publishDraft = async (admin: Client, packageId: string, d: { id: string; version: number }): Promise<{ status: number; body: { code?: string; [k: string]: unknown } }> =>
-  admin.post(`/admin/pricing/price-versions/${d.id}/publish`, { version: d.version, replacesVersionId: await currentOf(admin, packageId) });
+  admin.post(`/admin/pricing/price-versions/${d.id}/publish`, { version: d.version, replacesVersionId: await lastOf(admin, packageId) });
 
 export async function publishWith(admin: Client, packageId: string, rates: RatesBody, label = 'Prices'): Promise<string> {
   const d = await draftWith(admin, packageId, rates, label);

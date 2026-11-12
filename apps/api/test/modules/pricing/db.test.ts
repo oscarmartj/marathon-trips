@@ -84,7 +84,8 @@ describe('no TRUNCATE, even for the owner role (BEFORE TRUNCATE triggers)', () =
 describe('published_versions_do_not_overlap', () => {
   it('a second published version over the same period is refused by the EXCLUDE constraint', async () => {
     const d = await draft();
-    await expect(sql(`UPDATE price_versions SET status = 'published', "validFrom" = now() WHERE id = $1::uuid`, d)).rejects.toThrow(/price_versions_no_overlap|exclusion|conflicting key/);
+    // pricedTerms: a published version always has its price terms (2.2), so only the EXCLUDE can refuse this one
+    await expect(sql(`UPDATE price_versions SET status = 'published', "validFrom" = now(), "pricedTerms" = '[]' WHERE id = $1::uuid`, d)).rejects.toThrow(/price_versions_no_overlap|exclusion|conflicting key/);
   });
   it('a draft cannot be published in the past', async () => {
     const d = await draft();

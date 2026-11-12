@@ -1,17 +1,21 @@
 import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PermissionRegistry } from '../../platform/access/permissions';
 import { CatalogueModule, CatalogueChangeGuards, PackageOpenGates } from '../catalogue';
-import { PricingAdminController, PricingPublicController } from './controllers';
+import { PricingAdjustmentsController, PricingAdminController, PricingPublicController } from './controllers';
 import { pricingManifest } from './manifest';
 import { PriceVersionService } from './price-version.service';
+import { PromoAttemptGuard } from './promo-attempt.guard';
+import { PromoCodeService } from './promo-code.service';
+import { PromoRedemptionService } from './promo-redemption.service';
 import { QuoteRateLimitGuard } from './quote-rate-limit.guard';
+import { PriceRuleService } from './rule.service';
 import { QuoteService } from './quote.service';
 
 @Module({
   imports: [CatalogueModule],
-  controllers: [PricingAdminController, PricingPublicController],
-  providers: [PriceVersionService, QuoteService, QuoteRateLimitGuard],
-  exports: [QuoteService],
+  controllers: [PricingAdminController, PricingAdjustmentsController, PricingPublicController],
+  providers: [PriceVersionService, QuoteService, QuoteRateLimitGuard, PromoAttemptGuard, PriceRuleService, PromoCodeService, PromoRedemptionService],
+  exports: [QuoteService, PromoRedemptionService, PromoAttemptGuard],
 })
 export class PricingModule implements OnModuleInit {
   constructor(

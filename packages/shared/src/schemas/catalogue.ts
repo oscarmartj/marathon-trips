@@ -116,7 +116,8 @@ export const updateEditionSchema = z.strictObject({
 const amountMinor = z
   .string()
   .regex(/^\d{1,12}$/)
-  .refine((s) => BigInt(s) <= MAX_DEPOSIT_MINOR, { message: 'Amount is above the allowed limit' });
+  // zod 4 runs every check, so the refinement must not trust the regex: BigInt('1.5') would throw (a 500, not a 422).
+  .refine((s) => /^\d{1,12}$/.test(s) && BigInt(s) <= MAX_DEPOSIT_MINOR, { message: 'Amount is above the allowed limit' });
 /** Fixed deposit (per person or per booking, in the package currency) or a percentage in basis points. */
 export const depositSchema = z.discriminatedUnion('mode', [
   z.strictObject({ mode: z.enum(['per_person', 'per_booking']), amountMinor }),

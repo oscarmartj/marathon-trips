@@ -229,6 +229,8 @@ model RaceEdition {
   /// @nopii timestamp
   updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
   packages          Package[]
+  priceRules        PriceRule[]
+  promoCodes        PromoCode[]
   pools             InventoryPool[]
   alerts            AlertSubscription[]
   supplierContracts SupplierContract[]
@@ -299,6 +301,8 @@ model Package {
   extras               Extra[]
   costItems            CostItem[]
   priceVersions        PriceVersion[]
+  priceRules           PriceRule[]
+  promoCodes           PromoCode[]
 
   @@unique([editionId, slug])
   @@unique([id, currency])
