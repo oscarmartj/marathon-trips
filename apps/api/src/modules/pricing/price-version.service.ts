@@ -257,6 +257,10 @@ export class PriceVersionService {
         throw conflict('price_version_starts_too_soon', 'This version starts too soon to be withdrawn');
       }
       const predecessor = await tx.priceVersion.findFirst({ where: { packageId: v.packageId, status: 'published', validTo: last.validFrom } });
+      // Archive first: reopening the predecessor while the withdrawn version is still published would overlap it (EXCLUDE).
+      // The check that the predecessor was reopened runs at commit.
+      const withdrawn = await tx.$executeRaw`UPDATE price_versions SET status = 'archived', "updatedAt" = ${at} WHERE id = ${id}::uuid AND status = 'published'`;
+      if (withdrawn !== 1) throw versionConflict();
       if (predecessor) {
         await tx.$executeRaw`UPDATE price_versions SET "validTo" = NULL, "updatedAt" = ${at} WHERE id = ${predecessor.id}::uuid AND status = 'published'`;
         await this.audit.record(tx, {
@@ -264,8 +268,6 @@ export class PriceVersionService {
           before: { validTo: last.validFrom }, after: { validTo: null }, context: { withdrawnVersionId: id },
         });
       }
-      const withdrawn = await tx.$executeRaw`UPDATE price_versions SET status = 'archived', "updatedAt" = ${at} WHERE id = ${id}::uuid AND status = 'published'`;
-      if (withdrawn !== 1) throw versionConflict();
       await this.audit.record(tx, {
         actor, action: 'pricing.price_version.withdrawn', entityType: 'PriceVersion', entityId: id, reason: input.reason,
         before: { status: 'published' }, after: { status: 'archived' }, context: { previousVersionId: predecessor?.id ?? null },

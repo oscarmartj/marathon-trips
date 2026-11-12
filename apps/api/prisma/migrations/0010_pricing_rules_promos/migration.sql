@@ -260,14 +260,17 @@ CREATE TRIGGER promo_redemptions_no_truncate BEFORE TRUNCATE ON "promo_redemptio
 
 -- ---- Price versions: scheduled versions, withdrawal and the price terms (plan 2.2, sections 5 and 6) ----
 -- Existing published versions get the price terms of the catalogue as it is, so a package on sale keeps passing the
--- open gate; the guard is off only for this statement. A package without extras gets [] (section 15, point 4).
+-- open gate; the guards are off only for this statement (the deferred successor check too, or its pending events would
+-- block turning them back on). A package without extras gets [] (section 15, point 4).
 ALTER TABLE "price_versions" DISABLE TRIGGER "price_versions_guard";
+ALTER TABLE "price_versions" DISABLE TRIGGER "price_versions_successor";
 UPDATE "price_versions" v SET "pricedTerms" = (
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'extraId', e."id", 'pricingUnit', e."pricingUnit"::text, 'mandatory', e."mandatory",
            'availableTo', CASE WHEN e."mandatory" THEN e."availableTo"::text ELSE NULL END) ORDER BY e."id"), '[]'::jsonb)
   FROM "extras" e WHERE e."packageId" = v."packageId" AND e."deletedAt" IS NULL)
 WHERE v."status" = 'published';
+ALTER TABLE "price_versions" ENABLE TRIGGER "price_versions_successor";
 ALTER TABLE "price_versions" ENABLE TRIGGER "price_versions_guard";
 
 -- A withdrawn version (published, never started, then archived) keeps its start and its terms; a discarded draft has none.
