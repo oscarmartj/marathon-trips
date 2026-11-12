@@ -9,7 +9,7 @@ import { ProviderGateway, modeForEnv } from '../../../src/modules/payments/core/
 import { PaymentRouting } from '../../../src/modules/payments/core/routing';
 import { PaymentScheduleService } from '../../../src/modules/payments/core/schedule.service';
 import { succeededPaymentsSource } from '../../../src/modules/payments/core/payable';
-import { SIMULATOR_CHECKOUT_ORIGIN } from '../../../src/modules/payments/adapters/simulator/simulator';
+import { SIMULATOR_CHECKOUT_PATH } from '../../../src/modules/payments/adapters/simulator/simulator';
 import { TestApp, makeApp } from '../../support/auth';
 import { ApiError, conflict } from '../../../src/platform/http/api-error';
 import { AppError } from '../../../src/platform/errors/safe-error';
@@ -155,7 +155,7 @@ describe('payment attempts (plan 3.1, section 5)', () => {
     const res = await c.pay(reference, { method: 'card' });
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ status: 'requires_action', method: 'card', amountMinor: b.depositMinor.toString(), currency: 'AUD' });
-    expect(res.body.nextAction.url.startsWith(`${SIMULATOR_CHECKOUT_ORIGIN}/`)).toBe(true);
+    expect(res.body.nextAction.url.startsWith(`${t.config.WEB_ORIGIN}${SIMULATOR_CHECKOUT_PATH}/`)).toBe(true);
     const [p] = await paymentsOf(bookingId);
     expect(p).toMatchObject({ attemptNumber: 1, idempotencyKey: `booking:${bookingId}:attempt:1`, mode: 'test', adapterKey: 'simulator', liveBookingId: bookingId });
     expect(p!.providerPaymentRef).toMatch(/^sim_pay_/);

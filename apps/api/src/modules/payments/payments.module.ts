@@ -9,7 +9,7 @@ import { SettingsService } from '../../platform/flags/flags.service';
 import { RawBodyRoutes } from '../../platform/http/raw-body';
 import { BookingTransitionHooks, BookingsModule } from '../bookings';
 import { PaymentAdminService } from './admin.service';
-import { ADAPTERS } from './adapters';
+import { createAdapters } from './adapters';
 import { PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
 import { ProviderAccountsService } from './core/accounts.service';
 import { PaymentStateMachine } from './core/attempt-state';
@@ -26,14 +26,18 @@ import { WEBHOOK_MAX_BYTES, WEBHOOK_PATH_PREFIX, PaymentWebhooksService } from '
 import { PAYMENT_ENTITIES } from './entities';
 import { paymentsManifest } from './manifest';
 import { PaymentAttemptRateLimitGuard } from './rate-limit.guard';
+import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
 
 @Module({
   imports: [AuthModule, CommonModule, BookingsModule],
-  controllers: [PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController],
+  // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
+  // the configuration is parsed from.
+  controllers: [PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
-    { provide: PaymentAdapterRegistry, useFactory: () => new PaymentAdapterRegistry(ADAPTERS) },
+    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters({ webOrigin: config.WEB_ORIGIN })), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, PaymentCoverageService,
+    SimulatorCheckoutService,
   ],
   exports: [ProviderAccountsService, PaymentAttemptsService],
 })
