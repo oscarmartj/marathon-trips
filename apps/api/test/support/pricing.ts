@@ -47,7 +47,7 @@ export async function currentOf(admin: Client, packageId: string): Promise<strin
 }
 
 /** Publishes a draft over whatever is in force now. */
-export const publishDraft = async (admin: Client, packageId: string, d: { id: string; version: number }) =>
+export const publishDraft = async (admin: Client, packageId: string, d: { id: string; version: number }): Promise<{ status: number; body: { code?: string; [k: string]: unknown } }> =>
   admin.post(`/admin/pricing/price-versions/${d.id}/publish`, { version: d.version, replacesVersionId: await currentOf(admin, packageId) });
 
 export async function publishWith(admin: Client, packageId: string, rates: RatesBody, label = 'Prices'): Promise<string> {

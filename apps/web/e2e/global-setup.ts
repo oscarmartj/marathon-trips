@@ -9,4 +9,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF = create();
   process.env.E2E_STAFF_2 = create();
   process.env.E2E_STAFF_3 = create();
+  process.env.E2E_STAFF_4 = create();
+  process.env.E2E_STAFF_5 = create();
 }

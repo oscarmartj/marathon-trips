@@ -6,7 +6,7 @@ import type {
 import type { ClaimKind, EditionStatus, RaceStatus } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { AuditService } from '../../platform/audit/audit.service';
-import type { AuditActor } from '../../platform/audit/audit.service';
+import type { AuditActor, AuditContext } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
@@ -51,15 +51,16 @@ export class RaceService {
   }
 
   async create(actor: Actor, input: z.infer<typeof createRaceSchema>) {
-    const { reason, ...data } = input;
-    const row = await orConflict('race_slug_taken', 'A race with this slug already exists', () =>
-      this.prisma.$transaction(async (tx) => {
-        const created = await tx.race.create({ data: { ...data, isDemo: false } });
-        await this.audit.record(tx, { actor, action: 'catalogue.race.created', entityType: 'Race', entityId: created.id, reason, after: view(created) });
-        return created;
-      }),
-    );
+    const row = await orConflict('race_slug_taken', 'A race with this slug already exists', () => this.prisma.$transaction((tx) => this.createIn(tx, actor, input)));
     return this.get(row.id);
+  }
+
+  /** Creates a draft race in the caller's transaction (also used by the CSV import). `isDemo` is never taken from input. */
+  async createIn(tx: Tx, actor: Actor, input: z.infer<typeof createRaceSchema>, context?: AuditContext) {
+    const { reason, ...data } = input;
+    const created = await tx.race.create({ data: { ...data, isDemo: false } });
+    await this.audit.record(tx, { actor, action: 'catalogue.race.created', entityType: 'Race', entityId: created.id, reason, after: view(created), context });
+    return created;
   }
 
   async update(actor: Actor, id: string, input: z.infer<typeof updateRaceSchema>) {

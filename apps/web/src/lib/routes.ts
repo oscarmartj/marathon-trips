@@ -33,7 +33,12 @@ export const publicRoutes: readonly RouteDef[] = [
 export const adminRoutes: readonly RouteDef[] = [
   { path: '/admin', file: 'admin/(panel)/page.tsx', labelKey: 'admin.nav.dashboard', nav: true },
   { path: '/admin/races', file: 'admin/(panel)/races/page.tsx', labelKey: 'admin.nav.races', nav: true },
+  { path: '/admin/races/[id]', file: 'admin/(panel)/races/[id]/page.tsx', labelKey: 'admin.nav.race' },
+  { path: '/admin/editions/[id]', file: 'admin/(panel)/editions/[id]/page.tsx', labelKey: 'admin.nav.edition' },
   { path: '/admin/packages', file: 'admin/(panel)/packages/page.tsx', labelKey: 'admin.nav.packages', nav: true },
+  { path: '/admin/packages/[id]', file: 'admin/(panel)/packages/[id]/page.tsx', labelKey: 'admin.nav.package' },
+  { path: '/admin/packages/[id]/preview', file: 'admin/(panel)/packages/[id]/preview/page.tsx', labelKey: 'admin.nav.packagePreview' },
+  { path: '/admin/hotels', file: 'admin/(panel)/hotels/page.tsx', labelKey: 'admin.nav.hotels', nav: true },
   { path: '/admin/bookings', file: 'admin/(panel)/bookings/page.tsx', labelKey: 'admin.nav.bookings', nav: true },
   { path: '/admin/tasks', file: 'admin/(panel)/tasks/page.tsx', labelKey: 'admin.nav.tasks', nav: true },
   { path: '/admin/customers', file: 'admin/(panel)/customers/page.tsx', labelKey: 'admin.nav.customers', nav: true },
