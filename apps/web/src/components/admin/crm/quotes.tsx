@@ -14,7 +14,8 @@ import { crmError, formatMoment, fullName, statusLabel } from './crm-kit';
 interface PackageRow {
   id: string;
   name: Record<string, string>;
-  edition: { year: number; race: { name: Record<string, string> } };
+  edition: { year: number };
+  race: { name: Record<string, string> };
 }
 interface PackageOptions {
   id: string;
@@ -80,7 +81,7 @@ export function NewQuoteForm({ customerId }: { customerId: string }) {
         <select id="quote-package" value={packageId} onChange={(e) => { setPackageId(e.target.value); setRoomId(''); setDistanceId(''); }}>
           <option value="">{t('admin.crm.quote.choose')}</option>
           {packages.data?.items.map((p) => (
-            <option key={p.id} value={p.id}>{t('admin.crm.quote.packageOption', { race: localisedText(p.edition.race.name), year: String(p.edition.year), name: localisedText(p.name) })}</option>
+            <option key={p.id} value={p.id}>{t('admin.crm.quote.packageOption', { race: localisedText(p.race.name), year: String(p.edition.year), name: localisedText(p.name) })}</option>
           ))}
         </select>
       </div>
