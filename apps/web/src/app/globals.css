@@ -139,3 +139,15 @@ img, svg { max-width: 100%; height: auto; }
 .panel { background: var(--color-surface); border: 2px solid var(--color-border); border-radius: var(--radius); padding: var(--space-6); }
 details > summary { cursor: pointer; font-weight: 600; min-height: 2.75rem; display: flex; align-items: center; }
 fieldset { border: 1px solid var(--color-border); border-radius: var(--radius); }
+
+/* Catalogue panel (task 1.2) */
+.field--check label { display: flex; gap: var(--space-2); align-items: center; }
+.field--check input { width: 1.5rem; height: 1.5rem; min-height: 0; }
+.field__hint { margin: 0; font-size: 0.9rem; color: var(--color-ink); }
+.badge { display: inline-block; padding: 0 var(--space-2); border: 2px solid var(--color-border); border-radius: var(--radius); font-size: 0.85rem; font-weight: 600; background: var(--color-surface); color: var(--color-ink); }
+.badge--warn { border-color: var(--color-primary); }
+.catalogue-form { max-width: 40rem; }
+.action { display: inline-flex; flex-direction: column; gap: var(--space-1); }
+.admin__main details { padding: var(--space-2) 0; }
+.admin__main summary { cursor: pointer; font-weight: 600; }
+.admin__main summary:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
