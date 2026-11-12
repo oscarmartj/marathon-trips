@@ -3,6 +3,7 @@ import { PrismaClient } from '../../src/generated/prisma/client';
 import { DEMO_OWNER_EMAIL, createEnrolledOwner, demoStaffAllowed } from '../../src/platform/auth/demo-staff';
 import { AppConfig, loadConfig } from '../../src/platform/config/config';
 import { PLATFORM_FLAGS } from '../../src/platform/flags/flag-registry';
+import { seedDemoCatalogue } from './demo-catalogue';
 
 /**
  * Idempotent demo seed. Refuses to run in production. Later tasks add their own named steps:
@@ -56,6 +57,8 @@ export async function seed(prisma: PrismaClient, appEnv: string, given?: AppConf
       }
     },
   });
+  // 1.5: fictitious races, hotels and packages, all flagged demo (never publishable; see demo-catalogue.ts).
+  steps.push({ name: 'demo-catalogue', run: () => seedDemoCatalogue(prisma) });
   }
   for (const step of steps) {
     const done = await prisma.seedRun.findUnique({ where: { name: step.name } });
