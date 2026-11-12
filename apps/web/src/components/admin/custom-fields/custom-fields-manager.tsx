@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES, type CustomFieldEntity, type CustomFieldType } from '@mt/shared';
 import { api, type ApiResult } from '@/lib/api-client';
 import {
@@ -58,6 +58,11 @@ export function CustomFieldsManager() {
   const { run: withStepUp, prompt } = useStepUp();
   const [ask, setAsk] = useState<PublishAsk | null>(null);
   const [askMessage, setAskMessage] = useState<string | null>(null);
+  const askRef = useRef<HTMLElement>(null);
+  // The question appears above the list; move focus to it so keyboard and screen reader users land on it.
+  useEffect(() => {
+    if (ask) askRef.current?.focus();
+  }, [ask]);
   const run = async (build: BodyResult, call: BodyCall, message: string) => {
     if (!build.ok) return { ok: false as const, message: t(`admin.customFields.formErrors.${build.code}`) };
     const out = await outcome(() => withStepUp(() => call(build.body)), message);
@@ -108,7 +113,7 @@ export function CustomFieldsManager() {
 
       {prompt}
       {ask ? (
-        <section className="card stack" aria-labelledby="cf-publish-title">
+        <section ref={askRef} tabIndex={-1} className="card stack" aria-labelledby="cf-publish-title">
           <h2 id="cf-publish-title">{t('admin.customFields.publish.title', { label: fieldLabel(ask.def) })}</h2>
           <p>
             {ask.records < 0

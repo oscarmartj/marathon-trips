@@ -20,8 +20,9 @@ export class CustomFieldsController {
     return this.fields.list(q);
   }
 
+  /** Counts records that hold a value (a supplier count included), so it is a managing permission, not a reading one. */
   @Get(':id/usage')
-  @RequirePermission(K.customFieldRead)
+  @RequirePermission(K.customFieldManage)
   usage(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.fields.usage(id);
   }

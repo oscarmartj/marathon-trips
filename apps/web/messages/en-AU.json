@@ -1409,7 +1409,7 @@
         "help": "Values saved while the field was internal are included. You will be asked for your authenticator code.",
         "confirm": "Show to customers",
         "cancel": "Keep it internal",
-        "confirmBelow": "Confirm below to make this field visible to customers."
+        "confirmBelow": "Confirm in the box above the list to make this field visible to customers."
       },
       "form": {
         "legend": "Custom fields",

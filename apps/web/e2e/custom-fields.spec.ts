@@ -105,6 +105,8 @@ test('custom_field_appears_in_form_filter_and_export', async ({ page }) => {
     await edit.getByLabel('Show to customers on the website').check();
     await edit.getByRole('button', { name: 'Save changes', exact: true }).click();
     const ask = page.getByRole('region', { name: /Show .*Start wave.* to customers\?/ });
+    await expect(ask).toBeFocused();
+    await expect(edit.getByText('Confirm in the box above the list to make this field visible to customers.')).toBeVisible();
     await expect(ask.getByText('1 record already holds a value for this field.')).toBeVisible();
     await ask.getByRole('button', { name: 'Keep it internal' }).click();
     await expect(ask).toHaveCount(0);

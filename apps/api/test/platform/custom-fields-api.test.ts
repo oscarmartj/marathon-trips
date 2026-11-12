@@ -152,7 +152,7 @@ describe('making a field visible to customers', () => {
     const hidden = await define('Race', 'pub', 'text');
     const race = await newRace({ [hidden.key]: 'written while internal' });
     const blocked = await manager.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: true, version: 0 });
-    expect(blocked.status).toBe(403);
+    expect([blocked.status, blocked.body.code]).toEqual([403, 'forbidden']);
     expect((await admin.get(`/admin/custom-fields/${hidden.id}/usage`)).status).toBe(200);
     const stillHidden = (await admin.get('/admin/custom-fields').query({ entityType: 'Race' })).body.items.find((d: { id: string }) => d.id === hidden.id);
     expect(stillHidden.visibleToCustomer).toBe(false);
@@ -164,7 +164,8 @@ describe('making a field visible to customers', () => {
     const fresh = await staffClient(t, [K.customFieldRead, K.customFieldManage, K.customFieldPublish]);
     const on = ok(await fresh.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: true, version: 0 }), 'publish');
     expect(on.body.visibleToCustomer).toBe(true);
-    expect(race.customFields).toEqual({ [hidden.key]: 'written while internal' });
+    const stored = ok(await admin.get(`/admin/catalogue/races/${race.id}`), 'race').body;
+    expect(stored.customFields).toEqual({ [hidden.key]: 'written while internal' });
 
     // Turning it off, or editing a field that is already visible, needs only manage; so does creating a visible one.
     const off = ok(await manager.patch(`/admin/custom-fields/${hidden.id}`, { visibleToCustomer: false, version: 1 }), 'hide');
@@ -179,11 +180,29 @@ describe('making a field visible to customers', () => {
     const f = await define('Race', 'back', 'text', { visibleToCustomer: true });
     const archived = ok(await manager.post(`/admin/custom-fields/${f.id}/archive`, { version: 0 }), 'archive').body;
     const blocked = await manager.post(`/admin/custom-fields/${f.id}/restore`, { version: archived.version });
-    expect(blocked.status).toBe(403);
+    expect([blocked.status, blocked.body.code]).toEqual([403, 'forbidden']);
     ok(await admin.post(`/admin/custom-fields/${f.id}/restore`, { version: archived.version }), 'restore');
     const h = await define('Race', 'backhid', 'text');
     const a2 = ok(await manager.post(`/admin/custom-fields/${h.id}/archive`, { version: 0 }), 'archive hidden').body;
     ok(await manager.post(`/admin/custom-fields/${h.id}/restore`, { version: a2.version }), 'restore hidden needs only manage');
+  });
+
+  it('the check uses the row as the change reads it: a field hidden a moment ago cannot be shown by a manager', async () => {
+    const manager = await staffClient(t, [K.customFieldRead, K.customFieldManage]);
+    const f = await define('Race', 'race', 'text', { visibleToCustomer: true });
+    const hid = ok(await admin.patch(`/admin/custom-fields/${f.id}`, { visibleToCustomer: false, version: 0 }), 'hide').body;
+    const show = await manager.patch(`/admin/custom-fields/${f.id}`, { visibleToCustomer: true, version: hid.version });
+    expect([show.status, show.body.code]).toEqual([403, 'forbidden']);
+    // The same race, truly concurrent: the manager retries with the version the hide will produce.
+    const g = await define('Race', 'race2', 'text', { visibleToCustomer: true });
+    const [hide, ...tries] = await Promise.all([
+      admin.patch(`/admin/custom-fields/${g.id}`, { visibleToCustomer: false, version: 0 }),
+      ...Array.from({ length: 6 }, () => manager.patch(`/admin/custom-fields/${g.id}`, { visibleToCustomer: true, version: 1 })),
+    ]);
+    expect(hide.status).toBe(200);
+    for (const r of tries) expect([403, 409]).toContain(r.status);
+    const row = await t.prisma.customFieldDefinition.findUniqueOrThrow({ where: { id: g.id } });
+    expect(row.visibleToCustomer).toBe(false);
   });
 
   it('the permission is never an API key scope and asks for step-up', () => {
@@ -192,7 +211,7 @@ describe('making a field visible to customers', () => {
     expect(def?.apiKeyScopable).not.toBe(true);
   });
 
-  it('usage counts the records holding a value, never the values, and needs the read permission', async () => {
+  it('usage counts the records holding a value, never the values, and needs the manage permission', async () => {
     const f = await define('Race', 'use', 'text');
     const none = ok(await admin.get(`/admin/custom-fields/${f.id}/usage`), 'usage').body;
     expect(none).toEqual({ records: 0 });
@@ -204,6 +223,12 @@ describe('making a field visible to customers', () => {
     expect(JSON.stringify(two)).not.toContain('secret');
     const nobody = await staffClient(t, []);
     expect((await nobody.get(`/admin/custom-fields/${f.id}/usage`)).status).toBe(403);
+    const reader = await staffClient(t, [K.customFieldRead]);
+    expect((await reader.get(`/admin/custom-fields/${f.id}/usage`)).status).toBe(403);
+    const sf = await define('Supplier', 'usesup', 'text');
+    await newSupplier({ [sf.key]: 'x' });
+    expect((await reader.get(`/admin/custom-fields/${sf.id}/usage`)).status).toBe(403);
+    expect(ok(await admin.get(`/admin/custom-fields/${sf.id}/usage`), 'supplier usage').body).toEqual({ records: 1 });
     expect((await admin.get('/admin/custom-fields/00000000-0000-4000-8000-000000000000/usage')).status).toBe(404);
   });
 });

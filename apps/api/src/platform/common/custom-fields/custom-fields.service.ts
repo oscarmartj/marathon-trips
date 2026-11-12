@@ -17,6 +17,8 @@ import { filterCondition, fromCsvCell, isBlank, ownValue, toCsvCell, validateVal
 type Actor = AuditActor & { id: string };
 type Db = Pick<Prisma.TransactionClient, 'customFieldDefinition'>;
 type Row = Prisma.CustomFieldDefinitionGetPayload<object>;
+/** A check on the row as a change reads it, inside the change's transaction. */
+type Guard = (before: Row, tx: Prisma.TransactionClient) => Promise<void>;
 
 /**
  * What each kind of record allows. Adding Customer, Traveller or Booking later is one line here plus the `customFields`
@@ -108,8 +110,8 @@ export class CustomFieldsService {
    * So it needs its own permission with a recent authenticator check (M12), on top of manage. Creating a visible field does
    * not (no record holds a value yet), and a field that was already visible changes nothing.
    */
-  private async assertMayPublish(auth: AuthContext): Promise<void> {
-    await this.access.assertPermission(this.prisma, auth, K.customFieldPublish);
+  private async assertMayPublish(db: Prisma.TransactionClient, auth: AuthContext): Promise<void> {
+    await this.access.assertPermission(db, auth, K.customFieldPublish);
   }
 
   /** How many records hold a value for a field: what making it visible would show. Counts, never values. */
@@ -123,11 +125,11 @@ export class CustomFieldsService {
 
   async update(actor: Actor, auth: AuthContext, id: string, input: UpdateCustomFieldInput) {
     const { version, reason, ...patch } = input;
-    if (patch.visibleToCustomer === true) {
-      const current = await this.prisma.customFieldDefinition.findUnique({ where: { id }, select: { visibleToCustomer: true } });
-      if (current && !current.visibleToCustomer) await this.assertMayPublish(auth);
-    }
-    return this.change(actor, id, version, reason, 'common.custom_field.updated', (before) => {
+    // Decided on the row as the transaction reads it (after the version check), never on an earlier read.
+    const guard: Guard = async (before, tx) => {
+      if (patch.visibleToCustomer === true && !before.visibleToCustomer) await this.assertMayPublish(tx, auth);
+    };
+    return this.change(actor, id, version, reason, 'common.custom_field.updated', guard, (before) => {
       const next = { required: patch.required ?? before.required, visibleToCustomer: patch.visibleToCustomer ?? before.visibleToCustomer, editableByCustomer: patch.editableByCustomer ?? before.editableByCustomer };
       this.checkFlags(before.entityType as CustomFieldEntity, next);
       const options = patch.options ?? (before.options as CustomFieldOption[] | null) ?? undefined;
@@ -147,26 +149,28 @@ export class CustomFieldsService {
   }
 
   archive(actor: Actor, id: string, input: { version: number; reason?: string }) {
-    return this.change(actor, id, input.version, input.reason, 'common.custom_field.archived', (before) => {
+    return this.change(actor, id, input.version, input.reason, 'common.custom_field.archived', undefined, (before) => {
       if (before.archivedAt) throw conflict('custom_field_already_archived', 'This custom field is already archived');
       return { archivedAt: new Date() };
     });
   }
 
   async restore(actor: Actor, auth: AuthContext, id: string, input: { version: number; reason?: string }) {
-    const current = await this.prisma.customFieldDefinition.findUnique({ where: { id }, select: { visibleToCustomer: true, archivedAt: true } });
-    if (current?.visibleToCustomer && current.archivedAt) await this.assertMayPublish(auth);
-    return this.change(actor, id, input.version, input.reason, 'common.custom_field.restored', (before) => {
+    const guard: Guard = async (before, tx) => {
+      if (before.visibleToCustomer && before.archivedAt) await this.assertMayPublish(tx, auth);
+    };
+    return this.change(actor, id, input.version, input.reason, 'common.custom_field.restored', guard, (before) => {
       if (!before.archivedAt) throw conflict('custom_field_not_archived', 'This custom field is not archived');
       return { archivedAt: null };
     });
   }
 
-  private async change(actor: Actor, id: string, version: number, reason: string | undefined, action: string, build: (before: Row) => Prisma.CustomFieldDefinitionUpdateManyMutationInput) {
+  private async change(actor: Actor, id: string, version: number, reason: string | undefined, action: string, guard: Guard | undefined, build: (before: Row) => Prisma.CustomFieldDefinitionUpdateManyMutationInput) {
     return this.prisma.$transaction(async (tx) => {
       const before = await tx.customFieldDefinition.findUnique({ where: { id } });
       if (!before) throw notFound('custom_field_not_found', 'Custom field not found');
       if (before.version !== version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
+      await guard?.(before, tx);
       const res = await tx.customFieldDefinition.updateMany({ where: { id, version }, data: { ...build(before), version: { increment: 1 } } });
       if (res.count !== 1) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
       const after = await tx.customFieldDefinition.findUniqueOrThrow({ where: { id } });
