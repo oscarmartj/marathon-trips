@@ -60,6 +60,8 @@ export interface TransitionInput {
   /** The version the panel read; absent for the expiry task. */
   version?: number;
   reason?: string;
+  /** Hours an approval lasts, when the caller already read the setting (a caller inside a transaction must not read it there). */
+  approvalHours?: number;
 }
 
 export type TransitionResult = { changed: true; from: BookingStatus; to: BookingStatus; at: Date } | { changed: false; status: BookingStatus };
@@ -81,7 +83,7 @@ export class BookingStateMachine {
   ) {}
 
   async transition(tx: Tx, bookingId: string, event: BookingEvent, input: TransitionInput): Promise<TransitionResult> {
-    const approvalHours = event === 'approve' ? await this.settings.get(BOOKING_SETTINGS.approvalExpiryHours.key, BOOKING_SETTINGS.approvalExpiryHours.fallback) : 0;
+    const approvalHours = event === 'approve' ? (input.approvalHours ?? (await this.settings.get(BOOKING_SETTINGS.approvalExpiryHours.key, BOOKING_SETTINGS.approvalExpiryHours.fallback))) : 0;
     const rows = await tx.$queryRaw<LockedBooking[]>`
       SELECT id, status::text AS status, version, "customerId", "packageId", "editionId", currency, "requestExpiresAt"
       FROM bookings WHERE id = ${bookingId}::uuid FOR UPDATE`;

@@ -47,6 +47,19 @@ describe('outbox (plan 4.5)', () => {
     });
   });
 
+  it('a delivery row that already exists does not undo the batch: the other events and consumers are still dispatched', async () => {
+    p.registry.register({ name: 'test-a', module: 'platform', events: ['testing.*'], whenDisabled: 'skip', handle: async () => undefined });
+    p.registry.register({ name: 'test-b', module: 'platform', events: ['testing.*'], whenDisabled: 'skip', handle: async () => undefined });
+    const first = await publish();
+    const second = await publish();
+    await p.prisma.eventDelivery.create({ data: { eventId: first.id, consumer: 'test-a' } });
+    await expect(p.events.dispatchPending()).resolves.toBeGreaterThanOrEqual(2);
+    for (const e of [first, second]) {
+      expect((await p.prisma.outboxEvent.findUniqueOrThrow({ where: { id: e.id } })).dispatchedAt).not.toBeNull();
+      expect((await p.prisma.eventDelivery.findMany({ where: { eventId: e.id } })).map((d) => d.consumer).sort()).toEqual(['test-a', 'test-b']);
+    }
+  });
+
   it('dispatches once per consumer, with one pg-boss job per delivery', async () => {
     p.registry.register({ name: 'test-a', module: 'platform', events: ['testing.*'], whenDisabled: 'skip', handle: async () => undefined });
     p.registry.register({ name: 'test-b', module: 'platform', events: ['testing.happened'], whenDisabled: 'skip', handle: async () => undefined });

@@ -26,6 +26,8 @@ export interface EnqueueMailInput {
 
 export type SendOutcome = 'sent' | 'suppressed' | 'noop' | 'failed';
 const MAX_ATTEMPTS = 5;
+/** A template throws this when the email must never go out (the person or the thing it is about is gone): failed at once, no retries. */
+export const MAIL_NOT_SENDABLE = 'mail_not_sendable';
 
 @Injectable()
 export class MailService {
@@ -112,7 +114,7 @@ export class MailService {
       if (!started) throw err;
       const info = safeError(err);
       const attempts = attemptsBefore + 1;
-      const failed = attempts >= MAX_ATTEMPTS || (err instanceof AppError && err.code === 'mail_template_not_registered');
+      const failed = attempts >= MAX_ATTEMPTS || (err instanceof AppError && (err.code === 'mail_template_not_registered' || err.code === MAIL_NOT_SENDABLE));
       await this.prisma.outboundEmail.updateMany({
         where: { id: outboundEmailId, status: 'queued' },
         data: { attempts, error: formatSafeError(info), ...(failed ? { status: 'failed' as const } : {}) },

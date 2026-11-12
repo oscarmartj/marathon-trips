@@ -57,7 +57,8 @@
     "alertsUnsubscribe": "Unsubscribe from alerts",
     "page": "Page",
     "bookingRequest": "Request a trip",
-    "bookingRequestSent": "Your booking request"
+    "bookingRequestSent": "Your booking request",
+    "quote": "Your quote"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -232,7 +233,11 @@
       "customFields": "Custom fields",
       "packagePrices": "Package prices",
       "priceVersion": "Price version",
-      "pricing": "Pricing rules"
+      "pricing": "Pricing rules",
+      "booking": "Booking",
+      "customer": "Customer",
+      "quotes": "Quotes",
+      "quote": "Quote"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -249,11 +254,11 @@
     },
     "bookings": {
       "title": "Bookings",
-      "intro": "Search and manage customer bookings."
+      "intro": "Requests from customers and the bookings that follow. Approve, decline or close a request, and keep notes for the team."
     },
     "customers": {
       "title": "Customers",
-      "intro": "Customer records and their trips."
+      "intro": "Customer records with their trips, quotes and emails."
     },
     "settings": {
       "title": "Settings",
@@ -1905,6 +1910,170 @@
         "edition_not_found": "That edition does not exist.",
         "deposit_not_configured": "Set the deposit on the package before it can open for booking."
       }
+    },
+    "crm": {
+      "errors": {
+        "version_conflict": "Someone else changed this. Reload the page and try again.",
+        "transition_not_allowed": "That is not possible in the current state.",
+        "customer_exists": "A customer with this email address already exists.",
+        "customer_closed": "This account is closed.",
+        "customer_not_found": "We could not find this customer.",
+        "booking_not_found": "We could not find this booking.",
+        "quote_not_found": "We could not find this quote.",
+        "package_departed": "This trip has already started.",
+        "package_not_open": "This package is not open for requests.",
+        "step_up_required": "Confirm with your authenticator code to continue."
+      },
+      "bookingStatus": {
+        "requested": "Requested",
+        "approved": "Approved",
+        "deposit_paid": "Deposit paid",
+        "confirmed": "Confirmed",
+        "balance_paid": "Paid in full",
+        "completed": "Completed",
+        "declined": "Declined",
+        "expired": "Expired",
+        "cancelled": "Closed",
+        "refunded": "Refunded"
+      },
+      "quoteStatus": {
+        "draft": "Draft",
+        "sent": "Sent",
+        "accepted": "Accepted",
+        "expired": "Expired",
+        "withdrawn": "Withdrawn"
+      },
+      "columns": {
+        "reference": "Reference",
+        "customer": "Customer",
+        "status": "Status",
+        "total": "Total",
+        "requested": "Requested"
+      },
+      "notes": {
+        "title": "Notes",
+        "empty": "No notes yet.",
+        "label": "Add a note",
+        "hint": "Notes are for the team only. Customers never see them.",
+        "add": "Add note",
+        "added": "Note added.",
+        "by": "{who}, {when}",
+        "you": "You",
+        "unknown": "Unknown"
+      },
+      "inbox": {
+        "searchLabel": "Search bookings",
+        "searchHint": "Part of a reference, a name or an email address (at least two characters).",
+        "search": "Search",
+        "tabsLabel": "Show bookings by state",
+        "tab": "{status} ({count})",
+        "tabAll": "All",
+        "caption": "Bookings, newest first",
+        "empty": "No bookings match.",
+        "previous": "Previous page",
+        "next": "Next page"
+      },
+      "booking": {
+        "title": "Booking",
+        "intro": "What was asked, what was priced, and what happens next.",
+        "summary": "Booking {reference}",
+        "dates": "Dates",
+        "dateRange": "{from} to {to}",
+        "deposit": "Deposit",
+        "depositLine": "{amount}, with the balance due by {date}",
+        "heldUntil": "Places held until",
+        "travellers": "Travellers",
+        "travellerCount": "{count} in {rooms} room(s)",
+        "actions": "Decide",
+        "reason": "Reason",
+        "reasonHint": "Required when declining or closing. The customer may see it in the email.",
+        "reasonRequired": "Add a reason first.",
+        "approve": "Approve request",
+        "decline": "Decline request",
+        "cancel": "Close booking",
+        "done": {
+          "approve": "Request approved. The customer has been emailed.",
+          "decline": "Request declined. The customer has been emailed.",
+          "cancel": "Booking closed. The customer has been emailed."
+        }
+      },
+      "customers": {
+        "searchLabel": "Search customers",
+        "empty": "No customers match.",
+        "caption": "Customers, newest first",
+        "bookings": "Bookings",
+        "add": "Add a customer",
+        "addHelp": "For someone who asked by phone or email. They link the record to their sign-in the first time they sign in with this address.",
+        "addSubmit": "Add customer"
+      },
+      "customer": {
+        "title": "Customer",
+        "intro": "Contact details and everything that has happened with this customer.",
+        "contact": "Contact",
+        "signedUp": "This customer has signed in.",
+        "notSignedUp": "This customer has not signed in yet.",
+        "emailLine": "Email address: {email}",
+        "save": "Save contact",
+        "fields": {
+          "email": "Email address",
+          "givenName": "Given name",
+          "familyName": "Family name",
+          "phone": "Phone",
+          "country": "Country of residence",
+          "countryHint": "Two-letter code, for example AU."
+        },
+        "bookings": "Bookings",
+        "noBookings": "No bookings yet.",
+        "quotes": "Quotes",
+        "noQuotes": "No quotes yet.",
+        "rowLine": "{name}, {status}, {total}",
+        "emails": "Emails",
+        "noEmails": "No emails yet.",
+        "emailRow": "{subject}, {status}, {when}",
+        "alerts": "Alerts",
+        "noAlerts": "No alerts.",
+        "alertRow": "{race}, {status}",
+        "anyRace": "Any race"
+      },
+      "quotes": {
+        "title": "Quotes",
+        "intro": "Prices prepared for a customer. A quote holds its price until it expires.",
+        "filter": "Show quotes",
+        "empty": "No quotes match.",
+        "caption": "Quotes, newest first"
+      },
+      "quote": {
+        "title": "Quote",
+        "intro": "The price as offered, and whether it can still be accepted.",
+        "summary": "Quote {reference}",
+        "new": "Prepare a quote",
+        "newHelp": "Choose the trip and who is travelling. The API prices it and keeps that price until the quote expires. It stays a draft until you send it.",
+        "package": "Package",
+        "choose": "Choose…",
+        "packageOption": "{race} {year}, {name}",
+        "room": "Room",
+        "roomOption": "{hotel}, {name} ({min} to {max} people)",
+        "travellers": "People in the room",
+        "participation": "They are",
+        "distance": "Race distance",
+        "types": {
+          "runner_with_entry": "Runners with an entry",
+          "runner_own_entry": "Runners with their own entry",
+          "supporter": "Supporters"
+        },
+        "nightsBefore": "Extra nights before",
+        "nightsAfter": "Extra nights after",
+        "validFor": "Valid for (days)",
+        "validForHint": "Leave blank to use the default. The quote never outlasts the day before departure.",
+        "validForLine": "{days} days from when it is sent",
+        "create": "Create draft",
+        "chooseFirst": "Choose a package, a room and who is travelling first.",
+        "expires": "Expires",
+        "notSent": "Not sent",
+        "booking": "Booking",
+        "send": "Send to customer",
+        "withdraw": "Withdraw quote"
+      }
     }
   },
   "auth": {
@@ -2167,6 +2336,40 @@
       "completed": "This trip has finished.",
       "refunded": "This booking was refunded.",
       "requested": "We have your request."
+    }
+  },
+  "quote": {
+    "title": "Your quote",
+    "notFoundTitle": "Your quote",
+    "notFoundBody": "We could not show this quote. Sign in with the email address we sent it to, then open the link again.",
+    "notABooking": "Accepting this quote asks us to hold these places for you. It is not a confirmed booking yet.",
+    "nothingCharged": "You will not be charged now.",
+    "stands": "This price stands until {when} (Brisbane time).",
+    "reference": "Reference",
+    "accept": "Accept this quote",
+    "accepting": "Accepting…",
+    "viewBooking": "View your booking",
+    "lines": {
+      "accommodation": "Accommodation",
+      "participation": "Race participation",
+      "extras": "Extras",
+      "surcharges": "Surcharges",
+      "discounts": "Discounts"
+    },
+    "status": {
+      "draft": "This quote is not available.",
+      "sent": "This quote can no longer be accepted.",
+      "accepted": "You have accepted this quote.",
+      "expired": "This quote has expired. Ask us for a new one.",
+      "withdrawn": "We have withdrawn this quote. Get in touch if you would like a new one."
+    },
+    "errors": {
+      "generic": "We could not accept this quote. Please try again.",
+      "signedOut": "Sign in again to accept this quote.",
+      "quote_expired": "This quote has expired. Ask us for a new one.",
+      "quote_not_available": "This quote can no longer be accepted.",
+      "busy": "We are busy. Please try again in a moment.",
+      "network": "We could not reach the server. Please try again."
     }
   }
 }

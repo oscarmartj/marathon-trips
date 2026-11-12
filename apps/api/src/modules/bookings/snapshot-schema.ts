@@ -74,3 +74,4 @@ export const snapshotBreakdownSchema = z.strictObject({
 });
 
 export type SnapshotBreakdown = z.infer<typeof snapshotBreakdownSchema>;
+export type SnapshotConfiguration = z.infer<typeof snapshotConfigurationSchema>;

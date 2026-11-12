@@ -11,6 +11,14 @@ export const BOOKINGS_PERMISSIONS = {
   cancel: 'bookings.booking.cancel',
 } as const;
 
+/** Task 2.5: the panel's customers, and notes and tags on bookings (the shared table tools of task 0.5). Not API key scopes either. */
+export const BOOKINGS_CRM_PERMISSIONS = {
+  annotate: 'bookings.booking.annotate',
+  customerRead: 'bookings.customer.read',
+  customerWrite: 'bookings.customer.write',
+  customerAnnotate: 'bookings.customer.annotate',
+} as const;
+
 const def = (key: string, description: string, requiresStepUp = false): PermissionDef => ({ key, module: 'bookings', description, requiresStepUp, apiKeyScopable: false });
 
 export const BOOKING_EVENTS = {
@@ -30,6 +38,10 @@ export const bookingsManifest = {
     def(BOOKINGS_PERMISSIONS.approve, 'Approve a booking request'),
     def(BOOKINGS_PERMISSIONS.decline, 'Decline a booking request, which gives its stock and promo code back'),
     def(BOOKINGS_PERMISSIONS.cancel, 'Cancel a request or an approved booking, which gives its stock and promo code back; cannot be undone', true),
+    def(BOOKINGS_CRM_PERMISSIONS.annotate, 'Add notes and tags to a booking'),
+    def(BOOKINGS_CRM_PERMISSIONS.customerRead, 'See customers with their contact details and history of bookings, quotes and emails'),
+    def(BOOKINGS_CRM_PERMISSIONS.customerWrite, 'Add a customer and change a customer\'s contact details'),
+    def(BOOKINGS_CRM_PERMISSIONS.customerAnnotate, 'Add notes and tags to a customer'),
   ] satisfies PermissionDef[],
   publishes: Object.values(BOOKING_EVENTS),
   subscribes: [] as string[],

@@ -42,6 +42,32 @@ export const listBookingsQuerySchema = z.strictObject({
   status: z.enum(BOOKING_STATUSES).optional(),
   packageId: uuidSchema.optional(),
   editionId: uuidSchema.optional(),
+  customerId: uuidSchema.optional(),
+  /** Task 2.5: part of a reference, a name or an email address. */
+  q: z.string().trim().min(2).max(100).optional(),
+  cursor: uuidSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(50),
+});
+
+// ---- Customers in the panel (task 2.5) ----
+
+/** Staff create a customer with an email address that no customer has yet; the person links it by signing in. */
+export const createCustomerSchema = z.strictObject({
+  email: z.string().trim().toLowerCase().email().max(254),
+  givenName: nameSchema,
+  familyName: nameSchema,
+  phone: z.string().trim().regex(/^\+?[0-9 ]{6,20}$/).optional(),
+  countryOfResidence: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+});
+export const updateCustomerSchema = z.strictObject({
+  givenName: nameSchema.optional(),
+  familyName: nameSchema.optional(),
+  phone: z.string().trim().regex(/^\+?[0-9 ]{6,20}$/).nullable().optional(),
+  countryOfResidence: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(),
+  version: versionSchema,
+});
+export const listCustomersQuerySchema = z.strictObject({
+  q: z.string().trim().min(2).max(100).optional(),
   cursor: uuidSchema.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(50),
 });
