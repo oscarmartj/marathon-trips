@@ -51,7 +51,7 @@ function RateCell({ cell, label, cells, editable, errors, onChange }: CellProps)
  * typed in dollars and sent as cents (see `cellsToBody`). While the version is a draft the tables are inputs; otherwise they
  * are plain text. What the saved version still lacks comes from the API.
  */
-export function RateEditor({ pkg, version, editable, onSaved, onDirty }: { pkg: PricedPackage; version: VersionDetail; editable: boolean; onSaved: AsyncAction; onDirty: SetFlag }) {
+export function RateEditor({ pkg, version, editable, onSaved, onReload, onDirty }: { pkg: PricedPackage; version: VersionDetail; editable: boolean; onSaved: AsyncAction; onReload: AsyncAction; onDirty: SetFlag }) {
   const shape = useMemo(() => rateShapeOf(pkg), [pkg]);
   const names = useMemo(() => namesOf(pkg), [pkg]);
   const saved = useMemo(() => (ratesToCells(version.rates)), [version]);
@@ -59,10 +59,13 @@ export function RateEditor({ pkg, version, editable, onSaved, onDirty }: { pkg: 
   const [errors, setErrors] = useState<Map<string, CellFailure>>(new Map());
   const [reason, setReason] = useState('');
   const runner = useRunner();
+  const [saving, setSaving] = useState(false);
   const dirty = editable && cellsDiffer(cells, saved);
   const missing = useMemo(() => (new Set(version.missing.map(missingCell))), [version]);
   const dropped = droppedRateCount(version.rates, shape);
   useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // When the saved prices arrive after our own save, show them in the saved form ("250" becomes "250.00") unless there is more typing since.
+  useEffect(() => setCells((prev) => (cellsDiffer(prev, saved) ? prev : saved)), [saved]);
 
   const change = (cell: string, text: string) => {
     setCells((prev) => ({ ...prev, [cell]: text }));
@@ -85,11 +88,14 @@ export function RateEditor({ pkg, version, editable, onSaved, onDirty }: { pkg: 
       return;
     }
     setErrors(new Map());
+    setSaving(true);
     const r = await runner.run(() => api(`/admin/pricing/price-versions/${version.id}/rates`, { method: 'PUT', body: result.body }), t('admin.pricing.editor.saved'));
+    // The screen keeps what was typed; the new version number arrives with the reload, and saving again waits for it.
     if (r) {
       setReason('');
       await onSaved();
     }
+    setSaving(false);
   }
 
   const errorCount = errors.size;
@@ -202,14 +208,14 @@ export function RateEditor({ pkg, version, editable, onSaved, onDirty }: { pkg: 
           <TextField id="rates-reason" label={t('admin.common.reason')} maxLength={500} value={reason} onChange={setReason} />
           {errorCount > 0 ? <p className="form-error" role="alert">{t('admin.pricing.editor.fixErrors', { count: errorCount })}</p> : null}
           <div className="actions">
-            <button className="btn" type="submit" disabled={runner.busy || !dirty}>
+            <button className="btn" type="submit" disabled={runner.busy || saving || !dirty}>
               {t('admin.pricing.editor.save')}
             </button>
             {dirty ? <span role="status">{t('admin.pricing.editor.unsaved')}</span> : null}
           </div>
           {runner.status}
           {isVersionConflict(runner.failure) ? (
-            <button type="button" className="link-button" onClick={() => void onSaved()}>
+            <button type="button" className="link-button" onClick={() => void onReload()}>
               {t('admin.pricing.common.reload')}
             </button>
           ) : null}

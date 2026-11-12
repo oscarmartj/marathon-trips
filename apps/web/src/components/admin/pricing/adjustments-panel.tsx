@@ -66,6 +66,7 @@ export function AdjustmentsPanel({ packageId, editionId }: { packageId?: string;
   const codes = useLoad<{ items: Row[] }>(`/admin/pricing/promo-codes?${query}`);
   const packagesLoad = useLoad<{ items: PackageRow[] }>('/admin/catalogue/packages?page=1&pageSize=50');
   const [editing, setEditing] = useState<{ audience: Audience; id: string } | null>(null);
+  const [epoch, setEpoch] = useState(0);
   const runner = useRunner();
 
   const { editions, packages } = useMemo(() => {
@@ -90,6 +91,11 @@ export function AdjustmentsPanel({ packageId, editionId }: { packageId?: string;
   const visible = (items: Row[] | undefined) => (items ?? []).filter((r) => scopeType === '' || r.scopeType === scopeType);
   const reloadAll = async () => {
     await Promise.all([rules.reload(), codes.reload()]);
+  };
+  // After someone else's change the form starts again from what is saved (a new key); after our own save it keeps what was typed.
+  const reloadFresh = async () => {
+    await reloadAll();
+    setEpoch((n) => n + 1);
   };
   const edited = editing ? (editing.audience === 'rule' ? rules.data : codes.data)?.items.find((r) => r.id === editing.id) : undefined;
 
@@ -214,8 +220,8 @@ export function AdjustmentsPanel({ packageId, editionId }: { packageId?: string;
       {editing && edited ? (
         <Section id="adjust-edit" title={t(`admin.pricing.form.${editing.audience}.editTitle`, { label: editing.audience === 'promo' ? (edited.code ?? edited.label) : edited.label })}>
           <AdjustmentFormView
-            key={`${edited.id}-${edited.version}`} audience={editing.audience} row={edited} editions={editionOptions} packages={packageOptions}
-            onSaved={reloadAll} onCancel={() => setEditing(null)}
+            key={`${edited.id}-${epoch}`} audience={editing.audience} row={edited} editions={editionOptions} packages={packageOptions}
+            onSaved={reloadAll} onReload={reloadFresh} onCancel={() => setEditing(null)}
           />
         </Section>
       ) : null}

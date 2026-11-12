@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isoToLocal, localToIso, sameInstant } from './panel-time';
+import { formatInstant, isoToLocal, localToIso, sameInstant } from './panel-time';
 
 describe('panel time', () => {
   it.each([
@@ -30,5 +30,11 @@ describe('panel time', () => {
     expect(sameInstant('2027-03-01T00:00:00.000Z', '2027-03-01T00:00:01.000Z')).toBe(false);
     expect(sameInstant(null, null)).toBe(true);
     expect(sameInstant(null, '2027-03-01T00:00:00.000Z')).toBe(false);
+  });
+  it('formats_an_instant_with_its_time_zone', () => {
+    expect(formatInstant('2027-03-01T00:00:00.000Z', 'Australia/Brisbane')).toMatch(/^1 Mar 2027,? 10:00\s?am (AEST|GMT\+10)$/i);
+    expect(formatInstant('2027-03-01T00:00:00.000Z', 'UTC')).toMatch(/12:00\s?am/i);
+    expect(formatInstant(null)).toBe('');
+    expect(formatInstant('')).toBe('');
   });
 });

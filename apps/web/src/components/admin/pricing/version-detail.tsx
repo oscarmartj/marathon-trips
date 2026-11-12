@@ -22,10 +22,17 @@ export function VersionDetailView({ packageId, versionId }: { packageId: string;
   const { data: list, reload: reloadList } = useLoad<VersionList>(`/admin/pricing/packages/${packageId}/price-versions`);
   const { data: rules } = useLoad<{ items: Array<{ id: string; label: string }> }>('/admin/pricing/rules?includeArchived=true');
   const [dirty, setDirty] = useState(false);
+  const [epoch, setEpoch] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
   const runner = useRunner();
   const refresh = useCallback(async () => {
     await Promise.all([reload(), reloadList()]);
   }, [reload, reloadList]);
+  // After someone else's change, the editor starts again from what is saved (a new key); after our own save it keeps what was typed.
+  const reloadFresh = useCallback(async () => {
+    await refresh();
+    setEpoch((n) => n + 1);
+  }, [refresh]);
 
   if (!version || !pkg || !list) return error || pkgError ? <Status message={error ?? pkgError} /> : <p role="status">{t('admin.common.loading')}</p>;
   if (version.packageId !== packageId) return <Status message={t('admin.pricing.errors.price_version_not_found')} />;
@@ -40,6 +47,7 @@ export function VersionDetailView({ packageId, versionId }: { packageId: string;
       <p>
         <Link href={base}>{t('admin.pricing.detail.back', { name: enAU(pkg.name) || pkg.slug })}</Link>
       </p>
+      {notice ? <p role="status" className="notice">{notice}</p> : null}
       <h2>{version.label}</h2>
       <p>
         {t(`admin.pricing.detail.phase.${phase}`)}
@@ -50,12 +58,12 @@ export function VersionDetailView({ packageId, versionId }: { packageId: string;
       {editable ? <Completeness pkg={pkg} version={version} dirty={dirty} /> : null}
 
       <Section id="rates" title={t('admin.pricing.detail.ratesTitle')}>
-        <RateEditor key={`${version.id}-${version.version}`} pkg={pkg} version={version} editable={editable} onSaved={refresh} onDirty={setDirty} />
+        <RateEditor key={`${version.id}-${epoch}`} pkg={pkg} version={version} editable={editable} onSaved={refresh} onReload={reloadFresh} onDirty={setDirty} />
       </Section>
 
       <PreviewPanel pkg={pkg} versions={list.items} defaultVersionId={version.id} rules={rules?.items ?? []} packageId={packageId} />
 
-      {editable ? <PublishPanel version={version} list={list} blocked={blocked} onDone={refresh} /> : null}
+      {editable ? <PublishPanel version={version} list={list} blocked={blocked} onReload={reloadFresh} onPublished={async (message) => { setNotice(message); await reloadFresh(); }} /> : null}
 
       {phase === 'scheduled' && version.id === list.lastId ? (
         <Section id="withdraw" title={t('admin.pricing.detail.withdrawTitle')}>

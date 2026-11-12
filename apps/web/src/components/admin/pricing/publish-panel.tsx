@@ -13,12 +13,15 @@ import { type AsyncAction, TextField, isVersionConflict, useRunner } from './pri
  * a fresh authenticator code. `replacesVersionId` is the last version of the timeline that was on screen: if someone published
  * since, the API says so (409) and nothing changes.
  */
-export function PublishPanel({ version, list, blocked, onDone }: { version: VersionDetail; list: VersionList; blocked: 'unsaved' | 'incomplete' | null; onDone: AsyncAction }) {
+interface Announce {
+  (message: string): Promise<void>;
+}
+
+export function PublishPanel({ version, list, blocked, onPublished, onReload }: { version: VersionDetail; list: VersionList; blocked: 'unsaved' | 'incomplete' | null; onPublished: Announce; onReload: AsyncAction }) {
   const [when, setWhen] = useState<'now' | 'later'>('now');
   const [start, setStart] = useState('');
   const [startError, setStartError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
-  const [done, setDone] = useState<string | null>(null);
   const runner = useRunner();
   const last = list.items.find((v) => v.id === list.lastId);
   const current = list.items.find((v) => v.id === list.currentId);
@@ -37,15 +40,11 @@ export function PublishPanel({ version, list, blocked, onDone }: { version: Vers
     setStartError(null);
     const body = { version: version.version, replacesVersionId: list.lastId, ...(validFrom ? { validFrom } : {}), ...(reason.trim() ? { reason: reason.trim() } : {}) };
     const r = await runner.run(() => api(`/admin/pricing/price-versions/${version.id}/publish`, { method: 'POST', body }));
-    if (r) {
-      setDone(validFrom ? t('admin.pricing.publish.scheduled', { when: formatInstant(validFrom) }) : t('admin.pricing.publish.published'));
-      await onDone();
-    }
+    if (r) await onPublished(validFrom ? t('admin.pricing.publish.scheduled', { when: formatInstant(validFrom) }) : t('admin.pricing.publish.published'));
   }
 
   return (
     <Section id="publish" title={t('admin.pricing.publish.title')}>
-      {done ? <p role="status" className="notice">{done}</p> : null}
       <p>{t('admin.pricing.publish.help')}</p>
       {current ? <p>{t('admin.pricing.publish.endsCurrent', { label: current.label })}</p> : <p>{t('admin.pricing.publish.noCurrent')}</p>}
       {last && last.id !== current?.id ? <p className="notice" role="note">{t('admin.pricing.publish.afterScheduled', { label: last.label, when: formatInstant(last.validFrom) })}</p> : null}
@@ -72,7 +71,7 @@ export function PublishPanel({ version, list, blocked, onDone }: { version: Vers
         </div>
         {runner.status}
         {isVersionConflict(runner.failure) ? (
-          <button type="button" className="link-button" onClick={() => void onDone()}>
+          <button type="button" className="link-button" onClick={() => void onReload()}>
             {t('admin.pricing.common.reload')}
           </button>
         ) : null}

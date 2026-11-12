@@ -40,8 +40,9 @@ export const sameInstant = (a: string | null | undefined, b: string | null | und
   return Date.parse(a) === Date.parse(b);
 };
 
-/** An instant for people: "1 Mar 2027, 9:30 am AEST" in the browser's time zone. */
-export function formatInstant(iso: string | null | undefined): string {
+/** An instant for people: "1 Mar 2027, 9:30 am AEST" in the browser's time zone (or the one given, for tests). */
+export function formatInstant(iso: string | null | undefined, timeZone?: string): string {
   if (!iso) return '';
-  return new Intl.DateTimeFormat('en-AU', { dateStyle: 'medium', timeStyle: 'short', timeZoneName: 'short' }).format(new Date(iso));
+  // dateStyle and timeStyle cannot be combined with timeZoneName, so the parts are named one by one.
+  return new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', timeZone }).format(new Date(iso));
 }

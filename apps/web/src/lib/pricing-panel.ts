@@ -201,10 +201,16 @@ export function cellsToBody(cells: Cells, shape: RateShape, version: number, rea
   return errors.length > 0 ? { ok: false, errors } : { ok: true, body };
 }
 
-/** True when the editor's cells differ from the saved ones (empty and missing count the same). */
+/** A cell for comparing: the cents of a valid amount ("250" and "250.00" are the same), else the trimmed text. */
+const canonicalCell = (text: string | undefined): string => {
+  const r = parseMoney(text ?? '');
+  return r.ok ? `m${r.minor}` : (text ?? '').trim();
+};
+
+/** True when the editor's cells differ from the saved ones (empty and missing count the same; "250" equals "250.00"). */
 export function cellsDiffer(a: Cells, b: Cells): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const k of keys) if ((a[k] ?? '').trim() !== (b[k] ?? '').trim()) return true;
+  for (const k of keys) if (canonicalCell(a[k]) !== canonicalCell(b[k])) return true;
   return false;
 }
 

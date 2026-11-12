@@ -169,6 +169,9 @@ describe('rate editor', () => {
     expect(cellsDiffer({ a: '1.00' }, { a: '1.00', b: '' })).toBe(false);
     expect(cellsDiffer({ a: '1.00' }, { a: '1.01' })).toBe(true);
     expect(cellsDiffer({}, { a: '0.00' })).toBe(true);
+    expect(cellsDiffer({ a: '250' }, { a: '250.00' })).toBe(false);
+    expect(cellsDiffer({ a: '$1,234.5' }, { a: '1234.50' })).toBe(false);
+    expect(cellsDiffer({ a: '12.345' }, { a: '12.34' })).toBe(true);
   });
 });
 

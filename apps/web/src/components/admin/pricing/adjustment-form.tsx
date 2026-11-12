@@ -32,13 +32,14 @@ const zone = (): string => {
  * that differ from the saved row, with its version number (the API keeps what is left out and refuses a stale version).
  * Percentages and dollars are turned into basis points and cents by cutting text; nothing is calculated here.
  */
-export function AdjustmentFormView({ audience, row, editions, packages, defaultScope, onSaved, onCancel }: {
+export function AdjustmentFormView({ audience, row, editions, packages, defaultScope, onSaved, onReload, onCancel }: {
   audience: Audience;
   row?: Record<string, unknown>;
   editions: ScopeOption[];
   packages: ScopeOption[];
   defaultScope?: { scopeType: string; scopeId: string };
   onSaved: AsyncAction;
+  onReload?: AsyncAction;
   onCancel?: Action;
 }) {
   const editing = row !== undefined;
@@ -206,7 +207,7 @@ export function AdjustmentFormView({ audience, row, editions, packages, defaultS
       {info ? <p role="status" className="notice">{info}</p> : null}
       {runner.status}
       {isVersionConflict(runner.failure) ? (
-        <button type="button" className="link-button" onClick={() => void onSaved()}>
+        <button type="button" className="link-button" onClick={() => void (onReload ?? onSaved)()}>
           {t('admin.pricing.common.reload')}
         </button>
       ) : null}
