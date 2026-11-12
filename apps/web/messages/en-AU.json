@@ -209,7 +209,9 @@
       "race": "Race",
       "edition": "Edition",
       "package": "Package",
-      "packagePreview": "Package preview"
+      "packagePreview": "Package preview",
+      "suppliers": "Suppliers",
+      "supplier": "Supplier"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -537,7 +539,26 @@
         "bad_amount": "Enter an amount greater than zero, with at most two decimals, such as 500 or 500.50.",
         "bad_percent": "Enter a percentage between 0.01 and 100, with at most two decimals.",
         "race_has_editions": "Delete or move the editions first.",
-        "inventory_unavailable": "Not enough places left."
+        "inventory_unavailable": "Not enough places left.",
+        "supplier_not_found": "That supplier could not be found.",
+        "contract_not_found": "That contract could not be found.",
+        "contact_not_found": "That contact could not be found.",
+        "allotment_not_found": "That allotment could not be found.",
+        "supplier_has_contracts": "Delete this supplier's contracts first.",
+        "supplier_has_costs": "Cancel this supplier's cost items first.",
+        "contract_has_allotments": "Delete or move the allotments of this contract first.",
+        "contract_has_costs": "Cancel the cost items of this contract first.",
+        "contract_reference_taken": "This supplier already has a contract with that reference.",
+        "contract_dates_invalid": "The contract start date cannot be after its end date.",
+        "contract_edition_mismatch": "Some allotments of this contract are for another edition.",
+        "contract_supplier_mismatch": "That contract belongs to another supplier.",
+        "pool_kind_not_allowed": "Only entry and room stock can be contracted.",
+        "pool_edition_mismatch": "That stock is for a different edition than the contract.",
+        "release_after_event": "The release date is after the race.",
+        "allotment_released": "A released allotment cannot be changed.",
+        "cost_not_editable": "A paid or called off cost item cannot be changed.",
+        "fixed_cost_quantity": "A fixed cost has a quantity of 1.",
+        "package_not_found": "That package could not be found."
       },
       "common": {
         "search": "Search",
@@ -934,6 +955,133 @@
           "none": "Sold out"
         }
       }
+    },
+    "suppliers": {
+      "title": "Suppliers",
+      "intro": "Hotels, ground operators and race organisers, their contracts, the places they hold for us and what they charge.",
+      "listTitle": "All suppliers",
+      "empty": "No suppliers yet.",
+      "newTitle": "Add a supplier",
+      "create": "Add supplier",
+      "created": "Supplier added.",
+      "summary": "{kind}, {country}, invoices in {currency}",
+      "detailTitle": "Supplier",
+      "detailIntro": "Contacts, contracts, contracted places and cost prices for this supplier.",
+      "detailsTitle": "Details",
+      "delete": "Delete this supplier",
+      "amountHint": "Enter the amount in the currency shown, for example 950.50.",
+      "kinds": {
+        "hotel": "Hotel",
+        "ground_operator": "Ground operator",
+        "race_organiser": "Race organiser",
+        "other": "Other"
+      },
+      "fields": {
+        "name": "Name",
+        "kind": "Type",
+        "countryCode": "Country code",
+        "countryHint": "Two letters, for example DK.",
+        "defaultCurrency": "Usual currency",
+        "currencyShort": "Currency",
+        "currencyHint": "Three letters, for example EUR.",
+        "paymentTerms": "Payment terms",
+        "notes": "Notes"
+      },
+      "errors": {
+        "bad_amount": "Enter the amount as a number with the right decimals for the currency, for example 950.50."
+      },
+      "releases": {
+        "title": "Release dates coming up",
+        "empty": "No allotments are due for release in the next 60 days.",
+        "line": "{quantity} places in {pool}, release on {date}. {left} still to sell.",
+        "overdue": "Overdue"
+      },
+      "contacts": {
+        "title": "Contacts",
+        "empty": "No contacts yet.",
+        "name": "Name",
+        "email": "Email",
+        "phone": "Phone",
+        "role": "Role",
+        "add": "Add contact",
+        "added": "Contact added.",
+        "delete": "Delete {name}"
+      },
+      "contracts": {
+        "title": "Contracts",
+        "empty": "No contracts yet.",
+        "reference": "Reference",
+        "editionId": "Edition ID (optional)",
+        "editionHint": "Copy it from the edition page address. Needed to contract places.",
+        "signedAt": "Signed on",
+        "validFrom": "Valid from",
+        "validTo": "Valid to",
+        "terms": "Terms",
+        "add": "Add contract",
+        "added": "Contract added.",
+        "edit": "Edit {reference}",
+        "delete": "Delete this contract",
+        "dates": "{from} to {to}"
+      },
+      "allotments": {
+        "title": "Contracted places",
+        "empty": "No contracted places yet.",
+        "contract": "Contract",
+        "pool": "Stock",
+        "choosePool": "Choose stock",
+        "poolOption": "{kind}: {label}",
+        "quantity": "Places",
+        "releaseDate": "Release date",
+        "unitCost": "Cost per place ({currency})",
+        "add": "Add contracted places",
+        "added": "Contracted places added.",
+        "release": "Release",
+        "delete": "Delete",
+        "needContract": "Add a contract first.",
+        "needEdition": "Link this contract to an edition to contract places.",
+        "noDate": "no release date",
+        "committed": "Committed cost: {amount}",
+        "kindsNote": "Contracted stock can be {kinds}. Releasing places does not change what the catalogue sells.",
+        "line": "{quantity} {kind} in {pool} under {contract}, {cost} each, release {date}",
+        "kinds": {
+          "room": "rooms",
+          "entry": "race entries"
+        },
+        "status": {
+          "held": "Held",
+          "released": "Released"
+        }
+      },
+      "costs": {
+        "title": "Cost prices",
+        "empty": "No cost items yet.",
+        "description": "Description",
+        "basis": "Counted per",
+        "quantity": "Quantity",
+        "unitAmount": "Amount per unit",
+        "dueDate": "Due date",
+        "contract": "Contract (optional)",
+        "add": "Add cost item",
+        "added": "Cost item added.",
+        "markDue": "Mark as due",
+        "markPlanned": "Mark as planned",
+        "cancel": "Call off",
+        "edit": "Edit {description}",
+        "line": "{description}: {quantity} at {unit}, total {total}, due {date}",
+        "summaryLine": "{status}: {amount}",
+        "bases": {
+          "per_person": "Per person",
+          "per_room": "Per room",
+          "per_booking": "Per booking",
+          "fixed": "Fixed"
+        },
+        "status": {
+          "planned": "Planned",
+          "due": "Due",
+          "paid": "Paid",
+          "cancelled": "Called off"
+        }
+      }
     }
   },
   "auth": {
@@ -1025,5 +1173,98 @@
       "invalid": "This unsubscribe link is not valid. Use the link in the latest email we sent you.",
       "browse": "Browse races"
     }
+  },
+  "builder": {
+    "packageHeading": "{package}",
+    "datesLine": "Check-in {checkIn}, check-out {checkOut} ({nights} nights)",
+    "notOpenTitle": "This package is not open for booking",
+    "notOpenBody": "You can look at the race page for other packages, or set up an alert to hear when one opens.",
+    "backToRace": "Back to the race page",
+    "unavailableTitle": "Package not found",
+    "needsScript": "The package builder needs JavaScript to work out your price. Please turn it on, or contact us and we will help.",
+    "noRooms": "This package has no rooms to choose from yet, so it cannot be priced.",
+    "roomsHeading": "Rooms and travellers",
+    "roomHeading": "Room {number}",
+    "roomChoice": "Room type",
+    "occupancy": "People in this room",
+    "travellerHeading": "Traveller {number}",
+    "participation": "Taking part as",
+    "distance": "Race distance",
+    "addRoom": "Add another room",
+    "removeRoom": "Remove room {number}",
+    "roomLimit": "You can add up to {max} rooms here. For larger groups, contact us.",
+    "travellerLimits": "This package takes {min} to {max} travellers in total.",
+    "availability": {
+      "low": "Limited availability",
+      "none": "Sold out"
+    },
+    "participationTypes": {
+      "runner_with_entry": "Runner with a race entry from us",
+      "runner_own_entry": "Runner with their own entry",
+      "supporter": "Supporter"
+    },
+    "nightsHeading": "Extra nights",
+    "nightsIntro": "Stay longer in the same room type before check-in or after check-out.",
+    "nightsBefore": "Extra nights before (up to {max})",
+    "nightsAfter": "Extra nights after (up to {max})",
+    "extrasHeading": "Extras",
+    "extrasIncluded": "Included in every booking",
+    "extrasOptional": "Optional extras",
+    "extrasNone": "This package has no optional extras.",
+    "extraForWho": "Who takes {name}?",
+    "extraQuantity": "{name}: how many",
+    "extraQuantityMax": "Up to {max}",
+    "audience": {
+      "runners": "For runners only",
+      "supporters": "For supporters only"
+    },
+    "resultHeading": "Your price",
+    "updating": "Updating your price…",
+    "total": "Total",
+    "deposit": "Deposit to confirm",
+    "balance": "Balance",
+    "balanceDue": "Balance due by {date}",
+    "payInFull": "This package is payable in full when you book.",
+    "currencyNote": "All prices are in {currency}.",
+    "includesAll": "The total includes every mandatory part of the package.",
+    "breakdownHeading": "Breakdown",
+    "subtotals": {
+      "accommodation": "Accommodation",
+      "participation": "Race entries and participation",
+      "extras": "Extras",
+      "subtotal": "Subtotal"
+    },
+    "perTravellerHeading": "Per traveller",
+    "travellerLabel": "Traveller {number}",
+    "line": {
+      "room": "{room}",
+      "extraNights": "Extra nights in {room} ({quantity})",
+      "participation": "{kind}",
+      "participationDistance": "{kind}, {distance}",
+      "extra": "{name}",
+      "extraQuantity": "{name} x {quantity}",
+      "discount": "Discount",
+      "surcharge": "Surcharge",
+      "promo": "Promotion",
+      "capped": "Limited so that discounts never take more than the price",
+      "forTraveller": "Traveller {number}"
+    },
+    "promo": {
+      "none": "",
+      "applied": "A promotion has been applied.",
+      "not_combinable": "That promotion cannot be combined with the other offers on this booking.",
+      "conditions_not_met": "That promotion does not apply to this booking.",
+      "invalid": "That code is not valid."
+    },
+    "requestNote": "Showing a price does not hold your places. Nothing is booked until we confirm it with you.",
+    "errors": {
+      "network": "We could not reach the pricing service. Check your connection; we will try again when you change a choice.",
+      "notOpen": "This package is no longer open for booking.",
+      "notReady": "Prices for this package are not ready yet. Please check back soon or contact us.",
+      "unavailable": "That combination is not available. Try changing the rooms, travellers, nights or extras.",
+      "tooMany": "You are changing choices very quickly. Please wait a moment and try again.",
+      "generic": "Something went wrong working out your price. Please try again."
+    },
+    "adjustments": "Surcharges and discounts"
   }
 }

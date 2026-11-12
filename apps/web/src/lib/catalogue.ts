@@ -10,6 +10,23 @@ export interface RaceSummary {
 export interface PackageSummary { id: string; slug: string; name: Record<string, string>; saleStatus: string; checkInDate: string; checkOutDate: string; currency: string; guaranteedEntry: boolean }
 export interface EditionDetail extends EditionSummary { notes: Record<string, string>; packages: PackageSummary[] }
 export interface RaceDetail extends Omit<RaceSummary, 'editions'> { editions: EditionDetail[] }
+export type Availability = 'available' | 'low' | 'none';
+export interface PackageRoom { id: string; roomType: string; name: Record<string, string>; minOccupancy: number; maxOccupancy: number; availability: Availability }
+export interface PackageHotel { id: string; name: string; address: string; city: string; countryCode: string; starRating: number | null; description: Record<string, string>; rooms: PackageRoom[] }
+export interface PackageExtra {
+  id: string; kind: string; name: Record<string, string>; description: Record<string, string>; pricingUnit: 'per_person' | 'per_booking';
+  availableTo: 'all' | 'runners' | 'supporters'; mandatory: boolean; maxPerBooking: number | null; availability: Availability;
+}
+export interface PackageEntry { id: string; distance: Distance; availability: Availability }
+/** One package as the public catalogue API returns it (apps/api/src/modules/catalogue/public.service.ts, packageView). */
+export interface PackageDetail {
+  id: string; slug: string; name: Record<string, string>; saleStatus: string; currency: string;
+  race: { slug: string; name: Record<string, string>; claims: string[] };
+  edition: { year: number; startDate: string | null; dateStatus: string; dateConfirmed: boolean };
+  checkInDate: string; checkOutDate: string; nights: number; includes: Record<string, string>; excludes: Record<string, string>;
+  instantBooking: boolean; balanceDueDate: string | null; minTravellers: number; maxTravellers: number; maxExtraNightsBefore: number; maxExtraNightsAfter: number;
+  participation: string[]; guaranteedEntry: boolean; entries: PackageEntry[]; hotels: PackageHotel[]; extras: PackageExtra[];
+}
 export interface RaceSearchResult { items: RaceSummary[]; page: number; pageSize: number; total: number }
 
 /** The filters of the race finder. Each one maps to a query parameter the API understands. */
@@ -82,6 +99,9 @@ export async function searchRaces(filters: RaceFilters): Promise<RaceSearchResul
 }
 
 export const getRace = (slug: string): Promise<RaceDetail | null> => getJson<RaceDetail>(`/catalogue/races/${encodeURIComponent(slug)}`);
+
+export const getPackage = (raceSlug: string, year: number, packageSlug: string): Promise<PackageDetail | null> =>
+  getJson<PackageDetail>(`/catalogue/races/${encodeURIComponent(raceSlug)}/editions/${year}/packages/${encodeURIComponent(packageSlug)}`);
 
 /** Slugs to build at deploy time. If the API is not up yet the list is empty and pages are built on first request instead. */
 export async function listRaceSlugs(): Promise<string[]> {
