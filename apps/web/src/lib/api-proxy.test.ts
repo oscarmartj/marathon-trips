@@ -25,6 +25,17 @@ describe('web proxy to the API', () => {
     expect(forwardHeaders(behindOne, 1).get('x-forwarded-for')).toBe('203.0.113.20');
   });
 
+  it('forward_headers_passes_authorization only for an API key (task 8.4)', () => {
+    const token = `mtk_${'a'.repeat(12)}_${'B'.repeat(43)}`;
+    expect(forwardHeaders(new Headers({ authorization: `Bearer ${token}` }), 0).get('authorization')).toBe(`Bearer ${token}`);
+  });
+
+  it('forward_headers_drops_non_mtk_authorization', () => {
+    for (const v of ['Bearer stolen', 'Basic dXNlcjpwdw==', `Bearer mtk_${'a'.repeat(12)}_${'B'.repeat(42)}`, `bearer mtk_${'a'.repeat(12)}_${'B'.repeat(43)}`, `Bearer mtk_${'a'.repeat(12)}_${'B'.repeat(43)} extra`]) {
+      expect(forwardHeaders(new Headers({ authorization: v }), 0).get('authorization'), v).toBeNull();
+    }
+  });
+
   it('only builds URLs under the API root', () => {
     expect(apiUrl('http://api:4000', ['auth', 'staff', 'sign-in'], '')?.toString()).toBe('http://api:4000/auth/staff/sign-in');
     expect(apiUrl('http://api:4000', ['admin', 'audit'], '?entityType=Role')?.toString()).toBe('http://api:4000/admin/audit?entityType=Role');
