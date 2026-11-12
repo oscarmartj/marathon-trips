@@ -47,3 +47,13 @@ test('task 8.6: the backup service must be opt-in, read uploads read-only, stay 
   assert.match(problems(compose.replace('backups:/backups:ro', 'backups:/backups')), /backups volume read-only/);
   assert.match(problems(compose.replace(/ {2}backup:\n[\s\S]*?\nvolumes:/, 'volumes:')), /"backup" is missing/);
 });
+
+test('task 1.fix-1: WEB_ORIGIN must reach the web build and the web container, and never be local or http', () => {
+  assert.match(problems(compose.replace(/target: web, args: \{[^}]*\}/, 'target: web')), /build must pass WEB_ORIGIN/);
+  assert.match(problems(compose.replace('      WEB_ORIGIN: ${WEB_ORIGIN:?set the public https:// address}\n      # The web', '      # The web')), /api WEB_ORIGIN/);
+  const webEnv = '      API_BASE_URL: http://api:4000\n      WEB_ORIGIN: ${WEB_ORIGIN:?set the public https:// address}\n';
+  assert.ok(compose.includes(webEnv));
+  assert.match(problems(compose.replace(webEnv, '      API_BASE_URL: http://api:4000\n')), /web WEB_ORIGIN must be required at run time/);
+  assert.match(problems(compose.replace(webEnv, '      API_BASE_URL: http://api:4000\n      WEB_ORIGIN: http://localhost:3000\n')), /localhost or http/);
+  assert.match(problems(compose.replace(webEnv, '      API_BASE_URL: http://api:4000\n      WEB_ORIGIN: http://example.com.au\n')), /localhost or http/);
+});
