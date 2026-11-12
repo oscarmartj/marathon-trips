@@ -251,6 +251,25 @@ describe('publishing', () => {
   });
 });
 
+describe('price_version_overlap: the database constraint behind publishing', () => {
+  it('a publish that would overlap a later published version is a 409, not a 500 (23P01)', async () => {
+    // Since 2.2 the package lock and the compare-and-set on the timeline stop this before the database does, so the
+    // EXCLUDE is made to fire for real: the publish's transaction is replaced, once, by a statement that overlaps.
+    const w = await pricedWorld(admin);
+    const d = await draftWith(admin, w.pkg.id, w.rates, 'Overlapping');
+    const replacesVersionId = await currentOf(admin, w.pkg.id);
+    const spy = vi.spyOn(t.prisma, '$transaction').mockImplementationOnce((async () =>
+      t.prisma.$executeRawUnsafe(`UPDATE price_versions SET status = 'published', "validFrom" = now(), "pricedTerms" = '[]' WHERE id = $1::uuid`, d.id)) as never);
+    try {
+      const res = await admin.post(`/admin/pricing/price-versions/${d.id}/publish`, { version: d.version, replacesVersionId });
+      expect([res.status, res.body.code]).toEqual([409, 'price_version_overlap']);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await t.prisma.priceVersion.findUniqueOrThrow({ where: { id: d.id } })).status).toBe('draft');
+  });
+});
+
 describe('a scheduled version ahead of a publish (2.2 replaces the 2.1 test that forced one in by SQL)', () => {
   it('publishing now with a version scheduled later: 409 later_version_scheduled, or current_version_changed if the publisher did not see it', async () => {
     const w = await buildWorld(admin, { priced: false });

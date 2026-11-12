@@ -19,6 +19,25 @@ type VersionRow = { id: string; packageId: string; currency: string; status: str
 
 const versionConflict = () => conflict('version_conflict', 'Someone else changed this. Reload and try again.');
 
+/** True when a database error is an EXCLUDE (overlapping published versions, 23P01). */
+function isExclusionViolation(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) && !(err instanceof Prisma.PrismaClientUnknownRequestError)) return false;
+  return /23P01|exclusion constraint|price_versions_no_overlap/.test(`${JSON.stringify((err as { meta?: unknown }).meta ?? {})} ${err.message}`);
+}
+
+/**
+ * Defence in depth (code review 2.2): the package lock and the compare-and-set leave the EXCLUDE nothing to catch, but
+ * if it ever fires the answer is a 409, never a 500.
+ */
+async function overlapAs409<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    if (isExclusionViolation(err)) throw conflict('price_version_overlap', 'Another version was published at the same time. Reload and try again.');
+    throw err;
+  }
+}
+
 /** A scheduled version can be withdrawn only while it starts more than this far ahead (plan 2.2, section 5). */
 export const WITHDRAW_MARGIN_MS = 5 * 60_000;
 
@@ -175,9 +194,7 @@ export class PriceVersionService {
    * pricing.price_version.published event go in the same transaction.
    */
   async publish(actor: Actor, id: string, input: z.infer<typeof publishPriceVersionSchema>) {
-    // The package lock and the compare-and-set on the end of the timeline leave the EXCLUDE nothing to catch here (code
-    // review 2.2, M4): it stays as the database's own guarantee, tested in SQL; a breach would be an unexpected 500.
-    await this.prisma.$transaction(async (tx) => {
+    await overlapAs409(() => this.prisma.$transaction(async (tx) => {
       const peek = await tx.priceVersion.findUnique({ where: { id }, select: { packageId: true } });
       if (!peek) throw notFound('price_version_not_found', 'Price version not found');
       await lockPackage(tx, peek.packageId, 'update');
@@ -223,7 +240,7 @@ export class PriceVersionService {
         payload: { priceVersionId: id, packageId: v.packageId, previousVersionId: last?.id ?? null, validFrom: start.toISOString() },
         actorType: actor.type, actorId: actor.id,
       });
-    });
+    }));
     return this.get(id);
   }
 
@@ -234,7 +251,7 @@ export class PriceVersionService {
    * predecessor's end goes back to open. The database refuses to withdraw anything that has started.
    */
   async withdraw(actor: Actor, id: string, input: z.infer<typeof withdrawPriceVersionSchema>) {
-    await this.prisma.$transaction(async (tx) => {
+    await overlapAs409(() => this.prisma.$transaction(async (tx) => {
       const peek = await tx.priceVersion.findUnique({ where: { id }, select: { packageId: true } });
       if (!peek) throw notFound('price_version_not_found', 'Price version not found');
       await lockPackage(tx, peek.packageId, 'update');
@@ -268,7 +285,7 @@ export class PriceVersionService {
         payload: { priceVersionId: id, packageId: v.packageId, previousVersionId: predecessor?.id ?? null },
         actorType: actor.type, actorId: actor.id,
       });
-    });
+    }));
     return this.get(id);
   }
 
