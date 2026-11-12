@@ -553,7 +553,8 @@
         "yes": "Yes",
         "no": "No",
         "demo": "Demo",
-        "km": "{value} km"
+        "km": "{value} km",
+        "requiredNote": "* means the field is required."
       },
       "raceTypes": {
         "road": "Road",

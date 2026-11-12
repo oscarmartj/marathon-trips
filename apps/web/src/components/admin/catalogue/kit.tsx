@@ -107,6 +107,7 @@ export function EntityForm({
 
   return (
     <form onSubmit={handle} className="form stack catalogue-form">
+      {fields.some((f) => (f.required === true)) ? <p className="field__hint">{t('admin.catalogue.common.requiredNote')}</p> : null}
       {fields.map((f) => {
         const fid = `${id}-${f.key}`;
         const hint = f.hint ? `${fid}-hint` : undefined;
@@ -119,7 +120,10 @@ export function EntityForm({
                 <input {...common} type="checkbox" checked={v === true} onChange={(e) => set(f.key, e.target.checked)} /> {f.label}
               </label>
             ) : (
-              <label htmlFor={fid}>{f.label}</label>
+              <label htmlFor={fid}>
+                {f.label}
+                {f.required ? <span aria-hidden="true"> *</span> : null}
+              </label>
             )}
             {f.type === 'textarea' ? (
               <textarea {...common} rows={3} maxLength={f.maxLength} value={String(v ?? '')} onChange={(e) => set(f.key, e.target.value)} />

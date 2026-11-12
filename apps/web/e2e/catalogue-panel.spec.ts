@@ -169,6 +169,15 @@ test('create_publish_and_view_race', async ({ page }) => {
   expect(JSON.stringify(body)).not.toMatch(/capacity|consumed/);
   const pub = await (await page.request.get(`/api/catalogue/races/${slug}/editions/2027/packages/race-weekend`)).json();
   expect(pub).toMatchObject({ hotels: [{ rooms: [{ availability: 'available' }] }], extras: [{ availability: 'available' }], entries: [{ availability: 'available' }] });
+  // And on the website itself (task 1.3): the race page lists the open package and flags the unconfirmed date.
+  await page.goto(`/races/${slug}`);
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(raceName);
+  await expect(page.getByRole('heading', { level: 3, name: '2027 edition' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 4, name: 'Race weekend' })).toBeVisible();
+  await expect(page.getByRole('note').filter({ hasText: /not (yet )?confirmed/i })).toBeVisible();
+  await expect(page.getByText('Guaranteed entry')).toHaveCount(0);
+  await page.goto(`/races?q=${run}`);
+  await expect(page.getByRole('link', { name: new RegExp(raceName) }).first()).toBeVisible();
   await page.goto('/admin/races');
   await searchRaces(page, run);
   await expect(page.getByRole('link', { name: raceName, exact: true })).toBeVisible();
