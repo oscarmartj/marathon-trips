@@ -11,3 +11,5 @@ export { lockPackage } from './support';
 export { LIVE_SALE_STATUSES } from './transitions';
 export { PublicCatalogueService, guaranteedEntryOf } from './public.service';
 export { SALE_TRANSITIONS } from './transitions';
+export { readPackageForAutomations, existingCatalogueIds } from './automation-read';
+export type { PackageForAutomations } from './automation-read';

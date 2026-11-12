@@ -47,6 +47,9 @@ export async function makeApp(env: Record<string, string> = {}, opts: { allLogs?
     // Task 8.4: the integrations module is on, so route-walking tests reach its routes too (tests that need it off say so).
     await app.get(FeatureFlagService).ensure('module.integrations', true);
     await prisma.featureFlag.update({ where: { key: 'module.integrations' }, data: { enabled: true } });
+    // Task 7.4: the automations module is on too, for the same reason.
+    await app.get(FeatureFlagService).ensure('module.automations', true);
+    await prisma.featureFlag.update({ where: { key: 'module.automations' }, data: { enabled: true } });
     /** Closes the app and removes the jobs and events auth tests leave behind, so other test files start clean. */
     const close = async () => {
       await prisma.$executeRawUnsafe(`DELETE FROM pgboss.job WHERE name = 'mail.send'`);

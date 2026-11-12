@@ -75,6 +75,22 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  // Task 7.4: run one automation (one rule for one event or scheduled time), the schedule tick and the purge.
+  automationsRun: {
+    name: 'automations.run',
+    data: z.object({ runId: uuid }).strict(),
+    options: { policy: 'short', retryLimit: 3, retryDelay: 30, retryBackoff: true, expireInSeconds: 300, deleteAfterSeconds: 604800 },
+  },
+  automationsTick: {
+    name: 'automations.tick',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 0, retryDelay: 60, expireInSeconds: 120, deleteAfterSeconds: 604800 },
+  },
+  automationsMaintenance: {
+    name: 'automations.maintenance',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
+  },
   authMaintenance: {
     name: 'auth.maintenance',
     data: z.object({}).strict(),

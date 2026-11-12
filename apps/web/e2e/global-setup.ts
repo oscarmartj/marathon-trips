@@ -21,4 +21,6 @@ export default function globalSetup(): void {
   // Complaints register (complaints.spec.ts): slot 12 holds every permission; slot 13 can only read.
   process.env.E2E_STAFF_12 = create();
   process.env.E2E_STAFF_13 = create('--permissions', 'complaints.complaint.read,common.table.use');
+  // Automations (automations.spec.ts): an owner.
+  process.env.E2E_STAFF_14 = create();
 }

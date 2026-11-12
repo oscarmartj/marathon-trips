@@ -22,6 +22,7 @@ export interface CatalogueEntry {
 const uuid = z.string().uuid();
 
 export const PING_EVENT_TYPE = 'integrations.ping';
+export const AUTOMATION_RULE_FIRED = 'automations.rule.fired';
 
 export const WEBHOOK_EVENT_CATALOGUE: readonly CatalogueEntry[] = [
   {
@@ -47,6 +48,17 @@ export const WEBHOOK_EVENT_CATALOGUE: readonly CatalogueEntry[] = [
     description: 'A contracted allotment was released back to the supplier',
     readPermission: 'suppliers.supplier.read',
     data: z.object({ allotmentId: uuid, poolId: uuid.nullable(), contractId: uuid }).strict(),
+  },
+  {
+    // Task 7.4: never published to the outbox, so never fanned out. An automation's "call a webhook" action sends it to
+    // one subscription that chose this type, and only while the subscription's creator can read the rule's record.
+    type: AUTOMATION_RULE_FIRED,
+    description: 'An automation rule ran its "call a webhook" action',
+    readPermission: 'automations.rule.read',
+    data: z.object({
+      ruleId: uuid, runId: uuid, triggerEventType: z.string().regex(/^[a-z][a-z_]*(\.[a-z][a-z_]*)+$/).nullable(),
+      entityType: z.string().regex(/^[A-Z][A-Za-z]{0,63}$/).nullable(), entityId: uuid.nullable(), scheduledFor: z.string().datetime().nullable(),
+    }).strict(),
   },
 ];
 
