@@ -6,7 +6,9 @@ import { runTransaction } from '../../platform/database/transaction';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { PackagePricingReader, lockPackage } from '../catalogue';
-import { QuotedBookingService, dbNow, todayInBrisbane } from '../bookings';
+import { SettingsService } from '../../platform/flags/flags.service';
+import { QuotedBookingService, dbNow, mapLoadError, readBookingLimits, todayInBrisbane } from '../bookings';
+import type { BookingLimits } from '../bookings';
 import { QUOTE_TX_OPTIONS } from './quote.service';
 import { CRM_EVENTS } from './manifest';
 
@@ -31,7 +33,6 @@ interface LockedQuote {
 }
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
-const busy = () => conflict('busy_try_again', 'Many people are doing this at once. Try again.');
 
 /**
  * A customer accepts the quote they were sent (plan 2.5, section 5). One transaction in the order of plan 0.1, 6.3:
@@ -44,20 +45,22 @@ export class QuoteAcceptanceService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(QuotedBookingService) private readonly bookings: QuotedBookingService,
     @Inject(PackagePricingReader) private readonly catalogue: PackagePricingReader,
+    @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
   ) {}
 
   async accept(userId: string, reference: string, actor: AuditActor): Promise<{ bookingReference: string; created: boolean }> {
+    // Settings are read before the transaction: inside it they would need a second connection while this one is held.
+    const limits = await readBookingLimits(this.settings);
     try {
-      return await runTransaction(this.prisma, (tx) => this.acceptIn(tx, userId, reference, actor), QUOTE_TX_OPTIONS);
+      return await runTransaction(this.prisma, (tx) => this.acceptIn(tx, userId, reference, actor, limits), QUOTE_TX_OPTIONS);
     } catch (err) {
-      if (err instanceof Error && /P2024|P2028|Transaction already closed|Unable to start a transaction in the given time/.test(err.message)) throw busy();
-      throw err;
+      throw mapLoadError(err);
     }
   }
 
-  private async acceptIn(tx: Parameters<Parameters<typeof runTransaction>[1]>[0], userId: string, reference: string, actor: AuditActor) {
+  private async acceptIn(tx: Parameters<Parameters<typeof runTransaction>[1]>[0], userId: string, reference: string, actor: AuditActor, limits: BookingLimits) {
     // The customer first (their user's quote only), then the quote.
     const owner = await tx.$queryRaw<Array<{ customerId: string }>>`
       SELECT q."customerId" FROM quotes q JOIN customers c ON c.id = q."customerId" WHERE q.reference = ${reference} AND q.status <> 'draft' AND c."userId" = ${userId}::uuid`;
@@ -88,7 +91,7 @@ export class QuoteAcceptanceService {
       quoteId: q.id, customerId: q.customerId, packageId: q.packageId, editionId: q.editionId, currency: q.currency, totalMinor: q.totalMinor, depositMinor: q.depositMinor,
       priceVersionId: q.priceVersionId, engineVersion: q.engineVersion, departureDate: day(q.departureDate), returnDate: day(q.returnDate), balanceDueDate: day(q.balanceDueDate),
       configuration: q.configuration as never, priceBreakdown: q.priceBreakdown as never,
-    }, customer, actor);
+    }, customer, actor, limits);
 
     // Compare-and-set on the locked row: the quote is accepted once, with its booking.
     const n = await tx.$executeRaw`

@@ -11,7 +11,7 @@ import { IdempotencyInProgressError, IdempotencyKeyReuseError, IdempotencyServic
 import { PromoAttemptGuard } from '../pricing';
 import { BookingAdminService } from './admin.service';
 import { CustomerAdminService } from './customer-admin.service';
-import { BOOKINGS_PERMISSIONS as P } from './manifest';
+import { BOOKINGS_CRM_PERMISSIONS as C, BOOKINGS_PERMISSIONS as P } from './manifest';
 import { ownsBookingReference } from './ownership';
 import { BookingRequestRateLimitGuard } from './rate-limit.guard';
 import { BookingRequestService } from './request.service';
@@ -96,15 +96,15 @@ export class BookingsAdminController {
 export class CustomersAdminController {
   constructor(@Inject(CustomerAdminService) private readonly customers: CustomerAdminService) {}
 
-  @Get() @RequirePermission(P.customerRead)
+  @Get() @RequirePermission(C.customerRead)
   list(@Query(new ZodPipe(listCustomersQuerySchema)) q: In<typeof listCustomersQuerySchema>) { return this.customers.list(q); }
 
-  @Post() @RequirePermission(P.customerWrite)
+  @Post() @RequirePermission(C.customerWrite)
   create(@Body(new ZodPipe(createCustomerSchema)) b: In<typeof createCustomerSchema>, @Req() req: ApiRequest) { return this.customers.create(actorOf(req), b); }
 
-  @Get(':id') @RequirePermission(P.customerRead)
+  @Get(':id') @RequirePermission(C.customerRead)
   get(@Param('id', uuid()) id: string) { return this.customers.get(id); }
 
-  @Patch(':id') @RequirePermission(P.customerWrite)
+  @Patch(':id') @RequirePermission(C.customerWrite)
   update(@Param('id', uuid()) id: string, @Body(new ZodPipe(updateCustomerSchema)) b: In<typeof updateCustomerSchema>, @Req() req: ApiRequest) { return this.customers.update(actorOf(req), id, b); }
 }

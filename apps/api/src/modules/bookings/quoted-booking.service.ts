@@ -4,12 +4,11 @@ import { AuditService } from '../../platform/audit/audit.service';
 import type { AuditActor } from '../../platform/audit/audit.service';
 import { canonicalJson, sha256Hex } from '../../platform/crypto/hmac';
 import { OutboxService } from '../../platform/events/outbox.service';
-import { SettingsService } from '../../platform/flags/flags.service';
 import { conflict } from '../../platform/http/api-error';
 import { InventoryService } from '../catalogue';
 import { BOOKING_EVENTS } from './manifest';
 import { BookingRequestService, startOfDayInBrisbane } from './request.service';
-import { readBookingLimits } from './settings';
+import type { BookingLimits } from './settings';
 import { BookingStateMachine } from './state-machine';
 import { snapshotBreakdownSchema, snapshotConfigurationSchema } from './snapshot-schema';
 import { Tx, dbNow, toDate } from './support';
@@ -52,7 +51,6 @@ export class QuotedBookingService {
     @Inject(InventoryService) private readonly inventory: InventoryService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
-    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   /** The first lock of a quote acceptance: the customer, FOR UPDATE; null when it is closed or does not exist. */
@@ -63,8 +61,7 @@ export class QuotedBookingService {
     return rows[0] ?? null;
   }
 
-  async createApprovedFromQuote(tx: Tx, q: AcceptedQuote, customer: LockedQuoteCustomer, actor: AuditActor): Promise<{ bookingId: string; reference: string }> {
-    const limits = await readBookingLimits(this.settings);
+  async createApprovedFromQuote(tx: Tx, q: AcceptedQuote, customer: LockedQuoteCustomer, actor: AuditActor, limits: BookingLimits): Promise<{ bookingId: string; reference: string }> {
     const at = await dbNow(tx);
     const configuration = snapshotConfigurationSchema.parse(q.configuration);
     const priceBreakdown = snapshotBreakdownSchema.parse(q.priceBreakdown);
@@ -101,7 +98,7 @@ export class QuotedBookingService {
       payload: { bookingId, packageId: q.packageId, editionId: q.editionId, customerId: q.customerId }, actorType: actor.type, actorId: actor.id ?? undefined,
     });
     // Staff sent the quote, so accepting it is the approval: the state machine does it, like any other approval.
-    const r = await this.machine.transition(tx, bookingId, 'approve', { actor, reason: 'Quote accepted' });
+    const r = await this.machine.transition(tx, bookingId, 'approve', { actor, reason: 'Quote accepted', approvalHours: limits.approvalExpiryHours });
     if (!r.changed) throw conflict('booking_state_changed', 'This booking changed. Reload and try again.');
     return { bookingId, reference };
   }

@@ -17,7 +17,6 @@ import { QUOTE_SENT_TEMPLATE } from './emails';
 import { CRM_EVENTS } from './manifest';
 import { CRM_SETTINGS } from './settings';
 
-type Tx = Prisma.TransactionClient;
 export const QUOTE_TX_OPTIONS = { ...REDEEM_TX_OPTIONS, timeout: 15_000, maxWait: 5_000 } as const;
 
 /** What the staff panel sees: the quote with its customer, the price it holds (with the rule trace) and its booking. */

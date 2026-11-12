@@ -6,12 +6,14 @@ import type { CustomerClient } from './bookings';
 import { quoteBody } from './pricing';
 import type { PricedWorld } from './pricing';
 import { CRM_PERMISSIONS } from '../../src/modules/crm';
+import { BOOKINGS_CRM_PERMISSIONS } from '../../src/modules/bookings';
 
+export const ALL_CUSTOMER_PERMISSIONS = Object.values(BOOKINGS_CRM_PERMISSIONS);
 export const ALL_CRM_PERMISSIONS = Object.values(CRM_PERMISSIONS);
 
 /** Staff that can run the catalogue and prices, handle bookings and customers, and make quotes. */
 export const crmStaff = (t: TestApp): Promise<Client & { staff: StaffFixture }> =>
-  staffClient(t, [...CATALOGUE_AND_PRICING, ...ALL_BOOKING_PERMISSIONS, ...ALL_CRM_PERMISSIONS]);
+  staffClient(t, [...CATALOGUE_AND_PRICING, ...ALL_BOOKING_PERMISSIONS, ...ALL_CUSTOMER_PERMISSIONS, ...ALL_CRM_PERMISSIONS]);
 
 /** The configuration of a quote: the priced world's default (a runner and a supporter in the double), no promo code. */
 export const quoteConfiguration = (w: PricedWorld, over: Record<string, unknown> = {}) => quoteBody(w, over);
