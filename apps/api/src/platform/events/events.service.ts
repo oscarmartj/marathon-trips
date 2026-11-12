@@ -36,7 +36,9 @@ export class EventsService {
       for (const { id } of ids) {
         const event = await tx.outboxEvent.findUniqueOrThrow({ where: { id }, select: { id: true, type: true } });
         for (const consumer of this.registry.forEvent(event.type)) {
-          const delivery = await tx.eventDelivery.create({ data: { eventId: id, consumer: consumer.name }, select: { id: true } });
+          // A row that is already there (written by hand, or by an earlier half-finished run) must not undo the whole batch.
+          await tx.eventDelivery.createMany({ data: [{ eventId: id, consumer: consumer.name }], skipDuplicates: true });
+          const delivery = await tx.eventDelivery.findUniqueOrThrow({ where: { eventId_consumer: { eventId: id, consumer: consumer.name } }, select: { id: true } });
           await this.jobs.send(QUEUES.eventsDeliver, { deliveryId: delivery.id }, { db: bossDb(tx), singletonKey: `${consumer.name}:${id}` });
         }
         await tx.outboxEvent.update({ where: { id }, data: { dispatchedAt: now } });

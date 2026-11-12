@@ -69,6 +69,11 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  crmMaintenance: {
+    name: 'crm.maintenance',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
+  },
   authMaintenance: {
     name: 'auth.maintenance',
     data: z.object({}).strict(),

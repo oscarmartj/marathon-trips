@@ -79,6 +79,7 @@ model Customer {
   /// @nopii timestamp
   updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
   bookings           Booking[]
+  quotes             Quote[]
   promoRedemptions   PromoRedemption[]
   payments           Payment[]
   waitlistEntries    WaitlistEntry[]
@@ -154,6 +155,7 @@ model Booking {
   /// @nopii timestamp
   updatedAt              DateTime             @updatedAt @db.Timestamptz(3)
   snapshots              BookingSnapshot[]
+  quote                  Quote?
   travellers             BookingTraveller[]
   rooms                  BookingRoom[]
   extras                 BookingExtra[]

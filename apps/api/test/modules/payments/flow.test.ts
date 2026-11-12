@@ -14,6 +14,7 @@ import { TestApp, makeApp } from '../../support/auth';
 import { ApiError, conflict } from '../../../src/platform/http/api-error';
 import { AppError } from '../../../src/platform/errors/safe-error';
 import { closeCatalogue } from '../../support/catalogue';
+import { acceptQuote, crmStaff, linkedCustomer, makeQuote, sendQuote } from '../../support/crm';
 import { cleanBookingEvents, makeBookingFor } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
@@ -75,6 +76,20 @@ describe('the payment plan (plan 3.1, section 4)', () => {
     expect(plan.items[1]!.dueDate.toISOString().slice(0, 10)).toBe(b.balanceDueDate.toISOString().slice(0, 10));
     expect(await t.prisma.auditLog.count({ where: { action: 'payments.schedule.created', entityId: plan.id } })).toBe(1);
     expect(await t.prisma.outboxEvent.count({ where: { type: 'payments.schedule.created', aggregateId: plan.id } })).toBe(1);
+  });
+
+  it('accepting a quote (task 2.5) approves through the state machine, so the booking gets its plan that adds up to the total', async () => {
+    const crmAdmin = await crmStaff(t);
+    const ww = await pricedWorld(crmAdmin);
+    const { client, customerId } = await linkedCustomer(t);
+    const q = await sendQuote(crmAdmin, await makeQuote(crmAdmin, customerId, ww));
+    const res = await acceptQuote(t, client, q.reference);
+    expect(res.status).toBe(200);
+    const b = await booking(res.body.bookingReference as string);
+    expect(b.status).toBe('approved');
+    const plan = await t.prisma.paymentSchedule.findUniqueOrThrow({ where: { bookingId: b.id }, include: { items: { where: { state: 'active' }, orderBy: { sequence: 'asc' } } } });
+    expect(plan.items.reduce((sum, i) => sum + i.amountMinor, 0n)).toBe(b.totalMinor);
+    expect(plan.items[0]).toMatchObject({ kind: b.depositMinor > 0n ? 'deposit' : 'balance', amountMinor: b.depositMinor > 0n ? b.depositMinor : b.totalMinor });
   });
 
   it('schedule_failure_rolls_back_approval: a failing plan leaves the request as it was', async () => {

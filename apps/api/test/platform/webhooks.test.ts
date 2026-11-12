@@ -84,6 +84,11 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  // The events this file published (some never dispatched, some with hand-made delivery rows) must not outlive it: another
+  // file's dispatch would meet them.
+  await t.prisma.webhookDelivery.deleteMany({ where: { eventId: { in: publishedEventIds } } });
+  await t.prisma.eventDelivery.deleteMany({ where: { eventId: { in: publishedEventIds } } });
+  await t.prisma.outboxEvent.deleteMany({ where: { id: { in: publishedEventIds } } });
   await t.prisma.$executeRawUnsafe(`DELETE FROM pgboss.job WHERE name IN ('webhooks.send', 'events.deliver')`);
   await t.close();
   for (const s of dripSockets) s.destroy();
@@ -111,10 +116,12 @@ async function createHook(url: string, eventTypes = ['catalogue.package.sale_sta
 const ids = () => ({ packageId: randomUUID(), editionId: randomUUID(), raceId: randomUUID() });
 
 /** Publishes an outbox event and runs the webhook consumer on it (as the event delivery job would). */
+const publishedEventIds: string[] = [];
 async function publish(payload: Record<string, unknown> = { ...ids(), fromStatus: 'coming_soon', toStatus: 'open' }, type = 'catalogue.package.sale_status_changed') {
   const eventId = await t.prisma.$transaction((tx) => t.app.get(OutboxService).publish(tx, {
     type, aggregateType: 'Package', aggregateId: (payload.packageId as string) ?? randomUUID(), aggregateVersion: 1, payload, actorType: 'staff', actorId: owner.id,
   }));
+  publishedEventIds.push(eventId);
   const e = await t.prisma.outboxEvent.findUniqueOrThrow({ where: { id: eventId } });
   const consumer = t.app.get(ConsumerRegistry).get(WEBHOOK_CONSUMER)!;
   const event = { id: e.id, type: e.type, schemaVersion: e.schemaVersion, aggregateType: e.aggregateType, aggregateId: e.aggregateId, aggregateVersion: e.aggregateVersion, payload: e.payload, actorType: e.actorType, actorId: e.actorId, occurredAt: e.occurredAt };

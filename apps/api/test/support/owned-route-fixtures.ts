@@ -50,6 +50,25 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => send(a), asOther: () => send(b) };
     },
   },
+  // Task 2.5: GET /quotes/:reference. A quote sent to customer A; B asks for it.
+  quote: {
+    async create(t, a, b) {
+      const { sentQuoteFixture } = await import('./crm');
+      const ref = await sentQuoteFixture(t, a);
+      return { asOwner: () => t.http().get(`/quotes/${ref}`).set('Cookie', a.cookie), asOther: () => t.http().get(`/quotes/${ref}`).set('Cookie', b.cookie) };
+    },
+  },
+  // Task 2.5: POST /quotes/:reference/accept. A quote sent to customer A; B tries to accept it.
+  'quote-accept': {
+    async create(t, a, b) {
+      const { sentQuoteFixture } = await import('./crm');
+      const ref = await sentQuoteFixture(t, a);
+      return {
+        asOwner: () => t.http().post(`/quotes/${ref}/accept`).set(STATE_HEADERS).set('Cookie', a.cookie).send({}),
+        asOther: () => t.http().post(`/quotes/${ref}/accept`).set(STATE_HEADERS).set('Cookie', b.cookie).send({}),
+      };
+    },
+  },
 };
 
 /** A booking request by customer A for a fresh priced package, approved by staff. Returns its reference. */

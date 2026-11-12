@@ -278,7 +278,7 @@ describe('permissions and the panel', () => {
     const { bookingId } = await makeBookingFor(t, w);
     const routes = allRoutes(t.app).filter((r) => r.path.startsWith('/admin/bookings'));
     expect(routes.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
-      'GET /admin/bookings', 'GET /admin/bookings/:id', 'POST /admin/bookings/:id/approve', 'POST /admin/bookings/:id/cancel', 'POST /admin/bookings/:id/decline',
+      'GET /admin/bookings', 'GET /admin/bookings/:id', 'GET /admin/bookings/summary', 'POST /admin/bookings/:id/approve', 'POST /admin/bookings/:id/cancel', 'POST /admin/bookings/:id/decline',
     ]);
     for (const r of routes) {
       const path = r.path.replace(':id', bookingId);
