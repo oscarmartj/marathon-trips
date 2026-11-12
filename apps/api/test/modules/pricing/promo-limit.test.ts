@@ -39,8 +39,19 @@ describe('attemptKeyOf', () => {
   it('DistinctLimiter: the same value again does not count; the window slides', () => {
     const l = new DistinctLimiter(2, 1000);
     expect([l.allow('k', 'A', 0), l.allow('k', 'A', 10), l.allow('k', 'B', 20), l.allow('k', 'C', 30), l.allow('k', 'A', 40)]).toEqual([true, true, true, false, true]);
-    expect(l.allow('k', 'C', 1001)).toBe(true);
+    expect(l.allow('k', 'C', 1001)).toBe(false); // A was renewed at 40, B (20) is still in the window
+    expect(l.allow('k', 'C', 1021)).toBe(true);
     expect(l.allow('other', 'Z', 40)).toBe(true);
+  });
+
+  it('a shared address: MINE at 0, nine more before 15 minutes, a new one at 15 minutes and 1 ms; MINE, in use, is never refused', () => {
+    const minute = 60_000;
+    const l = new DistinctLimiter(PROMO_CODES_PER_WINDOW, 15 * minute);
+    expect(l.allow('k', 'MINE', 0)).toBe(true);
+    for (let i = 1; i <= 9; i++) expect(l.allow('k', `OTHER${i}`, i * minute)).toBe(true);
+    expect(l.allow('k', 'MINE', 14 * minute)).toBe(true);
+    expect(l.allow('k', 'NEW', 15 * minute + 1)).toBe(false);
+    expect(l.allow('k', 'MINE', 15 * minute + 2)).toBe(true);
   });
 
   it('the code a customer keeps using always fits again once its first try leaves the window (code review M2)', () => {

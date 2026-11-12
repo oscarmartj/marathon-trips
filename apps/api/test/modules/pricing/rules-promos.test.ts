@@ -8,7 +8,8 @@ import { price } from '../../../src/modules/pricing/engine';
 import { ruleInputOf } from '../../../src/modules/pricing/adjustments';
 import { engineView, loadRates } from '../../../src/modules/pricing/rates';
 import { PackagePricingReader } from '../../../src/modules/catalogue';
-import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
+import { STATE_HEADERS, TestApp, createStaff, makeApp, signInStaff } from '../../support/auth';
+import { INTEGRATIONS_PERMISSIONS as IP } from '../../../src/platform/integrations/permissions';
 import { Client, buildWorld, closeCatalogue, packageBody, staffClient } from '../../support/catalogue';
 import { createCode, createRule, freshCode, promoBody, richWorld, ruleBody } from '../../support/adjustments';
 import type { RichWorld } from '../../support/adjustments';
@@ -66,6 +67,7 @@ describe('rules in the panel', () => {
     ['a discount above 100 %', { valueBps: 10_001 }, 'rule_invalid'],
     ['a fixed amount without its currency', { effectMode: 'fixed', valueBps: null, valueMinor: '5000' }, 'rule_invalid'],
     ['percent and fixed at once', { valueMinor: '5000', currency: 'AUD' }, 'rule_invalid'],
+    ['a percentage with a currency', { currency: 'AUD' }, 'rule_invalid'],
     ['a fixed amount per person above A$12 500', { effectMode: 'fixed', valueBps: null, valueMinor: '1250001', currency: 'AUD', per: 'person' }, 'rule_invalid'],
     ['a fixed amount per booking above A$1 000 000', { effectMode: 'fixed', valueBps: null, valueMinor: '100000001', currency: 'AUD' }, 'validation_failed'],
     ['a condition the schema does not know', { conditions: { birthday: '2027-01-01' } }, 'validation_failed'],
@@ -294,6 +296,22 @@ describe('promo codes', () => {
     expect(resumed.body).toMatchObject({ ...kept, enabled: true });
     const unlimited = await admin.patch(`/admin/pricing/promo-codes/${c.id}`, { maxRedemptions: null, version: resumed.body.version });
     expect([unlimited.body.maxRedemptions, unlimited.body.maxPerCustomer]).toEqual([null, 1]);
+    // a start after the stored end: the merged code is checked, 422
+    const late = await admin.patch(`/admin/pricing/promo-codes/${c.id}`, { validFrom: new Date(Date.parse(validTo) + 60_000).toISOString(), version: unlimited.body.version });
+    expect([late.status, late.body.code]).toEqual([422, 'validity_invalid']);
+  });
+
+  it('a percentage never keeps a currency: on creation, and on a PATCH from fixed to percent without clearing it (422, not a 500)', async () => {
+    const pct = await admin.post('/admin/pricing/promo-codes', promoBody(freshCode(), { scopeType: 'package', packageId: w.pkg.id, currency: 'AUD' }));
+    expect([pct.status, pct.body.code]).toEqual([422, 'rule_invalid']);
+    const fixedCode = await createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id, effectMode: 'fixed', valueBps: null, valueMinor: '500', currency: 'AUD' });
+    const toPct = await admin.patch(`/admin/pricing/promo-codes/${fixedCode.id}`, { effectMode: 'percent', valueBps: 1000, valueMinor: null, version: fixedCode.version });
+    expect([toPct.status, toPct.body.code]).toEqual([422, 'rule_invalid']);
+    const ok = await admin.patch(`/admin/pricing/promo-codes/${fixedCode.id}`, { effectMode: 'percent', valueBps: 1000, valueMinor: null, currency: null, version: fixedCode.version });
+    expect([ok.status, ok.body.effectMode, ok.body.currency]).toEqual([200, 'percent', null]);
+    const fixedRule = await createRule(admin, { scopeType: 'package', packageId: w.pkg.id, enabled: false, effectMode: 'fixed', valueBps: null, valueMinor: '500', currency: 'AUD' });
+    const ruleToPct = await admin.patch(`/admin/pricing/rules/${fixedRule.id}`, { effectMode: 'percent', valueBps: 1000, valueMinor: null, version: fixedRule.version });
+    expect([ruleToPct.status, ruleToPct.body.code]).toEqual([422, 'rule_invalid']);
   });
 
   it('promo_max_below_redeemed_rejected: 409 from the API, and the CHECK refuses it in SQL', async () => {
@@ -385,13 +403,30 @@ describe('promo codes', () => {
     }
     const pub = await publicQuote(quoteBody(own, { promoCode: nzd }));
     expect([pub.status, pub.body.promo, pub.body.totalMinor]).toEqual([200, { status: 'invalid' }, '132500']);
-    expect((await preview(quoteBody(own, { promoCode: nzd }))).body.code).toBe('promo_code_misconfigured');
+    const nzdPanel = await preview(quoteBody(own, { promoCode: nzd }));
+    expect([nzdPanel.status, nzdPanel.body.code]).toEqual([409, 'promo_code_misconfigured']);
     // 100 % off rooms of A$2 000 000: a code line above the A$1 000 000 limit
     await publishWith(admin, own.pkg.id, { ...own.rates, roomRates: own.rates.roomRates.map((r) => ({ ...r, pricePerPersonMinor: '100000000' })) });
     const all = await createCode(admin, freshCode(), { scopeType: 'package', packageId: own.pkg.id, appliesTo: 'accommodation', valueBps: 10_000 });
     const big = await publicQuote(quoteBody(own, { promoCode: all.code }));
     expect([big.status, big.body.promo, big.body.totalMinor]).toEqual([200, { status: 'invalid' }, '200032500']);
-    expect((await preview(quoteBody(own, { promoCode: all.code }))).body.code).toBe('adjustment_above_limit');
+    const bigPanel = await preview(quoteBody(own, { promoCode: all.code }));
+    expect([bigPanel.status, bigPanel.body.code]).toEqual([409, 'adjustment_above_limit']);
+  });
+
+  it('an integration API key previewing quotes sees a code as the public does: never which codes exist (code review round 2)', async () => {
+    const flag = await t.prisma.featureFlag.findUniqueOrThrow({ where: { key: 'module.integrations' } });
+    await t.prisma.featureFlag.update({ where: { key: 'module.integrations' }, data: { enabled: true } });
+    const staff = await createStaff(t, { permissions: [PP.quotePreview, IP.apiKeyRead, IP.apiKeyManage] });
+    const cookie = await signInStaff(t, staff);
+    const key = await t.http().post('/admin/integrations/api-keys').set(STATE_HEADERS).set('Cookie', cookie).send({ name: 'Integration', scopes: [PP.quotePreview] });
+    expect(key.status).toBe(201);
+    const real = await createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id, conditions: { minTravellers: 3 } });
+    const viaKey = (code: string) => t.http().post('/admin/pricing/quotes').set('Authorization', `Bearer ${key.body.token}`).send(withCode(code));
+    const [known, unknown] = [await viaKey(real.code), await viaKey(freshCode('NOPE'))];
+    expect([known.status, known.body.promo, unknown.status, unknown.body.promo]).toEqual([200, { status: 'invalid' }, 200, { status: 'invalid' }]);
+    expect((await preview(withCode(real.code))).body.promo.status).toBe('conditions_not_met');
+    await t.prisma.featureFlag.update({ where: { key: 'module.integrations' }, data: { enabled: flag.enabled } });
   });
 
   it('promo code validity at the millisecond: validFrom included, validTo excluded (boundary_dates)', async () => {

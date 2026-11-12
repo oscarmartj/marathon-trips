@@ -133,7 +133,7 @@ export function validateEffect(e: Effect & { direction: 'discount' | 'surcharge'
   const bad = (why: string) => fail('rule_invalid', `Rule or code ${why}`, { id, origin });
   if (!TARGETS.includes(e.appliesTo)) bad('has an unknown target');
   if (e.effectMode === 'percent') {
-    if (e.valueBps === null || e.valueMinor !== null) bad('mixes percent and fixed');
+    if (e.valueBps === null || e.valueMinor !== null || e.currency !== null) bad('mixes percent and fixed');
     const max = e.direction === 'discount' ? MAX_DISCOUNT_BPS : MAX_SURCHARGE_BPS;
     if (!Number.isInteger(e.valueBps) || e.valueBps! < 0 || e.valueBps! > max) bad('has basis points out of range');
     if (e.per === 'person') bad('is a percentage per person');

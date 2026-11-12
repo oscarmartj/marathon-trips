@@ -60,7 +60,7 @@ export class QuoteService {
    * The breakdown and, when a code was applied, the code's id and version as read here: task 2.4 hands them to
    * PromoRedemptionService.redeemIn, which refuses a code that changed since (plan 2.2, section 15, point 3).
    */
-  async priceWithPromoRef(tx: Prisma.TransactionClient, req: QuoteRequest | AdminQuoteRequest, opts: { audience: 'public' | 'staff'; now: Date }): Promise<{ breakdown: PriceBreakdown; promoRef: PromoRef | null }> {
+  async priceWithPromoRef(tx: Prisma.TransactionClient, req: QuoteRequest | AdminQuoteRequest, opts: { audience: 'public' | 'staff'; now: Date; anonymousPromo?: boolean }): Promise<{ breakdown: PriceBreakdown; promoRef: PromoRef | null }> {
     const view = await this.catalogue.load(tx, req.packageId);
     if (!view) throw notFound('package_not_found', 'Package not found');
     if (opts.audience === 'public') {
@@ -94,7 +94,7 @@ export class QuoteService {
           if (!(e instanceof PricingError) || e.details.origin !== 'promo') throw e;
           // A code set up wrong is the code's problem, not the customer's: logged, and to the public it reads `invalid`.
           this.logger.warn(`promo code configuration error: ${e.code} ${String(e.details.id ?? '')}`);
-          if (opts.audience !== 'public') throw e;
+          if (opts.audience !== 'public' && !opts.anonymousPromo) throw e;
           return { breakdown: price(request, engine, rates, rules, UNKNOWN_CODE, opts.now), promoRef: null };
         }
       }
@@ -109,9 +109,9 @@ export class QuoteService {
     }
   }
 
-  private run(req: QuoteRequest | AdminQuoteRequest, audience: 'public' | 'staff'): Promise<PriceBreakdown> {
+  private run(req: QuoteRequest | AdminQuoteRequest, audience: 'public' | 'staff', anonymousPromo = false): Promise<PriceBreakdown> {
     const now = new Date();
-    return this.prisma.$transaction((tx) => this.priceIn(tx, req, { audience, now }), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return this.prisma.$transaction(async (tx) => (await this.priceWithPromoRef(tx, req, { audience, now, anonymousPromo })).breakdown, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   /** The public answer: the breakdown without the rule trace, and one status for any code that was not applied. */
@@ -121,7 +121,11 @@ export class QuoteService {
   }
 
   /** The panel's answer: any package that is not deleted, a draft version if asked, and why each rule did or did not apply. */
-  async quoteStaff(req: AdminQuoteRequest) {
-    return toJson(await this.run(req, 'staff'));
+  async quoteStaff(req: AdminQuoteRequest, opts: { viaApiKey?: boolean } = {}) {
+    if (!opts.viaApiKey) return toJson(await this.run(req, 'staff'));
+    // An integration's API key (8.4) sees a code as the public does, so a key cannot tell which codes exist (code review
+    // 2.2, round 2); a code set up wrong reads `invalid` too.
+    const b = await this.run(req, 'staff', true);
+    return toJson({ ...b, promo: { status: publicPromoStatus(b.promo.status) } });
   }
 }

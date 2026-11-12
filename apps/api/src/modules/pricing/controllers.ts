@@ -65,7 +65,9 @@ export class PricingAdminController {
   async discard(@Param('id', uuid()) id: string, @Req() req: ApiRequest) { await this.versions.discard(actorOf(req), id); }
 
   @Post('quotes') @HttpCode(200) @RequirePermission(P.quotePreview)
-  preview(@Body(new ZodPipe(adminQuoteRequestSchema)) b: In<typeof adminQuoteRequestSchema>) { return this.quotes.quoteStaff(b); }
+  preview(@Body(new ZodPipe(adminQuoteRequestSchema)) b: In<typeof adminQuoteRequestSchema>, @Req() req: ApiRequest) {
+    return this.quotes.quoteStaff(b, { viaApiKey: req.auth?.via === 'api_key' });
+  }
 }
 
 /** Price rules and promo codes in the panel (plan 2.2, sections 3 and 4). Changes need a recent TOTP check. */
