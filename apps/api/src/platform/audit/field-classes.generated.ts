@@ -486,6 +486,16 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  KeyDate: {
+    id: 'nopii',
+    editionId: 'nopii',
+    kind: 'nopii',
+    label: 'pii',
+    dueDate: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   LoginToken: {
     id: 'nopii',
     purpose: 'nopii',

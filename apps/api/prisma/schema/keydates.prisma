@@ -1,0 +1,30 @@
+// ---- Task 7.3: key dates calendar ----
+// Dates that staff add to an edition (the entry submission deadline, or any other date worth a task). Allotment release
+// dates (suppliers) and balance due dates (bookings) stay where they are and are read by the calendar. CHECKs are in
+// migration 0021_key_dates.
+
+enum KeyDateKind {
+  entry_submission
+  custom
+}
+
+model KeyDate {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  editionId String      @db.Uuid
+  edition   RaceEdition @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii entry_submission or custom
+  kind      KeyDateKind
+  /// @pii free text typed by staff (required for custom)
+  label     String?
+  /// @nopii calendar date in the business time zone
+  dueDate   DateTime    @db.Date
+  /// @nopii optimistic lock
+  version   Int         @default(0)
+  /// @nopii
+  createdAt DateTime    @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  updatedAt DateTime    @updatedAt @db.Timestamptz(3)
+
+  @@index([editionId, dueDate])
+  @@map("key_dates")
+}
