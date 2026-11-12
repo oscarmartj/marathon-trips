@@ -163,20 +163,21 @@ model Race {
 }
 
 model RaceDistance {
-  id             String               @id @default(uuid(7)) @db.Uuid
-  raceId         String               @db.Uuid
-  race           Race                 @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id                 String               @id @default(uuid(7)) @db.Uuid
+  raceId             String               @db.Uuid
+  race               Race                 @relation(fields: [raceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii catalogue data
-  kind           DistanceKind
+  kind               DistanceKind
   /// @nopii catalogue data
-  distanceMetres Int
+  distanceMetres     Int
   /// @nopii LocalizedText
-  name           Json
+  name               Json
   /// @nopii timestamp
-  createdAt      DateTime             @default(now()) @db.Timestamptz(3)
+  createdAt          DateTime             @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt      DateTime             @updatedAt @db.Timestamptz(3)
-  entryOptions   PackageEntryOption[]
+  updatedAt          DateTime             @updatedAt @db.Timestamptz(3)
+  entryOptions       PackageEntryOption[]
+  participationRates ParticipationRate[]
 
   @@index([raceId])
   @@map("race_distances")
@@ -296,6 +297,7 @@ model Package {
   hotels               PackageHotel[]
   extras               Extra[]
   costItems            CostItem[]
+  priceVersions        PriceVersion[]
 
   @@unique([editionId, slug])
   @@unique([id, currency])
@@ -406,6 +408,7 @@ model RoomOption {
   createdAt      DateTime      @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
   updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+  roomRates      RoomRate[]
 
   @@index([packageHotelId])
   @@index([roomPoolId])
@@ -443,6 +446,7 @@ model Extra {
   createdAt     DateTime       @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
   updatedAt     DateTime       @updatedAt @db.Timestamptz(3)
+  extraRates    ExtraRate[]
 
   @@index([packageId])
   @@index([poolId])

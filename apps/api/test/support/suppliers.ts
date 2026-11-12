@@ -1,13 +1,12 @@
 import { SUPPLIERS_PERMISSIONS } from '../../src/modules/suppliers';
 import { FeatureFlagService } from '../../src/platform/flags/flags.service';
 import { TestApp } from './auth';
-import { Client, World, buildWorld, staffClient } from './catalogue';
-import { CATALOGUE_PERMISSIONS } from '../../src/modules/catalogue';
+import { CATALOGUE_AND_PRICING, Client, World, buildWorld, staffClient } from './catalogue';
 
 export const SP = SUPPLIERS_PERMISSIONS;
 export const ALL_SUPPLIER_PERMISSIONS = Object.values(SUPPLIERS_PERMISSIONS);
-/** Catalogue permissions are needed to build the edition and pools the allotments point at. */
-export const ALL = [...ALL_SUPPLIER_PERMISSIONS, ...Object.values(CATALOGUE_PERMISSIONS)];
+/** Catalogue and pricing permissions are needed to build the edition and pools the allotments point at. */
+export const ALL = [...ALL_SUPPLIER_PERMISSIONS, ...CATALOGUE_AND_PRICING];
 
 export async function setSuppliersFlag(t: TestApp, enabled: boolean): Promise<void> {
   const flags = t.app.get(FeatureFlagService);

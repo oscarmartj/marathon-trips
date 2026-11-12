@@ -4,5 +4,6 @@ export * from './brand';
 export * from './schemas/auth';
 export * from './schemas/catalogue';
 export * from './schemas/tables';
+export * from './schemas/pricing';
 export * from './schemas/alerts';
 export * from './schemas/suppliers';
