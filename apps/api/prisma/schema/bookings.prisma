@@ -80,6 +80,7 @@ model Customer {
   updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
   bookings           Booking[]
   promoRedemptions   PromoRedemption[]
+  payments           Payment[]
 
   @@unique([userId, userKind])
   @@map("customers")
@@ -157,6 +158,9 @@ model Booking {
   extras                 BookingExtra[]
   claims                 InventoryClaim[]
   promoRedemptions       PromoRedemption[]
+  paymentSchedules       PaymentSchedule[]
+  payments               Payment[]
+  webhookEvents          WebhookEvent[]
   inventoryMovements     InventoryMovement[]
 
   @@unique([id, currency])
