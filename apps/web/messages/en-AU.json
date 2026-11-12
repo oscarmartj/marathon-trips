@@ -1972,7 +1972,7 @@
     "familyName": "Family name",
     "phone": "Mobile number (optional)",
     "country": "Country of residence (two-letter code, such as AU)",
-    "whatHappensNext": "We check availability with our hotels and the race, then email you. Places are held for you while we look.",
+    "whatHappensNext": "We check availability with our hotels and the race, then get back to you. Places are held for you while we look.",
     "send": "Send booking request",
     "sending": "Sending…",
     "errors": {
@@ -1997,7 +1997,7 @@
       "statusHeading": "Your booking request",
       "notABooking": "We have your booking request. It is a request, not a confirmed booking.",
       "nothingCharged": "We have not charged you anything.",
-      "next": "We will check availability and email you by {date}. Your places are held until then.",
+      "next": "We will check availability and be in touch. Your places are held until {date}.",
       "reference": "Reference",
       "dates": "Dates",
       "dateRange": "{from} to {to}",
@@ -2008,7 +2008,7 @@
       "notFoundBody": "We could not show this request. Sign in with the email address you used to send it."
     },
     "status": {
-      "approved": "We have approved your request. We will email you how to pay the deposit.",
+      "approved": "We have approved your request. We will be in touch about the next step.",
       "declined": "We could not offer this trip. Your request is closed.",
       "expired": "This request has expired.",
       "cancelled": "This request is closed.",

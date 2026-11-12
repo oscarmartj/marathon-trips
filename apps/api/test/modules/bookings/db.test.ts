@@ -122,6 +122,17 @@ describe('booking_snapshots_immutable and booking_total_mirrors_snapshot', () =>
     await expect(sql(`INSERT INTO promo_redemptions (id, "promoCodeId", "bookingId", "customerId", "activeBookingId", "redeemedAt") VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $3::uuid, now())`, randomUUID(), codeId, bookingId, stranger)).rejects.toThrow(/foreign key/);
   });
 
+  it('places, rooms and extras of a booking are never deleted (amendments mark them, task 6.3)', async () => {
+    const b = await real();
+    await sql(`INSERT INTO booking_extras (id, "bookingId", "extraId", quantity, "travellerSlot") VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 1)`, randomUUID(), b.id, w.extraId);
+    for (const table of ['booking_travellers', 'booking_rooms', 'booking_extras']) {
+      await expect(sql(`DELETE FROM ${table} WHERE "bookingId" = $1::uuid`, b.id), table).rejects.toThrow(/never deleted/);
+      expect(await asOwner(`DELETE FROM ${table} WHERE "bookingId" = $1::uuid`, [b.id])).toMatch(/never deleted/);
+      expect(await asOwner(`TRUNCATE ${table}`)).toMatch(/append-only/);
+      expect(await t.prisma.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM ${table} WHERE "bookingId" = $1::uuid`, b.id)).not.toEqual([{ n: 0 }]);
+    }
+  });
+
   it('customers are never deleted (erasure anonymises them, task 5.5)', async () => {
     const id = await makeCustomer(t);
     await expect(sql(`DELETE FROM customers WHERE id = $1::uuid`, id)).rejects.toThrow(/never deleted/);

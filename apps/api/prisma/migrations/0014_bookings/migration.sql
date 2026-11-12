@@ -433,6 +433,14 @@ ALTER TABLE "booking_rooms"
   ADD CONSTRAINT "booking_rooms_occupancy_check" CHECK ("occupancy" BETWEEN 1 AND 4 AND cardinality("travellerSlots") = "occupancy");
 ALTER TABLE "booking_extras"
   ADD CONSTRAINT "booking_extras_quantity_check" CHECK ("quantity" >= 1 AND ("travellerSlot" IS NULL OR ("travellerSlot" >= 1 AND "quantity" = 1)));
+CREATE TRIGGER booking_rooms_no_delete BEFORE DELETE ON "booking_rooms"
+  FOR EACH ROW EXECUTE FUNCTION public.mt_booking_part_guard();
+CREATE TRIGGER booking_rooms_no_truncate BEFORE TRUNCATE ON "booking_rooms"
+  FOR EACH STATEMENT EXECUTE FUNCTION public.mt_reject_modification();
+CREATE TRIGGER booking_extras_no_delete BEFORE DELETE ON "booking_extras"
+  FOR EACH ROW EXECUTE FUNCTION public.mt_booking_part_guard();
+CREATE TRIGGER booking_extras_no_truncate BEFORE TRUNCATE ON "booking_extras"
+  FOR EACH STATEMENT EXECUTE FUNCTION public.mt_reject_modification();
 
 -- ---- Stock held by a booking: held → released once, never anything else (plan 0.1, 6.2) ----
 ALTER TABLE "inventory_claims"

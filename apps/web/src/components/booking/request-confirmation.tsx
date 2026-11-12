@@ -4,6 +4,10 @@ import { localisedText } from '@/lib/catalogue';
 import { formatDate } from '@/lib/catalogue-format';
 import { t } from '@/lib/i18n';
 
+/** The calendar day of an instant in the business time zone (Australia/Brisbane, no daylight saving), as YYYY-MM-DD. */
+export const dateInBrisbane = (iso: string): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+
 export interface RequestView {
   reference: string;
   status: string;
@@ -32,7 +36,7 @@ export function RequestConfirmation({ view }: { view: RequestView }) {
           <div className="notice" role="status">
             <p>{t('bookingRequest.confirmation.notABooking')}</p>
             <p>{t('bookingRequest.confirmation.nothingCharged')}</p>
-            <p>{t('bookingRequest.confirmation.next', { date: formatDate(view.requestExpiresAt.slice(0, 10)) })}</p>
+            <p>{t('bookingRequest.confirmation.next', { date: formatDate(dateInBrisbane(view.requestExpiresAt)) })}</p>
           </div>
         ) : (
           <p className="notice" role="status">{t(`bookingRequest.status.${view.status}`)}</p>

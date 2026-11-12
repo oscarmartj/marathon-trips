@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { RequestConfirmation, type RequestView } from '@/components/booking/request-confirmation';
+import { RequestConfirmation, dateInBrisbane, type RequestView } from '@/components/booking/request-confirmation';
+import { formatDate } from '@/lib/catalogue-format';
 
 const view = (over: Partial<RequestView> = {}): RequestView => ({
   reference: 'MT-4YRAQQ', status: 'requested', isRequest: true, requestExpiresAt: '2026-11-19T09:23:33.035Z', departureDate: '2027-06-18', returnDate: '2027-06-21',
@@ -25,5 +26,14 @@ describe('confirmation page', () => {
     const text = renderToStaticMarkup(<RequestConfirmation view={view({ status: 'declined', isRequest: false })} />);
     expect(text).toContain('We could not offer this trip.');
     expect(text).not.toContain('Request received');
+  });
+
+  it('the hold date is the day in Brisbane, not in UTC: 07:30 on the 19th in Brisbane is the 18th in UTC', () => {
+    expect(dateInBrisbane('2026-11-18T21:30:00.000Z')).toBe('2026-11-19');
+    expect(dateInBrisbane('2026-11-18T13:59:59.000Z')).toBe('2026-11-18');
+    const text = renderToStaticMarkup(<RequestConfirmation view={view({ requestExpiresAt: '2026-11-18T21:30:00.000Z' })} />);
+    expect(text).toContain(formatDate('2026-11-19'));
+    expect(text).not.toContain(formatDate('2026-11-18'));
+    expect(text).not.toMatch(/email you/i);
   });
 });

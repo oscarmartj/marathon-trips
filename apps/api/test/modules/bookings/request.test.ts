@@ -9,9 +9,10 @@ import { SettingsService } from '../../../src/platform/flags/flags.service';
 import { STATE_HEADERS, TestApp, makeApp, signInStaff } from '../../support/auth';
 import { closeCatalogue, setSale } from '../../support/catalogue';
 import { createCode, createRule, freshCode, richWorld } from '../../support/adjustments';
+import { OWNERSHIP_MISSES_PER_HOUR } from '../../../src/modules/bookings/ownership';
 import type { RichWorld } from '../../support/adjustments';
 import { bookingStaff, cleanBookingEvents, contact, customerClient, requestBody } from '../../support/bookings';
-import { pricedWorld } from '../../support/pricing';
+import { cardFor, pricedWorld, publishWith } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
@@ -343,5 +344,131 @@ describe('dates', () => {
     const res = await c.request(requestBody(w));
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { reference: res.body.reference } });
     expect(b.requestExpiresAt.getTime() - b.requestedAt.getTime()).toBe(168 * 3_600_000);
+  });
+});
+
+describe('price_change_does_not_alter_snapshot (phase criterion: changing a price after a request does not alter it)', () => {
+  it('a new price version, a new rule and an archived code later: the booking, its snapshot and what the customer sees stay the same', async () => {
+    const w = await pricedWorld(admin);
+    const code = await createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id, valueBps: 1000, appliesTo: 'subtotal' });
+    const c = await customerClient(t);
+    const res = await c.request(requestBody(w, { promoCode: code.code }));
+    expect(res.status).toBe(201);
+    const read = async () => {
+      const b = await t.prisma.booking.findUniqueOrThrow({ where: { reference: res.body.reference }, include: { snapshots: true, claims: true, travellers: true, rooms: true, extras: true } });
+      return jsonOf(b);
+    };
+    const before = await read();
+    const seenBefore = (await c.get(res.body.reference)).body;
+    const quoteBefore = (await t.http().post('/pricing/quotes').set(STATE_HEADERS).send(requestBody(w, { contact: undefined }))).body.totalMinor;
+
+    // Prices change: a dearer version, a big package discount, and the code archived.
+    const dearer = cardFor({ roomId: w.roomId, extraId: w.extraId, distanceId: w.distanceId });
+    dearer.roomRates = dearer.roomRates.map((r) => ({ ...r, pricePerPersonMinor: String(BigInt(r.pricePerPersonMinor) * 2n) }));
+    const newVersion = await publishWith(admin, w.pkg.id, dearer, 'Dearer');
+    await createRule(admin, { scopeType: 'package', packageId: w.pkg.id, appliesTo: 'participation', valueBps: 5000, stackable: true });
+    expect((await admin.post(`/admin/pricing/promo-codes/${code.id}/archive`, { version: code.version })).status).toBe(200);
+
+    // The price really changed for a new quote...
+    const quoteAfter = (await t.http().post('/pricing/quotes').set(STATE_HEADERS).send(requestBody(w, { contact: undefined }))).body;
+    expect(quoteAfter.priceVersionId).toBe(newVersion);
+    expect(quoteAfter.totalMinor).not.toBe(quoteBefore);
+    // ...and nothing about the request did.
+    expect(await read()).toEqual(before);
+    expect((await c.get(res.body.reference)).body).toEqual(seenBefore);
+    expect(seenBefore.totalMinor).toBe(res.body.totalMinor);
+  });
+});
+
+describe('failures write nothing', () => {
+  /** Rows a failed request could have left anywhere: bookings and their parts, codes, stock, events and audit. */
+  async function footprint(userId: string, pools: string[], codeId: string) {
+    const customer = await t.prisma.customer.findUnique({ where: { userId } });
+    const cid = customer?.id ?? '00000000-0000-0000-0000-000000000000';
+    return {
+      customer: customer ? jsonOf(customer) : null,
+      bookings: await t.prisma.booking.count({ where: { customerId: cid } }),
+      snapshots: await t.prisma.bookingSnapshot.count({ where: { booking: { customerId: cid } } }),
+      travellers: await t.prisma.bookingTraveller.count({ where: { customerId: cid } }),
+      rooms: await t.prisma.bookingRoom.count({ where: { booking: { customerId: cid } } }),
+      extras: await t.prisma.bookingExtra.count({ where: { booking: { customerId: cid } } }),
+      claims: await t.prisma.inventoryClaim.count({ where: { booking: { customerId: cid } } }),
+      redemptions: await t.prisma.promoRedemption.count({ where: { promoCodeId: codeId } }),
+      redeemedCount: (await t.prisma.promoCode.findUniqueOrThrow({ where: { id: codeId } })).redeemedCount,
+      consumed: await Promise.all(pools.map(async (id) => (await t.prisma.inventoryPool.findUniqueOrThrow({ where: { id } })).consumed)),
+      movements: await t.prisma.inventoryMovement.count({ where: { poolId: { in: pools } } }),
+      requestedEvents: await t.prisma.outboxEvent.count({ where: { type: 'bookings.booking.requested' } }),
+      requestedAudit: await t.prisma.auditLog.count({ where: { action: { startsWith: 'bookings.' } } }),
+      redemptionAudit: await t.prisma.auditLog.count({ where: { entityId: codeId } }),
+    };
+  }
+
+  it('failed_hold_rolls_back_everything: no place left in the last pool, and nothing of the request remains anywhere', async () => {
+    const w = await pricedWorld(admin);
+    const code = await createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id });
+    const pools = [w.roomPoolId, w.entryPoolId, w.extraPoolId];
+    // the pool locked last (highest id) is the one that is full, so every earlier hold has already been written
+    const last = [...pools].sort().at(-1)!;
+    const v = (await t.prisma.inventoryPool.findUniqueOrThrow({ where: { id: last } })).version;
+    expect((await admin.patch(`/admin/catalogue/pools/${last}`, { capacity: 0, version: v })).status).toBe(200);
+    const c = await customerClient(t);
+    const before = await footprint(c.userId, pools, code.id);
+    const res = await c.request(requestBody(w, { promoCode: code.code, extras: [{ extraId: w.extraId, travellerSlots: [1] }] }));
+    expect([res.status, res.body.code]).toEqual([409, 'inventory_unavailable']);
+    expect(await footprint(c.userId, pools, code.id)).toEqual(before);
+    expect(before.customer).toBeNull();
+  });
+
+  it('failed_redemption_rolls_back_everything: the code fails at redemption (per-customer limit), after the booking was written; nothing remains', async () => {
+    const w = await pricedWorld(admin);
+    const code = await createCode(admin, freshCode(), { scopeType: 'package', packageId: w.pkg.id, maxPerCustomer: 1 });
+    const pools = [w.roomPoolId, w.entryPoolId, w.extraPoolId];
+    const c = await customerClient(t);
+    expect((await c.request(requestBody(w, { promoCode: code.code }))).status).toBe(201);
+    const before = await footprint(c.userId, pools, code.id);
+    const res = await c.request(requestBody(w, { promoCode: code.code }));
+    expect([res.status, res.body.code, res.body.message]).toEqual([409, 'promo_code_unavailable', 'That code can no longer be used. Remove it to continue.']);
+    expect(await footprint(c.userId, pools, code.id)).toEqual(before);
+  });
+
+  it('no_current_price_version_409: an open package whose version has ended takes no request and writes nothing', async () => {
+    const w = await pricedWorld(admin);
+    // A state the API never makes (a published version ends only when a successor starts): built as the table owner,
+    // with the successor check off for this one statement only.
+    const { default: pg } = await import('pg');
+    const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await owner.connect();
+    try {
+      await owner.query('ALTER TABLE price_versions DISABLE TRIGGER price_versions_successor');
+      await owner.query(`UPDATE price_versions SET "validTo" = clock_timestamp() WHERE id = $1::uuid`, [w.versionId]);
+    } finally {
+      await owner.query('ALTER TABLE price_versions ENABLE TRIGGER price_versions_successor');
+      await owner.end();
+    }
+    await new Promise((r) => setTimeout(r, 20));
+    const c = await customerClient(t);
+    const res = await c.request(requestBody(w));
+    expect([res.status, res.body.code]).toEqual([409, 'no_current_price_version']);
+    expect(await t.prisma.customer.count({ where: { userId: c.userId } })).toBe(0);
+    expect(await t.prisma.booking.count({ where: { packageId: w.pkg.id } })).toBe(0);
+  });
+});
+
+describe('guessing references', () => {
+  it(`after ${OWNERSHIP_MISSES_PER_HOUR} misses in an hour, even the customer's own reference reads as not found`, async () => {
+    const w = await pricedWorld(admin);
+    const c = await customerClient(t);
+    const mine = (await c.request(requestBody(w))).body.reference as string;
+    expect((await c.get(mine)).status).toBe(200);
+    for (let i = 0; i < OWNERSHIP_MISSES_PER_HOUR; i++) expect((await c.get(`MT-${String(i).padStart(6, '0')}`)).status).toBe(404);
+    const blocked = await c.get(mine);
+    const unknown = await c.get('MT-ZZZZZZ');
+    expect([blocked.status, blocked.body]).toEqual([unknown.status, unknown.body]);
+    expect(blocked.status).toBe(404);
+    // another customer is not affected
+    const other = await customerClient(t);
+    expect((await other.get('MT-ZZZZZZ')).status).toBe(404);
+    const theirs = (await other.request(requestBody(w))).body.reference as string;
+    expect((await other.get(theirs)).status).toBe(200);
   });
 });

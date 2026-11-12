@@ -122,7 +122,7 @@ export class BookingStateMachine {
 
     await this.audit.record(tx, {
       actor: input.actor, action: 'bookings.booking.status_changed', entityType: 'Booking', entityId: b.id, model: 'Booking',
-      before: { status: b.status, customerId: b.customerId }, after: { status: to, customerId: b.customerId, ...(RELEASING.has(to) && reason ? { statusReason: reason } : {}) },
+      before: { status: b.status, customerId: b.customerId }, after: { status: to, customerId: b.customerId },
       reason, context: { event, from: b.status, to, releasedPlaces: released.places, promoReleased: released.promo },
     });
     const type = { approved: BOOKING_EVENTS.approved, declined: BOOKING_EVENTS.declined, cancelled: BOOKING_EVENTS.cancelled, expired: BOOKING_EVENTS.expired }[to as 'approved' | 'declined' | 'cancelled' | 'expired'];

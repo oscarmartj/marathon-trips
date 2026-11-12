@@ -32,6 +32,20 @@ async function setCapacity(id: string, capacity: number): Promise<void> {
   const r = await admin.patch(`/admin/catalogue/pools/${id}`, { capacity, version: p.version });
   if (r.status !== 200) throw new Error(`capacity: ${r.status} ${JSON.stringify(r.body)}`);
 }
+/** Deadlocks PostgreSQL has detected in this database, after its statistics are flushed. */
+async function deadlocks(): Promise<number> {
+  await new Promise((r) => setTimeout(r, 1_200));
+  // A fresh connection reads fresh statistics (a session caches its stats snapshot).
+  const { default: pg } = await import('pg');
+  const c = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await c.connect();
+  try {
+    const { rows } = await c.query<{ n: number }>(`SELECT deadlocks::int AS n FROM pg_stat_database WHERE datname = current_database()`);
+    return rows[0]!.n;
+  } finally {
+    await c.end();
+  }
+}
 const customers = (n: number) => Promise.all(Array.from({ length: n }, () => customerClient(t)));
 const heldBy = async (packageId: string) => (await t.prisma.inventoryClaim.findMany({ where: { booking: { packageId }, status: 'held' } })).reduce((m, c) => ({ ...m, [c.poolId]: (m[c.poolId] ?? 0) + c.quantity }), {} as Record<string, number>);
 
@@ -62,10 +76,11 @@ describe('the last place', () => {
     const rs = await Promise.all(cs.map((c) => c.request(requestBody(w))));
     const o = outcomes(rs);
     const won = o.filter((x) => x === '201').length;
+    const busy = o.filter((x) => x === '409 busy_try_again').length;
     expect(o.filter((x) => x !== '201').every((x) => x === '409 inventory_unavailable' || x === '409 busy_try_again'), o.join()).toBe(true);
-    // nobody lost to load here, so the seven places all went
-    if (!o.includes('409 busy_try_again')) expect(won).toBe(7);
+    // never more than the seven places, and every place left unsold is accounted for by a request that lost to load
     expect(won).toBeLessThanOrEqual(7);
+    expect(7 - won, o.join()).toBeLessThanOrEqual(busy);
     expect((await poolOf(w.roomPoolId)).consumed).toBe(won);
     expect(await t.prisma.booking.count({ where: { packageId: w.pkg.id } })).toBe(won);
     expect((await heldBy(w.pkg.id))[w.roomPoolId]).toBe(won);
@@ -92,8 +107,11 @@ describe('opposite_order_requests_do_not_deadlock', () => {
     const forward = { packageId: w.pkg.id, rooms: [{ roomOptionId: double, travellers: [S] }, { roomOptionId: quad, travellers: [S] }], contact: contact() };
     const backward = { ...forward, rooms: [...forward.rooms].reverse() };
     const cs = await customers(20);
+    const deadlocksBefore = await deadlocks();
     const rs = await Promise.all(cs.map((c, i) => c.request(i % 2 === 0 ? forward : backward)));
     const o = outcomes(rs);
+    // a deadlock would be retried and could hide as busy_try_again: PostgreSQL's own count must not move
+    expect(await deadlocks(), o.join()).toBe(deadlocksBefore);
     expect(o.filter((x) => x !== '201' && x !== '409 busy_try_again'), o.join()).toEqual([]);
     const won = o.filter((x) => x === '201').length;
     expect([(await poolOf(w.roomPoolId)).consumed, (await poolOf(second)).consumed]).toEqual([won, won]);
