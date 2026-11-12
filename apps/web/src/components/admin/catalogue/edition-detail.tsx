@@ -7,6 +7,7 @@ import { enAU, nightsBetween, slugify, wholeNumber, withEnAU } from '@/lib/catal
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { PackageCsv } from './catalogue-csv';
+import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { ActionButton, type BodySubmit, EntityForm, Section, catalogueError, formatDay, outcome, useLoad } from './kit';
 import { LowStockNotice } from './low-stock-notice';
 import { EditionDates, EditionForm, type RaceView } from './race-detail';
@@ -44,6 +45,7 @@ export function EditionDetail({ id }: { id: string }) {
   const { data: edition, error, reload } = useLoad<EditionView>(`/admin/catalogue/editions/${id}`);
   const { data: race } = useLoad<RaceView>(edition ? `/admin/catalogue/races/${edition.raceId}` : null);
   const { data: pools, reload: reloadPools } = useLoad<Pool[]>(`/admin/catalogue/editions/${id}/pools`);
+  const newPackageCf = useCustomFieldForm('Package', undefined, true, 'new-package-cf');
   if (!edition) return error ? <Status message={error} /> : <p role="status">{t('admin.common.loading')}</p>;
 
   return (
@@ -190,11 +192,14 @@ export function EditionDetail({ id }: { id: string }) {
           ]}
           initial={{ name: '', slug: '', checkInDate: '', checkOutDate: '', balanceDueDate: '', maxTravellers: '4' }}
           submit={t('admin.catalogue.packages.addButton')}
+          extra={newPackageCf.extra}
           onSubmit={async (v) => {
+            const custom = newPackageCf.body();
+            if (custom.problem) return { ok: false, message: problemMessage(custom.problem) };
             const name = String(v.name).trim();
             const r = await api<{ id: string }>(`/admin/catalogue/editions/${id}/packages`, {
               method: 'POST',
-              body: { slug: String(v.slug).trim() || slugify(name), name: withEnAU(undefined, name), checkInDate: v.checkInDate, checkOutDate: v.checkOutDate, balanceDueDate: v.balanceDueDate, maxTravellers: wholeNumber(String(v.maxTravellers)) ?? 0 },
+              body: { ...custom.body, slug: String(v.slug).trim() || slugify(name), name: withEnAU(undefined, name), checkInDate: v.checkInDate, checkOutDate: v.checkOutDate, balanceDueDate: v.balanceDueDate, maxTravellers: wholeNumber(String(v.maxTravellers)) ?? 0 },
             });
             if (r.status === 201) {
               window.location.assign(`/admin/packages/${r.body.id}`);

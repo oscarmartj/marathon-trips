@@ -9,6 +9,7 @@ import { Status } from '../../auth/field';
 import { useStepUp } from '../step-up';
 import { ActionButton, type BodySubmit, EntityForm, Section, catalogueError, formatDay, outcome, useLoad } from './kit';
 import { raceBody, raceFields } from './races-panel';
+import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 
 interface Distance {
   id: string;
@@ -46,6 +47,7 @@ export interface RaceView {
   distances: Distance[];
   claims: Claim[];
   editions: EditionRow[];
+  customFields?: Record<string, unknown>;
 }
 
 const pickOptions = (keys: readonly string[], prefix: string) => keys.map((k) => ({ value: k, label: t(`${prefix}.${k}`) }));
@@ -55,6 +57,7 @@ const metres = (m: number) => t('admin.catalogue.common.km', { value: m % 1000 =
 export function RaceDetail({ id }: { id: string }) {
   const { data: race, error, reload } = useLoad<RaceView>(`/admin/catalogue/races/${id}`);
   const stepUp = useStepUp();
+  const cf = useCustomFieldForm('Race', race?.customFields, false, 'race-cf');
   if (!race) return error ? <Status message={error} /> : <p role="status">{t('admin.common.loading')}</p>;
 
   const details = {
@@ -88,8 +91,11 @@ export function RaceDetail({ id }: { id: string }) {
           fields={raceFields()}
           initial={details}
           submit={t('admin.catalogue.common.save')}
+          extra={cf.extra}
           onSubmit={async (v) => {
-            const out = await outcome(() => api(`/admin/catalogue/races/${id}`, { method: 'PATCH', body: { ...raceBody(v, race), version: race.version } }), t('admin.catalogue.common.saved'));
+            const custom = cf.body();
+            if (custom.problem) return { ok: false, message: problemMessage(custom.problem) };
+            const out = await outcome(() => api(`/admin/catalogue/races/${id}`, { method: 'PATCH', body: { ...raceBody(v, race), ...custom.body, version: race.version } }), t('admin.catalogue.common.saved'));
             if (out.ok) void reload();
             return out;
           }}

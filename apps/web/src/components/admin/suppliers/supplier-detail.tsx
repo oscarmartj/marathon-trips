@@ -6,13 +6,14 @@ import { api } from '@/lib/api-client';
 import { fromMinor, formatMinor, toMinor } from '@/lib/supplier-format';
 import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
+import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { ActionButton, EntityForm, type FieldDef, Section, formatDay, outcome, useLoad } from '../catalogue/kit';
 import { supplierBody, supplierFields } from './suppliers-panel';
 
 interface Contact { id: string; name: string; email: string | null; phone: string | null; role: string }
 interface Contract { id: string; reference: string; editionId: string | null; signedAt: string | null; validFrom: string | null; validTo: string | null; terms: string; version: number }
 interface Supplier {
-  id: string; name: string; kind: string; countryCode: string; defaultCurrency: string; paymentTerms: string; notes: string; version: number; isDemo: boolean;
+  id: string; name: string; kind: string; countryCode: string; defaultCurrency: string; paymentTerms: string; notes: string; version: number; isDemo: boolean; customFields?: Record<string, unknown>;
   contacts: Contact[]; contracts: Contract[];
 }
 interface Allotment {
@@ -37,6 +38,7 @@ export function SupplierDetail({ id }: { id: string }) {
   const costs = useLoad<{ items: Cost[]; summary: Array<{ currency: string; status: string; amountMinor: string }> }>(`/admin/suppliers/${id}/costs`);
   const [contractId, setContractId] = useState('');
   const s = supplier.data;
+  const cf = useCustomFieldForm('Supplier', s?.customFields, false, 'supplier-cf');
   const chosen = pickContract(s, contractId);
   const coverage = useLoad<{ items: CoveragePool[] }>(chosen?.editionId ? `/admin/suppliers/coverage?editionId=${chosen.editionId}` : null);
   const reloadAll = () => { void supplier.reload(); void allotments.reload(); void costs.reload(); };
@@ -88,8 +90,11 @@ export function SupplierDetail({ id }: { id: string }) {
           fields={supplierFields()}
           initial={{ name: s.name, kind: s.kind, countryCode: s.countryCode, defaultCurrency: s.defaultCurrency, paymentTerms: s.paymentTerms, notes: s.notes }}
           submit={t('admin.catalogue.common.save')}
+          extra={cf.extra}
           onSubmit={async (v) => {
-            const out = await outcome(() => api(`/admin/suppliers/${s.id}`, { method: 'PATCH', body: { ...supplierBody(v), version: s.version } }), t('admin.catalogue.common.saved'));
+            const custom = cf.body();
+            if (custom.problem) return { ok: false, message: problemMessage(custom.problem) };
+            const out = await outcome(() => api(`/admin/suppliers/${s.id}`, { method: 'PATCH', body: { ...supplierBody(v), ...custom.body, version: s.version } }), t('admin.catalogue.common.saved'));
             if (out.ok) void supplier.reload();
             return out;
           }}
