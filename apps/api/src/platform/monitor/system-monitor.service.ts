@@ -28,13 +28,15 @@ export interface SystemStatus {
   events: { pendingEvents: number; oldestPendingSeconds: number | null; pendingDeliveries: number; failedDeliveries: number };
   mail: { queued: number; oldestQueuedSeconds: number | null; failedLast24h: number };
   backup: { state: BackupState; finishedAt: string | null; ageHours: number | null; offsite: boolean | null; encrypted: boolean | null };
+  /** Outgoing webhooks (task 8.4): counts only, never an address. */
+  webhooks: { pending: number; sending: number; oldestPendingSeconds: number | null; failedLast24h: number; autoDisabledSubscriptions: number };
 }
 
 const seconds = (from: Date | null, now: Date): number | null => (from ? Math.max(0, Math.round((now.getTime() - from.getTime()) / 1000)) : null);
 
 /**
  * Task 8.6, the "system monitor" of docs/architecture.md. Counts, ages, queue names and fixed codes only: no addresses,
- * no job data and no error text ever leave this service. Webhook-out health joins when its tables exist (8.4).
+ * no job data and no error text ever leave this service. Webhook-out health is in `webhooks` (task 8.4).
  */
 @Injectable()
 export class SystemMonitorService {
@@ -50,7 +52,7 @@ export class SystemMonitorService {
     const roundTripMs = Date.now() - t0;
     const day = new Date(now.getTime() - 24 * 3600 * 1000);
 
-    const [jobRows, pendingEvents, oldestEvent, deliveries, mailGroups, oldestMail, mailFailed, maintenance, backup] = await Promise.all([
+    const [jobRows, pendingEvents, oldestEvent, deliveries, mailGroups, oldestMail, mailFailed, maintenance, backup, webhooks] = await Promise.all([
       this.prisma.$queryRaw<Array<{ name: string; waiting: number; active: number; failed: number; oldest: Date | null }>>`
         SELECT name,
                count(*) FILTER (WHERE state IN ('created', 'retry'))::int AS waiting,
@@ -66,6 +68,7 @@ export class SystemMonitorService {
       this.prisma.outboundEmail.count({ where: { status: 'failed', updatedAt: { gt: day } } }),
       this.flags.isEnabled(FLAGS.maintenance),
       this.backupState(now),
+      this.webhookState(now, day),
     ]);
 
     const byName = new Map(jobRows.map((r) => [r.name, r]));
@@ -87,6 +90,8 @@ export class SystemMonitorService {
     if (events.failedDeliveries > 0) reasons.push('event_deliveries_failed');
     if ((mail.oldestQueuedSeconds ?? 0) > MONITOR_LIMITS.mailQueuedSeconds) reasons.push('mail_queued_old');
     if (mail.failedLast24h > 0) reasons.push('mail_failed');
+    if (webhooks.failedLast24h > 0) reasons.push('webhook_deliveries_failed');
+    if (webhooks.autoDisabledSubscriptions > 0) reasons.push('webhooks_auto_disabled');
     if (backup.state === 'stale') reasons.push('backup_stale');
     // Outside production nobody runs the backup script, so "unknown" is only a problem there.
     if (backup.state === 'unknown' && this.config.APP_ENV === 'production') reasons.push('backup_unknown');
@@ -102,7 +107,19 @@ export class SystemMonitorService {
       events,
       mail,
       backup,
+      webhooks,
     };
+  }
+
+  async webhookState(now: Date, day: Date): Promise<SystemStatus['webhooks']> {
+    const [pending, sending, oldest, failed, autoDisabled] = await Promise.all([
+      this.prisma.webhookDelivery.count({ where: { status: 'pending' } }),
+      this.prisma.webhookDelivery.count({ where: { status: 'sending' } }),
+      this.prisma.webhookDelivery.aggregate({ where: { status: 'pending' }, _min: { createdAt: true } }),
+      this.prisma.webhookDelivery.count({ where: { status: 'failed', lastAttemptAt: { gt: day } } }),
+      this.prisma.webhookSubscription.count({ where: { deletedAt: null, disabledReason: 'consecutive_failures' } }),
+    ]);
+    return { pending, sending, oldestPendingSeconds: seconds(oldest._min.createdAt, now), failedLast24h: failed, autoDisabledSubscriptions: autoDisabled };
   }
 
   /** Reads the file backup.sh writes after a good backup. Missing, unreadable or malformed is "unknown", never an error. */

@@ -65,6 +65,7 @@ model User {
   recoveryCodes        RecoveryCode[]
   loginTokens          LoginToken[]
   roles                UserRole[]
+  apiKeys              ApiKey[]
 
   @@unique([kind, email])
   @@unique([id, kind])

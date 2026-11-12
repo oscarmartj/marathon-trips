@@ -225,7 +225,8 @@
       "suppliers": "Suppliers",
       "supplier": "Supplier",
       "content": "Content",
-      "contentKind": "Content list"
+      "contentKind": "Content list",
+      "integrations": "Integrations"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -1249,6 +1250,43 @@
         "media": "{label}",
         "redirect": "{from} -> {to} ({code}) - {state}"
       }
+    },
+    "integrations": {
+      "title": "Integrations",
+      "intro": "API keys let another tool use the admin API; webhooks tell another tool when something happens. Every change needs your authenticator code and is recorded in the audit log.",
+      "keysTitle": "API keys",
+      "keysIntro": "A key can only do what you choose from your own permissions, never anything that needs an authenticator code. It stops working when it expires, when you revoke it, or when its owner is disabled.",
+      "hooksTitle": "Webhooks",
+      "hooksIntro": "We send a signed notice to the address for each chosen event. Notices carry identifiers only, never personal details.",
+      "tokenLabel": "New API key:",
+      "secretLabel": "Signing secret:",
+      "copyNow": "Copy it now and store it safely. It will not be shown again.",
+      "name": "Name",
+      "prefix": "Key",
+      "scopes": "Permissions",
+      "expires": "Expires",
+      "expiresInDays": "Expires after (days, 365 at most)",
+      "lastUsed": "Last used",
+      "never": "Never",
+      "state": "State",
+      "status": {
+        "active": "Active",
+        "expired": "Expired",
+        "revoked": "Revoked"
+      },
+      "revoke": "Revoke",
+      "newKey": "New API key",
+      "createKey": "Create key",
+      "address": "Address",
+      "description": "Description",
+      "events": "Events",
+      "autoDisabled": "Off after repeated failures",
+      "sendTest": "Send test",
+      "rotate": "New secret",
+      "delete": "Delete",
+      "newHook": "New webhook",
+      "createHook": "Create webhook",
+      "invalid": "Check the details: the address must be public and use https, and you can only choose permissions and events you have."
     }
   },
   "auth": {

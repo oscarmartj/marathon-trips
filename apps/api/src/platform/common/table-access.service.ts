@@ -59,7 +59,7 @@ export class TableAccessService {
 
   /** Permission keys the caller holds, for services that filter by key (search). */
   effective(caller: Caller): Promise<Effective> {
-    return this.access.effective(this.prisma, caller.auth.userId);
+    return this.access.effectiveFor(this.prisma, caller.auth);
   }
 
   /** Throws unless the caller holds a platform-level key such as common.tag.manage. */

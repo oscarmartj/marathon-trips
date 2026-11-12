@@ -42,6 +42,13 @@ const configSchema = z.object({
   // Requests per minute and IP on sign-in, code and magic-link routes.
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
 
+  // Task 8.4. Outgoing webhooks outside production go only to these exact origins (scheme://host:port, comma separated);
+  // in production the list is ignored with a warning at start-up. Empty by default.
+  WEBHOOK_DEV_ALLOWLIST: z.string().default(''),
+  // Requests per minute per API key, and failed API key authentications per minute per IP.
+  API_KEY_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
+  API_KEY_FAILED_PER_MINUTE: z.coerce.number().int().min(1).default(30),
+
   // Task 8.6: file written by scripts/backup/backup.sh after each good backup; the system monitor reads it. Optional.
   BACKUP_STATUS_FILE: z.string().min(1).optional(),
 

@@ -15,10 +15,10 @@ export const pricingManifest = {
   /** pricing has no feature flag: it cannot be switched off (plan 0.1, 3.1). */
   flagKey: null,
   permissions: [
-    def(PRICING_PERMISSIONS.versionRead, 'See price versions and their rates, drafts included'),
+    { ...def(PRICING_PERMISSIONS.versionRead, 'See price versions and their rates, drafts included'), apiKeyScopable: true },
     def(PRICING_PERMISSIONS.versionManage, 'Create, edit and discard draft price versions'),
     def(PRICING_PERMISSIONS.versionPublish, 'Publish a price version, which replaces the prices in force', true),
-    def(PRICING_PERMISSIONS.quotePreview, 'Price any package or draft version in the panel, with the reasons behind each rule'),
+    { ...def(PRICING_PERMISSIONS.quotePreview, 'Price any package or draft version in the panel, with the reasons behind each rule'), apiKeyScopable: true },
   ] satisfies PermissionDef[],
   publishes: ['pricing.price_version.published'],
   subscribes: [] as string[],

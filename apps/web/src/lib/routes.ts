@@ -51,6 +51,7 @@ export const adminRoutes: readonly RouteDef[] = [
   { path: '/admin/customers', file: 'admin/(panel)/customers/page.tsx', labelKey: 'admin.nav.customers', nav: true },
   { path: '/admin/settings', file: 'admin/(panel)/settings/page.tsx', labelKey: 'admin.nav.settings', nav: true },
   { path: '/admin/flags', file: 'admin/(panel)/flags/page.tsx', labelKey: 'admin.nav.flags', nav: true },
+  { path: '/admin/integrations', file: 'admin/(panel)/integrations/page.tsx', labelKey: 'admin.nav.integrations', nav: true },
   { path: '/admin/staff', file: 'admin/(panel)/staff/page.tsx', labelKey: 'admin.nav.staff', nav: true },
   { path: '/admin/roles', file: 'admin/(panel)/roles/page.tsx', labelKey: 'admin.nav.roles', nav: true },
   { path: '/admin/sign-in', file: 'admin/(auth)/sign-in/page.tsx', labelKey: 'admin.nav.signIn' },

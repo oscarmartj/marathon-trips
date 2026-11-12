@@ -5,6 +5,7 @@ import {
 import type { Response } from 'express';
 import { OwnedBy, Public } from '../access/access.decorators';
 import { AccessService, STEP_UP_WINDOW_MS } from '../access/access.service';
+import { sessionOf } from '../access/actor';
 import { PrismaService } from '../database/prisma.service';
 import { RequiresFlag } from '../flags/requires-flag.guard';
 import { FLAGS } from '../flags/flag-registry';
@@ -64,7 +65,7 @@ export class AuthController {
   @OwnedBy({ kind: 'staff', resource: 'self' })
   @AuthRateLimit()
   async stepUp(@Body(new ZodPipe(stepUpSchema)) body: { code: string }, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
-    const auth = req.auth!;
+    const auth = sessionOf(req);
     const r = await this.staff.stepUp(auth.userId, auth.sessionId, body.code, req.requestId);
     if (r.ok) return { stepUpValidUntil: new Date(Date.now() + STEP_UP_WINDOW_MS).toISOString() };
     if (r.revoked) clearCookie(res, 'staff', this.secure);
@@ -88,7 +89,7 @@ export class AuthController {
   @HttpCode(200)
   @OwnedBy({ kind: 'staff', resource: 'self' })
   async staffSignOut(@Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
-    await this.staff.signOut(req.auth!, req.requestId);
+    await this.staff.signOut(sessionOf(req), req.requestId);
     clearCookie(res, 'staff', this.secure);
     return { signedOut: true };
   }
@@ -152,7 +153,7 @@ export class AuthController {
   @HttpCode(200)
   @OwnedBy({ kind: 'customer', resource: 'self' })
   async customerSignOut(@Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
-    await this.customers.signOut(req.auth!, req.requestId);
+    await this.customers.signOut(sessionOf(req), req.requestId);
     clearCookie(res, 'customer', this.secure);
     return { signedOut: true };
   }

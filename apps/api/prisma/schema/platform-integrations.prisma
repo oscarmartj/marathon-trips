@@ -1,0 +1,119 @@
+// ---- Task 8.4: scoped API keys and signed outgoing webhooks ----
+// Plan: docs/plans/8.4-api-keys-outbound-webhooks.md. CHECKs, triggers and grants live in migration 0011.
+
+enum WebhookDeliveryStatus {
+  pending
+  sending
+  succeeded
+  failed
+  suppressed
+  cancelled
+}
+
+model ApiKey {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  /// @pii free text typed by staff
+  name         String
+  /// @nopii public lookup part of the token (12 base32 characters); not a secret
+  prefix       String    @unique
+  /// @secret HMAC-SHA256 of the secret with AUTH_HMAC_KEY (domain separated); the token is shown once
+  secretHash   String
+  /// @nopii permission keys this key may use (each must be API-key scopable)
+  scopes       String[]
+  ownerUserId  String    @db.Uuid
+  /// @nopii always staff (CHECK): customers never own a key
+  ownerKind    UserKind  @default(staff)
+  owner        User      @relation(fields: [ownerUserId, ownerKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii required; at most 366 days after creation (CHECK)
+  expiresAt    DateTime  @db.Timestamptz(3)
+  /// @nopii written at most once a minute
+  lastUsedAt   DateTime? @db.Timestamptz(3)
+  /// @nopii set once, never cleared (trigger)
+  revokedAt    DateTime? @db.Timestamptz(3)
+  revokedById  String?   @db.Uuid
+  /// @nopii code: manual, owner_disabled or owner_reset
+  revokeReason String?
+  /// @nopii
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([ownerUserId])
+  @@map("api_keys")
+}
+
+model WebhookSubscription {
+  id                       String            @id @db.Uuid
+  /// @pii free text typed by staff
+  description              String            @default("")
+  /// @pii the receiver's address can carry its own token; never logged; emptied on deletion
+  url                      String
+  /// @nopii exact event types from the outgoing catalogue
+  eventTypes               String[]
+  /// @secret AES-256-GCM ciphertext of the signing secret (AAD webhook_subscription:<id>); emptied on deletion
+  secretCiphertext         String
+  /// @nopii version of APP_ENCRYPTION_KEY that encrypted the secret
+  keyVersion               Int
+  /// @secret previous signing secret, kept for 24 hours after a rotation
+  previousSecretCiphertext String?
+  /// @nopii
+  previousKeyVersion       Int?
+  /// @nopii when the previous secret stops being used
+  previousExpiresAt        DateTime?         @db.Timestamptz(3)
+  /// @nopii
+  enabled                  Boolean           @default(true)
+  /// @nopii failed attempts in a row; 50 disables the subscription
+  consecutiveFailures      Int               @default(0)
+  /// @nopii
+  disabledAt               DateTime?         @db.Timestamptz(3)
+  /// @nopii code: manual or consecutive_failures
+  disabledReason           String?
+  createdById              String            @db.Uuid
+  /// @nopii
+  deletedAt                DateTime?         @db.Timestamptz(3)
+  deletedById              String?           @db.Uuid
+  /// @nopii optimistic lock for the admin panel
+  version                  Int               @default(0)
+  /// @nopii
+  createdAt                DateTime          @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  updatedAt                DateTime          @updatedAt @db.Timestamptz(3)
+  deliveries               WebhookDelivery[]
+
+  @@map("webhook_subscriptions")
+}
+
+model WebhookDelivery {
+  /// sent as webhook-id; stays the same across retries
+  id                 String                @id @default(uuid(7)) @db.Uuid
+  subscriptionId     String                @db.Uuid
+  subscription       WebhookSubscription   @relation(fields: [subscriptionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// outbox event id (no foreign key: the outbox is purged), or a random id for a test ping
+  eventId            String                @db.Uuid
+  /// @nopii
+  eventType          String
+  /// @nopii identifiers only, built from the outgoing contract of the event type
+  body               Json
+  /// @nopii
+  status             WebhookDeliveryStatus @default(pending)
+  /// @nopii
+  attempts           Int                   @default(0)
+  /// @nopii
+  nextAttemptAt      DateTime?             @db.Timestamptz(3)
+  /// @nopii a sending delivery whose lease has passed is retried
+  leaseUntil         DateTime?             @db.Timestamptz(3)
+  /// @nopii
+  lastAttemptAt      DateTime?             @db.Timestamptz(3)
+  /// @nopii
+  succeededAt        DateTime?             @db.Timestamptz(3)
+  /// @nopii HTTP status of the last answer
+  lastResponseStatus Int?
+  /// @nopii
+  lastDurationMs     Int?
+  /// @nopii fixed code from a closed list, never text from the receiver
+  lastErrorCode      String?
+  /// @nopii
+  createdAt          DateTime              @default(now()) @db.Timestamptz(3)
+
+  @@unique([subscriptionId, eventId])
+  @@index([status, nextAttemptAt])
+  @@map("webhook_deliveries")
+}

@@ -13,6 +13,7 @@ import type { RequestMeta } from './request-meta';
 import { SessionService } from './session.service';
 import { looksLikeToken, newRecoveryCode, newToken, recoveryCodeHash, tokenHash } from './tokens';
 import { newTotpSecret, totpUri, verifyTotp } from './totp';
+import { revokeOwnerApiKeys } from '../integrations/revoke-owner-keys';
 
 export const SECRET_BOX = Symbol('SECRET_BOX');
 export const MFA_STEP_MS = 5 * 60_000;
@@ -189,6 +190,7 @@ export class StaffAuthService {
     const before = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, kind: true, passwordHash: true, totpSecretCiphertext: true } });
     if (before.kind !== 'staff') throw unprocessable('not_staff', 'Only staff accounts have credentials to reset');
     await this.sessions.revokeAllForUser(tx, userId, 'enrolment_reset');
+    await revokeOwnerApiKeys(tx, this.audit, actor, userId, 'owner_reset');
     await tx.recoveryCode.deleteMany({ where: { userId } });
     await tx.user.update({
       where: { id: userId },
