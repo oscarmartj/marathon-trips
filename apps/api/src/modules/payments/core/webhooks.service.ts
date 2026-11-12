@@ -12,6 +12,7 @@ import { JobsService } from '../../../platform/jobs/jobs.service';
 import { QUEUES } from '../../../platform/jobs/queues';
 import { readBookingForPayments } from '../../bookings';
 import { PaymentStateMachine, lockPayment } from './attempt-state';
+import { CoverageFailedError } from './coverage.service';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import { ACCOUNT_PUBLIC_SELECT, ProviderGateway } from './gateway';
 
@@ -101,6 +102,8 @@ export class PaymentWebhooksService {
       return await this.processOnce(webhookEventId);
     } catch (err) {
       await this.prisma.webhookEvent.updateMany({ where: { id: webhookEventId, status: { in: ['received', 'failed'] } }, data: { status: 'failed', attempts: { increment: 1 }, errorCode: safeError(err).code.slice(0, 64) } });
+      // The coverage rule failed: the payment is not recorded, and Oscar gets a task now (plan 3.2, section 11.8).
+      if (err instanceof CoverageFailedError) await this.attempts.afterCoverageFailure(err);
       throw err;
     }
   }
@@ -133,8 +136,9 @@ export class PaymentWebhooksService {
 
     return runTransaction(this.prisma, async (tx) => {
       const b = await readBookingForPayments(tx, { id: match.bookingId }, true);
-      const p = await lockPayment(tx, match.id);
-      if (!b || !p) throw notFound();
+      if (!b) throw notFound();
+      const p = await lockPayment(tx, b, match.id);
+      if (!p) throw notFound();
       const current = await tx.webhookEvent.findUniqueOrThrow({ where: { id: ev.id }, select: { status: true } });
       if (current.status !== 'received' && current.status !== 'failed') return 'skipped' as const;
       await tx.webhookEvent.update({ where: { id: ev.id }, data: { bookingId: b.id, paymentId: p.id } });
@@ -147,7 +151,7 @@ export class PaymentWebhooksService {
         return this.ignoreIn(tx, ev.id, 'amount_or_currency_mismatch');
       }
       await this.machine.setReference(tx, p, remote.ref);
-      await this.machine.apply(tx, p, remote.status, { source: 'webhook', failureCode: remote.failureCode, bookingReference: b.reference });
+      await this.machine.apply(tx, b, p, remote.status, { source: 'webhook', failureCode: remote.failureCode });
       await tx.webhookEvent.update({ where: { id: ev.id }, data: { status: 'processed', processedAt: new Date(), attempts: { increment: 1 }, errorCode: null } });
       // A task opened while it kept failing is closed now that it went through (review round 2, point 3a).
       await this.tasks.closeSystemIn(tx, `payments:webhook_failed:${ev.id}`);

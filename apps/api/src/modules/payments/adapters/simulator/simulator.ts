@@ -54,6 +54,8 @@ class SimAccount {
   readonly nextCancel: Array<'unavailable'> = [];
   readonly nextRetrieve: SimulatorRetrieveFault[] = [];
   createCalls = 0;
+  /** Cancellations that changed an object (a repeated one changes nothing). */
+  effectiveCancels = 0;
 }
 
 /** The simulated gateway's state, one per account id, in the process's memory. */
@@ -158,7 +160,10 @@ export class SimulatorProvider implements PaymentProvider {
     const p = acc.payments.get(ref);
     if (!p) throw new ProviderError('provider_not_found', false);
     // A collected or in-flight payment cannot be cancelled: the gateway says what it is instead.
-    if (p.status === 'requires_action') p.status = 'cancelled';
+    if (p.status === 'requires_action') {
+      p.status = 'cancelled';
+      acc.effectiveCancels += 1;
+    }
     return view(p, false);
   }
 
@@ -247,6 +252,10 @@ export class SimulatorControl {
 
   createCalls(accountId: string): number {
     return this.world.account(accountId).createCalls;
+  }
+
+  effectiveCancels(accountId: string): number {
+    return this.world.account(accountId).effectiveCancels;
   }
 
   objectCount(accountId: string): number {

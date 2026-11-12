@@ -6,6 +6,7 @@ import { notFound } from '../../../platform/http/api-error';
 import { LIVE_STATUSES, PaymentStateMachine, lockPayment } from './attempt-state';
 import type { AttemptEvent } from './attempt-state';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
+import type { ReplaceOutcome } from './attempts.service';
 import { ProviderGateway } from './gateway';
 import type { ProviderPayment } from './provider';
 
@@ -16,7 +17,7 @@ class GatewayCallFailure extends Error {
   }
 }
 
-export type SyncAction = 'sync' | 'cancel' | 'expire' | 'cancel_orphan';
+export type SyncAction = 'sync' | 'cancel' | 'expire' | 'cancel_orphan' | 'replace';
 export type SyncOutcome = 'not_live' | 'not_due' | 'applied' | 'unresolved' | 'still_pending';
 
 /** An attempt still unresolved this long after its expiry gets a task for Oscar (plan 3.1, section 14, point 3). */
@@ -35,7 +36,20 @@ export class PaymentAttemptSyncService {
     @Inject(PaymentAttemptsService) private readonly attempts: PaymentAttemptsService,
     @Inject(PaymentStateMachine) private readonly machine: PaymentStateMachine,
     @Inject(TasksService) private readonly tasks: TasksService,
-  ) {}
+  ) {
+    attempts.useReplacer((id) => this.replace(id));
+  }
+
+  /**
+   * Replacing a live attempt the customer no longer wants (plan 3.2, section 4): exactly the cancellation path, so it
+   * ends only when the gateway confirms the cancellation; then says what happened to it.
+   */
+  async replace(paymentId: string): Promise<ReplaceOutcome> {
+    const outcome = await this.run(paymentId, 'replace');
+    const p = await this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true } });
+    if (p.status === 'succeeded') return 'recorded';
+    return outcome === 'applied' && !LIVE_STATUSES.includes(p.status) ? 'replaced' : 'unresolved';
+  }
 
   async run(paymentId: string, action: SyncAction, now: Date = new Date()): Promise<SyncOutcome> {
     const p = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { id: true, status: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, pendingExpiresAt: true } });
@@ -50,7 +64,7 @@ export class PaymentAttemptSyncService {
       return remote ? 'applied' : 'unresolved';
     }
     try {
-      return await this.settle(p, action, now);
+      return await this.settle(p, action === 'replace' ? 'cancel' : action, now);
     } catch (err) {
       // A gateway that keeps failing (rotated credentials, a retired key version, a refused call…) must not hide a
       // blocked booking: past 24 hours the task is opened anyway, then the error goes back to the job and the sweep
@@ -108,11 +122,12 @@ export class PaymentAttemptSyncService {
       const event: AttemptEvent = action === 'cancel' ? 'cancelled' : 'expire_confirmed';
       await runTransaction(this.prisma, async (tx) => {
         const b = await this.attempts.lockBookingOf(tx, paymentId);
-        const p = await lockPayment(tx, paymentId);
-        if (!b || !p) throw notFound();
+        if (!b) throw notFound();
+        const p = await lockPayment(tx, b, paymentId);
+        if (!p) throw notFound();
         await this.machine.setReference(tx, p, remote.ref);
         if (remote.amount.amountMinor !== p.amountMinor || remote.amount.currency !== p.currency) return this.attempts.mismatchTask(tx, p, b.reference);
-        await this.machine.apply(tx, p, event, { source: 'sweep', bookingReference: b.reference });
+        await this.machine.apply(tx, b, p, event, { source: 'sweep' });
       }, PAYMENT_TX_OPTIONS);
       return 'applied';
     }
@@ -126,7 +141,7 @@ export class PaymentAttemptSyncService {
       await this.prisma.$transaction(async (tx) => {
         const b = await this.attempts.lockBookingOf(tx, paymentId);
         // Only while it is still live: one that ended meanwhile needs no task (its end closes any).
-        const p = await lockPayment(tx, paymentId);
+        const p = b ? await lockPayment(tx, b, paymentId) : null;
         if (!p || !LIVE_STATUSES.includes(p.status)) return;
         await this.tasks.createSystemIn(tx, {
           title: `Payment attempt unresolved on booking ${b?.reference ?? 'unknown'}`,

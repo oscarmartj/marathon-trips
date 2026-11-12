@@ -99,6 +99,12 @@ export class BookingsAdminController {
   cancel(@Param('id', uuid()) id: string, @Body(new ZodPipe(closeBookingSchema)) b: In<typeof closeBookingSchema>, @Req() req: ApiRequest) {
     return this.bookings.transition(id, 'cancel', { actor: actorOf(req), version: b.version, reason: b.reason });
   }
+
+  /** Oscar confirms a booking whose deposit is paid (plan 0.1, 6.2; plan 3.2, section 1.5). The answer has the final status. */
+  @Post(':id/confirm') @HttpCode(200) @RequirePermission(P.confirm)
+  confirm(@Param('id', uuid()) id: string, @Body(new ZodPipe(approveBookingSchema)) b: In<typeof approveBookingSchema>, @Req() req: ApiRequest) {
+    return this.bookings.transition(id, 'confirm', { actor: actorOf(req), version: b.version, reason: b.reason });
+  }
 }
 
 /** The panel's customers (task 2.5). Notes, tags and history come from the shared table routes of task 0.5. */

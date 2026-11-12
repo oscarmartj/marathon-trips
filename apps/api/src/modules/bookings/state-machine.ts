@@ -7,7 +7,9 @@ import { SettingsService } from '../../platform/flags/flags.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { InventoryService } from '../catalogue';
 import { PromoRedemptionService } from '../pricing';
+import { AppError } from '../../platform/errors/safe-error';
 import { BookingTransitionHooks } from './hooks';
+import type { HookedEvent } from './hooks';
 import { BOOKING_EVENTS } from './manifest';
 import { BOOKING_SETTINGS } from './settings';
 import { Tx, dbNow } from './support';
@@ -25,20 +27,42 @@ export const BOOKING_STATUS_PAIRS: ReadonlyArray<readonly [BookingStatus, Bookin
   ['cancelled', 'refunded'], ['refunded', 'cancelled'],
 ];
 
-/** The events task 2.4 implements: the cells of plan 0.1, 6.2 that move no money (plan 2.4, section 5). */
-export type BookingEvent = 'approve' | 'decline' | 'cancel' | 'expire_request';
+/**
+ * The events of plan 0.1, 6.2. Task 2.4: the cells that move no money. Task 3.2: Oscar's confirmation, the approval
+ * expiry and the coverage events, which only `applyCoverage` uses (no route takes them: plan 3.2, section 1.3).
+ */
+export type BookingEvent = 'approve' | 'decline' | 'cancel' | 'expire_request' | 'confirm' | 'expire_approval' | CoverageEvent;
+export type CoverageEvent = 'deposit_covered' | 'auto_confirm' | 'total_covered';
+/** The events the panel's routes may ask for. */
+export type StaffBookingEvent = 'approve' | 'decline' | 'cancel' | 'confirm';
 
-/** Where each event takes each state; a missing state is a 409 (or "no change" for the expiry task). */
+/** Where each event takes each state; a missing state is a 409 (or "no change" for the expiry events). */
 export const BOOKING_EVENT_TABLE: Readonly<Record<BookingEvent, Partial<Record<BookingStatus, BookingStatus>>>> = {
   approve: { requested: 'approved' },
   decline: { requested: 'declined' },
   cancel: { requested: 'cancelled', approved: 'cancelled' },
   expire_request: { requested: 'expired' },
+  confirm: { deposit_paid: 'confirmed' },
+  expire_approval: { approved: 'expired' },
+  deposit_covered: { approved: 'deposit_paid' },
+  auto_confirm: { deposit_paid: 'confirmed' },
+  total_covered: { confirmed: 'balance_paid' },
 };
+
+/** Events that are "no change" instead of a 409 when they do not apply (the expiry sweeps). */
+const SWEEP_EVENTS: ReadonlySet<BookingEvent> = new Set(['expire_request', 'expire_approval']);
+/** Events other modules hook into (hooks.ts). */
+const HOOKED: ReadonlySet<BookingEvent> = new Set(['approve', 'cancel', 'confirm', 'expire_approval']);
 
 /** Cells that move money: a 409 until payments exist (tasks 3.2 and 6.4), never a silent cancellation. */
 export const MONEY_CELLS: Readonly<Partial<Record<BookingEvent, readonly BookingStatus[]>>> = {
   cancel: ['deposit_paid', 'confirmed', 'balance_paid'],
+};
+
+/** The event published for each status a transition can reach. */
+const STATUS_EVENT: Partial<Record<BookingStatus, string>> = {
+  approved: BOOKING_EVENTS.approved, declined: BOOKING_EVENTS.declined, cancelled: BOOKING_EVENTS.cancelled, expired: BOOKING_EVENTS.expired,
+  deposit_paid: BOOKING_EVENTS.depositPaid, confirmed: BOOKING_EVENTS.confirmed, balance_paid: BOOKING_EVENTS.balancePaid,
 };
 
 const RELEASING: ReadonlySet<BookingStatus> = new Set(['declined', 'cancelled', 'expired']);
@@ -53,6 +77,7 @@ interface LockedBooking {
   editionId: string;
   currency: string;
   requestExpiresAt: Date;
+  approvalExpiresAt: Date | null;
 }
 
 export interface TransitionInput {
@@ -85,16 +110,17 @@ export class BookingStateMachine {
   async transition(tx: Tx, bookingId: string, event: BookingEvent, input: TransitionInput): Promise<TransitionResult> {
     const approvalHours = event === 'approve' ? (input.approvalHours ?? (await this.settings.get(BOOKING_SETTINGS.approvalExpiryHours.key, BOOKING_SETTINGS.approvalExpiryHours.fallback))) : 0;
     const rows = await tx.$queryRaw<LockedBooking[]>`
-      SELECT id, status::text AS status, version, "customerId", "packageId", "editionId", currency, "requestExpiresAt"
+      SELECT id, status::text AS status, version, "customerId", "packageId", "editionId", currency, "requestExpiresAt", "approvalExpiresAt"
       FROM bookings WHERE id = ${bookingId}::uuid FOR UPDATE`;
     const b = rows[0];
     if (!b) throw notFound('booking_not_found', 'Booking not found');
     const at = await dbNow(tx);
     const to = BOOKING_EVENT_TABLE[event][b.status];
 
-    if (event === 'expire_request') {
-      // The task: anything else, or a request whose time has not come, is no change.
-      if (!to || b.requestExpiresAt.getTime() > at.getTime()) return { changed: false, status: b.status };
+    if (SWEEP_EVENTS.has(event)) {
+      // The sweeps: anything else, or a request or approval whose time has not come, is no change.
+      const due = event === 'expire_request' ? b.requestExpiresAt : b.approvalExpiresAt;
+      if (!to || !due || due.getTime() > at.getTime()) return { changed: false, status: b.status };
     } else {
       if (!to) {
         if (MONEY_CELLS[event]?.includes(b.status)) throw conflict('cancellation_needs_payments', 'This booking has payments to settle first. Cancelling it is not available yet.');
@@ -106,14 +132,16 @@ export class BookingStateMachine {
 
     const approvalExpiresAt = to === 'approved' ? new Date(at.getTime() + approvalHours * 3_600_000) : null;
     const hooked = { id: b.id, customerId: b.customerId, packageId: b.packageId, currency: b.currency, from: b.status };
-    if (event === 'approve' || event === 'cancel') await this.hooks.run(event, tx, hooked, { actor: input.actor, at, approvalExpiresAt });
+    const hookedEvent = HOOKED.has(event) ? (event as HookedEvent) : null;
+    if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, { actor: input.actor, at, approvalExpiresAt });
 
     const column = TIME_COLUMN[to];
     const reason = input.reason ?? null;
     // Compare-and-set: the row is locked, so 0 rows here means a bug, never a race; still a 409, never a silent write.
+    // The payment states have no time column of their own: the audit log and the event carry the time.
     const updated = await tx.$executeRawUnsafe(
       `UPDATE bookings SET status = $2::"BookingStatus", version = version + 1, "updatedAt" = $3,
-         "${column}" = $3, "approvalExpiresAt" = COALESCE($4, "approvalExpiresAt"), "statusReason" = COALESCE($5, "statusReason")
+         ${column ? `"${column}" = $3,` : ''} "approvalExpiresAt" = COALESCE($4, "approvalExpiresAt"), "statusReason" = COALESCE($5, "statusReason")
        WHERE id = $1::uuid AND status = $6::"BookingStatus" AND version = $7`,
       b.id, to, at, approvalExpiresAt, RELEASING.has(to) ? reason : null, b.status, b.version,
     );
@@ -127,11 +155,14 @@ export class BookingStateMachine {
       before: { status: b.status, customerId: b.customerId }, after: { status: to, customerId: b.customerId },
       reason, context: { event, from: b.status, to, releasedPlaces: released.places, promoReleased: released.promo },
     });
-    const type = { approved: BOOKING_EVENTS.approved, declined: BOOKING_EVENTS.declined, cancelled: BOOKING_EVENTS.cancelled, expired: BOOKING_EVENTS.expired }[to as 'approved' | 'declined' | 'cancelled' | 'expired'];
+    const type = STATUS_EVENT[to];
+    if (!type) throw new AppError('booking_event_missing', `No event for booking status ${to}`);
     await this.outbox.publish(tx, {
       type, aggregateType: 'Booking', aggregateId: b.id, aggregateVersion: b.version + 1,
       payload: { bookingId: b.id, packageId: b.packageId, editionId: b.editionId, from: b.status, to }, actorType: input.actor.type, actorId: input.actor.id ?? undefined,
     });
+    // After the new status is written, in the same transaction (task 3.2: the coverage rule after approval and confirmation).
+    if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, { actor: input.actor, at, approvalExpiresAt }, 'after');
     return { changed: true, from: b.status, to, at };
   }
 

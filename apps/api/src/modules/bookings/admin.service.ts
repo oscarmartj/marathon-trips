@@ -6,7 +6,8 @@ import { PrismaService } from '../../platform/database/prisma.service';
 import { runTransaction } from '../../platform/database/transaction';
 import { notFound } from '../../platform/http/api-error';
 import { REQUEST_TX_OPTIONS, mapLoadError } from './request.service';
-import { BookingEvent, BookingStateMachine } from './state-machine';
+import { BookingStateMachine } from './state-machine';
+import type { StaffBookingEvent } from './state-machine';
 import { jsonOf } from './support';
 import { staffView } from './views';
 
@@ -52,7 +53,7 @@ export class BookingAdminService {
     return v;
   }
 
-  async transition(id: string, event: Exclude<BookingEvent, 'expire_request'>, input: { actor: AuditActor; version: number; reason?: string }) {
+  async transition(id: string, event: StaffBookingEvent, input: { actor: AuditActor; version: number; reason?: string }) {
     try {
       await runTransaction(this.prisma, (tx) => this.machine.transition(tx, id, event, input), REQUEST_TX_OPTIONS);
     } catch (err) {

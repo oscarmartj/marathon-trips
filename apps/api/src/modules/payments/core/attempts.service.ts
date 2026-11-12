@@ -15,12 +15,14 @@ import { JobsService } from '../../../platform/jobs/jobs.service';
 import { QUEUES } from '../../../platform/jobs/queues';
 import { SettingsService } from '../../../platform/flags/flags.service';
 import { readBookingForPayments } from '../../bookings';
-import type { BookingForPayments } from '../../bookings';
+import type { BookingForPayments, LockedBooking } from '../../bookings';
 import { LIVE_STATUSES, LockedPayment, PAYMENT_EVENTS, PaymentStateMachine, lockPayment } from './attempt-state';
 import { ProviderGateway } from './gateway';
+import { allocate } from './allocation';
 import { payable, succeededPaymentsSource } from './payable';
 import type { ProviderPayment } from './provider';
 import { ProviderError } from './provider';
+import { CoverageFailedError } from './coverage.service';
 import { PaymentRouting } from './routing';
 import { PAYMENT_SETTINGS } from './settings';
 
@@ -33,6 +35,21 @@ export const PAYABLE_STATES: readonly BookingStatus[] = ['approved', 'deposit_pa
 export const PAYMENT_TX_OPTIONS = { isolationLevel: 'ReadCommitted' as const, timeout: 15_000, maxWait: 5_000 };
 
 const ENDED_WITHOUT_MONEY: readonly string[] = ['failed', 'cancelled', 'expired'];
+
+/** The outcome of replacing a live attempt (plan 3.2, section 4). */
+export type ReplaceOutcome = 'replaced' | 'recorded' | 'unresolved';
+
+/** Transaction A found a live attempt the customer asked to replace; nothing was written. */
+class ReplacementNeeded extends Error {
+  constructor(readonly paymentId: string, readonly collectedMinor: bigint) {
+    super('replacement needed');
+  }
+}
+
+/** The idempotency record's answer when a replacement revealed money already in. */
+const ALREADY_RECORDED = 'PaymentAlreadyRecorded';
+
+const alreadyRecorded = () => conflict('payment_already_recorded', 'A payment for this booking has just been recorded. Check the booking before paying again.');
 
 const busy = () => conflict('busy_try_again', 'Many people are doing this at once. Try again.');
 
@@ -72,16 +89,20 @@ export class PaymentAttemptsService {
     const items = await this.prisma.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, orderBy: { sequence: 'asc' }, select: { kind: true, sequence: true, amountMinor: true, dueDate: true } });
     const collected = await succeededPaymentsSource.collected(this.prisma, b.id, this.gateway.mode);
     const p = payable(items, collected);
+    const split = allocate(items, collected);
+    const paid = new Map(split.items.map((i) => [i.sequence, i.paidMinor]));
     const methods = await this.routing.methods(this.prisma, { currency: b.currency, country: b.residenceCountry });
     const live = await this.prisma.payment.findUnique({ where: { liveBookingId: b.id }, select: { status: true, method: true, amountMinor: true, currency: true } });
-    const reason = !PAYABLE_STATES.includes(b.status) ? 'booking_not_payable'
+    const reason = b.status === 'balance_paid' ? 'nothing_to_pay' : !PAYABLE_STATES.includes(b.status) ? 'booking_not_payable'
       : b.status === 'approved' && b.approvalExpiresAt && b.approvalExpiresAt.getTime() <= Date.now() ? 'approval_expired'
         : !p.next ? 'nothing_to_pay'
           : methods.length === 0 ? 'no_payment_method_available' : undefined;
     return {
       reference: b.reference, currency: b.currency, payable: reason === undefined, ...(reason ? { notPayableReason: reason } : {}),
-      items: items.map((i) => ({ kind: i.kind, sequence: i.sequence, amountMinor: i.amountMinor.toString(), dueDate: i.dueDate.toISOString().slice(0, 10) })),
-      collectedMinor: p.collectedMinor.toString(), outstandingMinor: p.outstandingMinor.toString(),
+      items: items.map((i) => ({ kind: i.kind, sequence: i.sequence, amountMinor: i.amountMinor.toString(), dueDate: i.dueDate.toISOString().slice(0, 10), paidMinor: (paid.get(i.sequence) ?? 0n).toString() })),
+      collectedMinor: p.collectedMinor.toString(), outstandingMinor: p.outstandingMinor.toString(), overpaidMinor: split.overpaidMinor.toString(),
+      // The deposit date is a Brisbane day, but the approval ends at this instant (plan 3.2, section 11, point 2).
+      depositDueBy: b.status === 'approved' && b.approvalExpiresAt ? b.approvalExpiresAt.toISOString() : null,
       nextPayable: p.next ? { sequence: p.next.sequence, amountMinor: p.next.amountMinor.toString() } : null,
       methods,
       liveAttempt: live ? { status: live.status, method: live.method, amountMinor: live.amountMinor.toString(), currency: live.currency } : null,
@@ -95,21 +116,58 @@ export class PaymentAttemptsService {
     if (!booking) throw notFound();
     // The route of the record carries the booking id, so one key on two bookings is two records (plan 3.1, 14.4).
     const outcome = await this.idempotency.run({ actorType: 'customer', actorId: user.id, route: `POST /booking-requests/${booking.id}/payments`, key, body }, async () => {
-      const paymentId = await this.createOrResume(booking.id, body, actor);
-      return { status: 201, resourceType: 'Payment', resourceId: paymentId };
+      try {
+        const paymentId = await this.createOrReplace(booking.id, body, actor);
+        return { status: 201, resourceType: 'Payment', resourceId: paymentId };
+      } catch (err) {
+        // Stored as this key's answer, so a retry with the same key and body never pays the next item (review, point 4).
+        if (err instanceof ApiError && err.code === 'payment_already_recorded') return { status: 409, resourceType: ALREADY_RECORDED };
+        throw err;
+      }
     }).catch((err: unknown) => {
       if (err instanceof IdempotencyKeyReuseError) throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
       if (err instanceof IdempotencyInProgressError) throw conflict('idempotency_in_progress', 'A request with this Idempotency-Key is still being processed');
       throw err;
     });
+    if (outcome.result.resourceType === ALREADY_RECORDED) throw alreadyRecorded();
     const payment = await this.prisma.payment.findUnique({ where: { id: outcome.result.resourceId! }, select: { id: true, bookingId: true } });
     if (!payment || payment.bookingId !== booking.id) throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request');
     const nextAction = await this.drive(payment.id);
     return this.attemptView(payment.id, nextAction);
   }
 
+  /** The sync service's replacement of a live attempt (registered by it: the two services need each other). */
+  private replacer?: (paymentId: string) => Promise<ReplaceOutcome>;
+
+  useReplacer(fn: (paymentId: string) => Promise<ReplaceOutcome>): void {
+    this.replacer = fn;
+  }
+
+  /**
+   * Transaction A, and with `replaceLiveAttempt` the replacement of P2 (plan 3.2, sections 4 and 11.1): the live attempt
+   * is ended only once the gateway confirms its cancellation, and transaction A runs once more. If that showed money
+   * came in, or anything was collected between the two, nothing new is created: the customer did not ask for that item.
+   */
+  async createOrReplace(bookingId: string, body: StartPayment, actor: AuditActor): Promise<string> {
+    try {
+      return await this.createOrResume(bookingId, body, actor);
+    } catch (err) {
+      if (!(err instanceof ReplacementNeeded)) throw err;
+      if (!this.replacer) throw conflict('payment_attempt_in_progress', 'A payment for this booking is already in progress');
+      let outcome: ReplaceOutcome;
+      try {
+        outcome = await this.replacer(err.paymentId);
+      } catch (e) {
+        throw this.forCustomer(e);
+      }
+      if (outcome === 'recorded') throw alreadyRecorded();
+      if (outcome !== 'replaced') throw conflict('payment_attempt_in_progress', 'A payment for this booking is still being processed. Try again shortly.');
+      return this.createOrResume(bookingId, body, actor, { expectCollected: err.collectedMinor });
+    }
+  }
+
   /** Transaction A (plan 3.1, section 5.1). Returns the id of a new or resumed live attempt. */
-  async createOrResume(bookingId: string, body: StartPayment, actor: AuditActor): Promise<string> {
+  async createOrResume(bookingId: string, body: StartPayment, actor: AuditActor, again?: { expectCollected: bigint }): Promise<string> {
     const expiryMinutes = await this.settings.get(PAYMENT_SETTINGS.attemptExpiryMinutes.key, PAYMENT_SETTINGS.attemptExpiryMinutes.fallback);
     let result: string | { expiredLive: string };
     try {
@@ -121,6 +179,7 @@ export class PaymentAttemptsService {
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
         if (body.upToSequence !== undefined && !items.some((i) => i.sequence === body.upToSequence)) throw unprocessable('unknown_plan_item', 'There is no such item in the payment plan');
         const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
+        if (again && collected !== again.expectCollected) throw alreadyRecorded();
         const due = payable(items, collected, body.upToSequence).next;
         if (!due) throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
 
@@ -135,6 +194,8 @@ export class PaymentAttemptsService {
           // Resumed only with the same account (still able to take charges), method and amount (plan 3.1, 5.1).
           const sameAccount = accounts.some((a) => a.id === current.providerAccountId);
           if (current.status !== 'pending' && sameAccount && current.method === body.method && current.amountMinor === due.amountMinor) return current.id;
+          // P2: replaced only on request, never a pending debit, and once only (plan 3.2, section 4).
+          if (body.replaceLiveAttempt && !again && current.status !== 'pending') throw new ReplacementNeeded(current.id, collected);
           throw conflict('payment_attempt_in_progress', 'A payment for this booking is already in progress');
         }
 
@@ -169,6 +230,8 @@ export class PaymentAttemptsService {
   }
 
   private assertPayable(b: BookingForPayments, at: Date): void {
+    // Paid in full (plan 0.1, 6.2: "409, nothing outstanding"): say so rather than "not payable".
+    if (b.status === 'balance_paid') throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
     if (!PAYABLE_STATES.includes(b.status)) throw conflict('booking_not_payable', 'This booking cannot take a payment in its current state');
     if (b.status === 'approved' && (!b.approvalExpiresAt || b.approvalExpiresAt.getTime() <= at.getTime())) throw conflict('approval_expired', 'The time to pay the deposit for this booking has run out');
   }
@@ -246,13 +309,33 @@ export class PaymentAttemptsService {
    * booking is still payable and the attempt still waits for the customer.
    */
   async record(paymentId: string, remote: ProviderPayment | null, source: 'api' | 'sweep', failureCode?: string): Promise<boolean> {
+    try {
+      return await this.recordOnce(paymentId, remote, source, failureCode);
+    } catch (err) {
+      throw await this.afterCoverageFailure(err);
+    }
+  }
+
+  /**
+   * A payment whose coverage could not be applied is not recorded (its transaction was undone): Oscar gets a task, the
+   * customer a 503 that says it is being processed, and the sweep leaves the attempt alone (plan 3.2, section 11.8).
+   */
+  async afterCoverageFailure(err: unknown): Promise<unknown> {
+    if (!(err instanceof CoverageFailedError)) return err;
+    const p = await this.prisma.payment.findUnique({ where: { id: err.paymentId }, select: { booking: { select: { reference: true } } } });
+    await this.machine.coverageFailed(this.prisma, err, p?.booking.reference ?? 'unknown');
+    return new ApiError(503, 'payment_processing_delayed', 'Your payment is being processed. Check this booking again shortly.', { 'Retry-After': '60' });
+  }
+
+  private async recordOnce(paymentId: string, remote: ProviderPayment | null, source: 'api' | 'sweep', failureCode?: string): Promise<boolean> {
     return runTransaction(this.prisma, async (tx) => {
       const b = await this.lockBookingOf(tx, paymentId);
-      const p = await lockPayment(tx, paymentId);
-      if (!b || !p) throw notFound();
+      if (!b) throw notFound();
+      const p = await lockPayment(tx, b, paymentId);
+      if (!p) throw notFound();
       if (!remote) {
         // Only an attempt the gateway never took (created, no reference) fails without the gateway saying so.
-        if (p.status === 'created' && p.providerPaymentRef === null) await this.machine.apply(tx, p, 'failed', { source, failureCode, bookingReference: b.reference });
+        if (p.status === 'created' && p.providerPaymentRef === null) await this.machine.apply(tx, b, p, 'failed', { source, failureCode });
         return false;
       }
       await this.machine.setReference(tx, p, remote.ref);
@@ -272,7 +355,7 @@ export class PaymentAttemptsService {
         });
         return false;
       }
-      await this.machine.apply(tx, p, remote.status, { source, failureCode: remote.failureCode, bookingReference: b.reference });
+      await this.machine.apply(tx, b, p, remote.status, { source, failureCode: remote.failureCode });
       const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
       const stillPayable = PAYABLE_STATES.includes(b.status) && !(b.status === 'approved' && (!b.approvalExpiresAt || b.approvalExpiresAt <= at));
       // No redirect to the hosted page of an account that no longer takes charges (review M3).
@@ -281,7 +364,7 @@ export class PaymentAttemptsService {
     }, PAYMENT_TX_OPTIONS);
   }
 
-  async lockBookingOf(tx: Tx, paymentId: string): Promise<BookingForPayments | null> {
+  async lockBookingOf(tx: Tx, paymentId: string): Promise<LockedBooking | null> {
     const row = await tx.payment.findUnique({ where: { id: paymentId }, select: { bookingId: true } });
     return row ? readBookingForPayments(tx, { id: row.bookingId }, true) : null;
   }

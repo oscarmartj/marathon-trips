@@ -43,7 +43,12 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
   }
 
   async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; failedFlagged: string[]; bodiesPurged: number; rejectionsPurged: number }> {
-    const due = await this.prisma.payment.findMany({ where: { liveBookingId: { not: null }, pendingExpiresAt: { lte: now } }, select: { id: true }, orderBy: { pendingExpiresAt: 'asc' }, take: 200 });
+    // An attempt whose collected money could not be applied waits for Oscar (its task): no loop (plan 3.2, section 11.8).
+    const due = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT p.id::text AS id FROM payments p
+      WHERE p."liveBookingId" IS NOT NULL AND p."pendingExpiresAt" <= ${now}
+        AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t."sourceRef" = 'payments:coverage_failed:' || p.id::text AND t.status = 'open' AND t."deletedAt" IS NULL)
+      ORDER BY p."pendingExpiresAt", p.id LIMIT 200`;
     for (const { id } of due) await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: id, action: 'expire' }, { singletonKey: `expire:${id}` });
     const stuck = await this.prisma.webhookEvent.findMany({ where: { status: 'received', receivedAt: { lte: new Date(now.getTime() - STUCK_EVENT_MINUTES * 60_000) } }, select: { id: true }, take: 200 });
     for (const { id } of stuck) await this.jobs.send(QUEUES.paymentsWebhooks, { webhookEventId: id }, { singletonKey: `webhook:${id}` });
