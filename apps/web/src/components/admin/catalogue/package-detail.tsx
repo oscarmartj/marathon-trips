@@ -81,6 +81,8 @@ export function PackageDetail({ id }: { id: string }) {
         <Link href={`/admin/editions/${pkg.editionId}`}>{t('admin.catalogue.packages.backToEdition', { race: raceName, year: pkg.edition.year })}</Link>
         {' | '}
         <Link href={`/admin/packages/${id}/preview`}>{t('admin.catalogue.packages.previewLink')}</Link>
+        {' | '}
+        <Link href={`/admin/packages/${id}/prices`}>{t('admin.catalogue.packages.pricesLink')}</Link>
       </p>
       <h2>{enAU(pkg.name) || pkg.slug}</h2>
       {pkg.edition.race.isDemo ? <p className="notice" role="note">{t('admin.catalogue.races.demoNotice')}</p> : null}
