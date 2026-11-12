@@ -2612,7 +2612,9 @@
       "filters": {
         "status": "Status",
         "all": "All",
-        "apply": "Apply filters"
+        "apply": "Apply filters",
+        "packageId": "Package id (optional)",
+        "packageIdInvalid": "Use the package's id, as it appears in the address of its page."
       },
       "statuses": {
         "waiting": "Waiting",

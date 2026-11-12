@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BookingExpiryService } from '../../../src/modules/bookings/expiry.service';
+import { MailService } from '../../../src/platform/mail/mail.service';
 import { EntityRegistry } from '../../../src/platform/entities/entity-registry';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
 import { closeCatalogue, setSale } from '../../support/catalogue';
@@ -294,6 +295,38 @@ describe('concurrent_cancellations_offer_each_entry_once', () => {
     // Whoever won, the places are held by exactly one owner.
     const rivalBookings = await t.prisma.booking.count({ where: { customer: { userId: { in: rivals.map((r) => r.userId) } }, status: 'requested' } });
     expect(e.status === 'offered' ? rivalBookings : rivalBookings).toBeLessThanOrEqual(e.status === 'offered' ? 0 : 1);
+  });
+});
+
+describe('the offer email and a request that can no longer be priced', () => {
+  it('offer_email_sent_while_open_and_never_after_it_ended', async () => {
+    const s = await soldOutWorld(t, admin);
+    const [a, b] = [await customerClient(t), await customerClient(t)];
+    const [ia, ib] = [await joinList(t, a, s.w), await joinList(t, b, s.w)];
+    await cancelHolder(t, s);
+    const mailA = await t.prisma.outboundEmail.findFirstOrThrow({ where: { dedupeKey: `waitlist:offer:${ia}` } });
+    expect(mailA).toMatchObject({ templateKey: 'waitlist.offer', category: 'transactional' });
+    // A leaves before the email goes out: it must not be sent, and B (offered next) has its own email.
+    expect((await act(t, a, ia, 'withdraw')).status).toBe(200);
+    expect(await t.app.get(MailService).processSend(mailA.id)).toBe('failed');
+    expect((await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: mailA.id } })).status).not.toBe('sent');
+    const mailB = await t.prisma.outboundEmail.findFirstOrThrow({ where: { dedupeKey: `waitlist:offer:${ib}` } });
+    expect(await t.app.get(MailService).processSend(mailB.id)).not.toBe('failed');
+  });
+
+  it('changed_catalogue_expires_entry_and_continues: an entry whose room is gone leaves the queue, the next is offered', async () => {
+    const s = await soldOutWorld(t, admin);
+    const [a, b] = [await customerClient(t), await customerClient(t)];
+    const [ia, ib] = [await joinList(t, a, s.w), await joinList(t, b, s.w)];
+    // The kept request is immutable by trigger; the owner switches the guard off for one statement to simulate a removed room.
+    await owner.query('ALTER TABLE waitlist_entries DISABLE TRIGGER waitlist_entries_guard');
+    try {
+      await owner.query(`UPDATE waitlist_entries SET configuration = jsonb_set(configuration, '{rooms,0,roomOptionId}', to_jsonb($2::text)) WHERE id = $1`, [ia, randomUUID()]);
+    } finally {
+      await owner.query('ALTER TABLE waitlist_entries ENABLE TRIGGER waitlist_entries_guard');
+    }
+    await cancelHolder(t, s);
+    expect([(await entry(ia)).status, (await heldBy(ia)).length, (await entry(ib)).status]).toEqual(['expired', 0, 'offered']);
   });
 });
 

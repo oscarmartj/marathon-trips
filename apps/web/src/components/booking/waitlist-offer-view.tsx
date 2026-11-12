@@ -77,13 +77,15 @@ export function WaitlistOfferView({ view }: { view: WaitlistEntryView }) {
               <section aria-labelledby="offer-price">
                 <h2 id="offer-price">{t('waitlist.offer.priceHeading')}</h2>
                 <dl>
-                  <dt>{t('waitlist.offer.total')}</dt>
-                  <dd>{formatMoney(view.price.totalMinor, view.price.currency)}</dd>
+                  <div>
+                    <dt>{t('waitlist.offer.total')}</dt>
+                    <dd>{formatMoney(view.price.totalMinor, view.price.currency)}</dd>
+                  </div>
                   {view.price.depositMinor ? (
-                    <>
+                    <div>
                       <dt>{t('waitlist.offer.deposit', { date: formatDate(view.price.balanceDueDate) })}</dt>
                       <dd>{formatMoney(view.price.depositMinor, view.price.currency)}</dd>
-                    </>
+                    </div>
                   ) : null}
                 </dl>
               </section>

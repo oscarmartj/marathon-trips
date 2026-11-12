@@ -78,11 +78,23 @@ describe('race page', () => {
 
   it('does not offer to build a package that is not open for booking', async () => {
     const d = detail();
-    d.editions[0]!.packages[0]!.saleStatus = 'sold_out';
+    d.editions[0]!.packages[0]!.saleStatus = 'closed';
     stubCatalogue({ race: d });
     const html = await race();
-    expect(html).toContain('Sold out');
+    expect(html).toContain('Closed');
     expect(html).not.toContain('/build');
+  });
+
+  it('offers the waiting list, not a booking, for a package that is full (task 6.5)', async () => {
+    for (const [status, label] of [['sold_out', 'Sold out'], ['waitlist', 'Waitlist only']] as const) {
+      const d = detail();
+      d.editions[0]!.packages[0]!.saleStatus = status;
+      stubCatalogue({ race: d });
+      const html = await race();
+      expect(html).toContain(label);
+      expect(html).toContain('Join the waiting list');
+      expect(html).not.toContain('Build this package');
+    }
   });
 
   it('says so when an edition has no packages on sale', async () => {

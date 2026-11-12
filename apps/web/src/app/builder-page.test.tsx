@@ -57,10 +57,17 @@ describe('build page', () => {
   });
 
   it('offers no builder for a package that is not open', async () => {
-    stubCatalogue({ pkg: packageDetail({ saleStatus: 'sold_out' }) });
+    stubCatalogue({ pkg: packageDetail({ saleStatus: 'closed' }) });
     const html = await page();
     expect(html).toContain('This package is not open for booking');
     expect(html).not.toContain('Updating your price');
+  });
+
+  it('lets people choose what they want and join the waiting list when a package is full (task 6.5)', async () => {
+    stubCatalogue({ pkg: packageDetail({ saleStatus: 'sold_out' }) });
+    const html = await page();
+    expect(html).toContain('This trip is full at the moment');
+    expect(html).not.toContain('This package is not open for booking');
   });
 
   it('lets the API error propagate when the catalogue is down (Next shows its error page; nothing is cached)', async () => {
