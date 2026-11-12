@@ -344,6 +344,67 @@ describe('erasing a customer with an open offer', () => {
   });
 });
 
+describe('offers respect the package and where the person lives', () => {
+  it('no_offer_on_closed_package: places freed on a closed package are not offered, and nothing is held', async () => {
+    const s = await soldOutWorld(t, admin);
+    const a = await customerClient(t);
+    const id = await joinList(t, a, s.w);
+    expect((await setSale(admin, s.w.pkg.id, 'closed')).status).toBe(200);
+    await cancelHolder(t, s);
+    expect([(await entry(id)).status, (await heldBy(id)).length]).toEqual(['waiting', 0]);
+    expect(await t.prisma.outboundEmail.count({ where: { dedupeKey: `waitlist:offer:${id}` } })).toBe(0);
+  });
+
+  it('a person who no longer lives in a sales country keeps the place but is not offered one, and cannot accept an offer', async () => {
+    const s = await soldOutWorld(t, admin, undefined, 2);
+    const [a, b] = [await customerClient(t), await customerClient(t)];
+    const [ia, ib] = [await joinList(t, a, s.w), await joinList(t, b, s.w)];
+    await t.prisma.customer.update({ where: { userId: a.userId }, data: { countryOfResidence: 'GB' } });
+    await cancelHolder(t, s, s.holderBookingIds[0]);
+    expect([(await entry(ia)).status, (await entry(ib)).status]).toEqual(['waiting', 'offered']);
+    // B moves away after being offered: accepting is refused and the offer stays for expiry to clear.
+    await t.prisma.customer.update({ where: { userId: b.userId }, data: { countryOfResidence: 'NZ' } });
+    const res = await act(t, b, ib, 'accept');
+    expect([res.status, res.body.code]).toEqual([409, 'country_not_served']);
+    expect(await t.prisma.booking.count({ where: { customer: { userId: b.userId } } })).toBe(0);
+  });
+});
+
+describe('erasure_never_leaks_an_offer', () => {
+  it('erasing a customer while a cancellation offers them a place never leaves held places behind', async () => {
+    for (let i = 0; i < 4; i++) {
+      const s = await soldOutWorld(t, admin);
+      const a = await customerClient(t);
+      const id = await joinList(t, a, s.w);
+      const customerId = (await entry(id)).customerId;
+      const def = t.app.get(EntityRegistry).get('WaitlistEntry')!;
+      await Promise.all([cancelHolder(t, s), t.prisma.$transaction((tx) => def.handlers!.anonymise(tx, customerId))]);
+      const e = await entry(id);
+      expect(e.status).toBe('withdrawn');
+      expect(await heldBy(id)).toEqual([]);
+      // Every place went back to the pool: nothing consumed is left without an owner.
+      expect(Object.values(await consumed(s.pools)).reduce((n, v) => n + v, 0)).toBe(0);
+    }
+  });
+
+  it('the database refuses to end an offer that still holds places', async () => {
+    const s = await soldOutWorld(t, admin);
+    const a = await customerClient(t);
+    const id = await joinList(t, a, s.w);
+    await cancelHolder(t, s);
+    await owner.query('BEGIN');
+    let outcome = 'ok';
+    try {
+      await owner.query(`UPDATE waitlist_entries SET status = 'withdrawn', "withdrawnAt" = now() WHERE id = $1`, [id]);
+    } catch (err) {
+      outcome = String(err);
+    } finally {
+      await owner.query('ROLLBACK');
+    }
+    expect(outcome).toMatch(/still holds places/);
+  });
+});
+
 describe('waitlist_offer_database_guards', () => {
   const rolled = async (q: string, params: unknown[] = []): Promise<string> => {
     await owner.query('BEGIN');

@@ -167,10 +167,23 @@ export class WaitlistService {
    * waits for an entry that a customer is accepting or that another promotion is offering.
    */
   lockWaiting(tx: Tx, packageId: string, limit: number) {
-    return tx.$queryRaw<Array<{ id: string; customerId: string; email: string; configuration: Prisma.JsonValue }>>`
-      SELECT id, "customerId", email::text AS email, configuration FROM waitlist_entries
-      WHERE "packageId" = ${packageId}::uuid AND reason = 'sold_out' AND status = 'waiting'
-      ORDER BY position LIMIT ${limit} FOR UPDATE SKIP LOCKED`;
+    return tx.$queryRaw<Array<{ id: string; customerId: string; email: string; configuration: Prisma.JsonValue; residence: string }>>`
+      SELECT w.id, w."customerId", w.email::text AS email, w.configuration, c."countryOfResidence" AS residence
+      FROM waitlist_entries w JOIN customers c ON c.id = w."customerId"
+      WHERE w."packageId" = ${packageId}::uuid AND w.reason = 'sold_out' AND w.status = 'waiting'
+      ORDER BY w.position LIMIT ${limit} FOR UPDATE OF w SKIP LOCKED`;
+  }
+
+  /** Every live entry of a customer, locked in id order (erasure): a promotion working on one of them finishes first. */
+  async lockLiveOfCustomer(tx: Tx, customerId: string) {
+    return tx.$queryRaw<Array<{ id: string; status: string }>>`
+      SELECT id, status::text AS status FROM waitlist_entries WHERE "customerId" = ${customerId}::uuid AND status IN ('waiting', 'offered') ORDER BY id FOR UPDATE`;
+  }
+
+  /** The countries whose residents may book, read inside the caller's transaction. */
+  async salesCountries(tx: Tx): Promise<string[]> {
+    const row = await tx.setting.findUnique({ where: { key: 'salesCountries' }, select: { value: true } });
+    return Array.isArray(row?.value) ? (row.value as string[]) : ['AU'];
   }
 
   /** One entry, locked (customer-side actions and the expiry task). `skipLocked` makes a busy entry read as absent. */

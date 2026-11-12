@@ -33,6 +33,9 @@ async function lockCustomer(tx: Tx, customerId: string): Promise<{ id: string; r
   return rows[0] ?? null;
 }
 
+/** Sale statuses a place can be offered or taken in. */
+const OFFERABLE: ReadonlySet<string> = new Set(['open', 'waitlist', 'sold_out']);
+
 const offerClosed = () => conflict('offer_no_longer_open', 'This offer is no longer open');
 
 /**
@@ -68,11 +71,14 @@ export class WaitlistOffersService {
    */
   async promoteIn(tx: Tx, packageId: string, actor: AuditActor, at: Date): Promise<number> {
     const view = await this.catalogue.load(tx, packageId);
-    if (!view || !view.publiclyVisible || view.checkInDate <= todayInBrisbane(at)) return 0;
+    if (!view || !view.publiclyVisible || !OFFERABLE.has(view.saleStatus) || view.checkInDate <= todayInBrisbane(at)) return 0;
+    const countries = await this.waitlist.salesCountries(tx);
     const entries = await this.waitlist.lockWaiting(tx, packageId, MAX_ENTRIES_LOOKED_AT);
     let offers = 0;
     for (const e of entries) {
       if (offers >= MAX_OFFERS_PER_RELEASE) break;
+      // Someone who no longer lives in a country we sell to keeps their place but is not offered one (task 2.6).
+      if (!countries.includes(e.residence)) continue;
       let demand: Array<{ poolId: string; quantity: number }>;
       try {
         const { configuration } = await this.quotes.priceIn(tx, e.configuration as unknown as QuoteRequest, { audience: 'staff', now: at });
@@ -193,9 +199,10 @@ export class WaitlistOffersService {
     const at = await dbNow(tx);
     if (entry.status !== 'offered' || !entry.offerExpiresAt || entry.offerExpiresAt.getTime() <= at.getTime()) throw offerClosed();
 
+    if (!(await this.waitlist.salesCountries(tx)).includes(customer.residenceCountry)) throw conflict('country_not_served', 'We cannot take booking requests from where you live yet.');
     await lockPackage(tx, entry.packageId, 'share');
     const view = await this.catalogue.load(tx, entry.packageId);
-    if (!view || !view.publiclyVisible || view.saleStatus === 'closed') throw conflict('package_not_open', 'This trip is no longer open for booking');
+    if (!view || !view.publiclyVisible || !OFFERABLE.has(view.saleStatus)) throw conflict('package_not_open', 'This trip is no longer open for booking');
     let priced;
     try {
       priced = await this.quotes.priceIn(tx, entry.configuration as unknown as QuoteRequest, { audience: 'staff', now: at });

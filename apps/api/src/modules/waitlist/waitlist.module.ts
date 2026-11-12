@@ -39,9 +39,11 @@ export class WaitlistModule implements OnModuleInit {
         // Erasing a customer takes them off the list: nobody gets an offer for an erased person. The API role cannot
         // delete (only mt_privacy can), so the entry is withdrawn and redacted here; task 5.5's purge may delete it.
         anonymise: async (tx, customerId) => {
-          // An offer holds places: bookings gives them back (and offers them on) before the entry is withdrawn.
-          for (const e of await tx.waitlistEntry.findMany({ where: { customerId, status: 'offered' }, select: { id: true } })) await this.waitlist.closeHeldOffer(tx, e.id, SYSTEM_ACTOR);
-          await tx.waitlistEntry.updateMany({ where: { customerId, status: { in: ['waiting', 'offered'] } }, data: { status: 'withdrawn', withdrawnAt: new Date() } });
+          // Lock every live entry first: a promotion that is offering one commits before we look (no offer is missed). An
+          // offer holds places, so bookings gives them back (and offers them on) before the entry is withdrawn.
+          const live = await this.waitlist.lockLiveOfCustomer(tx, customerId);
+          for (const e of live.filter((x) => x.status === 'offered')) await this.waitlist.closeHeldOffer(tx, e.id, SYSTEM_ACTOR);
+          await tx.waitlistEntry.updateMany({ where: { customerId, status: 'waiting' }, data: { status: 'withdrawn', withdrawnAt: new Date() } });
           await tx.waitlistEntry.updateMany({ where: { customerId }, data: { email: `erased+${customerId}@invalid`, countryOfResidence: 'ZZ', requestContactHmac: null } });
         },
       },

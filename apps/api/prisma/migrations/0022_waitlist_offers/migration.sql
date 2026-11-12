@@ -54,6 +54,10 @@ BEGIN
   IF OLD."bookingId" IS NOT NULL AND NEW."bookingId" IS DISTINCT FROM OLD."bookingId" THEN
     RAISE EXCEPTION 'the booking of a converted waiting list entry never changes' USING ERRCODE = 'insufficient_privilege';
   END IF;
+  -- An offer holds places: it cannot end while any are still held for it.
+  IF OLD."status" = 'offered' AND NEW."status" <> 'offered' AND EXISTS (SELECT 1 FROM "inventory_claims" WHERE "waitlistEntryId" = OLD."id" AND "status" = 'held') THEN
+    RAISE EXCEPTION 'a waiting list offer cannot end while it still holds places' USING ERRCODE = 'check_violation';
+  END IF;
   IF NEW."status" IS DISTINCT FROM OLD."status" AND NOT (
        (OLD."status" = 'waiting' AND NEW."status" IN ('offered', 'withdrawn'))
     OR (OLD."status" = 'offered' AND NEW."status" IN ('converted', 'expired', 'withdrawn'))
