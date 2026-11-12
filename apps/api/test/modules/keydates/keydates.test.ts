@@ -132,7 +132,7 @@ describe('the calendar joins the three sources', () => {
   });
 
   it('lists the editions a date can be added to', async () => {
-    const w = await buildWorld(admin);
+    const w = await buildWorld(admin, { year: 2199 });
     const list = must(await admin.get('/admin/key-dates/editions'), 'editions').body as { items: Array<{ id: string; year: number; raceName: string }> };
     expect(list.items.find((e) => e.id === w.edition.id)).toMatchObject({ year: w.edition.year });
     expect((await (await staffClient(t, [])).get('/admin/key-dates/editions')).status).toBe(403);
