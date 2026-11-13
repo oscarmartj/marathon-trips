@@ -863,6 +863,12 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  RaceDailyStat: {
+    raceId: 'nopii',
+    day: 'nopii',
+    views: 'nopii',
+    builderUses: 'nopii'
+  },
   RaceDistance: {
     id: 'nopii',
     raceId: 'nopii',
@@ -890,6 +896,16 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     userId: 'nopii',
     codeHash: 'secret',
     usedAt: 'nopii',
+    createdAt: 'nopii'
+  },
+  ReportRun: {
+    id: 'nopii',
+    reportId: 'nopii',
+    scheduledFor: 'nopii',
+    status: 'nopii',
+    reasonCode: 'nopii',
+    emailsQueued: 'nopii',
+    recipientsSkipped: 'nopii',
     createdAt: 'nopii'
   },
   Role: {
@@ -927,6 +943,22 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     pricePerPersonMinor: 'nopii',
     extraNightPerPersonMinor: 'nopii',
     createdAt: 'nopii'
+  },
+  SavedReport: {
+    id: 'nopii',
+    name: 'pii',
+    entity: 'nopii',
+    definition: 'nopii',
+    schedule: 'nopii',
+    recipientUserIds: 'nopii',
+    ownerUserId: 'nopii',
+    ownerKind: 'nopii',
+    scheduleStartedAt: 'nopii',
+    version: 'nopii',
+    deletedAt: 'nopii',
+    deletedById: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   SavedView: {
     id: 'nopii',

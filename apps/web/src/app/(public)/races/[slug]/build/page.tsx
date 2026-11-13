@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { RaceBeacon } from '@/components/race-beacon';
 import { PackageBuilder } from '@/components/builder/package-builder';
 import { PageHeader } from '@/components/page-header';
 import { parseBuilderParams } from '@/lib/builder';
@@ -53,6 +54,7 @@ export default async function Build(props: Props) {
   const hasRooms = pkg.hotels.some((h) => h.rooms.length > 0);
   return (
     <>
+      <RaceBeacon raceSlug={slug} kind="builder" />
       <PageHeader title={t('builder.packageHeading', { package: name })} intro={t('builder.datesLine', { checkIn: formatDate(pkg.checkInDate), checkOut: formatDate(pkg.checkOutDate), nights: pkg.nights })} />
       <div className="container stack section">
         <p>{t(joinable ? 'builder.waitlistIntro' : 'races.build.intro')}</p>

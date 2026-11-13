@@ -67,6 +67,7 @@ model User {
   roles                UserRole[]
   apiKeys              ApiKey[]
   automationRules      AutomationRule[]
+  savedReports         SavedReport[]
   customer             Customer?
 
   @@unique([kind, email])

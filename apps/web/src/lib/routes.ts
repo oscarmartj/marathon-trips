@@ -63,6 +63,7 @@ export const adminRoutes: readonly RouteDef[] = [
   { path: '/admin/complaints', file: 'admin/(panel)/complaints/page.tsx', labelKey: 'admin.nav.complaints', nav: true },
   { path: '/admin/complaints/[id]', file: 'admin/(panel)/complaints/[id]/page.tsx', labelKey: 'admin.nav.complaint' },
   { path: '/admin/key-dates', file: 'admin/(panel)/key-dates/page.tsx', labelKey: 'admin.nav.keydates', nav: true },
+  { path: '/admin/reports', file: 'admin/(panel)/reports/page.tsx', labelKey: 'admin.nav.reports', nav: true },
   { path: '/admin/waitlist', file: 'admin/(panel)/waitlist/page.tsx', labelKey: 'admin.nav.waitlist', nav: true },
   { path: '/admin/automations', file: 'admin/(panel)/automations/page.tsx', labelKey: 'admin.nav.automations', nav: true },
   { path: '/admin/automations/[id]', file: 'admin/(panel)/automations/[id]/page.tsx', labelKey: 'admin.nav.automation' },
