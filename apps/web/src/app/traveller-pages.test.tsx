@@ -33,7 +33,7 @@ describe('traveller details page', () => {
   it('no_form_asks_passport_or_medical: field ids, labels and the catalogue name nothing of the kind', () => {
     const html = renderToStaticMarkup(<TravellerForms reference="MT-4YRAQQ" initial={view()} />);
     const ids = [...html.matchAll(/id="traveller-\d-([A-Za-z]+)"/g)].map((m) => m[1]!);
-    const allowed = new Set([...TRAVELLER_DETAIL_FIELDS, 'finishHours', 'finishMinutes']);
+    const allowed = new Set([...TRAVELLER_DETAIL_FIELDS, 'finishHours', 'finishMinutes', 'dobHint', 'finishHint', 'emergencyHint']);
     expect(ids.filter((i) => !allowed.has(i as never))).toEqual([]);
     const banned = /passport|medical|health|allerg|dietary|diet|disab|visa|nationality|gender|licen[cs]e|tax file|medicare/i;
     const { fields } = (messageCatalogue() as { account: { travellers: { fields: Record<string, string> } } }).account.travellers;
@@ -75,5 +75,17 @@ describe('the booking page section', () => {
   it('is left out when the API gives nothing to show', () => {
     expect(renderToStaticMarkup(<BookingOverview view={detail} />)).not.toContain('travellers-heading');
     expect(renderToStaticMarkup(<BookingOverview view={detail} travellers={view({ editable: false, reason: 'booking_status' })} />)).not.toContain('travellers-heading');
+  });
+});
+
+describe('form accessibility', () => {
+  it('uses autofill tokens for the lead place only, and links each hint to its input', () => {
+    const html = renderToStaticMarkup(<TravellerForms reference="MT-4YRAQQ" initial={view()} />);
+    expect(html).toContain('id="traveller-1-givenName"');
+    expect(html.match(/autoComplete="given-name"|autocomplete="given-name"/gi)).toHaveLength(1);
+    expect(html.match(/autocomplete="bday"/gi)).toHaveLength(1);
+    expect(html).toMatch(/id="traveller-1-dateOfBirth"[^>]*aria-describedby="traveller-1-dobHint"/);
+    expect(html).toContain('id="traveller-1-dobHint"');
+    expect(html).toMatch(/id="traveller-2-emergencyContactPhone"[^>]*aria-describedby="traveller-2-emergencyHint"/);
   });
 });

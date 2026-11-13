@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import type { BookingTravellersView, TravellerView } from '@mt/shared';
 import { Field, Status } from '@/components/auth/field';
 import { api } from '@/lib/api-client';
@@ -34,10 +34,17 @@ function TravellerForm({ reference, traveller, editable, onView }: { reference: 
   const [errors, setErrors] = useState<Partial<Record<DetailsField, string>>>({});
   const [message, setMessage] = useState<{ tone: 'error' | 'info'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const messageBox = useRef<HTMLDivElement>(null);
+  // Autofill hints (WCAG 1.3.5) only for the lead place, which is the customer's own details.
+  const ac = (token: string) => (traveller.isLead ? token : 'off');
   const id = (f: string) => `traveller-${traveller.slot}-${f}`;
   const set = (key: keyof DetailsForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const err = (f: DetailsField) => (errors[f] ? t(`account.travellers.errors.${errors[f]}`) : undefined);
-  const invalid = (f: DetailsField) => (errors[f] ? { 'aria-invalid': true, 'aria-describedby': `${id(f)}-error` } : {});
+  // Each input points at its hint and, when it has one, its error.
+  const described = (f: DetailsField, hint?: string) => {
+    const ids = [hint ? id(hint) : null, errors[f] ? `${id(f)}-error` : null].filter(Boolean).join(' ');
+    return { ...(errors[f] ? { 'aria-invalid': true } : {}), ...(ids ? { 'aria-describedby': ids } : {}) };
+  };
 
   async function run(method: 'PUT' | 'DELETE', body?: object, done?: string) {
     setBusy(true);
@@ -51,9 +58,11 @@ function TravellerForm({ reference, traveller, editable, onView }: { reference: 
         setMessage({ tone: 'info', text: t(done!) });
       } else {
         setMessage({ tone: 'error', text: t(`account.travellers.errors.${saveErrorKey(r.status, r.body.code)}`) });
+        queueMicrotask(() => messageBox.current?.focus());
       }
     } catch {
       setMessage({ tone: 'error', text: t('account.travellers.errors.network') });
+      queueMicrotask(() => messageBox.current?.focus());
     } finally {
       setBusy(false);
     }
@@ -93,28 +102,28 @@ function TravellerForm({ reference, traveller, editable, onView }: { reference: 
     <form className="stack form" onSubmit={submit} noValidate>
       <fieldset className="stack">
         <legend>{legend}</legend>
-        <Field label={t('account.travellers.fields.givenName')} id={id('givenName')} value={form.givenName} onChange={set('givenName')} required maxLength={100} autoComplete="off" {...invalid('givenName')} />
+        <Field label={t('account.travellers.fields.givenName')} id={id('givenName')} value={form.givenName} onChange={set('givenName')} required maxLength={100} autoComplete={ac('given-name')} {...described('givenName')} />
         {err('givenName') ? <p id={`${id('givenName')}-error`} className="form-error" role="alert">{err('givenName')}</p> : null}
-        <Field label={t('account.travellers.fields.familyName')} id={id('familyName')} value={form.familyName} onChange={set('familyName')} required maxLength={100} autoComplete="off" {...invalid('familyName')} />
+        <Field label={t('account.travellers.fields.familyName')} id={id('familyName')} value={form.familyName} onChange={set('familyName')} required maxLength={100} autoComplete={ac('family-name')} {...described('familyName')} />
         {err('familyName') ? <p id={`${id('familyName')}-error`} className="form-error" role="alert">{err('familyName')}</p> : null}
         {traveller.runner ? (
           <>
-            <Field label={t('account.travellers.fields.dateOfBirth')} id={id('dateOfBirth')} type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} autoComplete="off" {...invalid('dateOfBirth')} />
-            <p className="field__hint">{t('account.travellers.fields.dateOfBirthHint')}</p>
+            <Field label={t('account.travellers.fields.dateOfBirth')} id={id('dateOfBirth')} type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} autoComplete={ac('bday')} {...described('dateOfBirth', 'dobHint')} />
+            <p id={id('dobHint')} className="field__hint">{t('account.travellers.fields.dateOfBirthHint')}</p>
             {err('dateOfBirth') ? <p id={`${id('dateOfBirth')}-error`} className="form-error" role="alert">{err('dateOfBirth')}</p> : null}
-            <Field label={t('account.travellers.fields.finishHours')} id={id('finishHours')} inputMode="numeric" value={form.finishHours} onChange={set('finishHours')} maxLength={2} autoComplete="off" {...invalid('estimatedFinish')} />
-            <Field label={t('account.travellers.fields.finishMinutes')} id={id('finishMinutes')} inputMode="numeric" value={form.finishMinutes} onChange={set('finishMinutes')} maxLength={2} autoComplete="off" {...invalid('estimatedFinish')} />
-            <p className="field__hint">{t('account.travellers.fields.finishHint')}</p>
+            <Field label={t('account.travellers.fields.finishHours')} id={id('finishHours')} inputMode="numeric" value={form.finishHours} onChange={set('finishHours')} maxLength={2} autoComplete="off" {...described('estimatedFinish', 'finishHint')} />
+            <Field label={t('account.travellers.fields.finishMinutes')} id={id('finishMinutes')} inputMode="numeric" value={form.finishMinutes} onChange={set('finishMinutes')} maxLength={2} autoComplete="off" {...described('estimatedFinish', 'finishHint')} />
+            <p id={id('finishHint')} className="field__hint">{t('account.travellers.fields.finishHint')}</p>
             {err('estimatedFinish') ? <p id={`${id('estimatedFinish')}-error`} className="form-error" role="alert">{err('estimatedFinish')}</p> : null}
           </>
         ) : null}
-        <Field label={t('account.travellers.fields.emergencyContactName')} id={id('emergencyContactName')} value={form.emergencyContactName} onChange={set('emergencyContactName')} maxLength={100} autoComplete="off" {...invalid('emergencyContactName')} />
+        <Field label={t('account.travellers.fields.emergencyContactName')} id={id('emergencyContactName')} value={form.emergencyContactName} onChange={set('emergencyContactName')} maxLength={100} autoComplete="off" {...described('emergencyContactName', 'emergencyHint')} />
         {err('emergencyContactName') ? <p id={`${id('emergencyContactName')}-error`} className="form-error" role="alert">{err('emergencyContactName')}</p> : null}
-        <Field label={t('account.travellers.fields.emergencyContactPhone')} id={id('emergencyContactPhone')} type="tel" value={form.emergencyContactPhone} onChange={set('emergencyContactPhone')} maxLength={20} autoComplete="off" {...invalid('emergencyContactPhone')} />
-        <p className="field__hint">{t('account.travellers.fields.emergencyHint')}</p>
+        <Field label={t('account.travellers.fields.emergencyContactPhone')} id={id('emergencyContactPhone')} type="tel" value={form.emergencyContactPhone} onChange={set('emergencyContactPhone')} maxLength={20} autoComplete="off" {...described('emergencyContactPhone', 'emergencyHint')} />
+        <p id={id('emergencyHint')} className="field__hint">{t('account.travellers.fields.emergencyHint')}</p>
         {err('emergencyContactPhone') ? <p id={`${id('emergencyContactPhone')}-error`} className="form-error" role="alert">{err('emergencyContactPhone')}</p> : null}
       </fieldset>
-      <Status message={message?.text ?? null} tone={message?.tone} />
+      <div ref={messageBox} tabIndex={-1}><Status message={message?.text ?? null} tone={message?.tone} /></div>
       <p>
         <button className="btn" type="submit" disabled={busy} aria-disabled={busy}>{busy ? t('account.travellers.saving') : t('account.travellers.save')}</button>
         {traveller.details ? <> <button className="btn btn--accent" type="button" disabled={busy} onClick={() => void run('DELETE', undefined, 'account.travellers.cleared')}>{t('account.travellers.clear')}</button></> : null}

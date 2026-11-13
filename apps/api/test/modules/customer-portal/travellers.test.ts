@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { BookingStatus } from '@mt/shared';
 import { TRAVELLER_ENTITIES } from '../../../src/modules/customer-portal';
+import { TravellerDetailsService } from '../../../src/modules/customer-portal/traveller.service';
 import { todayInBrisbane } from '../../../src/modules/bookings';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
 import { cleanBookingEvents, customerClient } from '../../support/bookings';
@@ -328,13 +329,38 @@ describe('personal data handling', () => {
       expect(r.anonymisedAt).not.toBeNull();
     }
     expect((await t.prisma.traveller.findFirstOrThrow({ where: { bookingId: theirs.bookingId } })).givenName).toBe('Ana'); // only this customer's
-    expect(await t.prisma.$transaction((tx) => def.handlers!.anonymise(tx, customer.id))).toBeUndefined(); // safe to run again
+    const erasedAt = rows.map((r) => r.anonymisedAt!.getTime());
+    expect(await t.prisma.$transaction((tx) => def.handlers!.anonymise(tx, customer.id))).toBeUndefined(); // safe to run again...
+    const again = await t.prisma.traveller.findMany({ where: { bookingId: mine.bookingId }, orderBy: { slot: 'asc' } });
+    expect(again.map((r) => r.anonymisedAt!.getTime())).toEqual(erasedAt); // ...and it does not move the erasure time
   });
 
   it('no_form_asks_passport_or_medical: no column of the table can hold such data', async () => {
     const cols = await t.prisma.$queryRaw<Array<{ column_name: string }>>`SELECT column_name FROM information_schema.columns WHERE table_name = 'travellers'`;
     expect(cols.map((c) => c.column_name).sort()).toEqual(['anonymisedAt', 'bookingId', 'createdAt', 'customerId', 'dateOfBirth', 'emergencyContactName', 'emergencyContactPhone', 'estimatedFinishSeconds', 'familyName', 'givenName', 'id', 'slot', 'updatedAt']);
     expect(cols.map((c) => c.column_name).join(' ')).not.toMatch(/passport|medical|health|allerg|dietary|disab|nationality|gender|licen[cs]e|visa|tax/i);
+  });
+});
+
+describe('erasure racing a save', () => {
+  it('a save that passed the guard before the erasure committed is a 404 and writes nothing', async () => {
+    const svc = t.app.get(TravellerDetailsService);
+    const a = await customerClient(t);
+    const { reference, bookingId } = await bookingWith(a, 'deposit_paid');
+    const actor = { type: 'customer' as const, id: a.userId, sessionId: null, requestId: 'test' };
+    await svc.save(actor, reference, 2, supporter); // an existing row, to be erased
+    const customer = await t.prisma.customer.findFirstOrThrow({ where: { userId: a.userId }, select: { id: true } });
+    const def = TRAVELLER_ENTITIES[0]!;
+    // The erasure commits after the route's guard let the request through and before the service writes.
+    await t.prisma.$transaction(async (tx) => {
+      await def.handlers!.anonymise(tx, customer.id);
+      await tx.customer.update({ where: { id: customer.id }, data: { anonymisedAt: new Date() } });
+    });
+    await expect(svc.save(actor, reference, 1, runner)).rejects.toMatchObject({ status: 404 }); // would have created a row
+    await expect(svc.save(actor, reference, 2, { givenName: 'Late', familyName: 'Write' })).rejects.toMatchObject({ status: 404 }); // would have hit the erased CHECK
+    await expect(svc.clear(actor, reference, 2)).rejects.toMatchObject({ status: 404 });
+    const rows = await t.prisma.traveller.findMany({ where: { bookingId }, orderBy: { slot: 'asc' } });
+    expect(rows.map((r) => [r.slot, r.givenName])).toEqual([[2, '[redacted]']]);
   });
 });
 
@@ -353,6 +379,16 @@ describe('the database itself', () => {
     await expect(insert(mine.bookingId, aId, 9)).rejects.toThrow(/need a place of the booking/); // a place the booking does not have
     await expect(insert(mine.bookingId, aId, 1)).resolves.toBe(1);
     await expect(insert(mine.bookingId, aId, 1)).rejects.toThrow(/travellers_bookingId_slot_key/); // one row per place
+  });
+
+  it('a place of a booking cannot be rewritten, only marked removed', async () => {
+    const a = await customerClient(t);
+    const { bookingId } = await bookingWith(a, 'deposit_paid');
+    const upd = (set: string) => t.prisma.$executeRawUnsafe(`UPDATE booking_travellers SET ${set} WHERE "bookingId" = $1::uuid AND slot = 2`, bookingId);
+    for (const set of [`slot = 3`, `"participationType" = 'runner_own_entry'`, `"isLead" = true`, `"bookingId" = gen_random_uuid()`, `"addedInVersion" = 5`]) {
+      await expect(upd(set), set).rejects.toThrow(/never changes/);
+    }
+    await expect(upd(`"removedInVersion" = 2`)).resolves.toBe(1);
   });
 
   it('bounds, erased rows and the place of a row are guarded by the database', async () => {

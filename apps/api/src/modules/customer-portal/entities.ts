@@ -22,7 +22,7 @@ export const TRAVELLER_ENTITIES: EntityDef[] = [
       }),
       anonymise: async (tx: Tx, customerId) => {
         await tx.traveller.updateMany({
-          where: { customerId },
+          where: { customerId, anonymisedAt: null },
           data: { givenName: ERASED, familyName: ERASED, dateOfBirth: null, emergencyContactName: null, emergencyContactPhone: null, estimatedFinishSeconds: null, anonymisedAt: new Date() },
         });
       },

@@ -80,3 +80,22 @@ END;
 $$;
 CREATE TRIGGER travellers_place BEFORE INSERT ON "travellers"
   FOR EACH ROW EXECUTE FUNCTION public.mt_traveller_place();
+
+-- A place never changes who or what it is; an amendment only marks it removed (task 6.3). The API role could otherwise
+-- rewrite the slot, the booking or the participation type of a place that traveller details hang on.
+CREATE FUNCTION public.mt_booking_traveller_guard() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF NEW."id" IS DISTINCT FROM OLD."id" OR NEW."bookingId" IS DISTINCT FROM OLD."bookingId" OR NEW."customerId" IS DISTINCT FROM OLD."customerId"
+     OR NEW."slot" IS DISTINCT FROM OLD."slot" OR NEW."participationType" IS DISTINCT FROM OLD."participationType"
+     OR NEW."raceDistanceId" IS DISTINCT FROM OLD."raceDistanceId" OR NEW."isLead" IS DISTINCT FROM OLD."isLead"
+     OR NEW."addedInVersion" IS DISTINCT FROM OLD."addedInVersion" THEN
+    RAISE EXCEPTION 'a place of a booking never changes; amendments mark it removed' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER booking_travellers_guard BEFORE UPDATE ON "booking_travellers"
+  FOR EACH ROW EXECUTE FUNCTION public.mt_booking_traveller_guard();

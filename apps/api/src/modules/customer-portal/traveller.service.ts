@@ -98,9 +98,12 @@ export class TravellerDetailsService {
 
   private async write(actor: AuditActor, reference: string, slot: number, input: TravellerDetailsInput | null): Promise<BookingTravellersView> {
     return this.prisma.$transaction(async (tx) => {
-      // The booking row is locked for share so its status cannot change under the save; the place row serialises two saves of one place.
+      // The customer and then the booking are locked for share (the order erasure uses: Customer, Booking, Traveller), and the
+      // customer must still be open: the guard checked that before this transaction, so an erasure may have committed since.
+      // The booking lock keeps its status from changing under the save; the place row serialises two saves of one place.
       const [booking] = await tx.$queryRaw<Array<{ id: string; customerId: string; status: BookingStatus; editionId: string }>>`
-        SELECT id, "customerId", status, "editionId" FROM bookings WHERE reference = ${reference} FOR SHARE`;
+        SELECT b.id, b."customerId", b.status, b."editionId" FROM bookings b JOIN customers c ON c.id = b."customerId"
+        WHERE b.reference = ${reference} AND c."deletedAt" IS NULL AND c."anonymisedAt" IS NULL FOR SHARE OF c, b`;
       if (!booking) throw notFound();
       const [place] = await tx.$queryRaw<Array<{ id: string; participationType: PlaceRow['participationType'] }>>`
         SELECT id, "participationType" FROM booking_travellers WHERE "bookingId" = ${booking.id}::uuid AND slot = ${slot} AND "removedInVersion" IS NULL FOR UPDATE`;
