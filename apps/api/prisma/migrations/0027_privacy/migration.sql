@@ -177,7 +177,20 @@ REVOKE ALL ON FUNCTION public.privacy_active_trip_reason(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.privacy_active_trip_reason(uuid) TO mt_app, mt_privacy;
 
 -- ---- Erasure functions, owned by mt_privacy (plan 0.1, 4.9) ----
-GRANT SELECT ON "customers", "bookings", "payments", "quotes", "complaints", "waitlist_entries", "tasks", "users" TO mt_privacy;
+GRANT SELECT ON "customers", "bookings", "payments", "quotes", "complaints", "waitlist_entries", "tasks" TO mt_privacy;
+
+-- mt_privacy never reads users (0.3: it reaches nothing it does not need). The one fact privacy_erase_account needs, "this
+-- is a customer sign-in account that is already anonymised", comes from this owner function, callable by mt_privacy only.
+CREATE FUNCTION public.privacy_account_is_anonymised_customer(p_user uuid) RETURNS boolean
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.users u WHERE u.id = p_user AND u.kind = 'customer' AND u."anonymisedAt" IS NOT NULL)
+$$;
+REVOKE ALL ON FUNCTION public.privacy_account_is_anonymised_customer(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.privacy_account_is_anonymised_customer(uuid) TO mt_privacy;
 GRANT SELECT ON "consent_records" TO mt_privacy;
 GRANT UPDATE ("customerId") ON "consent_records" TO mt_privacy;
 
@@ -244,15 +257,9 @@ CREATE FUNCTION public.privacy_erase_account(p_user uuid) RETURNS integer
   SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
-  v_kind text;
-  v_erased timestamptz;
   deleted integer;
 BEGIN
-  SELECT u.kind::text, u."anonymisedAt" INTO v_kind, v_erased FROM public.users u WHERE u.id = p_user;
-  IF NOT FOUND OR v_kind <> 'customer' THEN
-    RAISE EXCEPTION 'privacy_account_not_found' USING ERRCODE = 'no_data_found';
-  END IF;
-  IF v_erased IS NULL THEN
+  IF NOT public.privacy_account_is_anonymised_customer(p_user) THEN
     RAISE EXCEPTION 'privacy_account_not_anonymised' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF EXISTS (SELECT 1 FROM public.customers c WHERE c."userId" = p_user) THEN
