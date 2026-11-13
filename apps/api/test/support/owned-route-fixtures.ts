@@ -94,6 +94,33 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
     },
   },
+  // Task 5.2: traveller details. A's booking with the deposit paid; B reads, saves and clears A's place 1.
+  'account-booking-travellers': {
+    async create(t, a, b) {
+      const { customerBookingIn } = await import('./customer-portal');
+      const { reference } = await customerBookingIn(t, a, 'deposit_paid');
+      const path = `/account/bookings/${reference}/travellers`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
+  'account-booking-traveller-save': {
+    async create(t, a, b) {
+      const { customerBookingIn } = await import('./customer-portal');
+      const { reference } = await customerBookingIn(t, a, 'deposit_paid');
+      const path = `/account/bookings/${reference}/travellers/1`;
+      const send = (s: CustomerSession) => t.http().put(path).set(STATE_HEADERS).set('Cookie', s.cookie).send({ givenName: 'Ana', familyName: 'Ruiz' });
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
+  'account-booking-traveller-clear': {
+    async create(t, a, b) {
+      const { customerBookingIn } = await import('./customer-portal');
+      const { reference } = await customerBookingIn(t, a, 'deposit_paid');
+      const path = `/account/bookings/${reference}/travellers/1`;
+      const send = (s: CustomerSession) => t.http().delete(path).set(STATE_HEADERS).set('Cookie', s.cookie);
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
   // Task 2.5: GET /quotes/:reference. A quote sent to customer A; B asks for it.
   quote: {
     async create(t, a, b) {

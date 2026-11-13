@@ -171,6 +171,7 @@ model Booking {
   inventoryMovements     InventoryMovement[]
   complaints             Complaint[]
   waitlistEntries        WaitlistEntry[]
+  travellerDetails       Traveller[]
 
   @@unique([id, currency])
   @@unique([id, customerId])
@@ -233,6 +234,8 @@ model BookingTraveller {
   addedInVersion    Int               @default(1)
   /// @nopii snapshot version that removed the place (6.3)
   removedInVersion  Int?
+  /// the personal details typed for this place (task 5.2, owned by customer-portal)
+  details           Traveller?
 
   @@unique([bookingId, slot])
   @@index([customerId])
