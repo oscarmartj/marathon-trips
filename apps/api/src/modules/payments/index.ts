@@ -3,5 +3,6 @@ export { PaymentsModule } from './payments.module';
 export { paymentsManifest, PAYMENTS_PERMISSIONS } from './manifest';
 export { ProviderAccountsService } from './core/accounts.service';
 export { PaymentAttemptsService, PAYABLE_STATES } from './core/attempts.service';
+export { TermsService } from './core/terms.service';
 export { PAYMENT_EVENTS, PAYMENT_STATUS_PAIRS } from './core/attempt-state';
 export type { PaymentProvider, AdapterManifest, AdapterStatus } from './core/provider';

@@ -39,8 +39,10 @@ export async function staffView(db: Db, id: string) {
       customer: { select: { id: true, email: true, givenName: true, familyName: true, phone: true, countryOfResidence: true } },
       snapshots: { orderBy: { version: 'asc' } },
       travellers: { orderBy: { slot: 'asc' } },
-      rooms: true,
-      extras: true,
+      // As the booking stands (task 6.3: a change marks the rows it replaces removed); the snapshots keep the history.
+      rooms: { where: { removedInVersion: null } },
+      extras: { where: { removedInVersion: null } },
+      amendments: { orderBy: { toVersion: 'asc' }, omit: { requestKeyHash: true, requestBodyHash: true } },
       claims: { orderBy: { poolId: 'asc' } },
       promoRedemptions: { select: { promoCodeId: true, redeemedAt: true, releasedAt: true } },
     },

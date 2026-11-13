@@ -10,6 +10,8 @@ export const BOOKINGS_PERMISSIONS = {
   decline: 'bookings.booking.decline',
   cancel: 'bookings.booking.cancel',
   confirm: 'bookings.booking.confirm',
+  /** Task 6.3: change a booking after its deposit (rooms, travellers, nights, extras), with the difference recalculated. */
+  amend: 'bookings.booking.amend',
 } as const;
 
 /** Task 2.5: the panel's customers, and notes and tags on bookings (the shared table tools of task 0.5). Not API key scopes either. */
@@ -31,6 +33,10 @@ export const BOOKING_EVENTS = {
   depositPaid: 'bookings.booking.deposit_paid',
   confirmed: 'bookings.booking.confirmed',
   balancePaid: 'bookings.booking.balance_paid',
+  /** Task 6.3: a change of the booking (new snapshot, difference recalculated). */
+  amended: 'bookings.booking.amended',
+  /** Task 6.3: a change raised the total of a booking paid in full, which goes back from balance paid to confirmed. */
+  balanceReopened: 'bookings.booking.balance_reopened',
 } as const;
 
 export const bookingsManifest = {
@@ -44,6 +50,9 @@ export const bookingsManifest = {
     // Confirming cannot be undone until refunds and penalties exist (cancelling a confirmed booking is a 409): step-up
     // (plan 3.2, section 11, point 5).
     def(BOOKINGS_PERMISSIONS.confirm, 'Confirm a booking whose deposit is paid (it then moves to balance paid if the balance is paid too); cannot be undone', true),
+    // A change moves what the customer owes, takes or gives back stock and cannot be undone except by another change:
+    // step-up, owner only by default, never an API key scope (task 6.3).
+    def(BOOKINGS_PERMISSIONS.amend, 'Change a booking after its deposit (rooms, travellers, nights, extras); the new price comes from the pricing engine and what is owed changes', true),
     def(BOOKINGS_PERMISSIONS.cancel, 'Cancel a request or an approved booking, which gives its stock and promo code back; cannot be undone', true),
     def(BOOKINGS_CRM_PERMISSIONS.annotate, 'Add notes and tags to a booking'),
     def(BOOKINGS_CRM_PERMISSIONS.customerRead, 'See customers with their contact details and history of bookings, quotes and emails'),

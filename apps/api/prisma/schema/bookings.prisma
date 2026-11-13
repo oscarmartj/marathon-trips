@@ -36,6 +36,30 @@ enum BookingSnapshotKind {
   amendment
 }
 
+/// Who asked for a change of a booking (task 6.3).
+enum BookingAmendmentInitiator {
+  customer
+  staff
+}
+
+/// Why staff changed a booking (task 6.3): a code, never free text (notes on the booking hold any detail).
+enum BookingAmendmentReason {
+  customer_request
+  correction
+  supplier_change
+  other
+}
+
+/// What a change of a booking changed (task 6.3), derived by the server from the two configurations.
+enum BookingAmendmentChange {
+  room
+  nights
+  travellers_added
+  travellers_removed
+  participation
+  extras
+}
+
 enum InventoryClaimStatus {
   held
   released
@@ -172,6 +196,7 @@ model Booking {
   complaints             Complaint[]
   waitlistEntries        WaitlistEntry[]
   travellerDetails       Traveller[]
+  amendments             BookingAmendment[]
 
   @@unique([id, currency])
   @@unique([id, customerId])
@@ -241,36 +266,46 @@ model BookingTraveller {
   @@map("booking_travellers")
 }
 
-/// A room of the booking as it stands (operations); the snapshot keeps what was priced.
+/// A room of the booking (operations); the snapshot keeps what was priced. As it stands: `removedInVersion` is null
+/// (task 6.3: a change marks the old rows removed and adds the new set; rows are never deleted).
 model BookingRoom {
-  id             String     @id @default(uuid(7)) @db.Uuid
-  bookingId      String     @db.Uuid
-  booking        Booking    @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  roomOptionId   String     @db.Uuid
-  roomOption     RoomOption @relation(fields: [roomOptionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id               String     @id @default(uuid(7)) @db.Uuid
+  bookingId        String     @db.Uuid
+  booking          Booking    @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  roomOptionId     String     @db.Uuid
+  roomOption       RoomOption @relation(fields: [roomOptionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii people in the room, 1 to 4
-  occupancy      Int
+  occupancy        Int
   /// @nopii traveller slots in the room
-  travellerSlots Int[]
+  travellerSlots   Int[]
+  /// @nopii snapshot version that added the row
+  addedInVersion   Int        @default(1)
+  /// @nopii snapshot version that removed the row (6.3)
+  removedInVersion Int?
 
   @@index([bookingId])
   @@index([roomOptionId])
   @@map("booking_rooms")
 }
 
-/// An extra of the booking as it stands: one row per traveller for per-person extras, one row with a quantity otherwise.
+/// An extra of the booking: one row per traveller for per-person extras, one row with a quantity otherwise. As it stands:
+/// `removedInVersion` is null (task 6.3).
 model BookingExtra {
-  id            String  @id @default(uuid(7)) @db.Uuid
-  bookingId     String  @db.Uuid
-  booking       Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  extraId       String  @db.Uuid
-  extra         Extra   @relation(fields: [extraId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id               String  @id @default(uuid(7)) @db.Uuid
+  bookingId        String  @db.Uuid
+  booking          Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  extraId          String  @db.Uuid
+  extra            Extra   @relation(fields: [extraId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii how many
-  quantity      Int
+  quantity         Int
   /// @nopii traveller slot for a per-person extra
-  travellerSlot Int?
+  travellerSlot    Int?
+  /// @nopii snapshot version that added the row
+  addedInVersion   Int     @default(1)
+  /// @nopii snapshot version that removed the row (6.3)
+  removedInVersion Int?
 
-  @@unique([bookingId, extraId, travellerSlot], map: "booking_extras_booking_extra_slot_key")
+  @@unique([bookingId, extraId, travellerSlot, addedInVersion], map: "booking_extras_booking_extra_slot_key")
   @@index([extraId])
   @@map("booking_extras")
 }
@@ -291,11 +326,68 @@ model InventoryClaim {
   status          InventoryClaimStatus @default(held)
   /// @nopii timestamp
   releasedAt      DateTime?            @db.Timestamptz(3)
+  /// @nopii snapshot version whose configuration the claim holds stock for (task 6.3: a change of quantity releases the
+  /// claim and takes a new one; at most one held claim per booking and pool, EXCLUDE in 0029)
+  snapshotVersion Int                  @default(1)
   /// @nopii timestamp
   createdAt       DateTime             @default(now()) @db.Timestamptz(3)
 
-  @@unique([bookingId, poolId])
+  @@unique([bookingId, poolId, snapshotVersion])
   @@unique([waitlistEntryId, poolId])
   @@index([poolId, status])
   @@map("inventory_claims")
+}
+
+/// A change of a booking after its deposit (task 6.3; plan docs/plans/6.3-booking-amendments.md). Each row is one applied
+/// change: it moved the booking from snapshot `fromVersion` to `toVersion` and records what that did to the money at that
+/// moment (history; screens show the current values derived from the plan and the payments). Append-only, no personal
+/// data and no free text; written in the same transaction as its snapshot (deferred triggers in 0029).
+model BookingAmendment {
+  id                  String                    @id @default(uuid(7)) @db.Uuid
+  bookingId           String                    @db.Uuid
+  /// @nopii ISO 4217, the booking's
+  currency            String                    @db.Char(3)
+  booking             Booking                   @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii snapshot version before the change
+  fromVersion         Int
+  /// @nopii snapshot version the change created (fromVersion + 1)
+  toVersion           Int
+  /// @nopii customer or staff
+  initiatedBy         BookingAmendmentInitiator
+  /// the user who made the change (a customer or a member of staff)
+  actorUserId         String                    @db.Uuid
+  /// @nopii why
+  reasonCode          BookingAmendmentReason
+  /// @nopii what changed
+  changes             BookingAmendmentChange[]
+  /// @nopii minor units, in `currency`: the total of snapshot fromVersion
+  previousTotalMinor  BigInt
+  /// @nopii minor units, in `currency`: the total of snapshot toVersion
+  newTotalMinor       BigInt
+  /// @signed minor units, in `currency`: newTotalMinor − previousTotalMinor, from the pricing engine's totals
+  priceDifferenceMinor BigInt
+  /// @nopii minor units, in `currency`: succeeded payments when the change was made
+  collectedMinor      BigInt
+  /// @nopii minor units, in `currency`: what was left to pay after the change
+  outstandingMinor    BigInt
+  /// @nopii minor units, in `currency`: paid beyond the new total after the change (parked: no refund until 4.5)
+  creditPendingMinor  BigInt
+  /// @signed minor units, in `currency`: re-pricing the unchanged configuration on the basis minus its stored total; ≤ 0 and
+  /// only with reasonCode correction (plan, decision 4)
+  basisDriftMinor     BigInt                    @default(0)
+  basisPriceVersionId String                    @db.Uuid
+  basisPriceVersion   PriceVersion              @relation(fields: [basisPriceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the instant the engine prices this booking at (its first pricing; plan, decision 3)
+  basisAt             DateTime                  @db.Timestamptz(3)
+  /// @secret SHA-256 of the user id and the client's Idempotency-Key: one change per key and booking
+  requestKeyHash      String                    @db.Char(64)
+  /// @secret SHA-256 of the request body (no personal data)
+  requestBodyHash     String                    @db.Char(64)
+  /// @nopii timestamp
+  createdAt           DateTime                  @default(now()) @db.Timestamptz(3)
+
+  @@unique([bookingId, toVersion])
+  @@unique([bookingId, requestKeyHash])
+  @@index([basisPriceVersionId])
+  @@map("booking_amendments")
 }

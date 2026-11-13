@@ -143,19 +143,46 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  BookingAmendment: {
+    id: 'nopii',
+    bookingId: 'nopii',
+    currency: 'nopii',
+    fromVersion: 'nopii',
+    toVersion: 'nopii',
+    initiatedBy: 'nopii',
+    actorUserId: 'nopii',
+    reasonCode: 'nopii',
+    changes: 'nopii',
+    previousTotalMinor: 'nopii',
+    newTotalMinor: 'nopii',
+    priceDifferenceMinor: 'pii',
+    collectedMinor: 'nopii',
+    outstandingMinor: 'nopii',
+    creditPendingMinor: 'nopii',
+    basisDriftMinor: 'pii',
+    basisPriceVersionId: 'nopii',
+    basisAt: 'nopii',
+    requestKeyHash: 'secret',
+    requestBodyHash: 'secret',
+    createdAt: 'nopii'
+  },
   BookingExtra: {
     id: 'nopii',
     bookingId: 'nopii',
     extraId: 'nopii',
     quantity: 'nopii',
-    travellerSlot: 'nopii'
+    travellerSlot: 'nopii',
+    addedInVersion: 'nopii',
+    removedInVersion: 'nopii'
   },
   BookingRoom: {
     id: 'nopii',
     bookingId: 'nopii',
     roomOptionId: 'nopii',
     occupancy: 'nopii',
-    travellerSlots: 'nopii'
+    travellerSlots: 'nopii',
+    addedInVersion: 'nopii',
+    removedInVersion: 'nopii'
   },
   BookingSnapshot: {
     id: 'nopii',
@@ -460,6 +487,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     quantity: 'nopii',
     status: 'nopii',
     releasedAt: 'nopii',
+    snapshotVersion: 'nopii',
     createdAt: 'nopii'
   },
   InventoryMovement: {

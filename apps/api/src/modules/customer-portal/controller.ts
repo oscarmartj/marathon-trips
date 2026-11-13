@@ -1,16 +1,17 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Put, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Headers, HttpCode, Inject, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { travellerDetailsSchema } from '@mt/shared';
-import type { TravellerDetailsInput } from '@mt/shared';
+import { customerAmendmentPreviewSchema, customerAmendmentSchema, travellerDetailsSchema } from '@mt/shared';
+import type { CustomerAmendment, CustomerAmendmentPreview, TravellerDetailsInput } from '@mt/shared';
 import { OwnedBy } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
-import { notFound } from '../../platform/http/api-error';
+import { notFound, unprocessable } from '../../platform/http/api-error';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import { ownsBookingReference } from '../bookings';
 import { CustomerAccountService } from './account.service';
 import { isDocumentKind } from './documents';
-import { DocumentRateLimitGuard } from './rate-limit.guard';
+import { CustomerAmendmentsService } from './amendments';
+import { AmendmentRateLimitGuard, DocumentRateLimitGuard } from './rate-limit.guard';
 import { TravellerDetailsService } from './traveller.service';
 
 /**
@@ -22,6 +23,7 @@ export class CustomerAccountController {
   constructor(
     @Inject(CustomerAccountService) private readonly account: CustomerAccountService,
     @Inject(TravellerDetailsService) private readonly travellers: TravellerDetailsService,
+    @Inject(CustomerAmendmentsService) private readonly amendments: CustomerAmendmentsService,
   ) {}
 
   @Get()
@@ -69,7 +71,30 @@ export class CustomerAccountController {
   clearTraveller(@Param('reference') reference: string, @Param('slot') slot: string, @Req() req: ApiRequest) {
     return this.travellers.clear(actorOf(req), reference, slotOf(slot));
   }
+
+  // Changes (task 6.3): nights and extras only; the price, the difference and what is owed come from the API.
+
+  @Post(':reference/amendments/preview')
+  @HttpCode(200)
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'account-booking-amendment-preview', owns: (ctx) => ownsBookingReference(ctx) })
+  @UseGuards(AmendmentRateLimitGuard)
+  @Header('Cache-Control', 'no-store')
+  previewAmendment(@Param('reference') reference: string, @Body(new ZodPipe(customerAmendmentPreviewSchema)) body: CustomerAmendmentPreview) {
+    return this.amendments.preview(reference, body);
+  }
+
+  @Post(':reference/amendments')
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'account-booking-amendment', owns: (ctx) => ownsBookingReference(ctx) })
+  @UseGuards(AmendmentRateLimitGuard)
+  @Header('Cache-Control', 'no-store')
+  async amend(@Param('reference') reference: string, @Body(new ZodPipe(customerAmendmentSchema)) body: CustomerAmendment, @Headers('idempotency-key') key: string | undefined, @Req() req: ApiRequest) {
+    if (!key || !IDEMPOTENCY_KEY.test(key)) throw unprocessable('idempotency_key_required', 'Send an Idempotency-Key header (16 to 64 letters, digits or hyphens)');
+    const r = await this.amendments.apply(reference, body, key, actorOf(req));
+    return { created: r.created, ...(await this.account.detail(reference)) };
+  }
 }
+
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9-]{16,64}$/;
 
 /** A place number: digits only, 1 to 80 (the most places a booking can hold). Anything else is not found. */
 function slotOf(raw: string): number {

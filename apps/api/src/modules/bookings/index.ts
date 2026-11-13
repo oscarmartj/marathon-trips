@@ -21,3 +21,8 @@ export { jsonOf, dbNow } from './support';
 export { readBookingLimits } from './settings';
 export type { BookingLimits } from './settings';
 export { mapLoadError } from './request.service';
+export { BookingAmendmentHooks } from './amendment-hooks';
+export type { AmendmentMoneyAfter, AmendmentMoneyFacts, AmendmentMoneyPort, AmendmentPlacesContext, AmendmentPlacesHook, AmendmentPlanContext } from './amendment-hooks';
+export { BookingAmendmentService, AMENDABLE_STATES } from './amendment.service';
+export type { AmendmentRequest, BookingRef } from './amendment.service';
+export { AMENDMENT_SETTINGS } from './settings';

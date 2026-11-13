@@ -15,7 +15,7 @@ export interface PlanInput {
 }
 
 export interface PlannedItem {
-  kind: 'deposit' | 'balance';
+  kind: 'deposit' | 'balance' | 'instalment' | 'adjustment';
   sequence: number;
   amountMinor: bigint;
   /** YYYY-MM-DD in the business time zone. */
@@ -47,4 +47,47 @@ export function planItems(input: PlanInput): PlannedItem[] {
   if (sum !== totalMinor) throw new AppError('plan_sum_mismatch', 'The plan does not add up to the total');
   for (let i = 1; i < items.length; i++) if (items[i]!.dueDate < items[i - 1]!.dueDate) throw new AppError('plan_dates_out_of_order', 'Plan due dates go backwards');
   return items;
+}
+
+/** An active item of a plan as an amendment finds it (dueDate as YYYY-MM-DD). */
+export interface ActivePlanItem {
+  kind: PlannedItem['kind'];
+  sequence: number;
+  amountMinor: bigint;
+  dueDate: string;
+}
+
+/**
+ * The plan after a change of the booking's total (task 6.3; plan docs/plans/6.3-booking-amendments.md, section 6). Pure,
+ * bigint only, no rounding. Returns null when the total does not change (the plan stays as it is). Otherwise the items of
+ * the next plan version, which always add up to the new total:
+ * - a higher total keeps every item (kind, amount, due date) and adds an `adjustment` item for the difference, due on
+ *   `adjustmentDue` but never before the last deposit item, so what "deposit covered" asks for never goes up;
+ * - a lower total takes the difference from the last item backwards and leaves out items that reach 0.
+ * Items are ordered by due date (deposit items first on a tie, then their old order) and numbered from 1.
+ */
+export function amendedPlanItems(active: readonly ActivePlanItem[], newTotalMinor: bigint, adjustmentDue: string): PlannedItem[] | null {
+  if (typeof newTotalMinor !== 'bigint' || newTotalMinor < 0n) throw new AppError('plan_amounts_invalid', 'The new total must be a whole number of minor units, not negative');
+  const old = [...active].sort((a, b) => a.sequence - b.sequence);
+  const oldTotal = old.reduce((s, i) => s + i.amountMinor, 0n);
+  if (newTotalMinor === oldTotal) return null;
+  let items = old.map((i, idx) => ({ kind: i.kind, amountMinor: i.amountMinor, dueDate: i.dueDate, order: idx }));
+  if (newTotalMinor > oldTotal) {
+    const lastDeposit = old.filter((i) => i.kind === 'deposit').reduce((d, i) => (i.dueDate > d ? i.dueDate : d), '');
+    const due = lastDeposit > adjustmentDue ? lastDeposit : adjustmentDue;
+    items.push({ kind: 'adjustment', amountMinor: newTotalMinor - oldTotal, dueDate: due, order: items.length });
+  } else {
+    let cut = oldTotal - newTotalMinor;
+    for (let i = items.length - 1; i >= 0 && cut > 0n; i--) {
+      const take = items[i]!.amountMinor < cut ? items[i]!.amountMinor : cut;
+      items[i]!.amountMinor -= take;
+      cut -= take;
+    }
+    items = items.filter((i) => i.amountMinor > 0n);
+  }
+  const rank = (k: PlannedItem['kind']) => (k === 'deposit' ? 0 : 1);
+  items.sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : rank(a.kind) - rank(b.kind) || a.order - b.order));
+  const out = items.map((i, idx) => ({ kind: i.kind, sequence: idx + 1, amountMinor: i.amountMinor, dueDate: i.dueDate }));
+  if (out.reduce((s, i) => s + i.amountMinor, 0n) !== newTotalMinor) throw new AppError('plan_sum_mismatch', 'The plan does not add up to the total');
+  return out;
 }

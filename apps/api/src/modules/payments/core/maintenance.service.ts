@@ -8,6 +8,7 @@ import { QUEUES } from '../../../platform/jobs/queues';
 import { PaymentAttemptSyncService } from './attempt-sync.service';
 import type { SyncAction } from './attempt-sync.service';
 import { PaymentWebhooksService } from './webhooks.service';
+import { PaymentAmendmentService } from './amendment-plan.service';
 
 export const RAW_BODY_RETENTION_DAYS = 180;
 export const REJECTION_RETENTION_DAYS = 30;
@@ -31,6 +32,7 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     @Inject(PaymentAttemptSyncService) private readonly sync: PaymentAttemptSyncService,
     @Inject(PaymentWebhooksService) private readonly webhooks: PaymentWebhooksService,
     @Inject(TasksService) private readonly tasks: TasksService,
+    @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -73,6 +75,12 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
         return true;
       });
       if (opened) flagged.push(ev.id);
+    }
+    // Unpaid adjustments past their due date (task 6.3, plan review M2): a task each, nothing cancelled.
+    try {
+      await this.prisma.$transaction((tx) => this.amendments.flagOverdueAdjustments(tx, now));
+    } catch (err) {
+      this.logger.error(`overdue adjustments check failed: ${safeError(err).code}`);
     }
     let bodiesPurged = 0;
     let rejectionsPurged = 0;
