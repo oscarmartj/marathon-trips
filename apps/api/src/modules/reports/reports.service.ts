@@ -161,7 +161,9 @@ export class ReportsService {
       await this.checkRaces(tx, definition);
       await this.checkRecipients(tx, recipients, definition.entity);
       if (recipients.length > 0 && !schedule) throw unprocessable('report_schedule_required', 'Recipients only receive a report on a schedule');
-      const scheduleChanged = JSON.stringify(schedule) !== JSON.stringify(before.schedule ?? null);
+      // Compared in the schema's key order: the database keeps JSON keys in its own order.
+      const was = reportScheduleSchema.safeParse(before.schedule);
+      const scheduleChanged = JSON.stringify(schedule) !== JSON.stringify(was.success ? was.data : null);
       const row = await tx.savedReport.update({
         where: { id },
         data: {

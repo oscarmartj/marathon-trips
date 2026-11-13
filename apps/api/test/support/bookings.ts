@@ -23,9 +23,9 @@ export async function makeCustomer(t: TestApp, over: Record<string, unknown> = {
  * transaction: the snapshot is required at commit by the "totals mirror the snapshot" trigger. For tests of other
  * modules that need a booking to point at (plan 2.4, section 13: the promo redemption tests of 2.2).
  */
-export async function makeBookingFor(t: TestApp, w: { pkg: { id: string }; edition: { id: string }; versionId: string }, customerId?: string): Promise<{ customerId: string; bookingId: string }> {
+export async function makeBookingFor(t: TestApp, w: { pkg: { id: string }; edition: { id: string }; versionId: string }, customerId?: string, requestedAt?: Date): Promise<{ customerId: string; bookingId: string }> {
   const cid = customerId ?? (await makeCustomer(t));
-  const now = new Date();
+  const now = requestedAt ?? new Date();
   const bookingId = await t.prisma.$transaction(async (tx) => {
     const b = await tx.booking.create({
       data: {
