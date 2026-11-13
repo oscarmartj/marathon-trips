@@ -67,7 +67,7 @@ test('funnel_and_report_builder', async ({ page }) => {
   await expect(page.getByText(/Nothing identifies a visitor/)).toBeVisible();
 
   // Build a report for this race, preview it, and save it with a weekly email to ourselves.
-  await page.getByLabel('Name', { exact: true }).fill(reportName);
+  await page.getByLabel(/^Name/).fill(reportName);
   await page.getByLabel('Race', { exact: true }).selectOption({ label: raceName });
   await page.getByLabel('Race page visits').check();
   await page.getByLabel('Requests per 100 visits').check();

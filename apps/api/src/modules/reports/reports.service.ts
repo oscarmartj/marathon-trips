@@ -63,14 +63,15 @@ export class ReportsService {
   async catalogue(auth: AuthContext) {
     const eff = await this.access.effectiveFor(this.prisma, auth);
     const [races, staff] = await Promise.all([
-      this.prisma.race.findMany({ where: { deletedAt: null }, select: { id: true, name: true, slug: true }, orderBy: { slug: 'asc' }, take: 500 }),
+      this.prisma.race.findMany({ where: { deletedAt: null }, select: { id: true, name: true, slug: true }, orderBy: { createdAt: 'desc' }, take: 500 }),
       this.recipientCandidates(),
     ]);
     return {
       entities: (Object.keys(REPORT_ENTITY_CATALOGUE) as Array<keyof typeof REPORT_ENTITY_CATALOGUE>).map((entity) => ({
         entity, columns: REPORT_ENTITY_CATALOGUE[entity].columns, groups: REPORT_ENTITY_CATALOGUE[entity].groups, allowed: eff.keys.has(entityPermission(entity)),
       })),
-      races: races.map((r) => ({ id: r.id, name: en(r.name, r.slug) })),
+      // The 500 newest races, by name: a filter for more than that is a later task (a search box).
+      races: races.map((r) => ({ id: r.id, name: en(r.name, r.slug) })).sort((a, b) => a.name.localeCompare(b.name, 'en-AU')),
       recipients: staff,
     };
   }
