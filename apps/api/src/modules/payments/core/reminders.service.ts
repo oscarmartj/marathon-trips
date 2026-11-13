@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { brand } from '@mt/shared';
+import { NIL_UUID } from '../../../platform/audit/audit.service';
 import { emailHash } from '../../../platform/crypto/hmac';
 import type { AppConfig } from '../../../platform/config/config';
 import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
@@ -87,8 +88,8 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
     await this.jobs.schedule(QUEUES.paymentsReminders, '*/30 * * * *');
   }
 
-  /** One sweep. `now` is a parameter for tests only. */
-  async run(now: Date = new Date()): Promise<ReminderRun> {
+  /** One sweep. `now` and `only` (one booking) are parameters for tests only. */
+  async run(now: Date = new Date(), only: { bookingId?: string } = {}): Promise<ReminderRun> {
     const result: ReminderRun = { idle: null, examined: 0, queued: 0, errors: 0, skipped: {} };
     const offsets = [...(await this.settings.get(PAYMENT_SETTINGS.balanceReminderOffsetsDays.key, PAYMENT_SETTINGS.balanceReminderOffsetsDays.fallback))].sort((a, b) => b - a);
     if (offsets.length === 0) return { ...result, idle: 'turned_off' };
@@ -105,6 +106,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
         AND i."dueDate" >= ${today}::date AND i."dueDate" <= ${addDays(today, Math.max(...offsets))}::date
         AND b.status::text = ANY(${[...REMINDABLE_STATES]}::text[])
         AND w.off IS NOT NULL
+        AND (${only.bookingId ?? null}::uuid IS NULL OR i."bookingId" = ${only.bookingId ?? null}::uuid)
         AND NOT EXISTS (SELECT 1 FROM outbound_emails e WHERE e."dedupeKey" = 'balance-reminder:' || i.id::text || ':' || w.off::text)
       ORDER BY i."dueDate", i.id LIMIT ${MAX_PER_RUN}`;
     for (const row of rows) {
@@ -138,10 +140,14 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
       if (payable(items, collected).next?.sequence !== item.sequence) return 'not_next_item';
       if (await tx.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } })) return 'payment_in_progress';
-      // The customer (or staff on a call) may already hold a working link for this item, or its email may be on its way: a
-      // new link would revoke it. Leave it; the sweep tries again once that link is used, expired or revoked.
+      // A link staff sent is protected while it may be in use: it has been delivered (its token exists) or its email is
+      // still queued. A link an earlier reminder minted is ours, so the new reminder replaces it; and a link whose email
+      // failed has no token and never blocks anything.
       const [{ now }] = (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`) as [{ now: Date }];
-      if (await tx.paymentLink.findFirst({ where: { bookingId: b.id, targetScheduleItemId: item.id, status: 'active', expiresAt: { gt: now } }, select: { id: true } })) return 'link_active';
+      const staffLinks = await tx.paymentLink.findMany({ where: { bookingId: b.id, targetScheduleItemId: item.id, status: 'active', expiresAt: { gt: now }, createdById: { not: NIL_UUID } }, select: { id: true, tokenHash: true } });
+      for (const l of staffLinks) {
+        if (l.tokenHash !== null || (await tx.outboundEmail.findUnique({ where: { dedupeKey: `payment-link:${l.id}` }, select: { status: true } }))?.status === 'queued') return 'link_active';
+      }
       const customer = await tx.customer.findUnique({ where: { id: b.customerId }, select: { id: true, email: true, preferredLocale: true, anonymisedAt: true, deletedAt: true } });
       if (!customer || customer.anonymisedAt || customer.deletedAt) return 'customer_closed';
       if (await tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email), scope: 'all' }, select: { id: true } })) return 'recipient_suppressed';
