@@ -221,7 +221,7 @@ describe('notes, tags and history on customers and bookings (the shared tools of
 });
 
 describe('personal data in notes and quotes: export and erasure (review 2.5, round 1)', () => {
-  it('the notes on a customer and on their bookings are exported, then redacted on erasure; other customers keep theirs', async () => {
+  it('the notes on a customer and on their bookings are kept out of the customer export (task 5.5), only in the owner\'s full export, then redacted on erasure; other customers keep theirs', async () => {
     const { customerId } = await linkedCustomer(t);
     const other = await linkedCustomer(t);
     const { bookingId } = await makeBookingFor(t, w, customerId);
@@ -232,17 +232,20 @@ describe('personal data in notes and quotes: export and erasure (review 2.5, rou
     }
     const registry = t.app.get(EntityRegistry);
     const exported = async (type: string, id: string) => t.prisma.$transaction((tx) => registry.get(type)!.handlers!.export(tx, id));
-    // A note deleted in the panel is still stored, so it is still the customer's data: exported, and redacted below.
+    // A note deleted in the panel is still stored, so it is still the customer's data: in the full export, and redacted below.
     const deletedBody = 'Deleted but kept: ex-partner is Pat Smith';
     const del = await admin.post(`/admin/tables/Customer/${customerId}/notes`, { body: deletedBody, pinned: false });
     await t.prisma.note.update({ where: { id: del.body.id }, data: { deletedAt: new Date() } });
     const customerExport = JSON.stringify(await exported('Customer', customerId));
-    expect(customerExport).toContain(deletedBody);
     const bookingExport = JSON.stringify(await exported('Booking', customerId));
-    expect(customerExport).toContain(`${secret} (Customer)`);
-    expect(bookingExport).toContain(`${secret} (Booking)`);
+    expect(customerExport + bookingExport).not.toMatch(/Maria|Pat Smith/);
     expect(customerExport + bookingExport).not.toContain(other.client.email);
-    expect(customerExport + bookingExport).not.toMatch(/\(Customer\).*\(Customer\)/);
+    const { ExportService } = await import('../../../src/modules/privacy/export.service');
+    const full = JSON.stringify(await t.app.get(ExportService).build({ customerId, userId: null, emails: [] }, 'full'));
+    expect(full).toContain(deletedBody);
+    expect(full).toContain(`${secret} (Customer)`);
+    expect(full).toContain(`${secret} (Booking)`);
+    expect(full).not.toMatch(/\(Customer\).*\(Customer\)/);
 
     await t.prisma.$transaction(async (tx) => {
       await registry.get('Customer')!.handlers!.anonymise(tx, customerId);
@@ -251,7 +254,6 @@ describe('personal data in notes and quotes: export and erasure (review 2.5, rou
     const notes = await t.prisma.note.findMany({ where: { entityId: { in: [customerId, bookingId] } } });
     expect(notes).toHaveLength(3);
     expect(notes.every((n) => n.body === '[redacted]')).toBe(true);
-    expect(JSON.stringify(await exported('Customer', customerId))).not.toMatch(/Maria|Pat Smith/);
     const kept = await t.prisma.note.findMany({ where: { entityId: { in: [other.customerId, otherBooking.bookingId] } } });
     expect(kept.map((n) => n.body).sort()).toEqual([`${secret} (Booking)`, `${secret} (Customer)`]);
   });
