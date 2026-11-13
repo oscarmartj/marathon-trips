@@ -50,7 +50,7 @@ test('funnel_and_report_builder', async ({ page }) => {
   const published = await page.request.post(`/api/admin/catalogue/races/${raceId}/status`, { headers: csrf, data: { status: 'published', version } });
   expect(published.status()).toBe(200);
 
-  // Two visits and one builder visit, as the race page and the package page send them. Nothing else is sent.
+  // A reload is not a second visit: the same address counts once per race and kind. Nothing else is sent.
   for (const kind of ['view', 'view', 'builder']) {
     expect((await page.request.post('/api/analytics/race-events', { headers: csrf, data: { raceSlug: `rp-${run}`, kind } })).status()).toBe(204);
   }
@@ -61,8 +61,7 @@ test('funnel_and_report_builder', async ({ page }) => {
 
   // The funnel has the race with its visits.
   const funnelRow = page.getByTestId('funnel-table').getByRole('row', { name: new RegExp(raceName) });
-  await expect(funnelRow).toContainText('2');
-  await expect(funnelRow.getByRole('cell').nth(0)).toHaveText('2');
+  await expect(funnelRow.getByRole('cell').nth(0)).toHaveText('1');
   await expect(funnelRow.getByRole('cell').nth(1)).toHaveText('1');
   await expect(page.getByText(/Nothing identifies a visitor/)).toBeVisible();
 
@@ -73,7 +72,7 @@ test('funnel_and_report_builder', async ({ page }) => {
   await page.getByLabel('Requests per 100 visits').check();
   await page.getByRole('button', { name: 'Preview' }).click();
   const preview = page.getByTestId('preview-table');
-  await expect(preview.getByRole('row', { name: new RegExp(raceName) })).toContainText('2');
+  await expect(preview.getByRole('row', { name: new RegExp(raceName) }).getByRole('cell').nth(0)).toHaveText('1');
   await expect(preview.getByRole('columnheader', { name: 'Requests per 100 visits' })).toBeVisible();
   await expect(preview).not.toContainText('@');
 
