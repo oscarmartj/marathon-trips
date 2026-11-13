@@ -174,6 +174,7 @@ model OutboundEmail {
   to                String
   /// @nopii template key
   templateKey       String
+  /// @nopii version of the template
   templateVersion   Int
   /// @nopii locale code
   locale            String
@@ -183,8 +184,11 @@ model OutboundEmail {
   bodySha256        String?
   /// @nopii derived from the fact that caused the email, such as booking:<id>:approved
   dedupeKey         String              @unique
+  /// @nopii
   category          MailCategory        @default(transactional)
+  /// @nopii
   status            OutboundEmailStatus @default(queued)
+  /// @nopii
   attempts          Int                 @default(0)
   /// @nopii id returned by the mail server
   providerMessageId String?
@@ -194,8 +198,11 @@ model OutboundEmail {
   relatedEntityId   String?             @db.Uuid
   /// @pii a bounce can quote the address; only error codes are written
   error             String?
+  /// @nopii
   sentAt            DateTime?           @db.Timestamptz(3)
+  /// @nopii
   createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  /// @nopii
   updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
 
   @@index([status, createdAt])
