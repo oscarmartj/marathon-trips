@@ -1,3 +1,4 @@
+import { RaceBeacon } from '@/components/race-beacon';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
@@ -40,6 +41,7 @@ export default async function RacePage({ params }: Props) {
   const anyOpen = hasOpenPackage(race);
   return (
     <>
+      <RaceBeacon raceSlug={race.slug} kind="view" />
       <JsonLdScript
         data={[
           breadcrumbJsonLd([

@@ -13,7 +13,8 @@ import { must } from '../../support/suppliers';
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let t: TestApp;
-let admin: Client;
+type Staff = Awaited<ReturnType<typeof staffClient>>;
+let admin: Staff;
 const BOOKING_READ = 'bookings.booking.read';
 const ALL_REPORTS = Object.values(P);
 const setFlag = async (enabled: boolean) => {
@@ -42,7 +43,6 @@ async function publishedWorld(): Promise<World> {
 const stats = (raceId: string) => t.prisma.raceDailyStat.findMany({ where: { raceId } });
 const sum = async (raceId: string, f: 'views' | 'builderUses') => (await stats(raceId)).reduce((n, r) => n + r[f], 0);
 
-const range = { kind: 'dates', from: '2000-01-01', to: '2099-12-31' } as const;
 const dayRange = (from: string, to: string) => ({ kind: 'dates', from, to }) as const;
 const funnelDef = (raceIds: string[], over: Record<string, unknown> = {}) => ({ entity: 'funnel', columns: ['views', 'builder_uses', 'requests', 'approved', 'paid', 'request_rate_pct', 'paid_rate_pct'], groupBy: 'race', raceIds, range: { kind: 'last_days', days: 366 }, ...over });
 const bookingDef = (raceIds: string[], over: Record<string, unknown> = {}) => ({ entity: 'bookings', columns: ['bookings', 'approved', 'declined', 'expired', 'cancelled', 'paid'], groupBy: 'race', raceIds, range: { kind: 'last_days', days: 366 }, ...over });
@@ -315,7 +315,7 @@ describe('scheduled sending', () => {
   // Wednesday 2027-03-03, 10:00 in Brisbane. A weekly Wednesday 08:00 report was due at 2027-03-02T22:00Z.
   const NOW = new Date('2027-03-03T00:00:00Z');
   const WED = { frequency: 'weekly', weekday: 3, time: '08:00' };
-  async function scheduled(recipients: Client[], over: { schedule?: object; owner?: Client } = {}) {
+  async function scheduled(recipients: Staff[], over: { schedule?: object; owner?: Staff } = {}) {
     const owner = over.owner ?? admin;
     const r = must(await owner.post('/admin/reports', { name: `Sched ${Date.now()}`, definition: funnelDef([]), schedule: over.schedule ?? WED, recipientUserIds: recipients.map((c) => c.staff.id) }), 'create').body as { id: string };
     await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "scheduleStartedAt" = '2027-01-01T00:00:00Z' WHERE id = '${r.id}'::uuid`);

@@ -1,12 +1,12 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { createReportSchema, deleteReportSchema, funnelQuerySchema, previewReportSchema, raceEventSchema, updateReportSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { Public, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
 import { RequiresModule } from '../../platform/flags/requires-module.guard';
-import { AuthRateLimit } from '../../platform/http/rate-limit.guard';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
+import { VisitRateLimitGuard } from './rate-limit.guard';
 import { REPORTS_MODULE, REPORTS_PERMISSIONS as P } from './manifest';
 import { ReportsService } from './reports.service';
 import type { Caller } from './reports.service';
@@ -20,7 +20,7 @@ const uuid = () => new ParseUUIDPipe();
 export class AnalyticsPublicController {
   constructor(@Inject(ReportsService) private readonly service: ReportsService) {}
 
-  @Post('race-events') @HttpCode(204) @AuthRateLimit()
+  @Post('race-events') @HttpCode(204) @UseGuards(VisitRateLimitGuard)
   @Public('a race slug and a kind (view or builder); counts one anonymous visit and answers the same for any slug')
   async raceEvent(@Body(new ZodPipe(raceEventSchema)) b: In<typeof raceEventSchema>) { await this.service.recordEvent(b); }
 }

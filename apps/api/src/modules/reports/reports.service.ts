@@ -10,7 +10,7 @@ import type { AuditActor } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import { reportDefinitionSchema, reportScheduleSchema } from '@mt/shared';
-import { addDays, todayInBusinessZone } from './dates';
+import { todayInBusinessZone } from './dates';
 import { ReportEngine } from './engine';
 import { REPORTS_PERMISSIONS as P } from './manifest';
 
