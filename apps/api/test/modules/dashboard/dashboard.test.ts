@@ -117,7 +117,7 @@ describe('what it shows', () => {
     const remaining = view.items.map((i) => i.remaining);
     expect(remaining).toEqual([...remaining].sort((a, b) => a - b));
     expect(view.lowCount).toBeGreaterThanOrEqual(1);
-    const all = await t.prisma.$transaction((tx) => readStockForDashboard(tx, 1000));
+    const all = await t.prisma.$transaction((tx) => readStockForDashboard(tx, 1_000_000));
     const mine = all.items.find((i) => i.id === pool.id)!;
     expect(mine).toMatchObject({ capacity: pool.capacity, remaining: pool.capacity - pool.consumed, lowStock: true, kind: 'entry' });
   });
