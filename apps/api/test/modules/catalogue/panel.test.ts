@@ -226,8 +226,14 @@ describe('CSV: races', () => {
     const text = exported.text;
     expect(text.split('\r\n')[0]).toContain('slug,name,countryCode');
     expect(text).toContain(a);
-    // Re-importing the export fails only because every slug is taken, and says so without echoing any value.
-    const again = await importCsv(text, true);
+    // Re-importing the export fails only because every slug is taken, and says so without echoing any value. Only this
+    // test's rows are sent back (with the export's own header): the export holds every race the shared test database has,
+    // and once earlier files have left more than the import's row limit, the whole file would fail on too_many_rows
+    // instead (task 5.1: order dependence found by the verifier on a fresh database).
+    const lines = text.split('\r\n');
+    const mine = [lines[0]!, ...lines.filter((l) => l.startsWith(`${a},`) || l.startsWith(`${b},`))];
+    expect(mine).toHaveLength(3);
+    const again = await importCsv(mine.join('\r\n'), true);
     expect(again.body.valid).toBe(false);
     expect(new Set((again.body.errors as Array<{ code: string }>).map((e) => e.code))).toEqual(new Set(['slug_taken']));
   });
