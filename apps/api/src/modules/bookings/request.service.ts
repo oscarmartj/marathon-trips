@@ -105,6 +105,10 @@ export class BookingRequestService {
     // 3. Who may ask: a resident of a country we sell to sends a request; anyone else joins the waiting list (task 2.6).
     if (!limits.salesCountries.includes(contact.countryOfResidence)) return this.joinWaitlistIn(tx, user, customer.id, body, hashes, actor);
 
+    // 3b. A package whose sale is `waitlist` or `sold_out` takes no request: the resident joins its waiting list (task 6.5).
+    const sale = await tx.$queryRaw<Array<{ saleStatus: string }>>`SELECT "saleStatus"::text AS "saleStatus" FROM packages WHERE id = ${configuration.packageId}::uuid AND "deletedAt" IS NULL FOR SHARE`;
+    if (sale[0] && (sale[0].saleStatus === 'waitlist' || sale[0].saleStatus === 'sold_out')) return this.joinWaitlistIn(tx, user, customer.id, body, hashes, actor, 'sold_out');
+
     // 4. How much one customer may hold.
     const open = await tx.booking.count({ where: { customerId: customer.id, status: 'requested' } });
     if (open >= limits.maxOpenRequests) throw conflict('too_many_open_requests', 'You already have as many open requests as we can take. We will be in touch about them first.');
@@ -178,17 +182,18 @@ export class BookingRequestService {
    * configuration is refused the same way, but nothing it returns is kept except the head count: no price, no snapshot,
    * no code redeemed (a code, if sent, is ignored) and no stock held.
    */
-  private async joinWaitlistIn(tx: Tx, user: { id: string; email: string }, customerId: string, body: BookingRequest, hashes: { key: string; config: string; contact: string }, actor: AuditActor): Promise<CreatedRequest> {
+  private async joinWaitlistIn(tx: Tx, user: { id: string; email: string }, customerId: string, body: BookingRequest, hashes: { key: string; config: string; contact: string }, actor: AuditActor, reason: 'non_resident' | 'sold_out' = 'non_resident'): Promise<CreatedRequest> {
     const { contact, promoCode: _ignored, ...configuration } = body;
     const pkg = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM packages WHERE id = ${configuration.packageId}::uuid AND "deletedAt" IS NULL FOR SHARE`;
     if (pkg.length === 0) throw notFound('package_not_found', 'Package not found');
     const at = await dbNow(tx);
-    const { breakdown } = await this.quotes.priceWithPromoRef(tx, configuration, { audience: 'public', now: at });
+    const { breakdown } = await this.quotes.priceWithPromoRef(tx, configuration, { audience: 'public', now: at, includeWaitlist: reason === 'sold_out' });
     if (breakdown.departureDate <= todayInBrisbane(at)) throw conflict('package_departed', 'This trip has already started');
     const travellers = breakdown.configuration.rooms.reduce((n, r) => n + r.travellers.length, 0);
     const joined = await this.waitlist.joinIn(tx, {
       customerId, email: user.email, countryOfResidence: contact.countryOfResidence, packageId: configuration.packageId, travellers,
       requestKeyHash: hashes.key, requestConfigHash: hashes.config, requestContactHmac: hashes.contact, actor,
+      ...(reason === 'sold_out' ? { reason, configuration: configuration as unknown as Prisma.InputJsonObject } : {}),
     });
     return { kind: 'waitlist', ...joined };
   }
@@ -202,7 +207,7 @@ export class BookingRequestService {
     throw busy();
   }
 
-  private async insertSnapshot(tx: Tx, bookingId: string, b: PriceBreakdown): Promise<void> {
+  async insertSnapshot(tx: Tx, bookingId: string, b: PriceBreakdown): Promise<void> {
     // Ids, slots, codes, dates and amounts only: checked before it reaches an immutable row.
     const configuration = snapshotConfigurationSchema.parse(jsonOf(b.configuration));
     const priceBreakdown = snapshotBreakdownSchema.parse(jsonOf(b));

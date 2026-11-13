@@ -8,7 +8,7 @@ import { PricingModule } from '../pricing';
 import { WaitlistModule } from '../waitlist';
 import { BookingAdminService } from './admin.service';
 import { BookingCoverage } from './coverage';
-import { BookingRequestsController, BookingsAdminController, CustomersAdminController } from './controllers';
+import { BookingRequestsController, BookingsAdminController, CustomersAdminController, WaitlistEntriesController } from './controllers';
 import { CustomerAdminService } from './customer-admin.service';
 import { QuotedBookingService } from './quoted-booking.service';
 import { CustomerService } from './customer.service';
@@ -21,14 +21,15 @@ import { BookingRequestRateLimitGuard } from './rate-limit.guard';
 import { BookingRequestService } from './request.service';
 import { defineBookingSettings } from './settings';
 import { BookingStateMachine } from './state-machine';
+import { WaitlistOffersService } from './waitlist-offers.service';
 import { ReferenceGenerator } from './support';
 
 @Module({
   imports: [CatalogueModule, PricingModule, WaitlistModule],
-  controllers: [BookingRequestsController, BookingsAdminController, CustomersAdminController],
+  controllers: [BookingRequestsController, BookingsAdminController, CustomersAdminController, WaitlistEntriesController],
   providers: [
     BookingRequestService, BookingStateMachine, BookingAdminService, BookingExpiryService, BookingTransitionHooks, CustomerService,
-    ReferenceGenerator, BookingRequestRateLimitGuard, CustomerAdminService, QuotedBookingService, BookingCoverage,
+    ReferenceGenerator, BookingRequestRateLimitGuard, CustomerAdminService, QuotedBookingService, BookingCoverage, WaitlistOffersService,
   ],
   exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage],
 })

@@ -11,6 +11,7 @@ import type { WaitlistJoined } from '@/lib/booking-request';
  * and no promise that a place will come up.
  */
 export function WaitlistConfirmation({ joined }: { joined: WaitlistJoined }) {
+  const soldOut = joined.reason === 'sold_out';
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
@@ -18,11 +19,11 @@ export function WaitlistConfirmation({ joined }: { joined: WaitlistJoined }) {
   return (
     <div className="notice stack" role="status">
       <h2 ref={heading} tabIndex={-1}>
-        {t('waitlist.heading')}
+        {t(soldOut ? 'waitlist.soldOut.heading' : 'waitlist.heading')}
       </h2>
       <p>{t('waitlist.notABooking', { name: localisedText(joined.package.name) })}</p>
-      <p>{t('waitlist.nothingCharged')}</p>
-      <p>{t('waitlist.next')}</p>
+      <p>{t(soldOut ? 'waitlist.soldOut.nothingCharged' : 'waitlist.nothingCharged')}</p>
+      <p>{t(soldOut ? 'waitlist.soldOut.next' : 'waitlist.next')}</p>
     </div>
   );
 }

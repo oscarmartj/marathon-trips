@@ -51,7 +51,7 @@ describe('public quotes', () => {
     expect((await publicQuote(base)).status).toBe(200);
   });
 
-  it('public_quote_only_for_open_packages: draft, coming soon, closed, sold out, waitlist, unpublished race, deleted or unknown all answer the same 404', async () => {
+  it('public_quote_only_for_open_packages: draft, coming soon, closed, unpublished race, deleted or unknown all answer the same 404', async () => {
     const draft = await pricedWorld(admin, { open: false });
     const bodies: object[] = [];
     bodies.push(quoteBody(draft));
@@ -64,18 +64,21 @@ describe('public quotes', () => {
     const hidden = await pricedWorld(admin);
     await must(admin.post(`/admin/catalogue/races/${hidden.race.id}/status`, { status: 'draft', version: hidden.race.version + 1 }), 'unpublish race');
     bodies.push(quoteBody(hidden));
-    const soldOut = await pricedWorld(admin);
-    await must(setSale(admin, soldOut.pkg.id, 'sold_out'), 'sold out');
-    bodies.push(quoteBody(soldOut));
-    const waitlist = await pricedWorld(admin);
-    await must(setSale(admin, waitlist.pkg.id, 'waitlist'), 'waitlist');
-    bodies.push(quoteBody(waitlist));
     const deleted = await pricedWorld(admin, { open: false });
     await must(admin.delete(`/admin/catalogue/packages/${deleted.pkg.id}`), 'delete package', 204);
     bodies.push(quoteBody(deleted));
     bodies.push(quoteBody({ ...draft, pkg: { id: crypto.randomUUID() } }));
     const answers = await Promise.all(bodies.map((b) => publicQuote(b)));
     for (const a of answers) expect([a.status, a.body]).toEqual([404, { code: 'package_not_found', message: 'Package not found' }]);
+  });
+
+  it('public_quote_prices_full_packages: sold out and waitlist packages are priced so a person can join their waiting list (task 6.5)', async () => {
+    for (const status of ['sold_out', 'waitlist'] as const) {
+      const w = await pricedWorld(admin);
+      await must(setSale(admin, w.pkg.id, status), status);
+      const a = await publicQuote(quoteBody(w));
+      expect([a.status, a.body.totalMinor]).toEqual([200, '132500']);
+    }
   });
 
   it('a configuration error is a 422 with a stable code; a promo code answers "invalid" until 2.2 stores codes', async () => {

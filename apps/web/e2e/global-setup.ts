@@ -23,6 +23,8 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_13 = create('--permissions', 'complaints.complaint.read,common.table.use');
   // Automations (automations.spec.ts): an owner.
   process.env.E2E_STAFF_14 = create();
-  // Key dates calendar (key-dates.spec.ts): an owner. Slot 15 belongs to task 6.5.
+  // Waiting list offers (waitlist.spec.ts): an owner.
+  process.env.E2E_STAFF_15 = create();
+  // Key dates calendar (key-dates.spec.ts): an owner.
   process.env.E2E_STAFF_16 = create();
 }

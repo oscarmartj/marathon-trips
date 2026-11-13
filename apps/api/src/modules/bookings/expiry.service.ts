@@ -9,6 +9,7 @@ import { JobsService } from '../../platform/jobs/jobs.service';
 import { QUEUES } from '../../platform/jobs/queues';
 import { REQUEST_TX_OPTIONS } from './request.service';
 import { BookingStateMachine } from './state-machine';
+import { WaitlistOffersService } from './waitlist-offers.service';
 
 /** The job payments queues when an attempt ends on an approval already past its time (plan 3.2, section 11, point 9). */
 export const approvalExpiryJob = (bookingId: string) => ({ data: { bookingId }, singletonKey: `expire-approval:${bookingId}` });
@@ -28,11 +29,19 @@ export class BookingExpiryService implements OnApplicationBootstrap {
     @Inject(BookingStateMachine) private readonly machine: BookingStateMachine,
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(WaitlistOffersService) private readonly offers: WaitlistOffersService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     if (this.config.JOBS_WORKERS !== 'on') return;
-    await this.jobs.work<{ bookingId?: string }>(QUEUES.bookingsMaintenance, async (d) => void (d?.bookingId ? await this.expireApproval(d.bookingId) : await this.run()));
+    await this.jobs.work<{ bookingId?: string }>(QUEUES.bookingsMaintenance, async (d) => {
+      if (d?.bookingId) await this.expireApproval(d.bookingId);
+      else {
+        await this.run();
+        // Waiting list offers past their time end too, and their places move on (task 6.5).
+        await this.offers.expireOffers();
+      }
+    });
     await this.jobs.schedule(QUEUES.bookingsMaintenance, '*/10 * * * *');
   }
 

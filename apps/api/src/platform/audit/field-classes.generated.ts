@@ -455,6 +455,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
   InventoryClaim: {
     id: 'nopii',
     bookingId: 'nopii',
+    waitlistEntryId: 'nopii',
     poolId: 'nopii',
     quantity: 'nopii',
     status: 'nopii',
@@ -1107,6 +1108,10 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     offeredAt: 'nopii',
     offerExpiresAt: 'nopii',
     withdrawnAt: 'nopii',
+    convertedAt: 'nopii',
+    expiredAt: 'nopii',
+    configuration: 'nopii',
+    bookingId: 'nopii',
     requestKeyHash: 'secret',
     requestConfigHash: 'secret',
     requestContactHmac: 'secret',

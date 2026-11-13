@@ -38,7 +38,8 @@ export default async function Build(props: Props) {
       <Link href={`/races/${slug}`}>{t('builder.backToRace')}</Link>
     </p>
   );
-  if (pkg.saleStatus !== 'open') {
+  const joinable = pkg.saleStatus === 'waitlist' || pkg.saleStatus === 'sold_out';
+  if (pkg.saleStatus !== 'open' && !joinable) {
     return (
       <>
         <PageHeader title={t('builder.notOpenTitle')} intro={name} />
@@ -54,7 +55,7 @@ export default async function Build(props: Props) {
     <>
       <PageHeader title={t('builder.packageHeading', { package: name })} intro={t('builder.datesLine', { checkIn: formatDate(pkg.checkInDate), checkOut: formatDate(pkg.checkOutDate), nights: pkg.nights })} />
       <div className="container stack section">
-        <p>{t('races.build.intro')}</p>
+        <p>{t(joinable ? 'builder.waitlistIntro' : 'races.build.intro')}</p>
         {pkg.guaranteedEntry ? <p className="chips">{t('races.guaranteedEntry')}</p> : null}
         {hasRooms ? (
           <>
