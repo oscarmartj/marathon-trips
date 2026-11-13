@@ -2,3 +2,5 @@
 export { CustomerPortalModule } from './customer-portal.module';
 export { customerPortalManifest } from './manifest';
 export { documentsFor } from './documents';
+export { TRAVELLER_ENTITIES } from './entities';
+export { editWindow, lastEditableDay, DETAILS_OPEN_STATUSES } from './traveller-window';

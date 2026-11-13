@@ -1,6 +1,6 @@
 import type { PermissionDef } from '../../platform/access/permissions';
 
-// The customer area (task 5.1; travellers come with 5.2). It declares no permissions: every route is a customer's own.
+// The customer area (task 5.1) and traveller details (task 5.2). It declares no permissions: every route is a customer's own.
 export const customerPortalManifest = {
   key: 'customerPortal',
   /**

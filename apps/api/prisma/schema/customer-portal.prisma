@@ -1,2 +1,38 @@
-// The customer area (task 5.1, plan docs/plans/5.1-customer-area.md). No tables of its own: it reads bookings, payments
-// and templates through their modules' public services. Traveller details (task 5.2) will add their models here.
+// The customer area (task 5.1, plan docs/plans/5.1-customer-area.md) and traveller details (task 5.2, plan
+// docs/plans/5.2-traveller-details.md). CHECKs live in migration 0026_traveller_details.
+
+/// The personal details of one place in a booking, typed by the booking's customer until the edit deadline. The
+/// minimum an entry and a safe trip need: no passport or ID number, no medical or dietary data, no free text. Personal data:
+/// exported and anonymised by 5.5 through the entity registry (TRAVELLER_ENTITIES). One row per place; the foreign key to
+/// the booking's own customer and a trigger on the place make it impossible to attach details to someone else's booking.
+model Traveller {
+  id                     String    @id @default(uuid(7)) @db.Uuid
+  bookingId              String    @db.Uuid
+  customerId             String    @db.Uuid
+  booking                Booking   @relation(fields: [bookingId, customerId], references: [id, customerId], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii 1-based place of the booking this row describes (a trigger checks that the booking has it)
+  slot                   Int
+  /// @pii given name as on the travel document; [redacted] once erased
+  givenName              String
+  /// @pii family name as on the travel document; [redacted] once erased
+  familyName             String
+  /// @pii runners only, needed for the race entry; calendar date
+  dateOfBirth            DateTime? @db.Date
+  /// @pii name of the person to call in an emergency
+  emergencyContactName   String?
+  /// @pii phone of the person to call in an emergency
+  emergencyContactPhone  String?
+  /// @pii runners only, optional: the finish time the runner expects, in seconds
+  estimatedFinishSeconds Int?
+  /// @nopii set when the personal data was erased
+  anonymisedAt           DateTime? @db.Timestamptz(3)
+  /// @nopii timestamp
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt              DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@unique([bookingId, slot])
+  @@unique([id, customerId])
+  @@index([customerId])
+  @@map("travellers")
+}

@@ -171,6 +171,7 @@ model Booking {
   inventoryMovements     InventoryMovement[]
   complaints             Complaint[]
   waitlistEntries        WaitlistEntry[]
+  travellerDetails       Traveller[]
 
   @@unique([id, currency])
   @@unique([id, customerId])

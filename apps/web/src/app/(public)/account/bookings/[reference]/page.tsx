@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
+import type { BookingTravellersView } from '@mt/shared';
 import { BookingOverview, type AccountBookingDetail } from '@/components/account/booking-overview';
 import { localisedText } from '@/lib/catalogue';
 import { apiBase } from '@/lib/api-proxy';
@@ -25,13 +26,26 @@ async function load(reference: string): Promise<AccountBookingDetail | null> {
   }
 }
 
+/** The places and their details; null when they cannot be read, and the booking page simply leaves the section out. */
+async function loadTravellers(reference: string): Promise<BookingTravellersView | null> {
+  try {
+    const cookie = (await cookies()).toString();
+    const res = await fetch(`${apiBase()}/account/bookings/${reference}/travellers`, { headers: { cookie, accept: 'application/json' }, cache: 'no-store' });
+    return res.ok ? ((await res.json()) as BookingTravellersView) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function Page({ params }: Props) {
-  const view = await load((await params).reference);
+  const reference = (await params).reference;
+  const view = await load(reference);
   if (view) {
+    const travellers = await loadTravellers(reference);
     return (
       <>
         <PageHeader title={t('account.detail.title')} intro={localisedText(view.booking.package.name)} />
-        <BookingOverview view={view} />
+        <BookingOverview view={view} travellers={travellers} />
       </>
     );
   }
