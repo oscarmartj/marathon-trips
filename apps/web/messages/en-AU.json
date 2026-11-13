@@ -61,7 +61,10 @@
     "quote": "Your quote",
     "waitlistOffer": "Waiting list place",
     "checkoutBooking": "Pay for your booking",
-    "paymentReturn": "Your payment"
+    "paymentReturn": "Your payment",
+    "accountBooking": "Your booking",
+    "payLink": "Pay with your link",
+    "payLinkReturn": "Your payment"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -985,7 +988,7 @@
           "excludes": "What is not included (one per line)"
         },
         "csvTitle": "Import and export",
-        "csvHelp": "Export this edition's packages, or check and import a file of new ones. Imported packages are drafts with no deposit; set the deposit on the package.",
+        "csvHelp": "Export this edition's packages, or check and import a file of new ones. Imported packages are drafts with no deposit; set the deposit on the package. The instantBooking column has no effect yet: every request waits for approval.",
         "detailTitle": "Package",
         "detailIntro": "Edit one package, then check how it will look.",
         "backToEdition": "Back to {race} {year}",
@@ -1058,7 +1061,8 @@
         "deleteTitle": "Delete",
         "deleteHelp": "Only a draft package can be deleted.",
         "deleteButton": "Delete this package",
-        "pricesLink": "Prices"
+        "pricesLink": "Prices",
+        "instantBookingHint": "Not active yet: every booking request waits for your approval, whatever this says."
       },
       "hotels": {
         "title": "Hotels",
@@ -2151,7 +2155,11 @@
         "quote_not_found": "We could not find this quote.",
         "package_departed": "This trip has already started.",
         "package_not_open": "This package is not open for requests.",
-        "step_up_required": "Confirm with your authenticator code to continue."
+        "step_up_required": "Confirm with your authenticator code to continue.",
+        "nothing_to_pay": "There is nothing to pay on this booking right now.",
+        "approval_expired": "The time to pay the deposit for this booking has run out.",
+        "booking_not_payable": "This booking cannot take a payment in its current state.",
+        "payment_link_not_found": "That payment link no longer exists."
       },
       "bookingStatus": {
         "requested": "Requested",
@@ -2302,6 +2310,24 @@
         "booking": "Booking",
         "send": "Send to customer",
         "withdraw": "Withdraw quote"
+      },
+      "paymentLinks": {
+        "title": "Payment links",
+        "intro": "Email the customer a single-use link to pay the next item of this booking's plan. The link goes only to the booking's own email address, works once and expires; sending a new one replaces the old.",
+        "none": "No payment links sent.",
+        "row": "{state}: plan item {item}, sent {created}, expires {expires}",
+        "states": {
+          "active": "Active",
+          "queued": "Waiting to be emailed",
+          "used": "Used",
+          "revoked": "Revoked",
+          "expired": "Expired"
+        },
+        "send": "Email a payment link",
+        "sent": "Payment link queued for the customer's email.",
+        "revoke": "Revoke",
+        "revoked": "Payment link revoked.",
+        "forbidden": "You do not have permission to send or revoke payment links."
       }
     },
     "templates": {
@@ -3098,7 +3124,8 @@
       "depositLine": "{amount}, with the balance due by {date}",
       "notFoundTitle": "Booking request",
       "notFoundBody": "We could not show this request. Sign in with the email address you used to send it.",
-      "continueToPayment": "Continue to payment"
+      "continueToPayment": "Continue to payment",
+      "inAccount": "See this booking, its payments and documents in your account"
     },
     "status": {
       "approved": "We have approved your request. We will be in touch about the next step.",
@@ -3172,5 +3199,108 @@
     "noscript": "This page needs JavaScript to check your payment. Open your booking to see where it stands.",
     "delayed": "Your payment is being processed. Check your booking again shortly.",
     "unavailable": "The payment service is not answering yet. Nothing has been lost. Check again in a moment."
+  },
+  "account": {
+    "title": "Your account",
+    "intro": "Your bookings, what you have paid and what is due, and your booking documents.",
+    "signIn": "Sign in to your account",
+    "reference": "Reference",
+    "dates": "Dates",
+    "dateRange": "{from} to {to}",
+    "statusLabel": "Status",
+    "total": "Total price",
+    "list": {
+      "heading": "Your bookings",
+      "label": "Your bookings",
+      "empty": "You have no bookings yet. When you send a booking request, it appears here.",
+      "trip": "{race} {year}: {pkg}",
+      "findRace": "Find a race"
+    },
+    "status": {
+      "requested": "Request received. It is a request, not a confirmed booking, and nothing has been charged. We will check availability and be in touch.",
+      "approved": "Request approved. We are holding your places until the deposit is paid.",
+      "deposit_paid": "Deposit paid. We will confirm your booking soon; it is not confirmed yet.",
+      "confirmed": "Booking confirmed.",
+      "balance_paid": "Booking confirmed and paid in full.",
+      "completed": "This trip has finished.",
+      "declined": "We could not offer this trip. The request is closed and nothing was charged.",
+      "expired": "This request has expired and the places are released.",
+      "cancelled": "This booking is closed.",
+      "refunded": "This booking is closed and refunded.",
+      "unknown": "We are reviewing this booking."
+    },
+    "detail": {
+      "title": "Your booking",
+      "notFoundTitle": "Booking",
+      "notFoundBody": "We could not show this booking. Sign in with the email address you used to book.",
+      "tripHeading": "Your trip",
+      "trip": "Trip",
+      "priceHeading": "Price",
+      "subtotal": {
+        "accommodation": "Accommodation",
+        "participation": "Race entries and participation",
+        "extras": "Extras"
+      },
+      "priceNote": "This is the price we stored when you sent your request. Later price changes do not affect it.",
+      "planHeading": "Payment plan",
+      "planCaption": "Payment plan: each payment, when it is due, its amount and what has been paid",
+      "planItem": "Payment",
+      "planDue": "Due",
+      "planAmount": "Amount",
+      "planPaid": "Paid",
+      "noPlan": "There is no payment plan yet. It is set when we approve your request.",
+      "outstanding": "Still to pay: {amount}",
+      "payNow": "Pay {amount} now",
+      "paymentsHeading": "Payments received",
+      "noPayments": "No payments yet.",
+      "paymentLine": "{amount} on {when} (Brisbane time), by {method}",
+      "receiptsNote": "This is a record of the payments we have received. It is not a receipt or a tax invoice.",
+      "documentsHeading": "Documents",
+      "noDocuments": "Your documents appear here once your booking is confirmed.",
+      "back": "Back to your bookings"
+    },
+    "documents": {
+      "confirmation": "Booking confirmation (PDF)",
+      "itinerary": "Itinerary (PDF)",
+      "voucher": "Voucher (PDF)"
+    }
+  },
+  "payLink": {
+    "title": "Pay with your link",
+    "intro": "This link was emailed to you to make the next payment on your booking. It works once.",
+    "loading": "Checking your link…",
+    "noscript": "This page needs JavaScript to read your payment link.",
+    "noToken": "We could not find a payment link on this page. Open the link from your email again, or sign in to pay from your account.",
+    "tripHeading": "Your booking",
+    "amountDue": "Amount due now: {amount}",
+    "validUntil": "This link works until {when} (Brisbane time).",
+    "inProgress": "A payment for this booking is already under way. If it was started from your account or another link, finish it there or wait for it to end before paying here.",
+    "termsFirst": "Before the first payment, the booking terms must be accepted by the person who made the booking. Sign in to your account to read and accept them, then pay from there.",
+    "signIn": "Sign in to your account",
+    "pay": "Pay now",
+    "toAccount": "Go to your account",
+    "returnNoToken": "We could not tell how your payment went from this page. Sign in to your account to see your booking.",
+    "return": {
+      "paid": "We have received your payment. Thank you. Your booking shows it in your account.",
+      "processing": "Your payment is still being processed. This can take a moment.",
+      "failed": "The payment did not go through. Nothing has been charged. You can try again with the same link.",
+      "none": "We have not received a payment through this link yet."
+    },
+    "errors": {
+      "notFound": "This payment link is not valid. It may have been used already, replaced by a newer one or expired, or the booking may not take a payment right now. Sign in to your account to see your booking.",
+      "tooMany": "Too many attempts. Wait a little and try again.",
+      "network": "We could not reach our server. Check your connection and try again.",
+      "chooseMethod": "Choose a payment method.",
+      "terms_not_accepted": "The booking terms must be accepted in your account before you can pay. Sign in to accept them.",
+      "terms_unavailable": "The booking terms are not available right now, so we cannot take a payment. Try again later.",
+      "payment_attempt_in_progress": "A payment for this booking is already under way. Wait for it to end, or finish it where it was started.",
+      "payment_already_recorded": "A payment for this booking has just been recorded. Check your account before you pay again.",
+      "no_payment_method_available": "That payment method is not available for this booking right now.",
+      "provider_unavailable": "The payment service is not answering. Try again in a moment.",
+      "nothing_to_pay": "There is nothing to pay on this booking right now.",
+      "approval_expired": "The time to pay the deposit for this booking has run out.",
+      "booking_not_payable": "This booking cannot take a payment right now.",
+      "generic": "Something went wrong. Nothing has been charged. Try again shortly."
+    }
   }
 }

@@ -114,7 +114,7 @@ export function PackageDetail({ id }: { id: string }) {
             { key: 'maxTravellers', label: t('admin.catalogue.packages.fields.maxTravellers'), type: 'number', required: true, min: 1, max: 50 },
             { key: 'maxExtraNightsBefore', label: t('admin.catalogue.packages.fields.maxExtraNightsBefore'), type: 'number', required: true, min: 0, max: 30 },
             { key: 'maxExtraNightsAfter', label: t('admin.catalogue.packages.fields.maxExtraNightsAfter'), type: 'number', required: true, min: 0, max: 30 },
-            { key: 'instantBooking', label: t('admin.catalogue.packages.fields.instantBooking'), type: 'checkbox' },
+            { key: 'instantBooking', label: t('admin.catalogue.packages.fields.instantBooking'), type: 'checkbox', hint: t('admin.catalogue.packages.instantBookingHint') },
             { key: 'autoConfirmOnDeposit', label: t('admin.catalogue.packages.fields.autoConfirmOnDeposit'), type: 'checkbox' },
             { key: 'includes', label: t('admin.catalogue.packages.fields.includes'), type: 'textarea', maxLength: 5000 },
             { key: 'excludes', label: t('admin.catalogue.packages.fields.excludes'), type: 'textarea', maxLength: 5000 },

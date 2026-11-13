@@ -4,7 +4,8 @@
  */
 // idempotency-key: booking requests (task 2.4) carry one, so a retried submission makes one request.
 export const FORWARD_REQUEST_HEADERS = ['cookie', 'origin', 'x-mt-csrf', 'content-type', 'accept', 'user-agent', 'x-request-id', 'idempotency-key'] as const;
-export const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'x-request-id'] as const;
+// content-disposition: a customer's booking documents download as files (task 5.1).
+export const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'x-request-id', 'content-disposition'] as const;
 
 export const API_KEY_AUTHORIZATION = /^Bearer mtk_[a-z2-7]{12}_[A-Za-z0-9_-]{43}$/;
 

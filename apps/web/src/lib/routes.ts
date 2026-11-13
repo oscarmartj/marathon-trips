@@ -35,6 +35,9 @@ export const publicRoutes: readonly RouteDef[] = [
   { path: '/alerts/confirm', file: '(public)/alerts/confirm/page.tsx', labelKey: 'nav.alertsConfirm' },
   { path: '/alerts/unsubscribe', file: '(public)/alerts/unsubscribe/page.tsx', labelKey: 'nav.alertsUnsubscribe' },
   { path: '/account', file: '(public)/account/page.tsx', labelKey: 'nav.account' },
+  { path: '/account/bookings/[reference]', file: '(public)/account/bookings/[reference]/page.tsx', labelKey: 'nav.accountBooking' },
+  { path: '/pay', file: '(public)/pay/page.tsx', labelKey: 'nav.payLink' },
+  { path: '/pay/return', file: '(public)/pay/return/page.tsx', labelKey: 'nav.payLinkReturn' },
   { path: '/account/sign-in', file: '(public)/account/sign-in/page.tsx', labelKey: 'nav.signIn' },
   { path: '/account/sign-in/verify', file: '(public)/account/sign-in/verify/page.tsx', labelKey: 'nav.verifySignIn' },
 ];
