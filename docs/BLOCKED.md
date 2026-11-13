@@ -2,7 +2,7 @@
 
 Lo que no se puede terminar sin Oscar o sin un tercero. No detiene el resto del trabajo. Lo actualiza el hilo de cierre de cada fase a partir de `docs/done/`.
 
-Actualizado al cerrar la fase 2 (2026-11-13).
+Actualizado al cerrar la fase 3 (2026-11-13).
 
 | Qué falta | Quién lo desbloquea | Qué se hizo mientras tanto | Tarea |
 |---|---|---|---|
@@ -21,3 +21,7 @@ Actualizado al cerrar la fase 2 (2026-11-13).
 | **Cerrada:** `WEB_ORIGIN` fijo también al construir la imagen de la web (y en ejecución); antes las páginas estáticas saldrían con `http://localhost:3000` en canónicas, Open Graph y JSON-LD | ~~Cerrada por `1.fix-1` (PR #29, fusionado)~~: Oscar solo pone la dirección pública en `deploy/production.env` | `ARG`/`ENV WEB_ORIGIN` en la imagen de la web y comprobación en `scripts/check-deploy-config.mjs`; sin Docker en los hilos solo la valida CI | 1.4, 8.7, 1.fix-1 |
 | Rama remota obsoleta `task/8.1-web-foundation` (el borrado falló dos veces desde el entorno de los hilos) | Oscar: `git push origin --delete task/8.1-web-foundation` o desde GitHub | Nada: no afecta a `main` | 8.1 |
 | Sin sandbox real de pasarela: el simulador (`payments:simulator-account`, solo development, test y ci) es el único adaptador y la única forma de crear su cuenta; el reproceso manual de webhooks fallidos desde el panel no existe hasta 4.1 (solo una tarea) | Oscar, al retomar el dinero | 3.1 contra el simulador; cuentas `mode = 'test'` por `CHECK` | 3.1, 4.1 |
+| Claves y cuentas de sandbox de cada pasarela real (Stripe y las demás): sin ellas ningún adaptador real pasa de `experimental`. `test:sandbox` se niega con `simulator` o un adaptador solo de pruebas, exige `SANDBOX_ADAPTER` y credenciales con aspecto de prueba, y `verified` exige la línea de evidencia `test:sandbox <clave> <fecha> N/N` | Oscar, al retomar el dinero (3.3 y 3.4 aparcadas) | Interfaz `PaymentProvider`, simulador, batería de contrato (23 cláusulas) y checkout contra el simulador; la guía `docs/adding-a-payment-adapter.md` | 3.3, 3.4, 3.6, fase 9 |
+| La cuenta del simulador solo se crea con la orden `payments:simulator-account` (no está en la semilla; solo development, test y ci) | Quien pruebe el cobro en local | La semilla no cobra | 3.1, 3.6 |
+| Publicar la página `terms` en el panel: sin una página publicada, 3.5 se niega a iniciar cualquier pago (`terms_unavailable`) | Oscar, antes de cobrar | La aceptación y su texto quedan guardados cuando exista | 3.5 |
+| Asignar permisos nuevos (solo owner los tiene; ninguno es alcance de clave de API): `bookings.booking.confirm` (step-up, solo owner), `templates.template.read\|manage\|publish`, `complaints.complaint.read\|manage`, `keydates.date.read\|manage` y `automations.rule.*` (activar exige step-up) | Oscar, en el panel de roles | Los roles actuales no los reciben solos | 3.2, 5.4, 7.3, 7.4, 7.6 |

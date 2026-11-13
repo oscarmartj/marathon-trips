@@ -6,10 +6,11 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Ahora
 
-- **Fases 0, 1 y 2 cerradas** (fase 2: 2.1, 2.2, 2.2b, 2.3, 2.4, 2.5 y 2.6 en `main`; los 7 criterios comprobados, evidencia en `docs/done/2.*.md`; ver el PR "2.close"). Fuera de fase ya en `main`: 1.fix-1, 3.1 (núcleo de pagos contra el simulador), 5.3, 6.1, 7.5, 8.4, 8.6, 8.7.
-- **Siguiente:** 3.2 (reparto de cobros, cobertura, caducidad de aprobaciones con gancho `expire`, enlaces y recordatorios; la reserva sigue `approved` tras el depósito hasta entonces), 3.6 y el resto según `docs/autonomous.md`. Dinero real aparcado desde el 2026-11-12.
+- **Fases 0, 1, 2 y 3 cerradas** (fase 3 con el dinero aparcado: hechas 3.1, 3.2, 3.5 y 3.6, solo contra el simulador; evidencia en `docs/done/3.1.md`, `3.2.md`, `3.5.md` y `3.6.md`; ver el PR "3.close"). **Aparcadas: 3.3 y 3.4** (dinero; no empezadas). Listo para retomarlas: interfaz `PaymentProvider`, simulador, batería de contrato de 23 cláusulas (`docs/adding-a-payment-adapter.md`) y checkout contra el simulador.
+- Fuera de su fase y ya en `main`: 1.fix-1, 5.3, 5.4 (plantillas, `0018_templates`), 6.1, 6.5 (ofertas de lista de espera, `0022`), 7.3 (fechas clave, `0021`), 7.4 (automatizaciones, `0020`), 7.5, 7.6 (reclamaciones, `0019`), 8.4, 8.6 y 8.7. La 3.5 trae la aceptación de condiciones (`0023_terms_acceptance`). Migraciones en `main`: 0001 a 0023.
+- **Siguiente:** fase 4 (aparcada casi entera) y la 5 según la tabla de `docs/autonomous.md`; 5.1 hereda de 3.2 el enlace de pago y la aprobación automática `instantBooking`, y 5.6 los recordatorios. Dinero real aparcado desde el 2026-11-12.
 - **Bloqueos:** ninguno que detenga el trabajo; lo externo está en `docs/BLOCKED.md`.
-- **Permisos por asignar (Oscar):** `common.customField.publish`, `waitlist.entry.read` y los de reservas y CRM; solo los tiene owner y ninguno es alcance de clave de API.
+- **Permisos por asignar (Oscar):** `bookings.booking.confirm` (step-up, solo owner), `templates.template.read|manage|publish`, `complaints.complaint.read|manage`, `keydates.date.read|manage`, `automations.rule.*` (activar exige step-up), además de `common.customField.publish`, `waitlist.entry.read` y los de reservas y CRM; solo los tiene owner y ninguno es alcance de clave de API.
 
 ## Pendiente de Oscar
 
@@ -17,7 +18,7 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Hecho
 
-Fases 0, 1 y 2, 1.fix-1, 3.1, 5.3, 6.1, 7.5, 8.4, 8.6 y 8.7: ver `docs/done/`.
+Fases 0, 1, 2 y 3 (sin 3.3 ni 3.4), 1.fix-1, 5.3, 5.4, 6.1, 6.5, 7.3, 7.4, 7.5, 7.6, 8.4, 8.6 y 8.7: ver `docs/done/`.
 
 ## Sin verificar
 
