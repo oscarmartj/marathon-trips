@@ -155,6 +155,7 @@ model Race {
   distances      RaceDistance[]
   claims         RaceClaim[]
   editions       RaceEdition[]
+  dailyStats     RaceDailyStat[]
   alerts         AlertSubscription[]
   contentGuides  ContentGuide[]
 

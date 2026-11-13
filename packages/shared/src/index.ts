@@ -19,3 +19,4 @@ export * from './schemas/crm';
 export * from './schemas/templates';
 export * from './iso-countries';
 export * from './schemas/complaints';
+export * from './schemas/reports';

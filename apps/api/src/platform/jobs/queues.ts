@@ -97,6 +97,12 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  // Task 7.7: makes the scheduled report runs that are due and queues their emails.
+  reportsTick: {
+    name: 'reports.tick',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 0, retryDelay: 60, expireInSeconds: 300, deleteAfterSeconds: 604800 },
+  },
   authMaintenance: {
     name: 'auth.maintenance',
     data: z.object({}).strict(),
