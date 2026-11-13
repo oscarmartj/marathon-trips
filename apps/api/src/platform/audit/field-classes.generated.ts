@@ -670,8 +670,21 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     pendingExpiresAt: 'nopii',
     succeededAt: 'nopii',
     version: 'nopii',
+    paymentLinkId: 'nopii',
     createdAt: 'nopii',
     updatedAt: 'nopii'
+  },
+  PaymentLink: {
+    id: 'nopii',
+    bookingId: 'nopii',
+    targetScheduleItemId: 'nopii',
+    tokenHash: 'secret',
+    status: 'nopii',
+    expiresAt: 'nopii',
+    createdById: 'nopii',
+    createdAt: 'nopii',
+    usedAt: 'nopii',
+    revokedAt: 'nopii'
   },
   PaymentSchedule: {
     id: 'nopii',

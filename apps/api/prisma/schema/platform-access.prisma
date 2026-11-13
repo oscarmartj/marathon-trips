@@ -23,6 +23,7 @@ enum AuditActorType {
   system
   automation
   api_key
+  payment_link
 }
 
 model User {

@@ -56,6 +56,13 @@ enum PaymentStatus {
   voided
 }
 
+/// A payment link's state (task 5.1): a link serves once. Expiry is not stored: it is expiresAt <= now.
+enum PaymentLinkStatus {
+  active
+  used
+  revoked
+}
+
 enum ProviderWebhookEventStatus {
   received
   processed
@@ -157,6 +164,7 @@ model PaymentScheduleItem {
   /// @nopii timestamp
   updatedAt           DateTime                 @updatedAt @db.Timestamptz(3)
   payments            Payment[]
+  paymentLinks        PaymentLink[]
 
   @@unique([id, bookingId, currency])
   @@unique([id, bookingId])
@@ -207,6 +215,9 @@ model Payment {
   succeededAt          DateTime?           @db.Timestamptz(3)
   /// @nopii bumped with every change
   version              Int                 @default(0)
+  /// the payment link the attempt was started through (task 5.1); null for checkout; never changes
+  paymentLinkId        String?             @db.Uuid
+  paymentLink          PaymentLink?        @relation(fields: [paymentLinkId, bookingId], references: [id, bookingId], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii timestamp
   createdAt            DateTime            @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
@@ -221,6 +232,7 @@ model Payment {
   @@index([status, pendingExpiresAt])
   @@index([payerCustomerId])
   @@index([targetScheduleItemId])
+  @@index([paymentLinkId])
   @@map("payments")
 }
 
@@ -315,4 +327,35 @@ model TermsAcceptance {
 
   @@unique([bookingId, documentSlug, locale, textDigest])
   @@map("terms_acceptances")
+}
+
+/// A payment link (task 5.1, plan docs/plans/5.1-customer-area.md, section 5): a single-use capability that staff send to
+/// the booking's own address to pay one plan item without a session. No amount (P1): the server computes it. The token
+/// is minted in the email's send step and only its SHA-256 is kept. Updates are limited by a trigger (migration 0024).
+model PaymentLink {
+  id                   String              @id @default(uuid(7)) @db.Uuid
+  bookingId            String              @db.Uuid
+  booking              Booking             @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// the plan item the link pays up to: next payable when it was sent
+  targetScheduleItemId String              @db.Uuid
+  targetScheduleItem   PaymentScheduleItem @relation(fields: [targetScheduleItemId, bookingId], references: [id, bookingId], onDelete: Restrict, onUpdate: Restrict)
+  /// @secret SHA-256 (hex) of the token; null until the email is sent
+  tokenHash            String?             @unique @db.Char(64)
+  /// @nopii active, used or revoked
+  status               PaymentLinkStatus   @default(active)
+  /// @nopii timestamp
+  expiresAt            DateTime            @db.Timestamptz(3)
+  /// staff user who sent it (UUID without a foreign key, like audit actors)
+  createdById          String              @db.Uuid
+  /// @nopii timestamp
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  usedAt               DateTime?           @db.Timestamptz(3)
+  /// @nopii timestamp
+  revokedAt            DateTime?           @db.Timestamptz(3)
+  payments             Payment[]
+
+  @@unique([id, bookingId])
+  @@index([bookingId, status])
+  @@map("payment_links")
 }
