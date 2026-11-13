@@ -3,22 +3,21 @@
 
 /// The personal details of one place in a booking, typed by the booking's customer until the edit deadline. The
 /// minimum an entry and a safe trip need: no passport or ID number, no medical or dietary data, no free text. Personal data:
-/// exported and anonymised by 5.5 through the entity registry (TRAVELLER_ENTITIES). One row per place; the foreign keys
-/// make it impossible to attach details to a place of another customer's booking.
+/// exported and anonymised by 5.5 through the entity registry (TRAVELLER_ENTITIES). One row per place; the foreign key to
+/// the booking's own customer and a trigger on the place make it impossible to attach details to someone else's booking.
 model Traveller {
-  id                     String           @id @default(uuid(7)) @db.Uuid
-  bookingId              String           @db.Uuid
-  customerId             String           @db.Uuid
-  booking                Booking          @relation(fields: [bookingId, customerId], references: [id, customerId], onDelete: Restrict, onUpdate: Restrict)
-  /// @nopii 1-based place of the booking this row describes
+  id                     String    @id @default(uuid(7)) @db.Uuid
+  bookingId              String    @db.Uuid
+  customerId             String    @db.Uuid
+  booking                Booking   @relation(fields: [bookingId, customerId], references: [id, customerId], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii 1-based place of the booking this row describes (a trigger checks that the booking has it)
   slot                   Int
-  place                  BookingTraveller @relation(fields: [bookingId, slot], references: [bookingId, slot], onDelete: Restrict, onUpdate: Restrict)
   /// @pii given name as on the travel document; [redacted] once erased
   givenName              String
   /// @pii family name as on the travel document; [redacted] once erased
   familyName             String
   /// @pii runners only, needed for the race entry; calendar date
-  dateOfBirth            DateTime?        @db.Date
+  dateOfBirth            DateTime? @db.Date
   /// @pii name of the person to call in an emergency
   emergencyContactName   String?
   /// @pii phone of the person to call in an emergency
@@ -26,11 +25,11 @@ model Traveller {
   /// @pii runners only, optional: the finish time the runner expects, in seconds
   estimatedFinishSeconds Int?
   /// @nopii set when the personal data was erased
-  anonymisedAt           DateTime?        @db.Timestamptz(3)
+  anonymisedAt           DateTime? @db.Timestamptz(3)
   /// @nopii timestamp
-  createdAt              DateTime         @default(now()) @db.Timestamptz(3)
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt              DateTime         @updatedAt @db.Timestamptz(3)
+  updatedAt              DateTime  @updatedAt @db.Timestamptz(3)
 
   @@unique([bookingId, slot])
   @@unique([id, customerId])

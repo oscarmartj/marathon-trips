@@ -3265,6 +3265,68 @@
       "confirmation": "Booking confirmation (PDF)",
       "itinerary": "Itinerary (PDF)",
       "voucher": "Voucher (PDF)"
+    },
+    "travellers": {
+      "title": "Traveller details",
+      "intro": "Tell us who is travelling. We only ask for what the race entry and the trip need.",
+      "notAsked": "We do not ask for passport or ID numbers, or for any medical or dietary details. This form has no place to enter them.",
+      "until": "You can change these details until {date}.",
+      "noDeadline": "You can change these details until we confirm the entry deadline. We will update this page when it is set.",
+      "reason": {
+        "booking_status": "Traveller details can only be changed after the deposit is paid and until the trip has finished.",
+        "deadline_passed": "The deadline for changing these details was {date}. Get in touch with us if something needs to change."
+      },
+      "place": "Traveller {n}",
+      "placeLead": "Traveller {n} (you)",
+      "type": {
+        "runner_with_entry": "Runner, entry included",
+        "runner_own_entry": "Runner, own entry",
+        "supporter": "Supporter"
+      },
+      "complete": "Details complete",
+      "incomplete": "Details still needed",
+      "fields": {
+        "givenName": "Given name (as on their travel document)",
+        "familyName": "Family name (as on their travel document)",
+        "dateOfBirth": "Date of birth",
+        "dateOfBirthHint": "The race organiser needs this for the entry and the age category.",
+        "finishHours": "Estimated finish time: hours",
+        "finishMinutes": "Estimated finish time: minutes",
+        "finishHint": "Optional. A rough estimate is fine.",
+        "emergencyContactName": "Emergency contact name",
+        "emergencyContactPhone": "Emergency contact phone",
+        "emergencyHint": "Optional. Someone we can call during the trip. Fill in both fields or neither.",
+        "required": "required"
+      },
+      "save": "Save details",
+      "saving": "Saving...",
+      "clear": "Remove these details",
+      "saved": "Details saved.",
+      "cleared": "Details removed.",
+      "none": "No details saved yet.",
+      "summary": {
+        "heading": "Traveller details",
+        "progress": "{done} of {total} travellers have the details we need.",
+        "manage": "Add or change traveller details",
+        "view": "View traveller details"
+      },
+      "back": "Back to your booking",
+      "notFoundTitle": "Traveller details",
+      "notFoundBody": "We could not show these details. Sign in with the email address you used to book.",
+      "errors": {
+        "givenName": "Enter a given name using letters only.",
+        "familyName": "Enter a family name using letters only.",
+        "dateOfBirth": "Enter a real date of birth that is not in the future.",
+        "estimatedFinish": "Enter hours and minutes between 10 minutes and 72 hours.",
+        "emergencyContactName": "Enter the emergency contact's name using letters only, or leave both emergency fields empty.",
+        "emergencyContactPhone": "Enter a phone number of 6 to 20 digits for the emergency contact, or leave both emergency fields empty.",
+        "notEditable": "These details can no longer be changed. Get in touch with us if something needs to change.",
+        "notFound": "We could not save these details. Sign in again with the email address you used to book.",
+        "rejected": "Some details were not accepted. Check the fields and try again.",
+        "tooMany": "Too many attempts. Wait a little and try again.",
+        "generic": "We could not save these details. Try again in a moment.",
+        "network": "We could not reach the server. Check your connection and try again."
+      }
     }
   },
   "payLink": {

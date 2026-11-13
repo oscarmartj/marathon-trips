@@ -66,14 +66,14 @@ export class TravellerDetailsService {
     return editWindow({ status: booking.status, entrySubmissionDate: day(key?.dueDate ?? null), raceStartDate: day(edition?.startDate ?? null), cutoffDays, today: todayInBrisbane(at) });
   }
 
-  private placesOf(tx: Tx, bookingId: string): Promise<PlaceRow[]> {
-    return tx.bookingTraveller.findMany({
-      where: { bookingId, removedInVersion: null }, orderBy: { slot: 'asc' },
-      select: {
-        slot: true, participationType: true, isLead: true,
-        details: { select: { givenName: true, familyName: true, dateOfBirth: true, emergencyContactName: true, emergencyContactPhone: true, estimatedFinishSeconds: true } },
-      },
-    });
+  /** The places of a booking in order, each with its details (two reads: the places belong to bookings, the details to this module). */
+  private async placesOf(tx: Tx, bookingId: string): Promise<PlaceRow[]> {
+    const [places, details] = await Promise.all([
+      tx.bookingTraveller.findMany({ where: { bookingId, removedInVersion: null }, orderBy: { slot: 'asc' }, select: { slot: true, participationType: true, isLead: true } }),
+      tx.traveller.findMany({ where: { bookingId }, select: { slot: true, givenName: true, familyName: true, dateOfBirth: true, emergencyContactName: true, emergencyContactPhone: true, estimatedFinishSeconds: true } }),
+    ]);
+    const bySlot = new Map(details.map(({ slot, ...d }) => [slot, d]));
+    return places.map((p) => ({ ...p, details: bySlot.get(p.slot) ?? null }));
   }
 
   /** The places of a booking, their details and whether they can still be changed. */

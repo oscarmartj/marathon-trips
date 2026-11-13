@@ -26,9 +26,10 @@ CREATE UNIQUE INDEX "travellers_id_customerId_key" ON "travellers"("id", "custom
 CREATE INDEX "travellers_customerId_idx" ON "travellers"("customerId");
 
 -- AddForeignKey
--- (bookingId, customerId): the details belong to the booking's own customer. (bookingId, slot): they describe a place of that booking.
+-- (bookingId, customerId): the details belong to the booking's own customer. The place (bookingId, slot) is checked by
+-- the trigger below, not by a foreign key: booking_travellers is append-only and a foreign key into it would make
+-- TRUNCATE fail on the foreign key before the append-only trigger could refuse it (test booking_travellers never deleted).
 ALTER TABLE "travellers" ADD CONSTRAINT "travellers_bookingId_customerId_fkey" FOREIGN KEY ("bookingId", "customerId") REFERENCES "bookings"("id", "customerId") ON DELETE RESTRICT ON UPDATE RESTRICT;
-ALTER TABLE "travellers" ADD CONSTRAINT "travellers_bookingId_slot_fkey" FOREIGN KEY ("bookingId", "slot") REFERENCES "booking_travellers"("bookingId", "slot") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- Constraints that Prisma cannot express.
 -- Sizes and ranges (the API validates the same limits and the character sets; the database keeps the bounds). An erased
@@ -63,3 +64,19 @@ END;
 $$;
 CREATE TRIGGER travellers_guard BEFORE UPDATE ON "travellers"
   FOR EACH ROW EXECUTE FUNCTION public.mt_traveller_guard();
+
+-- Details describe a place the booking has. Places are never deleted (they are marked removed by an amendment), so a place
+-- that exists when the row is written exists for as long as the row does.
+CREATE FUNCTION public.mt_traveller_place() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "booking_travellers" WHERE "bookingId" = NEW."bookingId" AND "slot" = NEW."slot") THEN
+    RAISE EXCEPTION 'traveller details need a place of the booking' USING ERRCODE = 'foreign_key_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER travellers_place BEFORE INSERT ON "travellers"
+  FOR EACH ROW EXECUTE FUNCTION public.mt_traveller_place();

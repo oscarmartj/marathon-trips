@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { BookingStatus } from '@mt/shared';
 import { TRAVELLER_ENTITIES } from '../../../src/modules/customer-portal';
 import { todayInBrisbane } from '../../../src/modules/bookings';
-import { STATE_HEADERS, TestApp, makeApp, signInCustomer } from '../../support/auth';
+import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
 import { cleanBookingEvents, customerClient } from '../../support/bookings';
 import { closeCatalogue } from '../../support/catalogue';
 import { customerBookingIn, walkTo } from '../../support/customer-portal';
@@ -339,7 +339,7 @@ describe('personal data handling', () => {
 });
 
 describe('the database itself', () => {
-  it('traveller_of_other_customer_cannot_be_assigned: another customer, another booking or an unknown place is refused by foreign keys', async () => {
+  it('traveller_of_other_customer_cannot_be_assigned: another customer, another booking or an unknown place is refused by the database', async () => {
     const a = await customerClient(t);
     const b = await customerClient(t);
     const mine = await bookingWith(a, 'deposit_paid');
@@ -350,7 +350,7 @@ describe('the database itself', () => {
       `INSERT INTO travellers (id, "bookingId", "customerId", slot, "givenName", "familyName", "updatedAt") VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, 'X', 'Y', now())`, bookingId, customerId, slot);
     await expect(insert(mine.bookingId, bId, 1)).rejects.toThrow(/travellers_bookingId_customerId_fkey/); // B's id on A's booking
     await expect(insert(theirs.bookingId, aId, 1)).rejects.toThrow(/travellers_bookingId_customerId_fkey/); // A's id on B's booking
-    await expect(insert(mine.bookingId, aId, 9)).rejects.toThrow(/travellers_bookingId_slot_fkey/); // a place the booking does not have
+    await expect(insert(mine.bookingId, aId, 9)).rejects.toThrow(/need a place of the booking/); // a place the booking does not have
     await expect(insert(mine.bookingId, aId, 1)).resolves.toBe(1);
     await expect(insert(mine.bookingId, aId, 1)).rejects.toThrow(/travellers_bookingId_slot_key/); // one row per place
   });
