@@ -429,18 +429,23 @@ describe('the email', () => {
 
   it('failed_reminder_link_never_blocks: the previous reminder\'s email failed, its token-less link is replaced', async () => {
     await setOffsets([3, 1]);
-    const w = await depositPaid();
-    await runFor(w, at(w.due, 3));
-    const [first] = await remindersOf(w.balance.id);
-    // The address bounces, so the send step fails the email for good and leaves an active link with no token.
-    const customer = await t.prisma.customer.findUniqueOrThrow({ where: { id: w.customerId }, select: { email: true } });
-    await t.app.get(MailService).addSuppression(customer.email, 'bounced', 'all');
-    expect(await t.app.get(MailService).processSend(first!.id)).toBe('failed');
-    await t.prisma.emailSuppression.deleteMany({});
-    const stale = await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: first!.relatedEntityId! } });
-    expect([stale.status, stale.tokenHash]).toEqual(['active', null]);
-    expect(await runFor(w, at(w.due, 1))).toMatchObject({ examined: 1, queued: 1, skipped: {} });
-    await setOffsets([14, 3]);
+    try {
+      const w = await depositPaid();
+      await runFor(w, at(w.due, 3));
+      const [first] = await remindersOf(w.balance.id);
+      // The address bounces, so the send step fails the email for good and leaves an active link with no token.
+      const customer = await t.prisma.customer.findUniqueOrThrow({ where: { id: w.customerId }, select: { email: true } });
+      await t.app.get(MailService).addSuppression(customer.email, 'bounced', 'all');
+      expect(await t.app.get(MailService).processSend(first!.id)).toBe('failed');
+      await t.prisma.emailSuppression.deleteMany({});
+      const stale = await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: first!.relatedEntityId! } });
+      expect([stale.status, stale.tokenHash]).toEqual(['active', null]);
+      expect(await runFor(w, at(w.due, 1))).toMatchObject({ examined: 1, queued: 1, skipped: {} });
+      expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: first!.relatedEntityId! } })).status).toBe('revoked');
+    } finally {
+      await t.prisma.emailSuppression.deleteMany({});
+      await setOffsets([14, 3]);
+    }
   });
 
   it('staff_link_still_protected: a delivered staff link is kept, and a staff link whose email failed is not', async () => {

@@ -159,6 +159,29 @@ test('customer_area_and_payment_link', async ({ page, browser }) => {
   expect(pdf.headers()['content-disposition']).toBe(`attachment; filename="${reference}-confirmation.pdf"`);
   expect((await pdf.body()).subarray(0, 5).toString('latin1')).toBe('%PDF-');
 
+  // ---- A adds her traveller details after the deposit (task 5.2); they are still there after a reload ----
+  await expect(a.page.getByRole('heading', { level: 2, name: 'Traveller details' })).toBeVisible();
+  await expect(a.page.getByText(/^You can change these details until /)).toBeVisible();
+  await a.page.getByRole('link', { name: 'Add or change traveller details' }).click();
+  await expect(a.page).toHaveURL(new RegExp(`/account/bookings/${reference}/travellers$`));
+  await expect(a.page.getByText(/This form has no place to enter them\./)).toBeVisible();
+  await expect(a.page.getByLabel(/passport|medical|dietary|allerg/i)).toHaveCount(0);
+  await a.page.getByLabel(/^Given name/).first().fill('Ada');
+  await a.page.getByLabel(/^Family name/).first().fill('Runner');
+  await a.page.getByLabel('Date of birth').first().fill('1985-07-02');
+  await a.page.getByLabel('Estimated finish time: hours').first().fill('4');
+  await a.page.getByLabel('Estimated finish time: minutes').first().fill('30');
+  await a.page.getByLabel('Emergency contact name').first().fill('Sam Runner');
+  await a.page.getByLabel('Emergency contact phone').first().fill('0400 123 456');
+  await a.page.getByRole('button', { name: 'Save details' }).first().click();
+  await expect(a.page.getByText('Details saved.')).toBeVisible();
+  await a.page.reload();
+  await expect(a.page.getByLabel('Emergency contact name').first()).toHaveValue('Sam Runner');
+  await expect(a.page.getByLabel('Date of birth').first()).toHaveValue('1985-07-02');
+  await expect(a.page.getByLabel('Estimated finish time: minutes').first()).toHaveValue('30');
+  await a.page.getByRole('link', { name: 'Back to your booking' }).click();
+  await expect(a.page.getByText(/^[0-9]+ of [0-9]+ travellers have the details we need\.$/)).toBeVisible();
+
   // ---- The team emails a payment link for the balance ----
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Payment links' })).toBeVisible();
@@ -210,6 +233,13 @@ test('customer_area_and_payment_link', async ({ page, browser }) => {
   expect((await b.context.request.get(`/api/account/bookings/${reference}/documents/confirmation`)).status()).toBe(404);
   expect((await b.context.request.get(`/api/account/bookings/${reference}`)).status()).toBe(404);
   await expect(b.page.getByText(reference)).toHaveCount(0);
+  // ...nor of her traveller details: the same neutral page, and the API answers 404 to read, save and remove.
+  await b.page.goto(`/account/bookings/${reference}/travellers`);
+  await expect(b.page.getByText('We could not show these details.', { exact: false })).toBeVisible();
+  await expect(b.page.getByText('Ada')).toHaveCount(0);
+  expect((await b.context.request.get(`/api/account/bookings/${reference}/travellers`)).status()).toBe(404);
+  expect((await b.context.request.put(`/api/account/bookings/${reference}/travellers/1`, { headers: STATE, data: { givenName: 'Mallory', familyName: 'Intruder' } })).status()).toBe(404);
+  expect((await b.context.request.delete(`/api/account/bookings/${reference}/travellers/1`, { headers: STATE })).status()).toBe(404);
   await b.page.goto('/account');
   await expect(b.page.getByText('You have no bookings yet.', { exact: false })).toBeVisible();
 

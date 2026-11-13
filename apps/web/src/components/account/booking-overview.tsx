@@ -1,11 +1,13 @@
 import Link from 'next/link';
-import type { AccountPaymentRecord, PaymentPlanView } from '@mt/shared';
+import type { AccountPaymentRecord, BookingTravellersView, PaymentPlanView } from '@mt/shared';
 import { formatMoney } from '@/lib/builder';
 import { localisedText } from '@/lib/catalogue';
 import { formatDate } from '@/lib/catalogue-format';
 import { formatInstant, notPayableKey } from '@/lib/checkout';
 import { documentHref, documentKinds, statusKey } from '@/lib/account';
 import { t } from '@/lib/i18n';
+import { progress, showTravellerSection, travellerHref } from '@/lib/travellers';
+import { DeadlineNote } from '@/components/account/traveller-forms';
 
 export interface AccountBookingDetail {
   booking: {
@@ -29,7 +31,7 @@ export interface AccountBookingDetail {
  * the API holds them, the payments received and the documents available. "Pay now" appears only when the API says
  * the booking can take a payment; the amount is the plan's, shown at checkout.
  */
-export function BookingOverview({ view }: { view: AccountBookingDetail }) {
+export function BookingOverview({ view, travellers = null }: { view: AccountBookingDetail; travellers?: BookingTravellersView | null }) {
   const { booking: b, plan } = view;
   const cur = b.currency;
   const subtotals = b.price.subtotals ?? {};
@@ -104,6 +106,8 @@ export function BookingOverview({ view }: { view: AccountBookingDetail }) {
         <p>{t('account.detail.receiptsNote')}</p>
       </section>
 
+      {showTravellerSection(travellers) ? <TravellerSummary reference={b.reference} travellers={travellers} /> : null}
+
       <section className="stack" aria-labelledby="documents-heading">
         <h2 id="documents-heading">{t('account.detail.documentsHeading')}</h2>
         {docs.length === 0 ? <p>{t('account.detail.noDocuments')}</p> : (
@@ -118,5 +122,18 @@ export function BookingOverview({ view }: { view: AccountBookingDetail }) {
 
       <p><Link href="/account">{t('account.detail.back')}</Link></p>
     </div>
+  );
+}
+
+function TravellerSummary({ reference, travellers }: { reference: string; travellers: BookingTravellersView }) {
+  const { done, total } = progress(travellers);
+  const href = travellerHref(reference);
+  return (
+    <section className="stack" aria-labelledby="travellers-heading">
+      <h2 id="travellers-heading">{t('account.travellers.summary.heading')}</h2>
+      <p>{t('account.travellers.summary.progress', { done, total })}</p>
+      <DeadlineNote view={travellers} />
+      {href ? <p><Link href={href}>{t(travellers.editable ? 'account.travellers.summary.manage' : 'account.travellers.summary.view')}</Link></p> : null}
+    </section>
   );
 }
