@@ -6,7 +6,7 @@ import { actorOf } from '../../platform/access/actor';
 import { RequiresModule } from '../../platform/flags/requires-module.guard';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
-import { VisitRateLimitGuard } from './rate-limit.guard';
+import { VisitDeduper, VisitRateLimitGuard } from './rate-limit.guard';
 import { REPORTS_MODULE, REPORTS_PERMISSIONS as P } from './manifest';
 import { ReportsService } from './reports.service';
 import type { Caller } from './reports.service';
@@ -18,11 +18,17 @@ const uuid = () => new ParseUUIDPipe();
 /** The anonymous visit counter. Nothing identifies the visitor, and the answer is the same for any slug. */
 @Controller('analytics')
 export class AnalyticsPublicController {
-  constructor(@Inject(ReportsService) private readonly service: ReportsService) {}
+  constructor(
+    @Inject(ReportsService) private readonly service: ReportsService,
+    @Inject(VisitDeduper) private readonly deduper: VisitDeduper,
+  ) {}
 
   @Post('race-events') @HttpCode(204) @UseGuards(VisitRateLimitGuard)
   @Public('a race slug and a kind (view or builder); counts one anonymous visit and answers the same for any slug')
-  async raceEvent(@Body(new ZodPipe(raceEventSchema)) b: In<typeof raceEventSchema>) { await this.service.recordEvent(b); }
+  async raceEvent(@Body(new ZodPipe(raceEventSchema)) b: In<typeof raceEventSchema>, @Req() req: ApiRequest) {
+    // The same address counts once per race and kind in half an hour; the answer is the same either way.
+    if (this.deduper.first(req.ip, b.raceSlug, b.kind)) await this.service.recordEvent(b);
+  }
 }
 
 /** The funnel and the report builder. 404 while the `reports` module flag is off. */

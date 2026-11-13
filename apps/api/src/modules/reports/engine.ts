@@ -64,7 +64,7 @@ export class ReportEngine {
       JOIN "race_editions" e ON e."id" = b."editionId"
       JOIN "races" r ON r."id" = e."raceId"
       ${g.joins}
-      WHERE r."deletedAt" IS NULL AND ${requestedDay} BETWEEN ${from}::date AND ${to}::date ${raceFilter('r."id"')}
+      WHERE r."deletedAt" IS NULL AND NOT r."isDemo" AND NOT b."isDemo" AND ${requestedDay} BETWEEN ${from}::date AND ${to}::date ${raceFilter('r."id"')}
       GROUP BY 1, 2`);
     for (const b of booked) add(b.key, b.label, { requests: b.requests, bookings: b.requests, approved: b.approved, declined: b.declined, expired: b.expired, cancelled: b.cancelled, paid: b.paid });
 
@@ -73,7 +73,7 @@ export class ReportEngine {
       const seen = await tx.$queryRaw<Array<{ key: string; label: string; views: number; builder: number }>>(Prisma.sql`
         SELECT ${sg.key} AS key, ${sg.label} AS label, COALESCE(sum(s."views"), 0)::int AS views, COALESCE(sum(s."builderUses"), 0)::int AS builder
         FROM "race_daily_stats" s JOIN "races" r ON r."id" = s."raceId"
-        WHERE r."deletedAt" IS NULL AND s."day" BETWEEN ${from}::date AND ${to}::date ${raceFilter('r."id"')}
+        WHERE r."deletedAt" IS NULL AND NOT r."isDemo" AND s."day" BETWEEN ${from}::date AND ${to}::date ${raceFilter('r."id"')}
         GROUP BY 1, 2`);
       for (const s of seen) add(s.key, s.label, { views: s.views, builder_uses: s.builder });
     }

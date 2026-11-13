@@ -27,6 +27,7 @@ CREATE TABLE "saved_reports" (
     "scheduleStartedAt" TIMESTAMPTZ(3),
     "version" INTEGER NOT NULL DEFAULT 0,
     "deletedAt" TIMESTAMPTZ(3),
+    "deletedById" UUID,
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ(3) NOT NULL,
 
@@ -65,6 +66,7 @@ ALTER TABLE "saved_reports"
   ADD CONSTRAINT "saved_reports_schedule_object" CHECK ("schedule" IS NULL OR jsonb_typeof("schedule") = 'object'),
   ADD CONSTRAINT "saved_reports_schedule_started" CHECK (("schedule" IS NULL) OR ("scheduleStartedAt" IS NOT NULL)),
   ADD CONSTRAINT "saved_reports_recipients_cap" CHECK (cardinality("recipientUserIds") <= 20),
+  ADD CONSTRAINT "saved_reports_deleted_together" CHECK (("deletedAt" IS NULL) = ("deletedById" IS NULL)),
   ADD CONSTRAINT "saved_reports_version_check" CHECK ("version" >= 0);
 ALTER TABLE "report_runs"
   ADD CONSTRAINT "report_runs_counts_check" CHECK ("emailsQueued" >= 0 AND "recipientsSkipped" >= 0),
@@ -73,7 +75,8 @@ ALTER TABLE "report_runs"
 
 -- Reports are never deleted, only marked (runs point at them); counters and runs are never deleted by the API.
 REVOKE DELETE, TRUNCATE ON "saved_reports" FROM mt_app;
-REVOKE DELETE, TRUNCATE ON "report_runs" FROM mt_app;
+-- A run is written once and never changed.
+REVOKE UPDATE, DELETE, TRUNCATE ON "report_runs" FROM mt_app;
 REVOKE DELETE, TRUNCATE ON "race_daily_stats" FROM mt_app;
 
 -- Queue (pg-boss), as declared in src/platform/jobs/queues.ts.

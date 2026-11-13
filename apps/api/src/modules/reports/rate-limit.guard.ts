@@ -3,10 +3,11 @@ import { WindowLimiter } from '../../platform/auth/attempt-limiter';
 import { tooManyRequests } from '../../platform/http/api-error';
 import type { ApiRequest } from '../../platform/http/request-context';
 
-/** Visits per minute and address. Generous, because until the hosting task names the proxies in front of the web app, every visitor shares one address. */
-export const VISITS_PER_MINUTE = 600;
+/** Visit requests per minute and address. In production the address is the visitor's (the proxy hops are set), so this is a per-person cap. */
+export const VISITS_PER_MINUTE = 60;
+/** The same visitor counts once per race and kind in this long: a reload or a script cannot raise the numbers. */
+export const VISIT_DEDUPE_MS = 30 * 60_000;
 
-/** A cap on the anonymous visit counter (task 7.7), in memory like the other limits. */
 @Injectable()
 export class VisitRateLimitGuard implements CanActivate {
   private readonly limiter = new WindowLimiter(VISITS_PER_MINUTE, 60_000);
@@ -15,5 +16,19 @@ export class VisitRateLimitGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<ApiRequest>();
     if (!this.limiter.allow(`race-event:${req.ip ?? 'unknown'}`)) throw tooManyRequests(60);
     return true;
+  }
+}
+
+/**
+ * Remembers, in memory only and in a bounded cache, that an address already counted for a race and kind. Nothing is
+ * stored in the database and the key is forgotten after the window. Per API instance, so it is a guide, not a proof.
+ */
+@Injectable()
+export class VisitDeduper {
+  private readonly seen = new WindowLimiter(1, VISIT_DEDUPE_MS);
+
+  /** True the first time in the window. */
+  first(ip: string | undefined, raceSlug: string, kind: string, now: number = Date.now()): boolean {
+    return this.seen.allow(`${ip ?? 'unknown'}|${raceSlug}|${kind}`, now);
   }
 }

@@ -50,6 +50,8 @@ model SavedReport {
   /// @nopii soft delete only (the API role has no DELETE on this table, migration 0024)
   deletedAt         DateTime?    @db.Timestamptz(3)
   /// @nopii
+  deletedById       String?      @db.Uuid
+  /// @nopii
   createdAt         DateTime     @default(now()) @db.Timestamptz(3)
   /// @nopii
   updatedAt         DateTime     @updatedAt @db.Timestamptz(3)

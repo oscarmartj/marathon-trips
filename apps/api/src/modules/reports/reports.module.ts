@@ -12,7 +12,7 @@ import { AnalyticsPublicController, ReportsAdminController } from './controller'
 import { ReportEmails } from './emails';
 import { ReportEngine } from './engine';
 import { REPORTS_MODULE, reportsManifest } from './manifest';
-import { VisitRateLimitGuard } from './rate-limit.guard';
+import { VisitDeduper, VisitRateLimitGuard } from './rate-limit.guard';
 import { ReportsService } from './reports.service';
 import { ReportScheduler } from './scheduler';
 
@@ -23,7 +23,7 @@ import { ReportScheduler } from './scheduler';
 @Module({
   imports: [CommonModule],
   controllers: [AnalyticsPublicController, ReportsAdminController],
-  providers: [VisitRateLimitGuard, ReportsService, ReportEngine, ReportScheduler, ReportEmails],
+  providers: [VisitRateLimitGuard, VisitDeduper, ReportsService, ReportEngine, ReportScheduler, ReportEmails],
   exports: [ReportEngine],
 })
 export class ReportsModule implements OnModuleInit, OnApplicationBootstrap {

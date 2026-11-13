@@ -174,7 +174,7 @@ function Builder({ catalogue, editing, onSaved, onCancel }: { catalogue: Catalog
             <fieldset className="field">
               <legend>{t('admin.reports.fields.recipients')}</legend>
               <p className="field__hint">{t('admin.reports.recipientsHint')}</p>
-              {catalogue.recipients.map((r) => (
+              {(catalogue.recipients ?? []).map((r) => (
                 <label key={r.id} className="field--check">
                   <input type="checkbox" checked={form.recipientUserIds.includes(r.id)} onChange={(e) => setForm(toggleRecipient(form, r.id, e.target.checked))} /> {r.email}
                 </label>

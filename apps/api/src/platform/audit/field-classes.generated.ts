@@ -956,6 +956,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     scheduleStartedAt: 'nopii',
     version: 'nopii',
     deletedAt: 'nopii',
+    deletedById: 'nopii',
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },

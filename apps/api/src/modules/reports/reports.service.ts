@@ -39,14 +39,15 @@ export class ReportsService {
    * Counts one visit. Anonymous: only a race and a day are kept. A slug that is not a published race counts nothing,
    * and the caller cannot tell the difference.
    */
-  async recordEvent(input: z.infer<typeof raceEventSchema>, now: Date = new Date()): Promise<void> {
+  async recordEvent(input: z.infer<typeof raceEventSchema>, now: Date = new Date()): Promise<boolean> {
     const race = await this.prisma.race.findFirst({ where: { slug: input.raceSlug, status: 'published', deletedAt: null, isDemo: false }, select: { id: true } });
-    if (!race) return;
+    if (!race) return false;
     const day = todayInBusinessZone(now);
     const [views, builder] = input.kind === 'view' ? [1, 0] : [0, 1];
     await this.prisma.$executeRaw`
       INSERT INTO "race_daily_stats" ("raceId", "day", "views", "builderUses") VALUES (${race.id}::uuid, ${day}::date, ${views}, ${builder})
       ON CONFLICT ("raceId", "day") DO UPDATE SET "views" = "race_daily_stats"."views" + ${views}, "builderUses" = "race_daily_stats"."builderUses" + ${builder}`;
+    return true;
   }
 
   // ---- Funnel ----
@@ -64,7 +65,8 @@ export class ReportsService {
     const eff = await this.access.effectiveFor(this.prisma, auth);
     const [races, staff] = await Promise.all([
       this.prisma.race.findMany({ where: { deletedAt: null }, select: { id: true, name: true, slug: true }, orderBy: { createdAt: 'desc' }, take: 500 }),
-      this.recipientCandidates(),
+      // Staff addresses and the access checks behind them are for people who can choose recipients.
+      eff.keys.has(P.manage) ? this.recipientCandidates() : Promise.resolve([]),
     ]);
     return {
       entities: (Object.keys(REPORT_ENTITY_CATALOGUE) as Array<keyof typeof REPORT_ENTITY_CATALOGUE>).map((entity) => ({
@@ -184,7 +186,7 @@ export class ReportsService {
     await this.prisma.$transaction(async (tx) => {
       const before = await this.lock(tx, id);
       if (before.version !== version) throw conflict('version_conflict', 'Someone else changed this report. Reload and try again.');
-      const row = await tx.savedReport.update({ where: { id }, data: { deletedAt: new Date(), schedule: Prisma.DbNull, scheduleStartedAt: null, recipientUserIds: [], version: { increment: 1 } } });
+      const row = await tx.savedReport.update({ where: { id }, data: { deletedAt: new Date(), deletedById: caller.actor.id, schedule: Prisma.DbNull, scheduleStartedAt: null, recipientUserIds: [], version: { increment: 1 } } });
       await this.audit.record(tx, { actor: caller.actor, action: 'reports.report.deleted', entityType: 'SavedReport', entityId: id, model: 'SavedReport', before: audited(before), after: audited(row) });
     });
   }

@@ -51,13 +51,17 @@ export class ReportEmails {
 
   private async render(ctx: RenderContext): Promise<RenderedMail> {
     const runId = ctx.email.relatedEntityType === 'ReportRun' ? ctx.email.relatedEntityId : null;
-    const run = runId ? await ctx.tx.reportRun.findUnique({ where: { id: runId }, select: { scheduledFor: true, report: { select: { id: true, name: true, definition: true, deletedAt: true } } } }) : null;
+    const run = runId ? await ctx.tx.reportRun.findUnique({ where: { id: runId }, select: { scheduledFor: true, report: { select: { id: true, name: true, definition: true, deletedAt: true, ownerUserId: true, recipientUserIds: true } } } }) : null;
     if (!run || run.report.deletedAt) throw new AppError(MAIL_NOT_SENDABLE, 'The report is gone');
     const def = reportDefinitionSchema.safeParse(run.report.definition);
     if (!def.success) throw new AppError(MAIL_NOT_SENDABLE, 'The report is no longer valid');
     const user = await ctx.tx.user.findFirst({ where: { email: ctx.email.to, kind: 'staff', status: 'active', anonymisedAt: null }, select: { id: true } });
     const eff = user ? await this.access.effective(ctx.tx, user.id) : null;
     if (!eff || !eff.keys.has(P.read) || !eff.keys.has(entityPermission(def.data.entity))) throw new AppError(MAIL_NOT_SENDABLE, 'The recipient can no longer see this report');
+    // Sent only while the report still names this person and its owner can still see the data.
+    if (!user || !run.report.recipientUserIds.includes(user.id)) throw new AppError(MAIL_NOT_SENDABLE, 'The recipient is no longer on this report');
+    const ownerEff = await this.access.effective(ctx.tx, run.report.ownerUserId);
+    if (!ownerEff.keys.has(P.read) || !ownerEff.keys.has(entityPermission(def.data.entity))) throw new AppError(MAIL_NOT_SENDABLE, 'The owner of the report can no longer see its data');
     const result = await this.engine.run(ctx.tx, def.data, run.scheduledFor);
     const link = `${new URL(this.config.WEB_ORIGIN).origin}/admin/reports`;
     return { subject: `Report: ${run.report.name}`, text: formatReportText(run.report.name, result, link) };

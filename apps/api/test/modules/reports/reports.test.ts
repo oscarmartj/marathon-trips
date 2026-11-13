@@ -2,9 +2,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { REPORT_ENTITY_CATALOGUE } from '@mt/shared';
 import { REPORTS_PERMISSIONS as P, reportsManifest } from '../../../src/modules/reports';
 import { ReportScheduler } from '../../../src/modules/reports/scheduler';
+import { ReportsService } from '../../../src/modules/reports/reports.service';
+import { VISIT_DEDUPE_MS, VISITS_PER_MINUTE, VisitDeduper } from '../../../src/modules/reports/rate-limit.guard';
 import { FeatureFlagService } from '../../../src/platform/flags/flags.service';
 import { MailService } from '../../../src/platform/mail/mail.service';
-import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
+import { STATE_HEADERS, TestApp, makeApp, signInCustomer } from '../../support/auth';
 import { Client, CATALOGUE_AND_PRICING, World, announceEdition, buildWorld, closeCatalogue, staffClient } from '../../support/catalogue';
 import { insertValidSchedule } from '../../support/payments';
 import { makeBookingFor } from '../../support/bookings';
@@ -40,6 +42,7 @@ async function publishedWorld(): Promise<World> {
   expect((await announceEdition(admin, w.edition.id)).status).toBe(200);
   return w;
 }
+const service = () => t.app.get(ReportsService);
 const stats = (raceId: string) => t.prisma.raceDailyStat.findMany({ where: { raceId } });
 const sum = async (raceId: string, f: 'views' | 'builderUses') => (await stats(raceId)).reduce((n, r) => n + r[f], 0);
 
@@ -73,8 +76,8 @@ describe('visits', () => {
   it('a published race counts views and builder uses, nothing else is stored', async () => {
     const w = await publishedWorld();
     expect((await beacon({ raceSlug: w.race.slug, kind: 'view' })).status).toBe(204);
-    expect((await beacon({ raceSlug: w.race.slug, kind: 'view' })).status).toBe(204);
     expect((await beacon({ raceSlug: w.race.slug, kind: 'builder' })).status).toBe(204);
+    await service().recordEvent({ raceSlug: w.race.slug, kind: 'view' });
     expect(await sum(w.race.id, 'views')).toBe(2);
     expect(await sum(w.race.id, 'builderUses')).toBe(1);
     expect(await stats(w.race.id)).toHaveLength(1);
@@ -82,9 +85,37 @@ describe('visits', () => {
     expect(cols).toEqual(['builderUses', 'day', 'raceId', 'views']);
   });
 
+  it('the same address counts once per race and kind in half an hour, and the answer does not change', async () => {
+    const w = await publishedWorld();
+    const other = await publishedWorld();
+    for (let i = 0; i < 5; i++) expect((await beacon({ raceSlug: w.race.slug, kind: 'view' })).status).toBe(204);
+    expect(await sum(w.race.id, 'views')).toBe(1);
+    expect((await beacon({ raceSlug: w.race.slug, kind: 'builder' })).status).toBe(204);
+    expect((await beacon({ raceSlug: other.race.slug, kind: 'view' })).status).toBe(204);
+    expect(await sum(w.race.id, 'builderUses')).toBe(1);
+    expect(await sum(other.race.id, 'views')).toBe(1);
+    // A header the proxy setting does not trust does not make a new visitor.
+    expect((await t.http().post('/analytics/race-events').set(STATE_HEADERS).set('X-Forwarded-For', '203.0.113.9').send({ raceSlug: w.race.slug, kind: 'view' })).status).toBe(204);
+    expect(await sum(w.race.id, 'views')).toBe(1);
+  });
+
+  it('the deduper is per address, race and kind, forgets after the window and is bounded', () => {
+    const d = new VisitDeduper();
+    const t0 = 1_000_000;
+    expect(d.first('a', 'r', 'view', t0)).toBe(true);
+    expect(d.first('a', 'r', 'view', t0 + 1)).toBe(false);
+    expect(d.first('b', 'r', 'view', t0)).toBe(true);
+    expect(d.first('a', 'r', 'builder', t0)).toBe(true);
+    expect(d.first('a', 'r2', 'view', t0)).toBe(true);
+    expect(d.first('a', 'r', 'view', t0 + VISIT_DEDUPE_MS - 1)).toBe(false);
+    expect(d.first('a', 'r', 'view', t0 + VISIT_DEDUPE_MS + 2)).toBe(true);
+    for (let i = 0; i < 12_000; i++) d.first(`ip${i}`, 'r', 'view', t0);
+    expect(d.first('ip0', 'r', 'view', t0)).toBe(true); // the oldest entries were dropped, so memory stays bounded
+  });
+
   it('concurrent visits are all counted', async () => {
     const w = await publishedWorld();
-    await Promise.all(Array.from({ length: 12 }, (_, i) => beacon({ raceSlug: w.race.slug, kind: i % 3 === 0 ? 'builder' : 'view' })));
+    await Promise.all(Array.from({ length: 12 }, (_, i) => service().recordEvent({ raceSlug: w.race.slug, kind: i % 3 === 0 ? 'builder' : 'view' })));
     expect(await sum(w.race.id, 'views')).toBe(8);
     expect(await sum(w.race.id, 'builderUses')).toBe(4);
   });
@@ -94,10 +125,17 @@ describe('visits', () => {
     const gone = await publishedWorld();
     const demo = await publishedWorld();
     await t.prisma.$executeRawUnsafe(`UPDATE races SET "deletedAt" = now(), "deletedById" = (SELECT id FROM users LIMIT 1) WHERE id = '${gone.race.id}'::uuid`);
-    await t.prisma.$executeRawUnsafe(`UPDATE races SET "isDemo" = true WHERE id = '${demo.race.id}'::uuid`).catch(() => undefined);
-    for (const slug of [draft.race.slug, gone.race.slug, 'no-such-race']) expect((await beacon({ raceSlug: slug, kind: 'view' })).status).toBe(204);
+    // Demo data can never be published (a CHECK); if the database ever allows it, the counter still ignores it.
+    const flagged = await t.prisma.$executeRawUnsafe(`UPDATE races SET "isDemo" = true WHERE id = '${demo.race.id}'::uuid`).then(() => true, () => false);
+    for (const slug of [draft.race.slug, gone.race.slug, demo.race.slug, 'no-such-race']) expect((await beacon({ raceSlug: slug, kind: 'view' })).status).toBe(204);
     expect(await sum(draft.race.id, 'views')).toBe(0);
     expect(await sum(gone.race.id, 'views')).toBe(0);
+    expect(flagged ? await sum(demo.race.id, 'views') : -1).toBe(flagged ? 0 : -1);
+    // The report side leaves demo races out too, whatever the counters hold.
+    if (flagged) {
+      await t.prisma.$executeRawUnsafe(`INSERT INTO race_daily_stats ("raceId", day, views) VALUES ('${demo.race.id}'::uuid, CURRENT_DATE, 7)`);
+      expect((await preview(admin, funnelDef([demo.race.id]))).rows).toEqual([]);
+    }
   });
 
   it('refuses a body with more than a slug and a kind', async () => {
@@ -156,11 +194,16 @@ describe('access', () => {
 
   it('the catalogue says which entities the caller may use and lists only staff who can read reports as recipients', async () => {
     const limited = await staffClient(t, [P.read]);
-    const cat = must(await limited.get('/admin/reports/catalogue'), 'catalogue').body as { entities: Array<{ entity: string; allowed: boolean }>; recipients: Array<{ id: string; email: string }> };
+    type Cat = { entities: Array<{ entity: string; allowed: boolean }>; recipients: Array<{ id: string; email: string }> };
+    const cat = must(await limited.get('/admin/reports/catalogue'), 'catalogue').body as Cat;
     expect(cat.entities.map((e) => [e.entity, e.allowed])).toEqual([['funnel', false], ['bookings', false]]);
-    expect(cat.recipients.some((r) => r.id === limited.staff.id)).toBe(true);
+    // Staff addresses go only to someone who can choose recipients.
+    expect(cat.recipients).toEqual([]);
+    const manager = await staffClient(t, [P.read, P.manage]);
+    const full = must(await manager.get('/admin/reports/catalogue'), 'catalogue').body as Cat;
+    expect(full.recipients.some((r) => r.id === limited.staff.id)).toBe(true);
     const noReports = await staffClient(t, [BOOKING_READ]);
-    expect(cat.recipients.some((r) => r.id === noReports.staff.id)).toBe(false);
+    expect(full.recipients.some((r) => r.id === noReports.staff.id)).toBe(false);
   });
 });
 
@@ -275,6 +318,8 @@ describe('saved reports', () => {
     // Never removed from the table, and the API role cannot remove it.
     expect(await t.prisma.savedReport.count({ where: { id: r.id, deletedAt: { not: null } } })).toBe(1);
     await expect(t.prisma.$executeRawUnsafe(`DELETE FROM saved_reports WHERE id = '${r.id}'::uuid`)).rejects.toThrow();
+    expect((await t.prisma.savedReport.findUniqueOrThrow({ where: { id: r.id } })).deletedById).toBe(admin.staff.id);
+    await expect(t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "deletedById" = NULL WHERE id = '${r.id}'::uuid`)).rejects.toThrow();
   });
 
   it('recipients must be active staff who can read reports and the data; they need a schedule', async () => {
@@ -292,8 +337,8 @@ describe('saved reports', () => {
     expect((await make([ok.staff.id], null)).body).toMatchObject({ code: 'report_schedule_required' });
     expect((await make([ok.staff.id, ok.staff.id])).status).toBe(422);
     // A customer's user id is not a recipient either.
-    const cust = await t.prisma.user.findFirstOrThrow({ where: { kind: 'customer' }, select: { id: true } }).catch(() => null);
-    if (cust) expect((await make([cust.id])).status).toBe(422);
+    const cust = await signInCustomer(t);
+    expect((await make([cust.userId])).status).toBe(422);
   });
 
   it('changing the schedule restarts its clock; changing only the name does not', async () => {
@@ -304,7 +349,10 @@ describe('saved reports', () => {
     const renamed = must(await admin.patch(`/admin/reports/${r.id}`, { name: 'Clock 2', version: 0 }), 'rename').body;
     expect(await started()).toBe(Date.parse('2027-01-01T00:00:00Z'));
     must(await admin.patch(`/admin/reports/${r.id}`, { schedule: { frequency: 'monthly', dayOfMonth: 2, time: '09:00' }, version: renamed.version }), 'reschedule');
-    expect(await started()).toBeGreaterThan(first - 1);
+    // The clock restarted at the change: no longer the old value, and not in the future.
+    expect(await started()).not.toBe(Date.parse('2027-01-01T00:00:00Z'));
+    expect(await started()).toBeLessThanOrEqual(Date.now());
+    expect(await started()).toBeGreaterThanOrEqual(first);
     const cleared = must(await admin.patch(`/admin/reports/${r.id}`, { schedule: null, version: 2 }), 'clear').body;
     expect(cleared.schedule).toBeNull();
     expect((await t.prisma.savedReport.findUniqueOrThrow({ where: { id: r.id } })).scheduleStartedAt).toBeNull();
@@ -435,6 +483,30 @@ describe('scheduled sending', () => {
     expect(t.mail.sent.filter((m) => m.subject.startsWith('Report: Sched'))).toHaveLength(0);
   });
 
+  it('a queued email is refused when the person was taken off the report or its owner lost the data', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const b = await staffClient(t, [P.read, P.funnelRead]);
+    const owner = await staffClient(t, [...ALL_REPORTS]);
+    const r = must(await owner.post('/admin/reports', { name: `Sched ${Date.now()}`, definition: funnelDef([]), schedule: WED, recipientUserIds: [a.staff.id, b.staff.id] }), 'create').body as { id: string; version: number };
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "scheduleStartedAt" = '2027-01-01T00:00:00Z' WHERE id = '${r.id}'::uuid`);
+    await tick();
+    const mails = await emailsOf((await runsOf(r.id))[0]!.id);
+    // a is taken off the report; the owner of the report then loses the funnel permission for b's email.
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "recipientUserIds" = ARRAY['${b.staff.id}']::uuid[] WHERE id = '${r.id}'::uuid`);
+    const mail = t.app.get(MailService);
+    expect(await mail.processSend(mails.find((m) => m.to === a.staff.email)!.id)).toBe('failed');
+    await t.prisma.$executeRawUnsafe(`DELETE FROM user_roles WHERE "userId" = '${owner.staff.id}'::uuid`);
+    expect(await mail.processSend(mails.find((m) => m.to === b.staff.email)!.id)).toBe('failed');
+  });
+
+  it('a run is written once: the API role cannot change it', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await tick();
+    const run = (await runsOf(id))[0]!;
+    await expect(t.prisma.$executeRawUnsafe(`UPDATE report_runs SET "emailsQueued" = 9 WHERE id = '${run.id}'::uuid`)).rejects.toThrow();
+  });
+
   it('with the module off nothing is made', async () => {
     const a = await staffClient(t, [P.read, P.funnelRead]);
     const id = await scheduled([a]);
@@ -445,5 +517,15 @@ describe('scheduled sending', () => {
       await setFlag(true);
     }
     expect(await runsOf(id)).toHaveLength(0);
+  });
+});
+
+describe('visit rate limit', () => {
+  it('one address cannot send more than the limit in a minute', async () => {
+    expect(VISITS_PER_MINUTE).toBe(60);
+    const statuses: number[] = [];
+    for (let i = 0; i < VISITS_PER_MINUTE + 2; i++) statuses.push((await beacon({ raceSlug: `no-such-race-${i}`, kind: 'view' })).status);
+    expect(statuses[0]).toBe(204);
+    expect(statuses.at(-1)).toBe(429);
   });
 });
