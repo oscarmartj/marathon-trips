@@ -95,6 +95,12 @@ describe('the list of my bookings', () => {
     await t.prisma.customer.updateMany({ where: { userId: me.userId }, data: { deletedAt: new Date() } });
     expect((await detail(mine.reference, me)).status).toBe(404);
     expect((await doc(mine.reference, 'confirmation', me)).status).toBe(404);
+    const other = await customerClient(t);
+    const theirs = await customerBookingIn(t, other, 'confirmed');
+    await t.prisma.customer.updateMany({ where: { userId: other.userId }, data: { anonymisedAt: new Date() } });
+    expect((await detail(theirs.reference, other)).status).toBe(404);
+    expect((await doc(theirs.reference, 'confirmation', other)).status).toBe(404);
+    expect((await list(other)).body).toEqual({ items: [] });
   });
 
   it('signed out is 401 on every customer-area route', async () => {

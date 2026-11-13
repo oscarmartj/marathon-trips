@@ -524,6 +524,27 @@ describe('limits', () => {
   }, 300_000);
 });
 
+describe('payment starts through a link (review round 2)', () => {
+  it('payment_link_starts_rate_limited_like_customer_starts: past the hourly start limit per token it is 429', async () => {
+    const own = await makeApp({ PAYMENT_ATTEMPTS_PER_HOUR_PER_USER: '3' });
+    try {
+      const staff = await paymentsStaff(own);
+      const b = await approvedBooking(own, staff, await pricedWorld(staff), await payingCustomer(own));
+      const res = await staff.post(`/admin/payments/bookings/${b.bookingId}/payment-links`, {});
+      const before = own.mail.sent.length;
+      await own.app.get(MailService).processSend((await own.prisma.outboundEmail.findUniqueOrThrow({ where: { dedupeKey: `payment-link:${res.body.id}` } })).id);
+      const token = TOKEN_IN_MAIL.exec(own.mail.sent.slice(before).map((m) => m.text).join('\n'))![1]!;
+      const statuses: number[] = [];
+      for (let i = 0; i < 4; i++) statuses.push((await own.http().post('/payment-links/payments').set(STATE_HEADERS).set('Idempotency-Key', randomUUID()).send({ token, method: 'card' })).status);
+      expect(statuses).toEqual([201, 201, 201, 429]);
+      // Viewing is not a start: it still works.
+      expect((await own.http().post('/payment-links/view').set(STATE_HEADERS).send({ token })).status).toBe(200);
+    } finally {
+      await own.close();
+    }
+  });
+});
+
 describe('logs', () => {
   it('link_token_never_logged_or_echoed: logs, audit and every 4xx body of /payment-links/*', async () => {
     const loud = await makeApp({}, { allLogs: true });

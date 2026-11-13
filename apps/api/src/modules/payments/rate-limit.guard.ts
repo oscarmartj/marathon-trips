@@ -60,3 +60,26 @@ export class PaymentLinkRateLimitGuard implements CanActivate {
     return true;
   }
 }
+
+/**
+ * Payment starts through a link (task 5.1, review round 2): the same hourly limits as a signed-in customer's starts
+ * (plan 3.1, section 7), per IP and per link token in place of the user, so one link holder cannot drive the gateway.
+ */
+@Injectable()
+export class PaymentLinkStartRateLimitGuard implements CanActivate {
+  private readonly perToken: WindowLimiter;
+  private readonly perIp: WindowLimiter;
+
+  constructor(@Inject(APP_CONFIG) config: AppConfig) {
+    this.perToken = new WindowLimiter(config.PAYMENT_ATTEMPTS_PER_HOUR_PER_USER, 3_600_000);
+    this.perIp = new WindowLimiter(config.PAYMENT_ATTEMPTS_PER_HOUR_PER_IP, 3_600_000);
+  }
+
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<ApiRequest>();
+    if (!this.perIp.allow(`payment-link-start:ip:${req.ip ?? 'unknown'}`)) throw tooManyRequests(3600);
+    const token = (req.body as { token?: unknown } | undefined)?.token;
+    if (!this.perToken.allow(`payment-link-start:token:${looksLikeToken(token) ? tokenHash(token) : 'malformed'}`)) throw tooManyRequests(3600);
+    return true;
+  }
+}

@@ -13,7 +13,7 @@ import { PaymentAttemptsService } from './core/attempts.service';
 import { TermsService } from './core/terms.service';
 import { PaymentWebhooksService } from './core/webhooks.service';
 import { PAYMENTS_PERMISSIONS as P } from './manifest';
-import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard } from './rate-limit.guard';
+import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
 import { PaymentLinksService } from './core/payment-links.service';
 import { PaymentAdminService } from './admin.service';
 
@@ -100,6 +100,7 @@ export class PaymentLinksController {
   }
 
   @Post('payments')
+  @UseGuards(PaymentLinkStartRateLimitGuard)
   @Public('payment link holders: start (or resume) the payment of the link\'s plan item; the amount is the plan\'s')
   pay(@Body(new ZodPipe(paymentLinkPaySchema)) b: In<typeof paymentLinkPaySchema>, @Headers('idempotency-key') key: string | undefined) {
     if (!key || !IDEMPOTENCY_KEY.test(key)) throw unprocessable('idempotency_key_required', 'Send an Idempotency-Key header (16 to 64 letters, digits or hyphens)');
