@@ -1,18 +1,20 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { DashboardView } from '@mt/shared';
+import { api } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
 import { bookingPath, editionPath, formatInstant, presentSections, racePath, tripLine } from '@/lib/dashboard-panel';
 import { formatMinor } from '@/lib/supplier-format';
 import { Status } from '../../auth/field';
-import { Section, formatDay, useLoad } from '../catalogue/kit';
+import { Section, catalogueError, formatDay } from '../catalogue/kit';
 
 type Sections = DashboardView['sections'];
 
 function NewRequests({ data }: { data: NonNullable<Sections['newRequests']> }) {
   return (
     <Section id="dash-requests" title={t('admin.dashboard.requests.title')}>
-      <p role="status">{t('admin.dashboard.requests.summary', { count: data.total })}</p>
+      <p>{t('admin.dashboard.requests.summary', { count: data.total })}</p>
       {data.items.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
@@ -46,7 +48,7 @@ function NewRequests({ data }: { data: NonNullable<Sections['newRequests']> }) {
 function PendingPayments({ data }: { data: NonNullable<Sections['pendingPayments']> }) {
   return (
     <Section id="dash-payments" title={t('admin.dashboard.payments.title')}>
-      <p role="status">{t('admin.dashboard.payments.summary', { overdue: data.overdue, dueSoon: data.dueSoon, days: data.horizonDays })}</p>
+      <p>{t('admin.dashboard.payments.summary', { overdue: data.overdue, dueSoon: data.dueSoon, days: data.horizonDays })}</p>
       {data.truncated ? <p className="field__hint">{t('admin.dashboard.payments.truncated')}</p> : null}
       {data.items.length === 0 ? null : (
         <div className="table-wrap">
@@ -83,7 +85,7 @@ function PendingPayments({ data }: { data: NonNullable<Sections['pendingPayments
 function Tasks({ data }: { data: NonNullable<Sections['tasks']> }) {
   return (
     <Section id="dash-tasks" title={t('admin.dashboard.tasks.title')}>
-      <p role="status">{t('admin.dashboard.tasks.summary', { overdue: data.overdue, dueSoon: data.dueSoon })}</p>
+      <p>{t('admin.dashboard.tasks.summary', { overdue: data.overdue, dueSoon: data.dueSoon })}</p>
       {data.items.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
@@ -116,7 +118,7 @@ function Tasks({ data }: { data: NonNullable<Sections['tasks']> }) {
 function Stock({ data }: { data: NonNullable<Sections['stock']> }) {
   return (
     <Section id="dash-stock" title={t('admin.dashboard.stock.title')}>
-      <p role="status">{t('admin.dashboard.stock.summary', { count: data.lowCount })}</p>
+      <p>{t('admin.dashboard.stock.summary', { count: data.lowCount })}</p>
       {data.items.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
@@ -150,7 +152,7 @@ function Stock({ data }: { data: NonNullable<Sections['stock']> }) {
 function Subscribers({ data }: { data: NonNullable<Sections['subscribers']> }) {
   return (
     <Section id="dash-subscribers" title={t('admin.dashboard.subscribers.title')}>
-      <p role="status">{t('admin.dashboard.subscribers.summary', { confirmed: data.confirmed, pending: data.pending })}</p>
+      <p>{t('admin.dashboard.subscribers.summary', { confirmed: data.confirmed, pending: data.pending })}</p>
       {data.races.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
@@ -198,10 +200,21 @@ export function DashboardSections({ view }: { view: DashboardView }) {
   );
 }
 
-/** The staff start page (task 5.6): what needs attention today. */
+/** The staff start page (task 5.6). Someone without the permission gets the friendly empty state, not an error. */
 export function DashboardPanel() {
-  const { data, error } = useLoad<DashboardView>('/admin/dashboard');
+  const [view, setView] = useState<DashboardView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    void api<DashboardView>('/admin/dashboard').then((r) => {
+      if (!current) return;
+      if (r.status === 200) setView(r.body as unknown as DashboardView);
+      else if (r.status === 403) setView({ today: '', generatedAt: '', sections: {} });
+      else setError(catalogueError(r));
+    });
+    return () => { current = false; };
+  }, []);
   if (error) return <Status message={error} />;
-  if (!data) return <p role="status">{t('admin.common.loading')}</p>;
-  return <DashboardSections view={data} />;
+  if (!view) return <p role="status">{t('admin.common.loading')}</p>;
+  return <DashboardSections view={view} />;
 }

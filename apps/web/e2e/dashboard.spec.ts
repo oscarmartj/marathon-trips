@@ -32,6 +32,7 @@ test('dashboard_shows_sections_and_an_overdue_task', async ({ page }) => {
   const yesterday = new Date(Date.now() - 86_400_000).toISOString();
   const task = await page.request.post('/api/admin/tasks', { headers: { 'X-MT-CSRF': '1', Origin: 'http://localhost:3000' }, data: { title: `Chase the hotel ${run}`, dueAt: yesterday } });
   expect(task.status()).toBe(201);
+  const taskId = ((await task.json()) as { id: string }).id;
 
   await page.reload();
   const board = page.getByTestId('dashboard');
@@ -45,6 +46,12 @@ test('dashboard_shows_sections_and_an_overdue_task', async ({ page }) => {
   await expect(row).toBeVisible();
   await expect(row.getByText('Overdue')).toBeVisible();
   await expect(tasks.getByRole('link', { name: 'Open all tasks' })).toHaveAttribute('href', '/admin/tasks');
+
+  // Close it, so a reused database never fills the list of eight with leftovers.
+  const done = await page.request.patch(`/api/admin/tasks/${taskId}`, { headers: { 'X-MT-CSRF': '1', Origin: 'http://localhost:3000' }, data: { version: 0, status: 'done' } });
+  expect(done.status()).toBe(200);
+  await page.reload();
+  await expect(board.getByRole('row', { name: new RegExp(`Chase the hotel ${run}`) })).toHaveCount(0);
 });
 
 // The API refuses what the page would show to someone without the permission, whatever the page does.

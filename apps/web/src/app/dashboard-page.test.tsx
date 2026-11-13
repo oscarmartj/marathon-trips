@@ -71,6 +71,10 @@ describe('the staff start page', () => {
     expect(none).toContain('Your role does not include any start page sections');
   });
 
+  it('summaries are plain text: no live regions that a screen reader would announce on every load', () => {
+    expect(renderToStaticMarkup(<DashboardSections view={full} />)).not.toContain('role="status"');
+  });
+
   it('empty lists show the summary only, with no empty table', () => {
     const html = renderToStaticMarkup(<DashboardSections view={{ ...full, sections: { newRequests: { total: 0, items: [] }, subscribers: { confirmed: 0, pending: 0, races: [] } } }} />);
     expect(text(html)).toContain('Requests waiting for an answer: 0.');
