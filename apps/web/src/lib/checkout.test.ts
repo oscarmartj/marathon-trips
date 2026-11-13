@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { startPaymentSchema } from '@mt/shared';
-import { acceptTermsBody, checkoutErrorKey, isBookingReference, notPayableKey, outcomeOf, safeRedirect, startPaymentBody } from './checkout';
+import { acceptTermsBody, checkoutErrorKey, isBookingReference, notPayableKey, outcomeOf, refreshErrorOf, safeRedirect, startPaymentBody } from './checkout';
 import { messageCatalogue, t } from './i18n';
 
 describe('checkout request bodies', () => {
@@ -77,4 +77,16 @@ describe('what the return page may say', () => {
     ['succeeded', 'paid'], ['created', 'processing'], ['pending', 'processing'], ['requires_action', 'processing'],
     ['failed', 'failed'], ['cancelled', 'failed'], ['expired', 'failed'], ['voided', 'failed'], [null, 'none'],
   ])('%s is %s', (status, expected) => expect(outcomeOf(view(status))).toBe(expected));
+});
+
+describe('what the return page says when the refresh call fails', () => {
+  it.each([
+    [401, undefined, 'signedOut'], [404, undefined, 'signedOut'], [503, 'payment_processing_delayed', 'delayed'], [503, 'provider_unavailable', 'unavailable'],
+    [503, undefined, 'unavailable'], [409, 'payment_attempt_in_progress', 'unavailable'], [429, undefined, 'network'], [500, undefined, 'network'],
+  ])('%s %s is %s', (status, code, expected) => expect(refreshErrorOf(status, code)).toBe(expected));
+
+  it('every kind has words', () => {
+    const m = messageCatalogue().paymentReturn as Record<string, string>;
+    for (const k of ['signedOut', 'delayed', 'unavailable', 'network']) expect(m[k]).toBeTruthy();
+  });
 });

@@ -77,3 +77,13 @@ export const formatInstant = (iso: string): string =>
 
 /** A fresh idempotency key: 36 characters of hex and hyphens, inside the API's 16 to 64 rule. */
 export const newIdempotencyKey = (): string => globalThis.crypto.randomUUID();
+
+export type RefreshError = 'signedOut' | 'delayed' | 'unavailable' | 'network';
+
+/** What the return page says when the refresh call is not a 200: a 503 "being processed", other 503 and 409 "not answering". */
+export function refreshErrorOf(status: number, code: string | undefined): RefreshError {
+  if (status === 401 || status === 404) return 'signedOut';
+  if (status === 503) return code === 'payment_processing_delayed' ? 'delayed' : 'unavailable';
+  if (status === 409) return 'unavailable';
+  return 'network';
+}

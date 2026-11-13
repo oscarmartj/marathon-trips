@@ -35,6 +35,8 @@ describe('checkout page', () => {
     expect(text(html)).toContain('A payment is already waiting for you.');
     const radios = html.match(/<input[^>]*type="radio"[^>]*>/g) ?? [];
     expect(radios.filter((r) => /checked/.test(r)).map((r) => /value="([a-z_]+)"/.exec(r)![1])).toEqual(['payid_transfer']);
+    const created = text(renderToStaticMarkup(<CheckoutForm plan={plan({ liveAttempt: { ...live, status: 'created' } })} initialTerms={terms()} />));
+    expect(created).toContain('A payment is already waiting for you.');
     const pending = text(renderToStaticMarkup(<CheckoutForm plan={plan({ liveAttempt: { ...live, status: 'pending' } })} initialTerms={terms()} />));
     expect(pending).toContain('is being processed');
   });

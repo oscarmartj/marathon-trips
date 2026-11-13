@@ -108,7 +108,7 @@ export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; in
           ))}
         </dl>
         {plan.nextPayable ? <p><strong>{t('checkout.payNow', { amount: formatMoney(plan.nextPayable.amountMinor, plan.currency) })}</strong></p> : null}
-        {plan.liveAttempt ? <p className="notice" role="status">{t(plan.liveAttempt.status === 'requires_action' ? 'checkout.attempt.open' : 'checkout.attempt.pending')}</p> : null}
+        {plan.liveAttempt ? <p className="notice" role="status">{t(plan.liveAttempt.status === 'requires_action' || plan.liveAttempt.status === 'created' ? 'checkout.attempt.open' : 'checkout.attempt.pending')}</p> : null}
         {plan.depositDueBy ? <p>{t('checkout.payNowUntil', { when: formatInstant(plan.depositDueBy) })}</p> : null}
       </section>
 

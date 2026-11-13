@@ -61,10 +61,11 @@ export class TermsService {
 
   /** Records the acceptance of the current text for this booking; accepting the same text again changes nothing. */
   async accept(reference: string, body: AcceptTerms, actor: AuditActor): Promise<{ version: number; acceptedAt: string }> {
-    const b = await readBookingForPayments(this.prisma, { reference });
-    if (!b) throw notFound();
-    if (!PAYABLE_STATES.includes(b.status)) throw conflict('booking_not_payable', 'This booking cannot take a payment in its current state');
     return runTransaction(this.prisma, async (tx) => {
+      // Read inside the transaction, so the state and the customer are those at the moment of the insert.
+      const b = await readBookingForPayments(tx, { reference });
+      if (!b) throw notFound();
+      if (!PAYABLE_STATES.includes(b.status)) throw conflict('booking_not_payable', 'This booking cannot take a payment in its current state');
       const terms = await this.current(tx as unknown as Pick<PrismaService, 'contentPage'>);
       if (!terms) throw unavailable();
       if (terms.version !== body.version || terms.digest !== body.digest) throw conflict('terms_changed', 'The booking terms have changed since you opened this page. Read them again.');

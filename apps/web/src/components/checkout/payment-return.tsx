@@ -5,10 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PaymentRefreshView } from '@mt/shared';
 import { Status } from '@/components/auth/field';
 import { api } from '@/lib/api-client';
-import { REFRESH_EVERY_MS, REFRESH_MAX_TRIES, outcomeOf } from '@/lib/checkout';
+import { REFRESH_EVERY_MS, REFRESH_MAX_TRIES, outcomeOf, refreshErrorOf } from '@/lib/checkout';
+import type { RefreshError } from '@/lib/checkout';
 import { t } from '@/lib/i18n';
 
-type Answer = { view: PaymentRefreshView } | { error: 'signedOut' | 'network' | 'delayed' | 'unavailable' };
+type Answer = { view: PaymentRefreshView } | { error: RefreshError };
 
 /**
  * Where the customer lands after the provider's page (task 3.5). The address only names the booking; what is said about
@@ -26,10 +27,7 @@ export function PaymentReturn({ reference }: { reference: string }) {
     try {
       const r = await api<PaymentRefreshView>(`/booking-requests/${encodeURIComponent(reference)}/payments/refresh`, { method: 'POST', body: {} });
       if (r.status === 200) setAnswer({ view: r.body as PaymentRefreshView });
-      else if (r.status === 401 || r.status === 404) setAnswer({ error: 'signedOut' });
-      else if (r.status === 503) setAnswer({ error: r.body.code === 'payment_processing_delayed' ? 'delayed' : 'unavailable' });
-      else if (r.status === 409) setAnswer({ error: 'unavailable' });
-      else setAnswer({ error: 'network' });
+      else setAnswer({ error: refreshErrorOf(r.status, r.body.code) });
     } catch {
       setAnswer({ error: 'network' });
     } finally {
