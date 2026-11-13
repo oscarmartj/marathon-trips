@@ -150,6 +150,11 @@ export class PaymentStateMachine {
     if (LIVE_STATUSES.includes(from) && !live) await this.tasks.closeSystemIn(tx, `payments:unresolved:${p.id}`);
     if (to === 'succeeded' && (from === 'failed' || from === 'cancelled' || from === 'expired')) await this.lateSuccess(tx, p, from, bookingReference);
     if (to === 'succeeded') {
+      // A payment link serves once (task 5.1, review G1): the link an attempt was started through is used up in the same
+      // transaction as the money (lock order Booking → Payment → PaymentLink). A revoked link stays revoked.
+      await tx.$executeRaw`
+        UPDATE payment_links SET status = 'used', "usedAt" = clock_timestamp()
+        WHERE status = 'active' AND id = (SELECT "paymentLinkId" FROM payments WHERE id = ${p.id}::uuid)`;
       await this.checkOverpayment(tx, p, bookingReference);
       await this.applyCoverage(tx, booking, p);
     }

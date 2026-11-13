@@ -7,6 +7,7 @@ import { PAYMENT_EVENTS } from './core/attempt-state';
 export const PAYMENTS_PERMISSIONS = {
   paymentRead: 'payments.payment.read',
   accountRead: 'payments.providerAccount.read',
+  paymentLinkSend: 'payments.paymentLink.send',
 } as const;
 
 const def = (key: string, description: string): PermissionDef => ({ key, module: 'payments', description, requiresStepUp: false, apiKeyScopable: false });
@@ -18,6 +19,7 @@ export const paymentsManifest = {
   permissions: [
     def(PAYMENTS_PERMISSIONS.paymentRead, "See a booking's payment plan, payment attempts and gateway events (never card data or raw bodies)"),
     def(PAYMENTS_PERMISSIONS.accountRead, 'See payment gateway accounts and their adapter status (never credentials)'),
+    def(PAYMENTS_PERMISSIONS.paymentLinkSend, "Email a customer a single-use link to pay the next item of their booking's plan, and revoke such links"),
   ] satisfies PermissionDef[],
   publishes: Object.values(PAYMENT_EVENTS),
   subscribes: [] as string[],

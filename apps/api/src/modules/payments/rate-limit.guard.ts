@@ -1,3 +1,4 @@
+import { looksLikeToken, tokenHash } from '../../platform/auth/tokens';
 import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import type { AppConfig } from '../../platform/config/config';
 import { APP_CONFIG } from '../../platform/database/prisma.service';
@@ -37,6 +38,25 @@ export class CheckoutRateLimitGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<ApiRequest>();
     if (!this.perIp.allow(`checkout:ip:${req.ip ?? 'unknown'}`)) throw tooManyRequests(3600);
     if (!this.perUser.allow(`checkout:user:${req.auth?.userId ?? 'none'}`)) throw tooManyRequests(3600);
+    return true;
+  }
+}
+
+/**
+ * Payment link calls (task 5.1): per IP, and per token so one leaked link cannot be hammered from many addresses. The
+ * token is only hashed here, never kept or logged. In memory, like the other limits.
+ */
+@Injectable()
+export class PaymentLinkRateLimitGuard implements CanActivate {
+  private readonly perIp = new WindowLimiter(300, 3_600_000);
+  private readonly perToken = new WindowLimiter(60, 3_600_000);
+
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<ApiRequest>();
+    if (!this.perIp.allow(`payment-link:ip:${req.ip ?? 'unknown'}`)) throw tooManyRequests(3600);
+    const token = (req.body as { token?: unknown } | undefined)?.token;
+    const key = looksLikeToken(token) ? tokenHash(token) : 'malformed';
+    if (!this.perToken.allow(`payment-link:token:${key}`)) throw tooManyRequests(3600);
     return true;
   }
 }

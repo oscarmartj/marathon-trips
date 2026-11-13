@@ -48,8 +48,8 @@ ALTER TABLE "payment_links"
     ("status" = 'used') = ("usedAt" IS NOT NULL) AND ("status" = 'revoked') = ("revokedAt" IS NOT NULL)),
   ADD CONSTRAINT "payment_links_expiry_check" CHECK ("expiresAt" > "createdAt");
 
--- A link is never deleted; only active -> used or revoked; the token hash is set once while active, or cleared with a
--- revocation (erasure); everything else is fixed at creation (review m5).
+-- A link is never deleted; only active -> used or revoked; the token hash is set once while active, or cleared when the
+-- link is revoked or already used (erasure); everything else is fixed at creation (review m5).
 CREATE FUNCTION public.mt_payment_link_guard() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, public, pg_temp
@@ -76,8 +76,8 @@ BEGIN
   END IF;
   IF NEW."tokenHash" IS DISTINCT FROM OLD."tokenHash" AND NOT (
        (OLD."tokenHash" IS NULL AND NEW."tokenHash" IS NOT NULL AND OLD."status" = 'active' AND NEW."status" = 'active')
-    OR (NEW."tokenHash" IS NULL AND NEW."status" = 'revoked')) THEN
-    RAISE EXCEPTION 'a payment link token is set once while active, or cleared when revoked' USING ERRCODE = 'check_violation';
+    OR (NEW."tokenHash" IS NULL AND NEW."status" IN ('revoked', 'used') AND (OLD."status" = NEW."status" OR NEW."status" = 'revoked'))) THEN
+    RAISE EXCEPTION 'a payment link token is set once while active, or cleared once it is revoked or used' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END;

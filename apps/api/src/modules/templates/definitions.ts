@@ -92,6 +92,16 @@ export const TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [
     ],
     starter: { subject: 'Automation: {{ruleName}}', body: ['The automation “{{ruleName}}” ran.', '', 'Record: {{reference}} {{adminLink}}', '', '{{brandName}}'].join('\n') },
   },
+  // Task 5.1: the payment link staff send. No amount (the page shows the live one); the link is the token, minted when
+  // the email is sent, and must stay in the body.
+  {
+    channel: 'email', key: 'payments.payment_link', label: 'Payment link (single use, sent by staff)',
+    variables: [GIVEN, REFERENCE, TRIP, v('expiresAt', 'When the link stops working (Brisbane time)', '1 December 2026, 5:00 pm'), v('link', 'The single-use payment link', 'https://example.test/pay#token=sample'), BRAND],
+    starter: {
+      subject: 'Your payment link for booking {{reference}}',
+      body: ['Hi {{givenName}},', '', 'Here is a link to make the next payment for your booking {{reference}}: {{trip}}.', '', 'It works once, until {{expiresAt}} (Brisbane time). The page shows the amount due.', '', '{{link}}', '', 'Please do not forward this email: anyone with the link can make this payment.', '', '{{brandName}}'].join('\n'),
+    },
+  },
   { channel: 'document', key: 'confirmation', label: 'Booking confirmation', variables: documentVars, starter: documentStarter('Booking confirmation', 'This confirms the booking below.') },
   { channel: 'document', key: 'itinerary', label: 'Itinerary', variables: documentVars, starter: { subject: 'Your itinerary', body: ['Your itinerary for {{trip}}.', '', '{{itinerary}}', '', 'Booking reference: {{reference}}', '', '{{brandName}}'].join('\n') } },
   { channel: 'document', key: 'voucher', label: 'Voucher', variables: documentVars, starter: documentStarter('Voucher', 'Show this voucher at check-in.') },
