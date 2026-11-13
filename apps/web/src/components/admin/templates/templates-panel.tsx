@@ -12,7 +12,7 @@ import { Section, useLoad } from '../catalogue/kit';
 interface Preview {
   subject: string | null;
   body: string | null;
-  problems: Array<{ field: 'subject' | 'body'; kind: 'unknown_variable' | 'malformed'; name?: string }>;
+  problems: Array<{ field: 'subject' | 'body'; kind: 'unknown_variable' | 'malformed' | 'body_only_variable' | 'missing_variable'; name?: string }>;
 }
 
 function errorText(r: { status: number; body: { code?: string } }): string {
@@ -154,7 +154,11 @@ export function TemplatesPanel() {
                       <li key={i}>
                         {p.kind === 'unknown_variable'
                           ? t('admin.templates.problemUnknown', { field: t(p.field === 'subject' ? (channel === 'email' ? 'admin.templates.fieldSubject' : 'admin.templates.fieldTitle') : 'admin.templates.fieldBody'), name: p.name ?? '' })
-                          : t('admin.templates.problemMalformed', { field: t(p.field === 'subject' ? (channel === 'email' ? 'admin.templates.fieldSubject' : 'admin.templates.fieldTitle') : 'admin.templates.fieldBody') })}
+                          : p.kind === 'body_only_variable'
+                            ? t('admin.templates.problemBodyOnly', { name: p.name ?? '' })
+                            : p.kind === 'missing_variable'
+                              ? t('admin.templates.problemMissing', { name: p.name ?? '' })
+                              : t('admin.templates.problemMalformed', { field: t(p.field === 'subject' ? (channel === 'email' ? 'admin.templates.fieldSubject' : 'admin.templates.fieldTitle') : 'admin.templates.fieldBody') })}
                       </li>
                     ))}
                   </ul>

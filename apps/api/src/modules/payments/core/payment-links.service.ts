@@ -196,7 +196,13 @@ export class PaymentLinksService {
     const link = `${new URL(this.config.WEB_ORIGIN).origin}/pay#token=${minted.token}`;
     const values = { givenName: b.customer.givenName, reference: b.reference, trip, expiresAt: dateTime(minted.expiresAt), link };
     const custom = await this.templates.renderEmail(ctx.tx, PAYMENT_LINK_TEMPLATE.key, ctx.email.locale, values);
-    if (custom) return { subject: custom.subject, text: custom.text };
+    if (custom) {
+      // The subject is stored with the email and shown in the panel: it must never carry the token, and the body must
+      // carry the link (review round 1, point 1). The template checks refuse such wording; this is the last guard, and
+      // throwing rolls back the token minted above.
+      if (custom.subject.includes(minted.token) || !custom.text.includes(link)) throw new AppError(MAIL_NOT_SENDABLE, 'The payment link wording must put the link in the body and never in the subject');
+      return { subject: custom.subject, text: custom.text };
+    }
     return {
       subject: `Your payment link for booking ${b.reference}`,
       text: [

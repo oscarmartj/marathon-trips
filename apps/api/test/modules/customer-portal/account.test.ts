@@ -83,6 +83,20 @@ describe('the list of my bookings', () => {
     expect((await list(me)).body).toEqual({ items: [] });
   });
 
+  it('a staff session is refused on every customer-area route, and a closed customer reads nothing', async () => {
+    const { reference } = await customerBookingIn(t, c, 'confirmed');
+    for (const path of ['/account/bookings', `/account/bookings/${reference}`, `/account/bookings/${reference}/documents/confirmation`]) {
+      const res = await admin.get(path);
+      expect([path, res.status === 401 || res.status === 403]).toEqual([path, true]);
+    }
+    const me = await customerClient(t);
+    const mine = await customerBookingIn(t, me, 'confirmed');
+    expect((await detail(mine.reference, me)).status).toBe(200);
+    await t.prisma.customer.updateMany({ where: { userId: me.userId }, data: { deletedAt: new Date() } });
+    expect((await detail(mine.reference, me)).status).toBe(404);
+    expect((await doc(mine.reference, 'confirmation', me)).status).toBe(404);
+  });
+
   it('signed out is 401 on every customer-area route', async () => {
     const { reference } = await customerBookingIn(t, c, 'confirmed');
     for (const path of ['/account/bookings', `/account/bookings/${reference}`, `/account/bookings/${reference}/documents/confirmation`]) {

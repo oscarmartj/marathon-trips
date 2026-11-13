@@ -10,6 +10,10 @@ export interface TemplateVariable {
   description: string;
   /** Made-up value for the preview. Never a real customer's. */
   sample: string;
+  /** Never in the subject, which is stored with the email and shown in the panel (task 5.1: a payment link's token). */
+  bodyOnly?: boolean;
+  /** Must be in the body (task 5.1: an email that minted a payment link has to carry it). */
+  requiredInBody?: boolean;
 }
 
 export interface TemplateDefinition {
@@ -96,7 +100,7 @@ export const TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [
   // the email is sent, and must stay in the body.
   {
     channel: 'email', key: 'payments.payment_link', label: 'Payment link (single use, sent by staff)',
-    variables: [GIVEN, REFERENCE, TRIP, v('expiresAt', 'When the link stops working (Brisbane time)', '1 December 2026, 5:00 pm'), v('link', 'The single-use payment link', 'https://example.test/pay#token=sample'), BRAND],
+    variables: [GIVEN, REFERENCE, TRIP, v('expiresAt', 'When the link stops working (Brisbane time)', '1 December 2026, 5:00 pm'), { ...v('link', 'The single-use payment link (body only, required: it carries a secret token)', 'https://example.test/pay#token=sample'), bodyOnly: true, requiredInBody: true }, BRAND],
     starter: {
       subject: 'Your payment link for booking {{reference}}',
       body: ['Hi {{givenName}},', '', 'Here is a link to make the next payment for your booking {{reference}}: {{trip}}.', '', 'It works once, until {{expiresAt}} (Brisbane time). The page shows the amount due.', '', '{{link}}', '', 'Please do not forward this email: anyone with the link can make this payment.', '', '{{brandName}}'].join('\n'),
@@ -111,5 +115,11 @@ export const TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [
 export function definitionOf(channel: TemplateChannelValue, key: string): TemplateDefinition | undefined {
   return TEMPLATE_DEFINITIONS.find((d) => d.channel === channel && d.key === key);
 }
+
+/** The variable rules of a definition, for checkWording. */
+export const rulesOf = (d: TemplateDefinition) => ({
+  bodyOnly: d.variables.filter((x) => x.bodyOnly).map((x) => x.name),
+  requiredInBody: d.variables.filter((x) => x.requiredInBody).map((x) => x.name),
+});
 
 export const sampleValues = (d: TemplateDefinition): Record<string, string> => Object.fromEntries(d.variables.map((x) => [x.name, x.sample]));

@@ -211,9 +211,13 @@ export class PaymentAttemptsService {
         const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
         this.assertPayable(b, at);
         // Through a link: the link must still be active and in date, checked with the booking locked (Booking → PaymentLink).
+        // Its target must still be an active item of the plan, at the sequence the caller pays up to: a regenerated plan
+        // (superseded items) makes the link not found (review round 1, point 2).
         if (viaLink) {
           const link = await tx.$queryRaw<Array<{ ok: boolean }>>`
-            SELECT (status = 'active' AND "expiresAt" > ${at}) AS ok FROM payment_links WHERE id = ${viaLink}::uuid AND "bookingId" = ${b.id}::uuid FOR UPDATE`;
+            SELECT (l.status = 'active' AND l."expiresAt" > ${at} AND i.state = 'active' AND i.sequence = ${body.upToSequence ?? -1}) AS ok
+            FROM payment_links l JOIN payment_schedule_items i ON i.id = l."targetScheduleItemId" AND i."bookingId" = l."bookingId"
+            WHERE l.id = ${viaLink}::uuid AND l."bookingId" = ${b.id}::uuid FOR UPDATE OF l`;
           if (!link[0]?.ok) throw notFound('payment_link_not_found', 'This payment link is not valid');
         }
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });

@@ -147,8 +147,11 @@ describe('sending and revoking (staff)', () => {
     expect(await t.prisma.paymentLink.count({ where: { bookingId, status: 'active' } })).toBe(1);
     const active = await t.prisma.paymentLink.findFirstOrThrow({ where: { bookingId, status: 'active' } });
     const [s, r] = await Promise.all([send(bookingId), revoke(active.id)]);
-    expect([s.status, r.status]).toEqual([201, 200]);
-    expect(await t.prisma.paymentLink.count({ where: { bookingId, status: 'active' } })).toBeLessThanOrEqual(1);
+    // Whichever runs first (both lock the booking first), the old link ends revoked and the new one is the only active.
+    expect([s.status, s.body.status, r.status, r.body.status]).toEqual([201, 'active', 200, 'revoked']);
+    const after = await t.prisma.paymentLink.findMany({ where: { bookingId }, select: { id: true, status: true } });
+    expect(after.filter((x) => x.status === 'active').map((x) => x.id)).toEqual([s.body.id]);
+    expect(after.find((x) => x.id === active.id)!.status).toBe('revoked');
   });
 
   it('revoke is audited, idempotent, and a revoked link is 404', async () => {
@@ -208,7 +211,14 @@ describe('the token', () => {
       await owner.end();
     }
     answers.push(await view(l.token), await refresh(l.token), await pay(l.token));
-    for (const a of answers) expect([a.status, a.body]).toEqual([404, { code: 'payment_link_not_found', message: expect.any(String) }]);
+    // A revoked link, and a used one, answer exactly the same.
+    const r = await linked();
+    await revoke(r.linkId);
+    const u = await linked();
+    expect((await pay(u.token)).status).toBe(201);
+    expect((await succeedLatest(u.bookingId, u.token)).body.used).toBe(true);
+    answers.push(await view(r.token), await pay(r.token), await view(u.token), await pay(u.token));
+    for (const a of answers) expect([a.status, a.body]).toEqual([404, { code: 'payment_link_not_found', message: 'This payment link is not valid. It may have been used, replaced or expired.' }]);
     const bad = await t.http().post('/payment-links/view').set(STATE_HEADERS).send({ token: 'short-secret-value' });
     expect(bad.status).toBe(422);
     expect(JSON.stringify(bad.body)).not.toContain('short-secret-value');
@@ -258,7 +268,8 @@ describe('paying through a link', () => {
 
   it('link_cannot_pay_beyond_target and link_used_after_success_404: the deposit only, then the link is spent', async () => {
     const l = await linked();
-    const res = await pay(l.token);
+    const payKey = randomUUID();
+    const res = await pay(l.token, {}, payKey);
     expect(res.status).toBe(201);
     const [p] = await paymentsOf(l.bookingId);
     const deposit = await t.prisma.paymentScheduleItem.findFirstOrThrow({ where: { bookingId: l.bookingId, sequence: 1 } });
@@ -271,6 +282,10 @@ describe('paying through a link', () => {
     expect([row.status, row.usedAt !== null]).toEqual(['used', true]);
     expect((await view(l.token)).status).toBe(404);
     expect((await pay(l.token)).status).toBe(404);
+    // Even the key that started the paid attempt gets 404 once the link has served: the link is checked before the
+    // idempotency record is read, so a spent link replays nothing.
+    const replay = await pay(l.token, {}, payKey);
+    expect([replay.status, replay.body.code]).toEqual([404, 'payment_link_not_found']);
     // The balance is still due, and the spent link cannot reach it.
     expect((await c.plan(l.reference)).body.payable).toBe(true);
     expect(await paymentsOf(l.bookingId)).toHaveLength(1);
@@ -337,6 +352,31 @@ describe('paying through a link', () => {
     expect(await paymentsOf(m.bookingId)).toHaveLength(1);
   });
 
+  it('a regenerated plan (target item superseded) makes the link not found, also in the payment transaction', async () => {
+    const l = await linked();
+    const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await owner.connect();
+    try {
+      // The plan replaced by one with the same amounts: the link's item is superseded, a new one takes its sequence.
+      await owner.query('BEGIN');
+      const items = (await owner.query(`SELECT id, "scheduleId", kind, sequence, "amountMinor", "dueDate", currency FROM payment_schedule_items WHERE "bookingId" = $1::uuid ORDER BY sequence`, [l.bookingId])).rows;
+      await owner.query(`UPDATE payment_schedule_items SET state = 'superseded', "supersededInVersion" = 2 WHERE "bookingId" = $1::uuid`, [l.bookingId]);
+      await owner.query(`UPDATE payment_schedules SET version = 2 WHERE "bookingId" = $1::uuid`, [l.bookingId]);
+      for (const i of items) {
+        await owner.query(`INSERT INTO payment_schedule_items (id, "scheduleId", "bookingId", currency, kind, sequence, "planVersion", "amountMinor", "dueDate", "updatedAt") VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 2, $6, $7, now())`,
+          [i.scheduleId, l.bookingId, i.currency, i.kind, i.sequence, i.amountMinor, i.dueDate]);
+      }
+      await owner.query('COMMIT');
+    } finally {
+      await owner.end();
+    }
+    expect((await view(l.token)).status).toBe(404);
+    // The transaction's own check, reached directly (the route stops earlier).
+    const svc = t.app.get(PaymentAttemptsService);
+    await expect(svc.createOrResume(l.bookingId, { method: 'card', upToSequence: 1 }, { type: 'payment_link', id: l.linkId }, undefined, l.linkId)).rejects.toMatchObject({ code: 'payment_link_not_found' });
+    expect(await paymentsOf(l.bookingId)).toHaveLength(0);
+  });
+
   it('link_vs_checkout_concurrent_one_live_attempt', async () => {
     const l = await linked();
     const [a, b] = await Promise.all([pay(l.token), c.pay(l.reference, { method: 'card' })]);
@@ -356,6 +396,71 @@ describe('paying through a link', () => {
     expect(r.body.attempt.status).toBe('succeeded');
     expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: l.linkId } })).status).toBe('revoked');
     expect((await refresh(l.token)).status).toBe(404);
+  });
+});
+
+describe('the email wording (review round 1, point 1)', () => {
+  const tpl = async (subject: string, body: string) => {
+    await t.prisma.messageTemplate.updateMany({ where: { channel: 'email', key: 'payments.payment_link', status: 'active' }, data: { status: 'archived' } });
+    const last = await t.prisma.messageTemplate.aggregate({ where: { channel: 'email', key: 'payments.payment_link', locale: 'en-AU' }, _max: { revision: true } });
+    // Written straight to the table, as if an older check had let it through: the send step is the last guard.
+    return t.prisma.messageTemplate.create({ data: { channel: 'email', key: 'payments.payment_link', locale: 'en-AU', revision: (last._max.revision ?? 0) + 1, status: 'active', subject, body } });
+  };
+  const retire = (id: string) => t.prisma.messageTemplate.update({ where: { id }, data: { status: 'archived' } });
+  const templatesStaff = () => staffClient(t, ['templates.template.read', 'templates.template.manage', 'templates.template.publish']);
+
+  it('the panel refuses {{link}} in the subject and a body without {{link}}', async () => {
+    const staff = await templatesStaff();
+    const inSubject = await staff.post('/admin/templates/email', { key: 'payments.payment_link', subject: 'Pay {{reference}} {{link}}', body: 'Pay here: {{link}}' });
+    expect([inSubject.status, inSubject.body.code]).toEqual([422, 'template_wording_invalid']);
+    const noLink = await staff.post('/admin/templates/email', { key: 'payments.payment_link', subject: 'Pay {{reference}}', body: 'Sign in to pay.' });
+    expect([noLink.status, noLink.body.code]).toEqual([422, 'template_wording_invalid']);
+    const preview = await staff.post('/admin/templates/email/preview', { key: 'payments.payment_link', subject: 'Pay {{link}}', body: 'Nothing' });
+    expect(preview.body.problems).toEqual([{ field: 'subject', kind: 'body_only_variable', name: 'link' }, { field: 'body', kind: 'missing_variable', name: 'link' }]);
+  });
+
+  it('an active revision with {{link}} in the subject: the send fails, no token is minted and the subject keeps no token', async () => {
+    const row = await tpl('Pay {{reference}} {{link}}', 'Pay here: {{link}}');
+    try {
+      const { bookingId } = await booked();
+      const res = await send(bookingId);
+      const email = await emailOf(res.body.id);
+      const before = t.mail.sent.length;
+      expect(await t.app.get(MailService).processSend(email.id)).toBe('failed');
+      expect(t.mail.sent.length).toBe(before);
+      expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: res.body.id } })).tokenHash).toBeNull();
+      const stored = await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: email.id } });
+      expect(JSON.stringify(stored)).not.toMatch(/token=/);
+    } finally {
+      await retire(row.id);
+    }
+  });
+
+  it('an active revision without {{link}} in the body: the send fails and no token is minted', async () => {
+    const row = await tpl('Pay {{reference}}', 'Sign in to pay {{reference}}.');
+    try {
+      const { bookingId } = await booked();
+      const res = await send(bookingId);
+      expect(await t.app.get(MailService).processSend((await emailOf(res.body.id)).id)).toBe('failed');
+      expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: res.body.id } })).tokenHash).toBeNull();
+    } finally {
+      await retire(row.id);
+    }
+  });
+
+  it('a valid active revision is used, with the link in the body only', async () => {
+    const row = await tpl('Pay for {{reference}}', 'Hello {{givenName}}, pay here: {{link}} before {{expiresAt}}.');
+    try {
+      const { bookingId, reference } = await booked();
+      const res = await send(bookingId);
+      const before = t.mail.sent.length;
+      await t.app.get(MailService).processSend((await emailOf(res.body.id)).id);
+      const m = t.mail.sent.slice(before)[0]!;
+      expect(m.subject).toBe(`Pay for ${reference}`);
+      expect(m.text).toMatch(TOKEN_IN_MAIL);
+    } finally {
+      await retire(row.id);
+    }
   });
 });
 
@@ -403,6 +508,20 @@ describe('the table and erasure', () => {
     expect(rows.every((r) => r.status !== 'active' && r.tokenHash === null)).toBe(true);
     expect((await view(l.token)).status).toBe(404);
   });
+});
+
+describe('limits', () => {
+  it('payment_link_rate_limited_429 per IP: unknown tokens from one address are cut off too', async () => {
+    const own = await makeApp();
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 301; i++) statuses.push((await own.http().post('/payment-links/view').set(STATE_HEADERS).send({ token: randomUUID().replace(/-/g, '').padEnd(43, 'x') })).status);
+      expect(statuses.slice(0, 300).every((x) => x === 404)).toBe(true);
+      expect(statuses[300]).toBe(429);
+    } finally {
+      await own.close();
+    }
+  }, 300_000);
 });
 
 describe('logs', () => {

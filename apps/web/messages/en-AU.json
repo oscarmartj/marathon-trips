@@ -2393,7 +2393,9 @@
         "template_activation_conflict": "Someone else is changing this template. Reload and try again.",
         "template_too_long": "This document would run to more than 50 pages.",
         "forbidden": "You do not have permission to do this."
-      }
+      },
+      "problemBodyOnly": "The variable {name} can only go in the body: the subject is stored and shown in the panel, and this value is secret.",
+      "problemMissing": "The body must include the variable {name}."
     },
     "complaints": {
       "title": "Complaints",
