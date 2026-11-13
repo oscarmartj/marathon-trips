@@ -29,4 +29,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_16 = create();
   // Checkout with the payment simulator (checkout.spec.ts): an owner.
   process.env.E2E_STAFF_17 = create();
+  // Funnel and report builder (reports.spec.ts): an owner. Slot 18 belongs to the customer area (5.1).
+  process.env.E2E_STAFF_19 = create();
 }

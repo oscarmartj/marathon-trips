@@ -28,53 +28,53 @@ model RaceDailyStat {
 }
 
 model SavedReport {
-  id               String       @id @default(uuid(7)) @db.Uuid
+  id                String       @id @default(uuid(7)) @db.Uuid
   /// @pii free text typed by staff
-  name             String
+  name              String
   /// @nopii funnel or bookings
-  entity           ReportEntity
+  entity            ReportEntity
   /// @nopii columns, grouping, races and range from the closed catalogue (strict zod schema)
-  definition       Json
+  definition        Json
   /// @nopii { frequency, weekday | dayOfMonth, time } or null (strict zod schema)
-  schedule         Json?
+  schedule          Json?
   /// @nopii staff user ids; each is checked again when a run is made and when an email is sent
-  recipientUserIds String[]     @db.Uuid
-  ownerUserId      String       @db.Uuid
+  recipientUserIds  String[]     @db.Uuid
+  ownerUserId       String       @db.Uuid
   /// @nopii always staff (CHECK)
-  ownerKind        UserKind     @default(staff)
-  owner            User         @relation(fields: [ownerUserId, ownerKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  ownerKind         UserKind     @default(staff)
+  owner             User         @relation(fields: [ownerUserId, ownerKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii occurrences before this instant are never sent (set when the schedule is set or changed)
-  scheduleStartedAt DateTime?   @db.Timestamptz(3)
+  scheduleStartedAt DateTime?    @db.Timestamptz(3)
   /// @nopii optimistic lock
-  version          Int          @default(0)
+  version           Int          @default(0)
   /// @nopii soft delete only (the API role has no DELETE on this table, migration 0024)
-  deletedAt        DateTime?    @db.Timestamptz(3)
+  deletedAt         DateTime?    @db.Timestamptz(3)
   /// @nopii
-  createdAt        DateTime     @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime     @default(now()) @db.Timestamptz(3)
   /// @nopii
-  updatedAt        DateTime     @updatedAt @db.Timestamptz(3)
-  runs             ReportRun[]
+  updatedAt         DateTime     @updatedAt @db.Timestamptz(3)
+  runs              ReportRun[]
 
   @@index([ownerUserId])
   @@map("saved_reports")
 }
 
 model ReportRun {
-  id           String          @id @default(uuid(7)) @db.Uuid
-  reportId     String          @db.Uuid
-  report       SavedReport     @relation(fields: [reportId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id                String          @id @default(uuid(7)) @db.Uuid
+  reportId          String          @db.Uuid
+  report            SavedReport     @relation(fields: [reportId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii the scheduled instant this run is for
-  scheduledFor DateTime        @db.Timestamptz(3)
+  scheduledFor      DateTime        @db.Timestamptz(3)
   /// @nopii queued (emails were queued) or skipped
-  status       ReportRunStatus
+  status            ReportRunStatus
   /// @nopii code from a closed list
-  reasonCode   String?
+  reasonCode        String?
   /// @nopii how many emails were queued
-  emailsQueued Int             @default(0)
+  emailsQueued      Int             @default(0)
   /// @nopii how many recipients were left out
-  recipientsSkipped Int        @default(0)
+  recipientsSkipped Int             @default(0)
   /// @nopii
-  createdAt    DateTime        @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
 
   @@unique([reportId, scheduledFor])
   @@map("report_runs")

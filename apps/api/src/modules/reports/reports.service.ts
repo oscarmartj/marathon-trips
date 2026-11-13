@@ -77,10 +77,10 @@ export class ReportsService {
 
   /** Active staff who may read reports: the only people a report can be emailed to. */
   private async recipientCandidates(): Promise<Array<{ id: string; email: string }>> {
-    const users = await this.prisma.user.findMany({ where: { kind: 'staff', status: 'active', anonymisedAt: null }, select: { id: true, email: true }, orderBy: { email: 'asc' }, take: 200 });
+    const users = await this.prisma.user.findMany({ where: { kind: 'staff', status: 'active', anonymisedAt: null }, select: { id: true, email: true }, orderBy: { createdAt: 'desc' }, take: 200 });
     const out: Array<{ id: string; email: string }> = [];
     for (const u of users) if ((await this.access.effective(this.prisma, u.id)).keys.has(P.read)) out.push(u);
-    return out;
+    return out.sort((a, b) => a.email.localeCompare(b.email, 'en-AU'));
   }
 
   // ---- Saved reports ----
