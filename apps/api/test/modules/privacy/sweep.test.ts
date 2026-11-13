@@ -52,7 +52,7 @@ afterAll(async () => {
 const letters = (n: number) => Array.from(randomBytes(n), (b) => String.fromCharCode(97 + (b % 26))).join('');
 const TEXT_TYPES = new Set(['String', 'Json', 'Bytes']);
 const SENTINEL_DATE = '1901-02-03';
-const SENTINEL_INT = 987654;
+const SENTINEL_INT = 98765;
 const SENTINEL_CHAR = 'NR';
 
 type Planted = { table: string; column: string; ids: string[]; kind: 'marker' | 'date' | 'int' | 'char' };
@@ -71,6 +71,12 @@ async function richCustomer(marker: string) {
   const booking = await t.prisma.booking.findUniqueOrThrow({ where: { reference: res.body.reference as string }, select: { id: true, customerId: true } });
   await walkTo(t, booking.id, 'declined');
   const customerId = booking.customerId;
+
+  // Task 5.2: the traveller details of the booking, personal data the customer typed.
+  await t.prisma.traveller.create({
+    data: { bookingId: booking.id, customerId, slot: 1, givenName: `${marker}trav`, familyName: `${marker}eller`, dateOfBirth: new Date('1980-05-06'),
+      emergencyContactName: `${marker} contact`, emergencyContactPhone: '+61 400 222 333', estimatedFinishSeconds: 14400 },
+  });
 
   // Staff notes and tasks on the customer and the booking; a system task records its title in the audit log.
   for (const [entityType, entityId] of [['Customer', customerId], ['Booking', booking.id]] as const) {
@@ -179,6 +185,8 @@ describe('erasure_sweep_leaves_no_marker', () => {
     const { planted, refused } = await plantEverywhere(marker, a);
     // Something must have been planted in every registered table that has a personal text column and rows of A's.
     expect(planted.length).toBeGreaterThan(10);
+    // 5.2's travellers come in through the registry contract: their dates and numbers get sentinels too.
+    expect(planted.map((p) => `${p.table}.${p.column}`)).toEqual(expect.arrayContaining(['travellers.givenName', 'travellers.dateOfBirth', 'travellers.estimatedFinishSeconds', 'customers.countryOfResidence']));
     expect((await tablesWith(marker)).length).toBeGreaterThan(5);
     const money = async () => ({
       snapshots: await t.prisma.bookingSnapshot.count({ where: { booking: { customerId: a.customerId } } }),

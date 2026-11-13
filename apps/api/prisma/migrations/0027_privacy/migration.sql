@@ -145,14 +145,8 @@ CREATE TRIGGER complaints_customer_not_erased BEFORE INSERT OR UPDATE OF "custom
   FOR EACH ROW EXECUTE FUNCTION public.mt_customer_not_erased('customerId');
 CREATE TRIGGER outbound_emails_customer_not_erased BEFORE INSERT OR UPDATE OF "customerId" ON "outbound_emails"
   FOR EACH ROW EXECUTE FUNCTION public.mt_customer_not_erased('customerId');
--- Travellers come with task 5.2 (migration 0026). If this migration runs before that table exists, 5.2 adds the trigger.
-DO $$
-BEGIN
-  IF pg_catalog.to_regclass('public.travellers') IS NOT NULL THEN
-    EXECUTE 'CREATE TRIGGER travellers_customer_not_erased BEFORE INSERT OR UPDATE OF "customerId" ON "travellers" '
-         || 'FOR EACH ROW EXECUTE FUNCTION public.mt_customer_not_erased(''customerId'')';
-  END IF;
-END $$;
+CREATE TRIGGER travellers_customer_not_erased BEFORE INSERT OR UPDATE OF "customerId" ON "travellers"
+  FOR EACH ROW EXECUTE FUNCTION public.mt_customer_not_erased('customerId');
 
 -- ---- The active-trip rule (plan 5.5, section 2.2), shared by the API (for its 409) and privacy_erase_customer ----
 -- NULL when the customer may be erased; otherwise the reason code.
