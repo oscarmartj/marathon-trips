@@ -20,8 +20,9 @@ const STEP = `UPDATE bookings SET status = $2::"BookingStatus", version = versio
   WHERE id = $1::uuid`;
 
 /** Walks a requested booking to `to` by SQL (tests about what the customer sees in each status, not about how it got there). */
-export async function walkTo(t: TestApp, bookingId: string, to: BookingStatus): Promise<void> {
-  for (const s of PATH_TO[to]) {
+export async function walkTo(t: TestApp, bookingId: string, to: BookingStatus, from: BookingStatus = 'requested'): Promise<void> {
+  const done = new Set(PATH_TO[from]);
+  for (const s of PATH_TO[to].filter((x) => !done.has(x))) {
     await t.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(STEP, bookingId, s);
       if (s === 'approved') await insertValidSchedule(tx, bookingId);
