@@ -1,0 +1,276 @@
+// The data export, marketing consent and one-click unsubscribe (task 5.5, plan docs/plans/5.5-privacy-export-erase.md,
+// sections 2.4-2.7, 6, 7 and 10.9-10.10).
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { MARKETING_WORDING_KEY } from '@mt/shared';
+import { ConsentService } from '../../../src/modules/privacy';
+import { emailHash, unsubscribeToken } from '../../../src/platform/crypto/hmac';
+import { MailService } from '../../../src/platform/mail/mail.service';
+import { STATE_HEADERS, TestApp, makeApp, signInCustomer, uniqueEmail } from '../../support/auth';
+import { cleanBookingEvents, contact, requestBody } from '../../support/bookings';
+import { closeCatalogue } from '../../support/catalogue';
+import { pricedWorld } from '../../support/pricing';
+import type { PricedWorld } from '../../support/pricing';
+import { approvedBooking, cleanPayments, ensureTerms, onlyAccount, paymentsStaff, simulatorAccount } from '../../support/payments';
+import { privacyStaff, stepUpOld } from '../../support/privacy';
+import type { StaffHttp } from '../../support/privacy';
+
+vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
+
+let t: TestApp;
+let owner: StaffHttp;
+let admin: Awaited<ReturnType<typeof paymentsStaff>>;
+let w: PricedWorld;
+beforeAll(async () => {
+  t = await makeApp();
+  owner = await privacyStaff(t, { owner: true });
+  admin = await paymentsStaff(t);
+  await onlyAccount(t, (await simulatorAccount(t)).id);
+  await ensureTerms(t);
+  w = await pricedWorld(admin);
+});
+afterAll(async () => {
+  await cleanPayments(t);
+  await cleanBookingEvents(t);
+  await closeCatalogue(t);
+});
+
+type Who = { cookie: string; userId: string; email: string };
+const as = (who: Who) => ({
+  get: (path: string) => t.http().get(path).set('Cookie', who.cookie),
+  post: (path: string, body: object = {}) => t.http().post(path).set(STATE_HEADERS).set('Cookie', who.cookie).send(body),
+  put: (path: string, body: object) => t.http().put(path).set(STATE_HEADERS).set('Cookie', who.cookie).send(body),
+});
+
+/** A signed-in customer with a booking request (so a customer record), its names carrying `marker`. */
+async function bookedCustomer(marker: string): Promise<Who & { customerId: string; reference: string; bookingId: string }> {
+  const who = await signInCustomer(t, uniqueEmail(marker.toLowerCase()));
+  const res = await t.http().post('/booking-requests').set(STATE_HEADERS).set('Cookie', who.cookie).set('Idempotency-Key', randomUUID())
+    .send(requestBody(w, { contact: contact({ givenName: `${marker}given`, familyName: `${marker}family` }) }));
+  expect(res.status).toBe(201);
+  const b = await t.prisma.booking.findUniqueOrThrow({ where: { reference: res.body.reference as string }, select: { id: true, customerId: true, reference: true } });
+  return { ...who, customerId: b.customerId, reference: b.reference, bookingId: b.id };
+}
+
+const download = (who: Who) => as(who).get('/account/privacy/export').buffer(true).parse((res, cb) => {
+  let s = '';
+  res.on('data', (x: Buffer) => (s += x.toString('utf8')));
+  res.on('end', () => cb(null, s));
+});
+const parsed = (body: unknown) => JSON.parse(body as string) as Record<string, unknown>;
+
+describe('the customer download', () => {
+  it('anonymous 401; staff cannot use it; the route takes no id', async () => {
+    expect((await t.http().get('/account/privacy/export')).status).toBe(401);
+    expect((await owner.get('/account/privacy/export')).status).toBe(401);
+  });
+
+  it('only my data, no staff notes, no ids, hashes or tokens; JSON attachment that no cache keeps; nothing stored but the request', async () => {
+    const me = await bookedCustomer('Mine');
+    const other = await bookedCustomer('Theirs');
+    const complaint = await t.prisma.complaint.create({ data: { reference: 'CP-ABCDEF'.replace('ABCDEF', randomUUID().replace(/[^0-9]/g, '').slice(0, 6).replace(/./g, (d) => 'ABCDEFGHJK'[Number(d)]!)), customerId: me.customerId, complainantName: 'Mine Complainant', channel: 'email', category: 'service', summary: 'Mine summary', description: 'Mine words', receivedDate: new Date(), acknowledgeDueDate: new Date(), resolveDueDate: new Date(), createdById: owner.staff.id } });
+    for (const [entityType, entityId] of [['Customer', me.customerId], ['Booking', me.bookingId], ['Complaint', complaint.id]] as const) {
+      await t.prisma.note.create({ data: { entityType, entityId, body: `STAFFNOTE about ${entityType}`, authorId: owner.staff.id } });
+    }
+    const jobsBefore = await t.prisma.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM pgboss.job`);
+    const filesBefore = await t.prisma.storedFile.count();
+    const res = await download(me);
+    expect(res.status).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['content-type']).toMatch(/^application\/json/);
+    expect(res.headers['content-disposition']).toMatch(/^attachment; filename="marathon-trips-data-\d{4}-\d{2}-\d{2}\.json"$/);
+    const text = res.body as string;
+    const data = parsed(text);
+    expect(data.format).toBe('marathon-trips.personal-data.v1');
+    expect(text).toContain('Minegiven');
+    expect(text).toContain(me.reference);
+    expect(text).toContain('Mine words');
+    expect(text).not.toContain('STAFFNOTE');
+    expect(text).not.toContain('Theirsgiven');
+    expect(text).not.toContain(other.reference);
+    expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/); // no ids at all
+    expect(text).not.toMatch(/"[^"]*(Id|id|Hash|hash|token|Token|secret)":/);
+    expect((data.sections as Record<string, unknown>).Booking).toBeTruthy();
+    expect((await t.prisma.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM pgboss.job`))[0]!.n).toBe(jobsBefore[0]!.n);
+    expect(await t.prisma.storedFile.count()).toBe(filesBefore);
+    const req = await t.prisma.privacyRequest.findFirstOrThrow({ where: { customerId: me.customerId, kind: 'export' } });
+    expect(req).toMatchObject({ status: 'completed', requestedBy: 'customer' });
+    const log = await t.prisma.auditLog.findFirstOrThrow({ where: { action: 'privacy.export.generated', entityId: me.customerId }, include: { piiValues: true } });
+    expect(log.piiValues).toEqual([]);
+
+    // The owner: subject by default (no staff notes); full adds them for a formal access request.
+    const sub = await owner.get(`/admin/privacy/customers/${me.customerId}/export`);
+    expect(sub.status).toBe(200);
+    expect(sub.headers['cache-control']).toBe('no-store');
+    expect(JSON.stringify(sub.body)).not.toContain('STAFFNOTE');
+    const full = await owner.get(`/admin/privacy/customers/${me.customerId}/export?audience=full`);
+    const notes = (full.body.staffNotes as Array<{ text: string }>).map((n) => n.text).sort();
+    expect(notes).toEqual(['STAFFNOTE about Booking', 'STAFFNOTE about Complaint', 'STAFFNOTE about Customer']);
+    await stepUpOld(t, owner.staff.id);
+    expect((await owner.get(`/admin/privacy/customers/${me.customerId}/export`)).status).toBe(403);
+    owner = await privacyStaff(t, { owner: true });
+  });
+
+  it('rate limited: the sixth download in an hour is 429', async () => {
+    const me = await signInCustomer(t, uniqueEmail('limit'));
+    for (let i = 0; i < 5; i++) expect((await download(me)).status).toBe(200);
+    const r = await download(me);
+    expect(r.status).toBe(429);
+    expect(r.headers['retry-after']).toBeTruthy();
+  });
+
+  it('an account with no customer record exports its account data and the alerts of its address', async () => {
+    const me = await signInCustomer(t, uniqueEmail('nocust'));
+    await t.prisma.race.update({ where: { id: w.race.id }, data: { status: 'published' } });
+    expect((await t.http().post('/alerts/subscriptions').set(STATE_HEADERS).send({ email: me.email.toUpperCase(), raceSlug: w.race.slug })).status).toBe(202);
+    const data = parsed((await download(me)).body);
+    expect(data.account).toMatchObject({ email: me.email });
+    expect((data.sections as Record<string, unknown[]>).AlertSubscription).toHaveLength(1);
+  });
+});
+
+describe('marketing consent', () => {
+  const consent = (who: Who, granted: boolean, wordingKey = MARKETING_WORDING_KEY) => as(who).put('/account/privacy/marketing-consent', { granted, wordingKey });
+
+  it('none by default; accepting the booking terms records no consent; an outdated wording is 422', async () => {
+    const me = await bookedCustomer('Terms');
+    const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: me.bookingId } });
+    await admin.post(`/admin/bookings/${b.id}/approve`, { version: b.version });
+    const { acceptCurrentTerms } = await import('../../support/payments');
+    await acceptCurrentTerms(t, me, me.reference);
+    expect(await t.prisma.termsAcceptance.count({ where: { customerId: me.customerId } })).toBe(1);
+    expect(await t.prisma.consentRecord.count({ where: { customerId: me.customerId } })).toBe(0);
+    const view = await as(me).get('/account/privacy');
+    expect(view.body).toMatchObject({ hasCustomerRecord: true, marketingConsent: { granted: false, recordedAt: null }, wordingKey: MARKETING_WORDING_KEY, erasureRequest: null });
+    expect((await consent(me, true, 'marketing_email.v0')).status).toBe(422);
+    void approvedBooking;
+  });
+
+  it('grant and withdraw are recorded once each; withdrawal suppresses marketing only and keeps an `all` suppression; grant lifts only an unsubscribe', async () => {
+    const me = await bookedCustomer('Cons');
+    expect((await consent(me, true)).status).toBe(200);
+    expect((await consent(me, true)).status).toBe(200);
+    expect(await t.prisma.consentRecord.count({ where: { customerId: me.customerId } })).toBe(1);
+    expect((await as(me).get('/account/privacy')).body.marketingConsent.granted).toBe(true);
+    expect((await consent(me, false)).status).toBe(200);
+    expect((await consent(me, false)).status).toBe(200);
+    const rows = await t.prisma.consentRecord.findMany({ where: { customerId: me.customerId }, orderBy: { recordedAt: 'asc' } });
+    expect(rows.map((r) => [r.granted, r.source, r.wordingKey])).toEqual([[true, 'account', MARKETING_WORDING_KEY], [false, 'account', MARKETING_WORDING_KEY]]);
+    const hash = emailHash(t.config.EMAIL_HASH_KEY, me.email);
+    expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: hash } })).toMatchObject({ reason: 'unsubscribed', scope: 'marketing' });
+    // Marketing mail to the address is suppressed at send; transactional is not.
+    const mail = t.app.get(MailService);
+    const m = await t.prisma.$transaction((tx) => mail.enqueue({ to: me.email, templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `c:${randomUUID()}`, category: 'marketing' }, tx));
+    expect(await mail.processSend(m.id)).toBe('suppressed');
+    expect((await consent(me, true)).status).toBe(200);
+    expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: hash } })).toBeNull();
+    // A bounce is never downgraded or lifted.
+    await mail.addSuppression(me.email, 'bounced', 'all');
+    await mail.addSuppression(me.email, 'unsubscribed', 'marketing');
+    expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: hash } })).toMatchObject({ reason: 'bounced', scope: 'all' });
+    expect((await consent(me, false)).status).toBe(200);
+    expect((await consent(me, true)).status).toBe(200);
+    expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: hash } })).toMatchObject({ reason: 'bounced', scope: 'all' });
+  });
+
+  it('an account with no customer record keeps consent by address, and it carries over to the customer created later', async () => {
+    const me = await signInCustomer(t, uniqueEmail('later'));
+    expect((await as(me).get('/account/privacy')).body.hasCustomerRecord).toBe(false);
+    expect((await consent(me, true)).status).toBe(200);
+    const res = await t.http().post('/booking-requests').set(STATE_HEADERS).set('Cookie', me.cookie).set('Idempotency-Key', randomUUID()).send(requestBody(w));
+    expect(res.status).toBe(201);
+    const view = (await as(me).get('/account/privacy')).body;
+    expect(view).toMatchObject({ hasCustomerRecord: true, marketingConsent: { granted: true } });
+  });
+
+  it('the account page and an unsubscribe link racing on one address end consistent (advisory lock): last writer wins, one record each', async () => {
+    const me = await bookedCustomer('Race');
+    const mail = t.app.get(MailService);
+    const m = await t.prisma.$transaction((tx) => mail.enqueue({ to: me.email, templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `r:${randomUUID()}`, category: 'marketing', customerId: me.customerId }, tx));
+    const ref = `${m.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, m.id)}`;
+    await Promise.all([consent(me, true).then((r) => r), t.http().post(`/unsubscribe/${ref}`).then((r) => r)]);
+    const rows = await t.prisma.consentRecord.findMany({ where: { customerId: me.customerId }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
+    const state = await t.app.get(ConsentService).current(t.prisma, { customerId: me.customerId, emailHash: emailHash(t.config.EMAIL_HASH_KEY, me.email) });
+    expect(state.granted).toBe(rows.at(-1)!.granted);
+    const sup = await t.prisma.emailSuppression.findUnique({ where: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, me.email) } });
+    expect(!!sup).toBe(!state.granted);
+  });
+});
+
+describe('one-click unsubscribe', () => {
+  it('bad HMAC and unknown id are the same 404; GET changes nothing and redirects with a fragment; POST twice records once', async () => {
+    const me = await bookedCustomer('Unsub');
+    const mail = t.app.get(MailService);
+    const m = await t.prisma.$transaction((tx) => mail.enqueue({ to: me.email, templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `u:${randomUUID()}`, category: 'marketing', customerId: me.customerId }, tx));
+    const ref = `${m.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, m.id)}`;
+    const bad = await t.http().post(`/unsubscribe/${m.id}.${'0'.repeat(64)}`);
+    const unknownId = randomUUID();
+    const unknown = await t.http().post(`/unsubscribe/${unknownId}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, unknownId)}`);
+    expect([bad.status, unknown.status]).toEqual([404, 404]);
+    expect(bad.body).toEqual(unknown.body);
+    const page = await t.http().get(`/unsubscribe/${ref}`);
+    expect(page.status).toBe(303);
+    expect(page.headers.location).toBe(`http://localhost:3000/unsubscribe#ref=${ref}`);
+    expect(await t.prisma.consentRecord.count({ where: { customerId: me.customerId } })).toBe(0);
+    // No Origin, no CSRF header: a mail client's one-click POST.
+    expect((await t.http().post(`/unsubscribe/${ref}`).send('List-Unsubscribe=One-Click')).status).toBe(200);
+    expect((await t.http().post(`/unsubscribe/${ref}`)).status).toBe(200);
+    const rows = await t.prisma.consentRecord.findMany({ where: { customerId: me.customerId } });
+    expect(rows.map((r) => [r.granted, r.source])).toEqual([[false, 'unsubscribe_link']]);
+    expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, me.email) } })).toMatchObject({ scope: 'marketing' });
+  });
+
+  it('marketing_withdrawal_keeps_balance_reminders: a marketing suppression does not stop an automation email; an `all` one does', async () => {
+    // The automation action checks the suppression scope (7.4); its test of `all` is in automations.test.ts. Here: the
+    // rule itself, read from the same table the action reads.
+    const email = uniqueEmail('rem');
+    const mail = t.app.get(MailService);
+    await mail.addSuppression(email, 'unsubscribed', 'marketing');
+    expect(await mail.suppressionScope(email)).toBe('marketing');
+    const stops = await t.prisma.emailSuppression.findFirst({ where: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, email), scope: 'all' } });
+    expect(stops).toBeNull();
+    await mail.addSuppression(email, 'complaint', 'all');
+    expect(await mail.suppressionScope(email)).toBe('all');
+  });
+
+  it('marketing mail carries the one-click headers (RFC 8058)', async () => {
+    const me = await bookedCustomer('Hdr');
+    await t.prisma.race.update({ where: { id: w.race.id }, data: { status: 'published' } });
+    await t.prisma.alertSubscription.create({ data: { email: me.email, raceId: w.race.id, scope: 'race', status: 'confirmed', confirmedAt: new Date() } });
+    const sub = await t.prisma.alertSubscription.findFirstOrThrow({ where: { email: me.email } });
+    const mail = t.app.get(MailService);
+    const m = await t.prisma.$transaction((tx) => mail.enqueue({ to: me.email, templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `alerts:open:${w.pkg.id}:${sub.id}`, category: 'marketing', relatedEntityType: 'AlertSubscription', relatedEntityId: sub.id }, tx));
+    expect(await mail.processSend(m.id)).toBe('sent');
+    const msg = t.mail.sent.filter((x) => x.to === me.email).at(-1)!;
+    expect(msg.headers?.['List-Unsubscribe']).toBe(`<${t.config.API_BASE_URL}/unsubscribe/${m.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, m.id)}>`);
+    expect(msg.headers?.['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
+  });
+});
+
+describe('erasure requests from the account', () => {
+  it('with a customer record: one open request and one staff task, however many times asked; staff see it', async () => {
+    const me = await bookedCustomer('Ask');
+    expect((await as(me).post('/account/privacy/erasure-request', {})).body.status).toBe('received');
+    expect((await as(me).post('/account/privacy/erasure-request', {})).body.status).toBe('received');
+    expect(await t.prisma.privacyRequest.count({ where: { customerId: me.customerId, kind: 'erasure' } })).toBe(1);
+    expect(await t.prisma.task.count({ where: { entityType: 'Customer', entityId: me.customerId, sourceRef: `privacy:erasure:${me.customerId}`, status: 'open' } })).toBe(1);
+    const view = await owner.get(`/admin/privacy/customers/${me.customerId}`);
+    expect(view.status).toBe(200);
+    expect(view.body.requests[0]).toMatchObject({ kind: 'erasure', status: 'received', requestedBy: 'customer' });
+    expect(view.body.erasure).toEqual({ possible: false, blockedBy: 'open_booking' });
+    expect(JSON.stringify(view.body)).not.toContain(me.email);
+  });
+
+  it('without a customer record: confirmation required, then the sign-in account is erased and signed out', async () => {
+    const me = await signInCustomer(t, uniqueEmail('gone'));
+    expect((await as(me).post('/account/privacy/erasure-request', {})).status).toBe(422);
+    const r = await as(me).post('/account/privacy/erasure-request', { confirm: true });
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('completed');
+    const u = await t.prisma.user.findUniqueOrThrow({ where: { id: me.userId } });
+    expect(u).toMatchObject({ email: `erased+${me.userId}@invalid`, status: 'disabled' });
+    expect(await t.prisma.session.count({ where: { userId: me.userId } })).toBe(0);
+    expect((await as(me).get('/account/privacy')).status).toBe(401);
+    expect(await t.prisma.auditPiiValue.count({ where: { subjectUserId: me.userId } })).toBe(0);
+  });
+});
