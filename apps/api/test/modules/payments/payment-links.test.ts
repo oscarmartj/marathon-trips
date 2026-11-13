@@ -315,12 +315,12 @@ describe('paying through a link', () => {
 
   it('link_return_url_is_pay_return and checkout_return_url_unchanged', async () => {
     const svc = t.app.get(PaymentAttemptsService);
-    expect(svc.returnUrlOf({ paymentLinkId: randomUUID(), booking: { reference: 'MT-ABCDEF' } })).toBe(`${process.env.WEB_ORIGIN}/pay/return`);
-    expect(svc.returnUrlOf({ paymentLinkId: null, booking: { reference: 'MT-ABCDEF' } })).toBe(`${process.env.WEB_ORIGIN}/payments/return?ref=MT-ABCDEF`);
+    expect(svc.returnUrlOf({ paymentLinkId: randomUUID(), booking: { reference: 'MT-ABCDEF' } })).toBe(`${t.config.WEB_ORIGIN}/pay/return`);
+    expect(svc.returnUrlOf({ paymentLinkId: null, booking: { reference: 'MT-ABCDEF' } })).toBe(`${t.config.WEB_ORIGIN}/payments/return?ref=MT-ABCDEF`);
     const l = await linked();
     const res = await pay(l.token);
     const page = await t.http().get(new URL(res.body.nextAction.url).pathname.replace(/^\/api/, ''));
-    expect(page.text).toContain(`${process.env.WEB_ORIGIN}/pay/return`);
+    expect(page.text).toContain(`${t.config.WEB_ORIGIN}/pay/return`);
     expect(page.text).not.toContain('return?ref=');
   });
 
