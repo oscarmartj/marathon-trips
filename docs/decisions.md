@@ -48,7 +48,12 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 | 2026-11-13 | Campos personalizados: solo Race, Package y Supplier; mostrar un campo a clientes exige `common.customField.publish` con step-up; permisos sin alcance de clave | 7.5; los roles actuales no reciben `publish` solos |
 | 2026-11-13 | Núcleo de pagos: cuentas solo `mode = 'test'` (`CHECK` hasta 4.1); simulador solo en development, test y ci y su cuenta solo por consola; intento de cobro de 60 min; 3.1 absorbe el plan, los intentos y el registro de cobros que eran de 3.2 | 3.1; la fila 3.2 de `docs/autonomous.md` queda con reparto, cobertura, caducidad de aprobaciones, enlaces y recordatorios |
 | 2026-11-13 | Panel de precios: fechas de vigencia en la zona horaria del navegador (se muestra cuál); el panel no calcula importes (texto puro, sin floats) | 2.2b |
-
+| 2026-11-13 | Regla C de cobertura en pagos de entradas: el depósito pasa la reserva a `deposit_paid` y el saldo a `balance_paid`; `confirmed` solo lo pone Oscar (`bookings.booking.confirm`, con step-up) | 3.2; sin `PaymentAllocation` (reparto derivado) |
+| 2026-11-13 | La aprobación caduca en el instante exacto de `approvalExpiresAt` y el panel y la web muestran `depositDueBy`; no se alarga la retención | 3.2; el gancho `expire_approval` lo aplica |
+| 2026-11-13 | Una tabla `message_templates` con columna de canal en lugar de plantillas de correo y de documento por separado; variables permitidas en código | 5.4; se separa en dos si hace falta |
+| 2026-11-13 | Automatizaciones con lista cerrada de acciones (tarea, etiqueta, cerrar tareas automáticas, correo por plantilla, webhook); sin dinero ni permisos; horario estructurado en vez de `cron` | 7.4; coherente con la fila de automatizaciones del 2026-11-12 |
+| 2026-11-13 | Ofertas de lista de espera de 48 h (`waitlistOfferHours`), a la primera entrada a la que le caben las plazas; aceptar crea una solicitud normal | 6.5; se cambia con el ajuste |
+| 2026-11-13 | Aceptación de condiciones inmutable, con instantánea del texto, versión, huella, fecha y `customerId`; las condiciones son la página publicada `terms` y sin ella no hay pago | 3.5 (migración 0023) |
 
 ## Abiertas
 
