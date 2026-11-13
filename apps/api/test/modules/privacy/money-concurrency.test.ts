@@ -3,13 +3,12 @@
 // mail sends that run at the same moment are forced to interleave with barriers.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ErasureService } from '../../../src/modules/privacy';
-import { erasureHooks } from '../../../src/modules/privacy/erasure.service';
 import { PaymentRouting } from '../../../src/modules/payments/core/routing';
 import { WaitlistService } from '../../../src/modules/waitlist/waitlist.service';
 import { MailService } from '../../../src/platform/mail/mail.service';
 import { MailTemplateRegistry } from '../../../src/platform/mail/templates';
 import { TestApp, makeApp } from '../../support/auth';
-import { cleanBookingEvents, customerClient } from '../../support/bookings';
+import { bookingStaff, cleanBookingEvents, customerClient } from '../../support/bookings';
 import { closeCatalogue } from '../../support/catalogue';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
@@ -151,7 +150,7 @@ describe('money that is moving or may be owed', () => {
 
 describe('the waiting list and mail', () => {
   it('(c) erasing a customer while a cancellation is offering them a place: withdrawn, nothing held', async () => {
-    const s = await soldOutWorld(t, admin);
+    const s = await soldOutWorld(t, await bookingStaff(t));
     const a = await customerClient(t);
     const entryId = await joinList(t, a, s.w);
     const customerId = (await t.prisma.waitlistEntry.findUniqueOrThrow({ where: { id: entryId } })).customerId;

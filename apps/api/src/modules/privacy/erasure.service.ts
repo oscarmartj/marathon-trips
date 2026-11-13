@@ -59,7 +59,7 @@ export class ErasureService {
     return (row?.reason ?? null) as ErasureBlockReason | null;
   }
 
-  async erase(customerId: string, actor: AuditActor & { id: string }): Promise<ErasureResult> {
+  async erase(customerId: string, actor: AuditActor): Promise<ErasureResult> {
     let rejected: ErasureBlockReason | null = null;
     const result = await runTransaction(this.prisma, async (tx): Promise<ErasureResult | null> => {
       rejected = null;
@@ -90,11 +90,11 @@ export class ErasureService {
 
       const open = await tx.privacyRequest.findFirst({ where: { customerId, kind: 'erasure', status: 'received' }, select: { id: true } });
       const now = new Date();
-      if (open) await tx.privacyRequest.update({ where: { id: open.id }, data: { status: 'completed', completedAt: now, actorUserId: actor.id } });
-      else await tx.privacyRequest.create({ data: { customerId, kind: 'erasure', status: 'completed', requestedBy: 'staff', completedAt: now, actorUserId: actor.id } });
+      if (open) await tx.privacyRequest.update({ where: { id: open.id }, data: { status: 'completed', completedAt: now, actorUserId: actor.type === 'staff' ? actor.id : null } });
+      else await tx.privacyRequest.create({ data: { customerId, kind: 'erasure', status: 'completed', requestedBy: 'staff', completedAt: now, actorUserId: actor.type === 'staff' ? actor.id : null } });
       await this.tasks.closeSystemIn(tx, `privacy:erasure:${customerId}`);
       await this.audit.record(tx, { actor, action: 'privacy.customer.erased', entityType: 'Customer', entityId: customerId, context: { requestedBy: open ? 'customer' : 'staff' } });
-      await this.outbox.publish(tx, { type: PRIVACY_EVENTS.customerErased, aggregateType: 'Customer', aggregateId: customerId, payload: { customerId }, actorType: actor.type, actorId: actor.id });
+      await this.outbox.publish(tx, { type: PRIVACY_EVENTS.customerErased, aggregateType: 'Customer', aggregateId: customerId, payload: { customerId }, actorType: actor.type, ...(actor.id ? { actorId: actor.id } : {}) });
       return { customerId, status: 'completed', alreadyErased: false };
     });
     if (!result) {

@@ -242,6 +242,31 @@ describe('rollback, idempotency and the database guards', () => {
   });
 });
 
+describe('after restoring a backup (plan section 2.11)', () => {
+  it('privacy:erasures-list gives ids only; privacy:erasures-reapply erases listed customers again, skips unknown ones and reports trips', async () => {
+    const { runCli } = await import('../../../src/cli');
+    const gone = await privacyCustomer(t);
+    expect((await erase(owner, gone.id)).status).toBe(200);
+    const out: string[] = [];
+    expect(await runCli(['privacy:erasures-list'], (l) => out.push(l))).toBe(0);
+    const listed = JSON.parse(out.join('')) as Array<{ customerId: string | null }>;
+    expect(listed.some((r) => r.customerId === gone.id)).toBe(true);
+    expect(out.join('')).not.toContain('@');
+    // As if a backup from before these erasures had been restored: the customers are back, not anonymised.
+    const back = await privacyCustomer(t, 'Back');
+    const trip = await privacyCustomer(t, 'Trip');
+    await bookingWithDates(t, w, trip.id, 'confirmed', { departure: brisbaneDay(5), return: brisbaneDay(9) });
+    const { writeFileSync, mkdtempSync } = await import('node:fs');
+    const dir = mkdtempSync('/tmp/mt55-');
+    writeFileSync(`${dir}/e.json`, JSON.stringify([{ customerId: back.id, userId: null }, { customerId: trip.id, userId: null }, { customerId: '018f0000-0000-7000-8000-000000000001', userId: null }]));
+    const lines: string[] = [];
+    expect(await runCli(['privacy:erasures-reapply', `${dir}/e.json`], (l) => lines.push(l))).toBe(1);
+    expect(await isErased(back.id)).toBe(true);
+    expect(await isErased(trip.id)).toBe(false);
+    expect(lines.join('\n')).toContain(`${trip.id}: NOT erased`);
+  });
+});
+
 describe('concurrency, forced with barriers', () => {
   it('(a) a booking request waiting on the customer during an erasure gets 409 customer_closed and creates nothing', async () => {
     const me = await customerClient(t);

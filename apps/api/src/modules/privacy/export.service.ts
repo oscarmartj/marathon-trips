@@ -8,7 +8,6 @@ import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { customerRecordIds, platformExport, staffNotesOf } from '../../platform/privacy/records';
 import { ConsentService } from './consent.service';
 
-type Tx = Prisma.TransactionClient;
 
 export const EXPORT_FORMAT = 'marathon-trips.personal-data.v1';
 
