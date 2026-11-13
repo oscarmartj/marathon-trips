@@ -21,6 +21,7 @@ import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, makeBookingFor } from '../
 import { pricedWorld } from '../../support/pricing';
 import {
   PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, expireNow, insertValidSchedule, onlyAccount, payingCustomer, paymentsStaff, sendWebhook, sim, simulatorAccount,
+  acceptCurrentTerms,
 } from '../../support/payments';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
@@ -80,6 +81,8 @@ async function amounts(depositMinor: bigint, totalMinor: bigint): Promise<{ refe
   const b = await bookingRow(bookingId);
   const ok = await admin.post(`/admin/bookings/${bookingId}/approve`, { version: b.version });
   if (ok.status !== 200) throw new Error(`approve failed ${ok.status} ${JSON.stringify(ok.body)}`);
+  // A free booking is paid in full at approval and takes no payment, so it has no terms to accept.
+  if (totalMinor > 0n) await acceptCurrentTerms(t, c, b.reference);
   return { reference: b.reference, bookingId };
 }
 

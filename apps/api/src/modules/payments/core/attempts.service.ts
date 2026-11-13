@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { BookingStatus, PaymentAttemptView, PaymentMethod, PaymentPlanView, StartPayment } from '@mt/shared';
+import type { PaymentAttemptView, PaymentMethod, PaymentPlanView, StartPayment } from '@mt/shared';
 import type { Prisma } from '../../../generated/prisma/client';
 import { AuditService } from '../../../platform/audit/audit.service';
 import type { AuditActor } from '../../../platform/audit/audit.service';
@@ -24,15 +24,13 @@ import type { ProviderPayment } from './provider';
 import { ProviderError } from './provider';
 import { CoverageFailedError } from './coverage.service';
 import { PaymentRouting } from './routing';
+import { TermsService } from './terms.service';
+import { PAYABLE_STATES, PAYMENT_TX_OPTIONS } from './payable-states';
 import { PAYMENT_SETTINGS } from './settings';
 
 type Tx = Prisma.TransactionClient;
 
-/** Booking states in which a payment can be started (plan 0.1, 6.2, "create an attempt"). */
-export const PAYABLE_STATES: readonly BookingStatus[] = ['approved', 'deposit_paid', 'confirmed'];
-
-/** READ COMMITTED with short limits, like booking requests (plan 2.4, section 4). */
-export const PAYMENT_TX_OPTIONS = { isolationLevel: 'ReadCommitted' as const, timeout: 15_000, maxWait: 5_000 };
+export { PAYABLE_STATES, PAYMENT_TX_OPTIONS };
 
 const ENDED_WITHOUT_MONEY: readonly string[] = ['failed', 'cancelled', 'expired'];
 
@@ -78,6 +76,7 @@ export class PaymentAttemptsService {
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(TermsService) private readonly terms: TermsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -117,6 +116,10 @@ export class PaymentAttemptsService {
     // The route of the record carries the booking id, so one key on two bookings is two records (plan 3.1, 14.4).
     const outcome = await this.idempotency.run({ actorType: 'customer', actorId: user.id, route: `POST /booking-requests/${booking.id}/payments`, key, body }, async () => {
       try {
+        // The current booking terms must have been accepted (task 3.5). Inside the record, so a retry of a payment that
+        // was already created replays it even if the terms changed since; a refusal deletes the record: nothing stored.
+        // A booking that cannot take a payment at all keeps its own error (booking_not_payable and the like).
+        if (PAYABLE_STATES.includes(booking.status)) await this.terms.assertAccepted(booking.id);
         const paymentId = await this.createOrReplace(booking.id, body, actor);
         return { status: 201, resourceType: 'Payment', resourceId: paymentId };
       } catch (err) {
@@ -244,7 +247,7 @@ export class PaymentAttemptsService {
   async drive(paymentId: string): Promise<{ type: 'redirect'; url: string } | undefined> {
     const p = await this.prisma.payment.findUniqueOrThrow({
       where: { id: paymentId },
-      select: { id: true, bookingId: true, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, payerCustomer: { select: { countryOfResidence: true } } },
+      select: { id: true, bookingId: true, booking: { select: { reference: true } }, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, payerCustomer: { select: { countryOfResidence: true } } },
     });
     if (!LIVE_STATUSES.includes(p.status)) return undefined;
     let remote: ProviderPayment | null;
@@ -259,7 +262,7 @@ export class PaymentAttemptsService {
       try {
         remote = await this.gateway.call(p.providerAccountId, 'create', (provider, ctx) => provider.createPayment(ctx, {
           amount: { amountMinor: p.amountMinor, currency: p.currency }, method: p.method, idempotencyKey: p.idempotencyKey,
-          metadata: { paymentId: p.id, bookingId: p.bookingId }, returnUrl: `${this.config.WEB_ORIGIN}/payments/return`, customerCountry: p.payerCustomer.countryOfResidence,
+          metadata: { paymentId: p.id, bookingId: p.bookingId }, returnUrl: `${this.config.WEB_ORIGIN}/payments/return?ref=${p.booking.reference}`, customerCountry: p.payerCustomer.countryOfResidence,
         }));
       } catch (err) {
         if (!(err instanceof ProviderError)) throw this.forCustomer(err);
@@ -297,7 +300,7 @@ export class PaymentAttemptsService {
    * What a customer sees of a gateway problem: a 503 for the gateway, and for the gateway wrapper's own refusals
    * (account paused, adapter blocked…) the neutral "payment in progress", never the internal code (review round 2, 4).
    */
-  private forCustomer(err: unknown): unknown {
+  forCustomer(err: unknown): unknown {
     if (err instanceof ProviderError) return providerUnavailable();
     if (err instanceof ApiError && err.status === 409) return conflict('payment_attempt_in_progress', 'This payment cannot continue right now. Try again later.');
     return err;

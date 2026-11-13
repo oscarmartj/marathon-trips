@@ -39,12 +39,41 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
     },
   },
+  // Task 3.5: the checkout routes of the same approved request. B asks for A's terms, accepts on A's booking, refreshes A's payment.
+  'booking-checkout-terms': {
+    async create(t, a, b) {
+      const { ensureTerms } = await import('./payments');
+      await ensureTerms(t);
+      const path = `/booking-requests/${await approvedRequestOf(t, a)}/checkout-terms`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
+  'booking-terms-acceptance': {
+    async create(t, a, b) {
+      const { ensureTerms } = await import('./payments');
+      const terms = await ensureTerms(t);
+      const { digestOf } = await import('./payments');
+      const path = `/booking-requests/${await approvedRequestOf(t, a)}/terms-acceptance`;
+      const body = { version: terms.version, digest: digestOf(terms) };
+      const send = (s: CustomerSession) => t.http().post(path).set(STATE_HEADERS).set('Cookie', s.cookie).send(body);
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
+  'booking-payment-refresh': {
+    async create(t, a, b) {
+      const path = `/booking-requests/${await approvedRequestOf(t, a)}/payments/refresh`;
+      const send = (s: CustomerSession) => t.http().post(path).set(STATE_HEADERS).set('Cookie', s.cookie).send({});
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
   // Task 3.1: POST /booking-requests/:reference/payments. A pays the deposit against the simulator; B tries the same.
   'booking-payment-start': {
     async create(t, a, b) {
       const { simulatorAccount } = await import('./payments');
       await simulatorAccount(t);
       const ref = await approvedRequestOf(t, a);
+      const { acceptCurrentTerms } = await import('./payments');
+      await acceptCurrentTerms(t, a, ref);
       const path = `/booking-requests/${ref}/payments`;
       const send = (s: CustomerSession) => t.http().post(path).set(STATE_HEADERS).set('Cookie', s.cookie).set('Idempotency-Key', randomUUID()).send({ method: 'card' });
       return { asOwner: () => send(a), asOther: () => send(b) };

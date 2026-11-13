@@ -59,7 +59,9 @@
     "bookingRequest": "Request a trip",
     "bookingRequestSent": "Your booking request",
     "quote": "Your quote",
-    "waitlistOffer": "Waiting list place"
+    "waitlistOffer": "Waiting list place",
+    "checkoutBooking": "Pay for your booking",
+    "paymentReturn": "Your payment"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -177,7 +179,80 @@
   },
   "checkout": {
     "title": "Checkout",
-    "intro": "Review your booking and accept the booking terms before you pay. Only payment methods available in your country are shown."
+    "intro": "Review your booking and accept the booking terms before you pay. Only payment methods available in your country are shown.",
+    "bookingTitle": "Pay for your booking",
+    "reference": "Reference",
+    "planHeading": "Your payment plan",
+    "item": {
+      "deposit": "Deposit",
+      "balance": "Balance",
+      "instalment": "Instalment",
+      "adjustment": "Adjustment"
+    },
+    "itemLine": "{amount}, due {date}",
+    "itemPaid": "{amount} paid",
+    "itemUnpaid": "Not paid yet",
+    "payNow": "You will pay {amount} now.",
+    "payNowUntil": "The deposit must be paid by {when} (Brisbane time), or the places we are holding are released.",
+    "hostedNote": "You enter your payment details on the payment provider's own secure page. We never see or store them.",
+    "methodsHeading": "Payment method",
+    "methodsNote": "These are the methods we can take for your country.",
+    "methods": {
+      "card": "Credit or debit card",
+      "apple_pay": "Apple Pay",
+      "google_pay": "Google Pay",
+      "payto": "PayTo",
+      "becs": "Direct debit (BECS)",
+      "payid_transfer": "PayID or bank transfer",
+      "bpay": "BPAY",
+      "bnpl": "Pay later",
+      "manual_other": "Other method"
+    },
+    "termsHeading": "Booking terms",
+    "termsVersion": "Terms version {version}",
+    "termsText": "Text of the booking terms",
+    "termsFull": "Open the terms in their own page",
+    "termsAccept": "I have read and accept the booking terms (version {version}).",
+    "termsAccepted": "You accepted these terms on {when} (Brisbane time).",
+    "pay": "Pay now",
+    "paying": "Taking you to the payment page…",
+    "signedOutTitle": "Sign in to pay",
+    "signedOutBody": "We could not show this booking. Sign in with the email address you used to send your request.",
+    "signIn": "Sign in to continue",
+    "viewBooking": "View your booking",
+    "noMethods": "We cannot take online payments for this booking yet. Your request stands and nothing has been charged. We will contact you about how to pay.",
+    "termsUnavailable": "The booking terms are not available right now, so we cannot take a payment. Nothing has been charged. Try again later or contact us.",
+    "notPayable": {
+      "booking_not_payable": "This booking cannot take a payment right now.",
+      "approval_expired": "The time to pay the deposit for this booking has run out.",
+      "nothing_to_pay": "There is nothing to pay on this booking right now.",
+      "no_payment_method_available": "We cannot take online payments for this booking yet. Your request stands and nothing has been charged. We will contact you about how to pay.",
+      "generic": "This booking cannot take a payment right now."
+    },
+    "attempt": {
+      "open": "A payment is already waiting for you. Choose the same method and carry on to the payment page to finish it.",
+      "pending": "A payment for this booking is being processed. If you pay again now it may be refused; check your booking in a moment."
+    },
+    "errors": {
+      "acceptFirst": "Tick the box to accept the booking terms before you pay.",
+      "chooseMethod": "Choose a payment method.",
+      "signedOut": "Your session has ended. Sign in again to pay.",
+      "network": "We could not reach our server. Check your connection and try again.",
+      "termsChanged": "The booking terms changed while this page was open. Read them again and tick the box to accept.",
+      "termsUnavailable": "The booking terms are not available right now, so we cannot take a payment. Try again later.",
+      "terms_not_accepted": "Tick the box to accept the booking terms before you pay.",
+      "no_payment_method_available": "That payment method is not available for this booking right now. Choose another.",
+      "approval_expired": "The time to pay the deposit for this booking has run out.",
+      "booking_not_payable": "This booking cannot take a payment right now.",
+      "nothing_to_pay": "There is nothing to pay on this booking right now.",
+      "payment_attempt_in_progress": "A payment for this booking is already in progress. Wait a moment and try again.",
+      "payment_already_recorded": "A payment for this booking has just been recorded. Check your booking before you pay again.",
+      "provider_unavailable": "The payment service is not answering. Try again in a moment.",
+      "tooMany": "Too many attempts. Wait a little and try again.",
+      "busy": "Many people are doing this at once. Try again in a moment.",
+      "badRedirect": "We could not open the payment page. Nothing has been charged. Try again shortly.",
+      "generic": "Something went wrong. Nothing has been charged. Try again shortly."
+    }
   },
   "about": {
     "title": "About {brand}",
@@ -2930,7 +3005,8 @@
       "deposit": "Deposit if approved",
       "depositLine": "{amount}, with the balance due by {date}",
       "notFoundTitle": "Booking request",
-      "notFoundBody": "We could not show this request. Sign in with the email address you used to send it."
+      "notFoundBody": "We could not show this request. Sign in with the email address you used to send it.",
+      "continueToPayment": "Continue to payment"
     },
     "status": {
       "approved": "We have approved your request. We will be in touch about the next step.",
@@ -2980,5 +3056,29 @@
       "busy": "We are busy. Please try again in a moment.",
       "network": "We could not reach the server. Please try again."
     }
+  },
+  "paymentReturn": {
+    "title": "Your payment",
+    "checking": "Checking your payment…",
+    "paidHeading": "Payment received",
+    "paid": "Thank you. We have received your payment.",
+    "processingHeading": "Your payment is still being processed",
+    "processing": "We have not had the final answer from the payment provider yet. This page does not confirm a payment until the provider does. You can check again in a moment.",
+    "checkAgain": "Check again",
+    "failedHeading": "Your payment did not go through",
+    "failed": "Nothing has been charged. You can try again with the same or another method.",
+    "tryAgain": "Back to checkout",
+    "noneHeading": "No payment found",
+    "none": "We could not find a payment for this booking. Nothing has been charged.",
+    "viewBooking": "View your booking",
+    "bookingStatus": "Booking status",
+    "invalidTitle": "We could not show this payment",
+    "invalidBody": "Open your booking from the link in your email, or sign in and look for it in your account.",
+    "signedOut": "Your session has ended. Sign in to see this payment.",
+    "signIn": "Sign in to continue",
+    "network": "We could not reach our server. Check your connection and try again.",
+    "noscript": "This page needs JavaScript to check your payment. Open your booking to see where it stands.",
+    "delayed": "Your payment is being processed. Check your booking again shortly.",
+    "unavailable": "The payment service is not answering yet. Nothing has been lost. Check again in a moment."
   }
 }

@@ -285,3 +285,34 @@ model WebhookRejection {
   @@index([providerAccountId, receivedAt])
   @@map("webhook_rejections")
 }
+
+/// The booking terms a customer accepted before paying (task 3.5, plan docs/plans/3.5-checkout-simulator.md, section 2).
+/// The content page is edited in place, so the accepted text is kept here as a snapshot. Never edited or deleted (trigger
+/// in migration 0023); one row per booking and exact text.
+model TermsAcceptance {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  bookingId      String   @db.Uuid
+  booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// who accepted: the booking's customer, read inside the same transaction
+  customerId     String   @db.Uuid
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii content page address, such as terms
+  documentSlug   String
+  /// @nopii language tag such as en-AU
+  locale         String
+  /// @nopii version counter of the content page when it was accepted
+  contentVersion Int
+  /// @nopii SHA-256 (hex) of the canonical JSON of slug, locale, title, intro and body
+  textDigest     String   @db.Char(64)
+  /// @nopii editorial text as accepted
+  title          String
+  /// @nopii editorial text as accepted
+  intro          String
+  /// @nopii editorial text as accepted
+  body           String
+  /// @nopii timestamp
+  acceptedAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([bookingId, documentSlug, locale, textDigest])
+  @@map("terms_acceptances")
+}

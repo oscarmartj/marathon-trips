@@ -192,3 +192,9 @@ fieldset { border: 1px solid var(--color-border); border-radius: var(--radius); 
 .banner--notice { background: var(--color-notice); color: var(--color-on-notice); border-bottom-color: var(--color-notice); }
 .banner--warning { border-left: 0.5rem solid var(--color-danger); }
 .banner--info .banner__tone { display: none; }
+
+/* Checkout (task 3.5): choices with a clear target size, and the terms in a region that scrolls and takes focus. */
+.choice { display: flex; gap: var(--space-3); align-items: flex-start; min-height: 2.75rem; }
+.choice input { width: 1.5rem; height: 1.5rem; margin-top: 0.1rem; flex: none; }
+.choice input:focus-visible, .terms-text:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.terms-text { max-height: 20rem; overflow: auto; border: 2px solid var(--color-border); border-radius: var(--radius); padding: var(--space-4); background: var(--color-surface); white-space: normal; overflow-wrap: anywhere; }

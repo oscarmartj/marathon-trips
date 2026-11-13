@@ -20,6 +20,7 @@ import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 import {
   PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, expireNow, insertValidSchedule, onlyAccount, payingCustomer, paymentsStaff, sim, simulatorAccount,
+  acceptCurrentTerms,
 } from '../../support/payments';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
@@ -62,6 +63,7 @@ async function smallDepositBooking(depositMinor: bigint, totalMinor: bigint): Pr
   const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
   const ok = await admin.post(`/admin/bookings/${bookingId}/approve`, { version: b.version });
   if (ok.status !== 200) throw new Error(`approve failed ${ok.status} ${JSON.stringify(ok.body)}`);
+  await acceptCurrentTerms(t, c, b.reference);
   return { reference: b.reference, bookingId };
 }
 

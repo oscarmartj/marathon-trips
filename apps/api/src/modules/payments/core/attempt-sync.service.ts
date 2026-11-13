@@ -2,7 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
+import type { PaymentMethod, PaymentRefreshView } from '@mt/shared';
 import { notFound } from '../../../platform/http/api-error';
+import { readBookingForPayments } from '../../bookings';
 import { LIVE_STATUSES, PaymentStateMachine, lockPayment } from './attempt-state';
 import type { AttemptEvent } from './attempt-state';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
@@ -49,6 +51,36 @@ export class PaymentAttemptSyncService {
     const p = await this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true } });
     if (p.status === 'succeeded') return 'recorded';
     return outcome === 'applied' && !LIVE_STATUSES.includes(p.status) ? 'replaced' : 'unresolved';
+  }
+
+  /**
+   * The customer's "where does my payment stand" (task 3.5, plan section 3): a live attempt is read from the gateway and
+   * recorded exactly as the sweep does; then the latest attempt and the booking status are returned. It never creates
+   * an attempt. A gateway that cannot be reached is the neutral 503 (a paused or blocked account, the neutral 409);
+   * a coverage failure is the 503 "being processed", and an attempt waiting for Oscar's task is not retried here.
+   */
+  async refresh(reference: string): Promise<PaymentRefreshView> {
+    const b = await readBookingForPayments(this.prisma, { reference });
+    if (!b) throw notFound();
+    const live = await this.prisma.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } });
+    if (live) {
+      // An attempt whose collected money could not be applied waits for Oscar's task, as the sweep leaves it (plan 3.2, 11.8).
+      const waiting = await this.prisma.task.count({ where: { sourceRef: `payments:coverage_failed:${live.id}`, status: 'open', deletedAt: null } });
+      if (waiting === 0) {
+        try {
+          await this.run(live.id, 'sync');
+        } catch (err) {
+          // What a customer sees of a gateway problem: the neutral 503 or "in progress", never an internal code.
+          throw this.attempts.forCustomer(err);
+        }
+      }
+    }
+    const latest = await this.prisma.payment.findFirst({ where: { bookingId: b.id }, orderBy: { attemptNumber: 'desc' }, select: { status: true, method: true, amountMinor: true, currency: true } });
+    const after = await readBookingForPayments(this.prisma, { id: b.id });
+    return {
+      bookingStatus: (after ?? b).status,
+      attempt: latest ? { status: latest.status, method: latest.method as PaymentMethod, amountMinor: latest.amountMinor.toString(), currency: latest.currency } : null,
+    };
   }
 
   async run(paymentId: string, action: SyncAction, now: Date = new Date()): Promise<SyncOutcome> {

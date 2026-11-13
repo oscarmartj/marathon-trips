@@ -47,6 +47,9 @@ export function RequestConfirmation({ view }: { view: RequestView }) {
         ) : (
           <p className="notice" role="status">{t(`bookingRequest.status.${view.status}`)}</p>
         )}
+        {view.status === 'approved' || view.status === 'deposit_paid' ? (
+          <p><a className="btn" href={`/checkout/${encodeURIComponent(view.reference)}`}>{t('bookingRequest.confirmation.continueToPayment')}</a></p>
+        ) : null}
         <dl>
           <dt>{t('bookingRequest.confirmation.reference')}</dt>
           <dd>{view.reference}</dd>

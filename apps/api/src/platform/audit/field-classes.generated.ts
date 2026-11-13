@@ -1067,6 +1067,19 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  TermsAcceptance: {
+    id: 'nopii',
+    bookingId: 'nopii',
+    customerId: 'nopii',
+    documentSlug: 'nopii',
+    locale: 'nopii',
+    contentVersion: 'nopii',
+    textDigest: 'nopii',
+    title: 'nopii',
+    intro: 'nopii',
+    body: 'nopii',
+    acceptedAt: 'nopii'
+  },
   User: {
     id: 'nopii',
     kind: 'nopii',
