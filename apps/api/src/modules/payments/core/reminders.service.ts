@@ -28,13 +28,15 @@ export const REMINDER_HOURS = { from: 8, to: 18 } as const;
 const MAX_PER_RUN = 500;
 
 export type ReminderSkip =
-  | 'not_due_yet' | 'already_queued' | 'not_next_item' | 'item_changed' | 'booking_not_payable' | 'payment_in_progress' | 'customer_closed' | 'recipient_suppressed';
+  | 'not_due_yet' | 'already_queued' | 'not_next_item' | 'item_changed' | 'booking_not_payable' | 'payment_in_progress' | 'customer_closed' | 'recipient_suppressed' | 'link_active';
 
 export interface ReminderRun {
   /** The sweep did nothing because it is outside business hours, or reminders are turned off. */
   idle: 'outside_hours' | 'turned_off' | null;
   examined: number;
   queued: number;
+  /** Lines whose reminder threw (the next sweep tries them again). */
+  errors: number;
   skipped: Partial<Record<ReminderSkip, number>>;
 }
 
@@ -87,18 +89,23 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
 
   /** One sweep. `now` is a parameter for tests only. */
   async run(now: Date = new Date()): Promise<ReminderRun> {
-    const result: ReminderRun = { idle: null, examined: 0, queued: 0, skipped: {} };
+    const result: ReminderRun = { idle: null, examined: 0, queued: 0, errors: 0, skipped: {} };
     const offsets = [...(await this.settings.get(PAYMENT_SETTINGS.balanceReminderOffsetsDays.key, PAYMENT_SETTINGS.balanceReminderOffsetsDays.fallback))].sort((a, b) => b - a);
     if (offsets.length === 0) return { ...result, idle: 'turned_off' };
     const hour = brisbaneHour(now);
     if (hour < REMINDER_HOURS.from || hour >= REMINDER_HOURS.to) return { ...result, idle: 'outside_hours' };
     const today = todayInBrisbane(now);
+    // Lines whose reminder for the offset now in force is already queued are left out in SQL, so a long list of them never
+    // starves the ones still to do (the limit applies to work, not to history).
     const rows = await this.prisma.$queryRaw<Array<{ id: string; bookingId: string }>>`
       SELECT i.id::text AS id, i."bookingId"::text AS "bookingId"
       FROM payment_schedule_items i JOIN bookings b ON b.id = i."bookingId"
+      CROSS JOIN LATERAL (SELECT min(o) AS off FROM unnest(${offsets}::int[]) AS o WHERE o >= (i."dueDate" - ${today}::date)) AS w
       WHERE i.state = 'active' AND i.kind IN ('balance', 'instalment')
         AND i."dueDate" >= ${today}::date AND i."dueDate" <= ${addDays(today, Math.max(...offsets))}::date
         AND b.status::text = ANY(${[...REMINDABLE_STATES]}::text[])
+        AND w.off IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM outbound_emails e WHERE e."dedupeKey" = 'balance-reminder:' || i.id::text || ':' || w.off::text)
       ORDER BY i."dueDate", i.id LIMIT ${MAX_PER_RUN}`;
     for (const row of rows) {
       result.examined += 1;
@@ -108,13 +115,15 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
         else result.skipped[outcome] = (result.skipped[outcome] ?? 0) + 1;
       } catch (err) {
         // One bad booking must not stop the others; the next sweep tries it again.
+        result.errors += 1;
         this.logger.warn(`reminder for item ${row.id} failed: ${safeError(err).code}`);
       }
     }
     return result;
   }
 
-  private async remind(itemId: string, bookingId: string, offsets: readonly number[], today: string): Promise<'queued' | ReminderSkip> {
+  /** One line's reminder in its own transaction (public for tests of the failure paths). */
+  async remind(itemId: string, bookingId: string, offsets: readonly number[], today: string): Promise<'queued' | ReminderSkip> {
     return runTransaction(this.prisma, async (tx) => {
       const b = await readBookingForPayments(tx, { id: bookingId }, true);
       if (!b || !(REMINDABLE_STATES as readonly string[]).includes(b.status)) return 'booking_not_payable';
@@ -129,6 +138,10 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
       if (payable(items, collected).next?.sequence !== item.sequence) return 'not_next_item';
       if (await tx.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } })) return 'payment_in_progress';
+      // The customer (or staff on a call) may already hold a working link for this item, or its email may be on its way: a
+      // new link would revoke it. Leave it; the sweep tries again once that link is used, expired or revoked.
+      const [{ now }] = (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`) as [{ now: Date }];
+      if (await tx.paymentLink.findFirst({ where: { bookingId: b.id, targetScheduleItemId: item.id, status: 'active', expiresAt: { gt: now } }, select: { id: true } })) return 'link_active';
       const customer = await tx.customer.findUnique({ where: { id: b.customerId }, select: { id: true, email: true, preferredLocale: true, anonymisedAt: true, deletedAt: true } });
       if (!customer || customer.anonymisedAt || customer.deletedAt) return 'customer_closed';
       if (await tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email), scope: 'all' }, select: { id: true } })) return 'recipient_suppressed';
@@ -193,7 +206,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
     };
   }
 
-  /** The item is still active, uncovered and the first one owed, and its booking can still take a payment. */
+  /** The item is still active, uncovered and the first one owed, its booking can still take a payment, and no payment is in progress. */
   private async isReminderStillWanted(ctx: RenderContext, itemId: string): Promise<boolean> {
     const item = await ctx.tx.paymentScheduleItem.findUnique({ where: { id: itemId }, select: { bookingId: true, state: true, sequence: true } });
     if (!item || item.state !== 'active') return false;
@@ -201,6 +214,8 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
     if (!b || !(REMINDABLE_STATES as readonly string[]).includes(b.status)) return false;
     const items = await ctx.tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { sequence: true, amountMinor: true } });
     const collected = await succeededPaymentsSource.collected(ctx.tx, b.id, this.gateway.mode);
-    return payable(items, collected).next?.sequence === item.sequence;
+    if (payable(items, collected).next?.sequence !== item.sequence) return false;
+    // Never write to someone while they are paying.
+    return !(await ctx.tx.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } }));
   }
 }

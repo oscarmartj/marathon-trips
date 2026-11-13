@@ -47,11 +47,19 @@ export class PaymentPendingService {
 
   async collections(today: string, limit: number): Promise<PendingCollections> {
     const horizon = addDays(today, PENDING_HORIZON_DAYS);
+    // Only lines the money collected does not cover yet count (a paid deposit must not crowd out the balance), so the
+    // limit applies to work that is still owed.
     const candidates = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      WITH collected AS (
+        SELECT "bookingId", sum("amountMinor") AS paid FROM payments WHERE status = 'succeeded' AND mode = ${this.gateway.mode}::"PaymentMode" GROUP BY "bookingId"
+      ), lines AS (
+        SELECT i."bookingId", i."dueDate", sum(i."amountMinor") OVER (PARTITION BY i."bookingId" ORDER BY i.sequence) AS cumulative
+        FROM payment_schedule_items i WHERE i.state = 'active'
+      )
       SELECT b.id::text AS id FROM bookings b
-      JOIN payment_schedule_items i ON i."bookingId" = b.id
-      WHERE b.status::text = ANY(${[...PAYABLE_STATES]}::text[]) AND i.state = 'active' AND i."dueDate" <= ${horizon}::date
-      GROUP BY b.id ORDER BY min(i."dueDate"), b.id LIMIT ${CANDIDATES + 1}`;
+      JOIN lines l ON l."bookingId" = b.id LEFT JOIN collected c ON c."bookingId" = b.id
+      WHERE b.status::text = ANY(${[...PAYABLE_STATES]}::text[]) AND l."dueDate" <= ${horizon}::date AND l.cumulative > COALESCE(c.paid, 0)
+      GROUP BY b.id ORDER BY min(l."dueDate"), b.id LIMIT ${CANDIDATES + 1}`;
     const truncated = candidates.length > CANDIDATES;
     const ids = candidates.slice(0, CANDIDATES).map((c) => c.id);
     if (ids.length === 0) return { overdue: 0, dueSoon: 0, items: [], truncated: false };
