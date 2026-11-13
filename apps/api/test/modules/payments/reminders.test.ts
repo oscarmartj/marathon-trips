@@ -175,10 +175,10 @@ describe('queueing', () => {
     expect(run.skipped.payment_in_progress).toBeGreaterThanOrEqual(1);
     expect(await remindersOf(live.balance.id)).toHaveLength(0);
 
-    // The address is on the suppression list (any scope).
+    // The address bounced or complained (scope all).
     const sup = await depositPaid();
     const customer = await t.prisma.customer.findUniqueOrThrow({ where: { id: sup.customerId }, select: { email: true } });
-    await t.app.get(MailService).addSuppression(customer.email, 'unsubscribed', 'marketing');
+    await t.app.get(MailService).addSuppression(customer.email, 'bounced', 'all');
     try {
       const out = await reminders().run(at(sup.due, 3));
       expect(out.skipped.recipient_suppressed).toBeGreaterThanOrEqual(1);
@@ -276,7 +276,22 @@ describe('the email', () => {
     expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: row!.relatedEntityId! } })).tokenHash).toBeNull();
   });
 
-  it('reminder_not_sent_to_a_suppressed_address even if it was queued before', async () => {
+  it('marketing_suppression_does_not_block_balance_reminder: an unsubscribe from marketing still gets the reminder', async () => {
+    await setOffsets([14, 3]);
+    const w = await depositPaid();
+    const customer = await t.prisma.customer.findUniqueOrThrow({ where: { id: w.customerId }, select: { email: true } });
+    await t.app.get(MailService).addSuppression(customer.email, 'unsubscribed', 'marketing');
+    try {
+      await reminders().run(at(w.due, 3));
+      const [row] = await remindersOf(w.balance.id);
+      expect(row).toBeDefined();
+      expect((await sentNow(row!.id)).outcome).toBe('sent');
+    } finally {
+      await t.prisma.emailSuppression.deleteMany({});
+    }
+  });
+
+  it('all_suppression_blocks_it: reminder_not_sent_to_a_suppressed_address even if it was queued before', async () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await reminders().run(at(w.due, 3));

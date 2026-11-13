@@ -131,7 +131,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       if (await tx.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } })) return 'payment_in_progress';
       const customer = await tx.customer.findUnique({ where: { id: b.customerId }, select: { id: true, email: true, preferredLocale: true, anonymisedAt: true, deletedAt: true } });
       if (!customer || customer.anonymisedAt || customer.deletedAt) return 'customer_closed';
-      if (await tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email) }, select: { id: true } })) return 'recipient_suppressed';
+      if (await tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email), scope: 'all' }, select: { id: true } })) return 'recipient_suppressed';
       try {
         await this.links.openForReminder(tx, b, { id: item.id, sequence: item.sequence }, { email: customer.email, customerId: customer.id, locale: customer.preferredLocale }, dedupeKey, PAYMENT_REMINDER_TEMPLATE.key, PAYMENT_REMINDER_TEMPLATE.version);
       } catch (err) {
@@ -146,7 +146,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
 
   /**
    * Renders the reminder when the email is sent. Everything is read again: if the item was paid, the booking left the
-   * payable states or the customer was suppressed or closed since it was queued, the email never goes out. The token is
+   * payable states or the customer was suppressed (bounce or complaint) or closed since it was queued, the email never goes out. The token is
    * minted here (so it commits with the send) and goes into the body only.
    */
   async renderEmail(ctx: RenderContext): Promise<RenderedMail> {
@@ -155,7 +155,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
     const head = await ctx.tx.paymentLink.findUnique({ where: { id: linkId }, select: { targetScheduleItemId: true } });
     if (!head) throw new AppError(MAIL_NOT_SENDABLE, 'The payment link does not exist');
     if (!(await this.isReminderStillWanted(ctx, head.targetScheduleItemId))) throw new AppError(MAIL_NOT_SENDABLE, 'The reminder is no longer needed');
-    if (await ctx.tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, ctx.email.to) }, select: { id: true } })) throw new AppError(MAIL_NOT_SENDABLE, 'The recipient is suppressed');
+    if (await ctx.tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, ctx.email.to), scope: 'all' }, select: { id: true } })) throw new AppError(MAIL_NOT_SENDABLE, 'The recipient is suppressed');
 
     const minted = await mintPaymentLinkToken(ctx.tx, linkId, this.gateway.mode);
     const item = await ctx.tx.paymentScheduleItem.findUniqueOrThrow({ where: { id: head.targetScheduleItemId }, select: { sequence: true, dueDate: true, currency: true } });
