@@ -1,0 +1,2 @@
+// The staff start page (task 5.6). No tables of its own: it reads bookings, payments, catalogue, alerts and tasks through
+// their modules' public APIs, and only shows what the signed-in person is allowed to read.

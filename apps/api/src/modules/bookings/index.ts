@@ -10,6 +10,8 @@ export { ownsBookingReference } from './ownership';
 export { customerView } from './views';
 export { readBookingForPayments, readBookingForAutomations, readBalancesDueForCalendar } from './read';
 export type { BookingForPayments, LockedBooking, BookingForAutomations, BalancesDueForCalendar } from './read';
+export { readNewRequestsForDashboard } from './dashboard-read';
+export type { NewRequestForDashboard } from './dashboard-read';
 export { BookingStateMachine, BOOKING_EVENT_TABLE, BOOKING_STATUS_PAIRS } from './state-machine';
 export type { BookingEvent, CoverageEvent, StaffBookingEvent } from './state-machine';
 export { QuotedBookingService } from './quoted-booking.service';

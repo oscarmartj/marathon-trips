@@ -11,6 +11,7 @@ import { BookingTransitionHooks, BookingsModule } from '../bookings';
 import { TemplatesModule } from '../templates';
 import { MailTemplateRegistry } from '../../platform/mail/templates';
 import { PAYMENT_LINK_TEMPLATE, PaymentLinksService } from './core/payment-links.service';
+import { PaymentPendingService } from './core/pending.service';
 import { PAYMENT_REMINDER_TEMPLATE, PaymentRemindersService } from './core/reminders.service';
 import { PaymentAdminService } from './admin.service';
 import { adapterOptions, createAdapters } from './adapters';
@@ -41,10 +42,10 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
-    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService,
+    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService,
     SimulatorCheckoutService,
   ],
-  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService],
+  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(

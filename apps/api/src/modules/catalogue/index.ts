@@ -13,3 +13,5 @@ export { PublicCatalogueService, guaranteedEntryOf } from './public.service';
 export { SALE_TRANSITIONS } from './transitions';
 export { readPackageForAutomations, existingCatalogueIds, readEditionLabels, listEditionLabels } from './automation-read';
 export type { PackageForAutomations, EditionLabel } from './automation-read';
+export { readStockForDashboard } from './dashboard-read';
+export type { StockForDashboard } from './dashboard-read';
