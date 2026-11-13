@@ -4,7 +4,7 @@ import { EntityRegistry } from '../entities/entity-registry';
 import { AppError } from '../errors/safe-error';
 import { FIELD_CLASSES, FieldClass } from './field-classes.generated';
 
-export type AuditActorType = 'staff' | 'customer' | 'system' | 'automation' | 'api_key';
+export type AuditActorType = 'staff' | 'customer' | 'system' | 'automation' | 'api_key' | 'payment_link';
 
 /** Who did it. Built by the access guard for HTTP requests; `system` for jobs and the CLI. */
 export interface AuditActor {

@@ -167,6 +167,7 @@ model Booking {
   payments               Payment[]
   webhookEvents          WebhookEvent[]
   termsAcceptances       TermsAcceptance[]
+  paymentLinks           PaymentLink[]
   inventoryMovements     InventoryMovement[]
   complaints             Complaint[]
   waitlistEntries        WaitlistEntry[]

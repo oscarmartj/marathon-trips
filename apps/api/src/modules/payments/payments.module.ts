@@ -8,9 +8,12 @@ import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { RawBodyRoutes } from '../../platform/http/raw-body';
 import { BookingTransitionHooks, BookingsModule } from '../bookings';
+import { TemplatesModule } from '../templates';
+import { MailTemplateRegistry } from '../../platform/mail/templates';
+import { PAYMENT_LINK_TEMPLATE, PaymentLinksService } from './core/payment-links.service';
 import { PaymentAdminService } from './admin.service';
 import { adapterOptions, createAdapters } from './adapters';
-import { PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
+import { PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
 import { ProviderAccountsService } from './core/accounts.service';
 import { PaymentStateMachine } from './core/attempt-state';
 import { PaymentAttemptSyncService } from './core/attempt-sync.service';
@@ -26,21 +29,21 @@ import { WEBHOOK_MAX_BYTES, WEBHOOK_PATH_PREFIX, PaymentWebhooksService } from '
 import { PAYMENT_ENTITIES } from './entities';
 import { paymentsManifest } from './manifest';
 import { TermsService } from './core/terms.service';
-import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard } from './rate-limit.guard';
+import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
 
 @Module({
-  imports: [AuthModule, CommonModule, BookingsModule],
+  imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
-  controllers: [PaymentCustomerController, PaymentWebhooksController, PaymentsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
+  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
-    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentCoverageService, TermsService,
+    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService,
     SimulatorCheckoutService,
   ],
-  exports: [ProviderAccountsService, PaymentAttemptsService],
+  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(
@@ -52,6 +55,8 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(PaymentCoverageService) private readonly coverage: PaymentCoverageService,
     @Inject(RawBodyRoutes) private readonly rawBody: RawBodyRoutes,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(MailTemplateRegistry) private readonly mailTemplates: MailTemplateRegistry,
+    @Inject(PaymentLinksService) private readonly links: PaymentLinksService,
   ) {}
 
   /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
@@ -61,6 +66,7 @@ export class PaymentsModule implements OnModuleInit {
     for (const e of PAYMENT_ENTITIES) this.entities.register(e);
     this.schedule.register(this.hooks);
     this.coverage.register(this.hooks);
+    this.mailTemplates.register({ ...PAYMENT_LINK_TEMPLATE, render: (ctx) => this.links.renderEmail(ctx) });
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });
   }
 }

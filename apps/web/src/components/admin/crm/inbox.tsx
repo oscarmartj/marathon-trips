@@ -10,6 +10,7 @@ import { t } from '@/lib/i18n';
 import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
 import { RecordNotes, crmError, formatMoment, fullName, statusLabel } from './crm-kit';
+import { PaymentLinksPanel } from './payment-links';
 
 interface Row {
   id: string;
@@ -185,6 +186,7 @@ export function BookingDetail({ id }: { id: string }) {
         </Section>
       ) : null}
       <Status message={message?.text ?? null} tone={message?.tone ?? 'error'} />
+      <PaymentLinksPanel bookingId={id} status={b.status} />
       <Section id="booking-notes" title={t('admin.crm.notes.title')}>
         <RecordNotes entityType="Booking" id={id} />
       </Section>

@@ -19,7 +19,8 @@ function missesOf(userId: string, now: number): number[] {
 }
 
 /**
- * True only when the booking with this reference belongs to the customer of this user (plan 2.4, section 7). Any
+ * True only when the booking with this reference belongs to the customer of this user, and that customer's account is
+ * not closed (deleted or anonymised; task 5.1, review round 1, point 4) (plan 2.4, section 7). Any
  * other case, an unknown reference included, is the same false, so the guard answers the same 404 to both. Guards run
  * after the access check, so guessing is capped here: after too many misses in an hour, every reference reads as not
  * found for that user.
@@ -31,7 +32,7 @@ export async function ownsBookingReference(ctx: { userId: string; params: Record
   const rows = prisma && BOOKING_REFERENCE_PATTERN.test(reference)
     ? await prisma.$queryRaw<Array<{ ok: number }>>`
         SELECT 1 AS ok FROM bookings b JOIN customers c ON c.id = b."customerId"
-        WHERE b.reference = ${reference} AND c."userId" = ${ctx.userId}::uuid`
+        WHERE b.reference = ${reference} AND c."userId" = ${ctx.userId}::uuid AND c."deletedAt" IS NULL AND c."anonymisedAt" IS NULL`
     : [];
   if (rows.length === 1) return true;
   misses.set(ctx.userId, [...recent, now], now);

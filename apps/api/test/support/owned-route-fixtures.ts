@@ -79,6 +79,21 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => send(a), asOther: () => send(b) };
     },
   },
+  // Task 5.1: the customer area. A's booking (approved, so it has a plan) and a document of A's confirmed booking.
+  'account-booking': {
+    async create(t, a, b) {
+      const path = `/account/bookings/${await approvedRequestOf(t, a)}`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
+  'account-booking-document': {
+    async create(t, a, b) {
+      const { customerBookingIn } = await import('./customer-portal');
+      const { reference } = await customerBookingIn(t, a, 'confirmed');
+      const path = `/account/bookings/${reference}/documents/confirmation`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
   // Task 2.5: GET /quotes/:reference. A quote sent to customer A; B asks for it.
   quote: {
     async create(t, a, b) {

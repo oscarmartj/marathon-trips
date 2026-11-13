@@ -7,7 +7,7 @@ import type { AuditActor } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import { type Tx, assertVersion, defined, orConflict, versionConflict, view } from './support';
-import { TEMPLATE_DEFINITIONS, type TemplateDefinition, definitionOf, sampleValues } from './definitions';
+import { TEMPLATE_DEFINITIONS, type TemplateDefinition, definitionOf, rulesOf, sampleValues } from './definitions';
 import { buildPdf } from './pdf';
 import { type TemplateProblem, checkWording, fill } from './render';
 
@@ -53,7 +53,7 @@ export class TemplatesService {
 
   /** Refuses wording with a placeholder outside the template's variables, or with braces that are not a placeholder. */
   private assertWording(d: TemplateDefinition, fields: { subject?: string; body?: string }): void {
-    const problems = checkWording(fields, d.variables.map((x) => x.name));
+    const problems = checkWording(fields, d.variables.map((x) => x.name), rulesOf(d));
     if (problems.length === 0) return;
     // Fixed wording, as for every error. The preview route names the problems; saving only says that there are some.
     throw unprocessable('template_wording_invalid', 'The wording uses a variable this template does not have, or has braces that are not a variable');
@@ -151,7 +151,7 @@ export class TemplatesService {
   previewWording(channel: TemplateChannelValue, input: z.infer<typeof previewTemplateSchema>): PreviewResult {
     const d = this.def(channel, input.key);
     const variables = d.variables.map((x) => ({ ...x }));
-    const problems = checkWording(input, d.variables.map((x) => x.name));
+    const problems = checkWording(input, d.variables.map((x) => x.name), rulesOf(d));
     if (problems.length > 0) return { subject: null, body: null, problems, variables };
     const values = sampleValues(d);
     return { subject: fill(input.subject, values, { singleLine: true }), body: fill(input.body, values), problems: [], variables };

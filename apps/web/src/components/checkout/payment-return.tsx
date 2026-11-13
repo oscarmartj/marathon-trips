@@ -52,7 +52,7 @@ export function PaymentReturn({ reference }: { reference: string }) {
     };
   }, [outcome, tries, checking, check]);
 
-  const booking = `/trips/requests/${encodeURIComponent(reference)}`;
+  const booking = `/account/bookings/${encodeURIComponent(reference)}`;
   if (!answer) return <p className="notice" role="status">{t('paymentReturn.checking')}</p>;
   if ('error' in answer) {
     return (

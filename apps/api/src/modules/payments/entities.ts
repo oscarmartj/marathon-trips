@@ -43,4 +43,19 @@ export const PAYMENT_ENTITIES: EntityDef[] = [
       },
     },
   },
+  {
+    // Task 5.1: a link holds no personal data, but it is a way into the customer's booking: erasure revokes it and drops
+    // its token hash, so nothing can use it again.
+    entityType: 'PaymentLink', model: 'PaymentLink', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: {
+      export: (tx: Tx, customerId) => tx.paymentLink.findMany({ where: { booking: { customerId } }, select: { bookingId: true, status: true, expiresAt: true, createdAt: true, usedAt: true, revokedAt: true } }),
+      anonymise: async (tx: Tx, customerId) => {
+        // Lock order Booking → Payment → PaymentLink (review round 1, point 3): the customer's bookings first, so a payment
+        // succeeding through one of these links cannot interleave with the revocation.
+        await tx.$queryRaw`SELECT id FROM bookings WHERE "customerId" = ${customerId}::uuid ORDER BY id FOR UPDATE`;
+        await tx.paymentLink.updateMany({ where: { booking: { customerId }, status: 'active' }, data: { status: 'revoked', revokedAt: new Date(), tokenHash: null } });
+        await tx.paymentLink.updateMany({ where: { booking: { customerId }, status: { in: ['revoked', 'used'] }, tokenHash: { not: null } }, data: { tokenHash: null } });
+      },
+    },
+  },
 ];

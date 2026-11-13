@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { PaymentAttemptView, PaymentMethod, PaymentPlanView, StartPayment } from '@mt/shared';
+import type { AccountPaymentRecord, PaymentAttemptView, PaymentMethod, PaymentPlanView, StartPayment } from '@mt/shared';
 import type { Prisma } from '../../../generated/prisma/client';
 import { AuditService } from '../../../platform/audit/audit.service';
 import type { AuditActor } from '../../../platform/audit/audit.service';
@@ -108,19 +108,50 @@ export class PaymentAttemptsService {
     };
   }
 
+  /**
+   * The payments a customer sees in their account (task 5.1): the attempts of the booking that succeeded in this
+   * environment's mode, oldest first. A record of money received, not a receipt: no ids, references or failure codes.
+   */
+  async paymentRecords(reference: string): Promise<AccountPaymentRecord[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { booking: { reference }, mode: this.gateway.mode, status: 'succeeded' }, orderBy: [{ succeededAt: 'asc' }, { attemptNumber: 'asc' }],
+      select: { succeededAt: true, amountMinor: true, currency: true, method: true },
+    });
+    return rows.map((r) => ({ succeededAt: r.succeededAt!.toISOString(), amountMinor: r.amountMinor.toString(), currency: r.currency, method: r.method as PaymentMethod }));
+  }
+
   // ---- Customer: start (or resume) a payment ----
 
   async start(user: { id: string }, reference: string, body: StartPayment, key: string, actor: AuditActor): Promise<PaymentAttemptView> {
     const booking = await readBookingForPayments(this.prisma, { reference });
     if (!booking) throw notFound();
     // The route of the record carries the booking id, so one key on two bookings is two records (plan 3.1, 14.4).
-    const outcome = await this.idempotency.run({ actorType: 'customer', actorId: user.id, route: `POST /booking-requests/${booking.id}/payments`, key, body }, async () => {
+    return this.startWith(booking, { actorType: 'customer', actorId: user.id, route: `POST /booking-requests/${booking.id}/payments` }, body, body, key, actor, null);
+  }
+
+  /**
+   * A payment through a payment link (task 5.1, plan section 5). The link's holder has no session: the idempotency
+   * record belongs to the token (its hash) and the link, the amount is the plan's up to the link's target item, and the
+   * terms must already have been accepted by the signed-in customer. Nothing here accepts terms or replaces an attempt.
+   */
+  async startViaLink(link: { id: string; bookingId: string; tokenHash: string; targetSequence: number }, method: StartPayment['method'], key: string): Promise<PaymentAttemptView> {
+    const booking = await readBookingForPayments(this.prisma, { id: link.bookingId });
+    if (!booking) throw notFound();
+    const actor: AuditActor = { type: 'payment_link', id: link.id };
+    return this.startWith(booking, { actorType: 'token', actorId: link.tokenHash, route: `POST /payment-links/${link.id}/payments` }, { method }, { method, upToSequence: link.targetSequence }, key, actor, link.id);
+  }
+
+  private async startWith(
+    booking: BookingForPayments, record: { actorType: 'customer' | 'token'; actorId: string; route: string }, recordBody: object, body: StartPayment,
+    key: string, actor: AuditActor, viaLink: string | null,
+  ): Promise<PaymentAttemptView> {
+    const outcome = await this.idempotency.run({ ...record, key, body: recordBody }, async () => {
       try {
         // The current booking terms must have been accepted (task 3.5). Inside the record, so a retry of a payment that
         // was already created replays it even if the terms changed since; a refusal deletes the record: nothing stored.
         // A booking that cannot take a payment at all keeps its own error (booking_not_payable and the like).
         if (PAYABLE_STATES.includes(booking.status)) await this.terms.assertAccepted(booking.id);
-        const paymentId = await this.createOrReplace(booking.id, body, actor);
+        const paymentId = await this.createOrReplace(booking.id, body, actor, viaLink);
         return { status: 201, resourceType: 'Payment', resourceId: paymentId };
       } catch (err) {
         // Stored as this key's answer, so a retry with the same key and body never pays the next item (review, point 4).
@@ -151,9 +182,9 @@ export class PaymentAttemptsService {
    * is ended only once the gateway confirms its cancellation, and transaction A runs once more. If that showed money
    * came in, or anything was collected between the two, nothing new is created: the customer did not ask for that item.
    */
-  async createOrReplace(bookingId: string, body: StartPayment, actor: AuditActor): Promise<string> {
+  async createOrReplace(bookingId: string, body: StartPayment, actor: AuditActor, viaLink: string | null = null): Promise<string> {
     try {
-      return await this.createOrResume(bookingId, body, actor);
+      return await this.createOrResume(bookingId, body, actor, undefined, viaLink);
     } catch (err) {
       if (!(err instanceof ReplacementNeeded)) throw err;
       if (!this.replacer) throw conflict('payment_attempt_in_progress', 'A payment for this booking is already in progress');
@@ -165,12 +196,12 @@ export class PaymentAttemptsService {
       }
       if (outcome === 'recorded') throw alreadyRecorded();
       if (outcome !== 'replaced') throw conflict('payment_attempt_in_progress', 'A payment for this booking is still being processed. Try again shortly.');
-      return this.createOrResume(bookingId, body, actor, { expectCollected: err.collectedMinor });
+      return this.createOrResume(bookingId, body, actor, { expectCollected: err.collectedMinor }, viaLink);
     }
   }
 
   /** Transaction A (plan 3.1, section 5.1). Returns the id of a new or resumed live attempt. */
-  async createOrResume(bookingId: string, body: StartPayment, actor: AuditActor, again?: { expectCollected: bigint }): Promise<string> {
+  async createOrResume(bookingId: string, body: StartPayment, actor: AuditActor, again?: { expectCollected: bigint }, viaLink: string | null = null): Promise<string> {
     const expiryMinutes = await this.settings.get(PAYMENT_SETTINGS.attemptExpiryMinutes.key, PAYMENT_SETTINGS.attemptExpiryMinutes.fallback);
     let result: string | { expiredLive: string };
     try {
@@ -179,6 +210,16 @@ export class PaymentAttemptsService {
         if (!b) throw notFound();
         const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
         this.assertPayable(b, at);
+        // Through a link: the link must still be active and in date, checked with the booking locked (Booking → PaymentLink).
+        // Its target must still be an active item of the plan, at the sequence the caller pays up to: a regenerated plan
+        // (superseded items) makes the link not found (review round 1, point 2).
+        if (viaLink) {
+          const link = await tx.$queryRaw<Array<{ ok: boolean }>>`
+            SELECT (l.status = 'active' AND l."expiresAt" > ${at} AND i.state = 'active' AND i.sequence = ${body.upToSequence ?? -1}) AS ok
+            FROM payment_links l JOIN payment_schedule_items i ON i.id = l."targetScheduleItemId" AND i."bookingId" = l."bookingId"
+            WHERE l.id = ${viaLink}::uuid AND l."bookingId" = ${b.id}::uuid FOR UPDATE OF l`;
+          if (!link[0]?.ok) throw notFound('payment_link_not_found', 'This payment link is not valid');
+        }
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
         if (body.upToSequence !== undefined && !items.some((i) => i.sequence === body.upToSequence)) throw unprocessable('unknown_plan_item', 'There is no such item in the payment plan');
         const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
@@ -187,8 +228,9 @@ export class PaymentAttemptsService {
         if (!due) throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
 
         const accounts = await this.routing.candidates(tx, { method: body.method, currency: b.currency, country: b.residenceCountry });
-        const live = await tx.$queryRaw<Array<{ id: string; status: string; method: string; amountMinor: bigint; pendingExpiresAt: Date; providerAccountId: string }>>`
-          SELECT id::text AS id, status::text AS status, method::text AS method, "amountMinor", "pendingExpiresAt", "providerAccountId"::text AS "providerAccountId"
+        const live = await tx.$queryRaw<Array<{ id: string; status: string; method: string; amountMinor: bigint; pendingExpiresAt: Date; providerAccountId: string; paymentLinkId: string | null }>>`
+          SELECT id::text AS id, status::text AS status, method::text AS method, "amountMinor", "pendingExpiresAt", "providerAccountId"::text AS "providerAccountId",
+                 "paymentLinkId"::text AS "paymentLinkId"
           FROM payments WHERE "liveBookingId" = ${b.id}::uuid FOR UPDATE`;
         const current = live[0];
         if (current) {
@@ -196,7 +238,10 @@ export class PaymentAttemptsService {
           if (current.pendingExpiresAt.getTime() <= at.getTime()) return { expiredLive: current.id };
           // Resumed only with the same account (still able to take charges), method and amount (plan 3.1, 5.1).
           const sameAccount = accounts.some((a) => a.id === current.providerAccountId);
-          if (current.status !== 'pending' && sameAccount && current.method === body.method && current.amountMinor === due.amountMinor) return current.id;
+          // Never across paths (task 5.1, review G2): checkout resumes only its own attempts and a link only the attempts it
+          // started, so the return address and the holder always match the attempt.
+          const samePath = (current.paymentLinkId ?? null) === viaLink;
+          if (samePath && current.status !== 'pending' && sameAccount && current.method === body.method && current.amountMinor === due.amountMinor) return current.id;
           // P2: replaced only on request, never a pending debit, and once only (plan 3.2, section 4).
           if (body.replaceLiveAttempt && !again && current.status !== 'pending') throw new ReplacementNeeded(current.id, collected);
           throw conflict('payment_attempt_in_progress', 'A payment for this booking is already in progress');
@@ -211,7 +256,7 @@ export class PaymentAttemptsService {
           data: {
             bookingId: b.id, currency: b.currency, origin: 'collection', attemptNumber: n, targetScheduleItemId: target.id, payerCustomerId: b.customerId,
             providerAccountId: account.id, mode: account.mode, adapterKey: account.adapterKey, method: body.method, amountMinor: due.amountMinor,
-            status: 'created', liveBookingId: b.id, idempotencyKey: `booking:${b.id}:attempt:${n}`,
+            status: 'created', liveBookingId: b.id, idempotencyKey: `booking:${b.id}:attempt:${n}`, paymentLinkId: viaLink,
             pendingExpiresAt: new Date(at.getTime() + expiryMinutes * 60_000),
           },
           select: { id: true },
@@ -232,6 +277,11 @@ export class PaymentAttemptsService {
     throw conflict('payment_attempt_in_progress', 'A payment for this booking is still being processed. Try again shortly.');
   }
 
+  /** Back to the page of the path the attempt was started on: a link's holder may have no session (review G2). */
+  returnUrlOf(p: { paymentLinkId: string | null; booking: { reference: string } }): string {
+    return p.paymentLinkId ? `${this.config.WEB_ORIGIN}/pay/return` : `${this.config.WEB_ORIGIN}/payments/return?ref=${p.booking.reference}`;
+  }
+
   private assertPayable(b: BookingForPayments, at: Date): void {
     // Paid in full (plan 0.1, 6.2: "409, nothing outstanding"): say so rather than "not payable".
     if (b.status === 'balance_paid') throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
@@ -247,7 +297,7 @@ export class PaymentAttemptsService {
   async drive(paymentId: string): Promise<{ type: 'redirect'; url: string } | undefined> {
     const p = await this.prisma.payment.findUniqueOrThrow({
       where: { id: paymentId },
-      select: { id: true, bookingId: true, booking: { select: { reference: true } }, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, payerCustomer: { select: { countryOfResidence: true } } },
+      select: { id: true, bookingId: true, paymentLinkId: true, booking: { select: { reference: true } }, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, payerCustomer: { select: { countryOfResidence: true } } },
     });
     if (!LIVE_STATUSES.includes(p.status)) return undefined;
     let remote: ProviderPayment | null;
@@ -262,7 +312,7 @@ export class PaymentAttemptsService {
       try {
         remote = await this.gateway.call(p.providerAccountId, 'create', (provider, ctx) => provider.createPayment(ctx, {
           amount: { amountMinor: p.amountMinor, currency: p.currency }, method: p.method, idempotencyKey: p.idempotencyKey,
-          metadata: { paymentId: p.id, bookingId: p.bookingId }, returnUrl: `${this.config.WEB_ORIGIN}/payments/return?ref=${p.booking.reference}`, customerCountry: p.payerCustomer.countryOfResidence,
+          metadata: { paymentId: p.id, bookingId: p.bookingId }, returnUrl: this.returnUrlOf(p), customerCountry: p.payerCustomer.countryOfResidence,
         }));
       } catch (err) {
         if (!(err instanceof ProviderError)) throw this.forCustomer(err);

@@ -18,18 +18,35 @@ export function hasMalformedBraces(text: string): boolean {
 
 export interface TemplateProblem {
   field: 'subject' | 'body';
-  kind: 'unknown_variable' | 'malformed';
+  kind: 'unknown_variable' | 'malformed' | 'body_only_variable' | 'missing_variable';
   name?: string;
 }
 
-/** What is wrong with the wording: placeholders that are not in the list of allowed names, and malformed braces. */
-export function checkWording(fields: { subject?: string; body?: string }, allowed: readonly string[]): TemplateProblem[] {
+/**
+ * Rules some variables carry (task 5.1): a `bodyOnly` one never goes in the subject, which is stored and shown in the
+ * panel (a payment link's token must not be); a `requiredInBody` one must be in the body (an email that minted a link
+ * has to carry it).
+ */
+export interface VariableRules {
+  bodyOnly?: readonly string[];
+  requiredInBody?: readonly string[];
+}
+
+/** What is wrong with the wording: placeholders not allowed, or not allowed where they are, missing ones, malformed braces. */
+export function checkWording(fields: { subject?: string; body?: string }, allowed: readonly string[], rules: VariableRules = {}): TemplateProblem[] {
   const problems: TemplateProblem[] = [];
   for (const field of ['subject', 'body'] as const) {
     const text = fields[field];
     if (text === undefined) continue;
-    for (const name of placeholdersOf(text)) if (!allowed.includes(name)) problems.push({ field, kind: 'unknown_variable', name });
+    for (const name of placeholdersOf(text)) {
+      if (!allowed.includes(name)) problems.push({ field, kind: 'unknown_variable', name });
+      else if (field === 'subject' && rules.bodyOnly?.includes(name)) problems.push({ field, kind: 'body_only_variable', name });
+    }
     if (hasMalformedBraces(text)) problems.push({ field, kind: 'malformed' });
+  }
+  if (fields.body !== undefined) {
+    const used = placeholdersOf(fields.body);
+    for (const name of rules.requiredInBody ?? []) if (!used.includes(name)) problems.push({ field: 'body', kind: 'missing_variable', name });
   }
   return problems;
 }

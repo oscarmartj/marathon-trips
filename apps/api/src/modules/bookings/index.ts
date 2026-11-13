@@ -7,6 +7,7 @@ export { BookingCoverage, coverageEvents } from './coverage';
 export type { CoverageFacts } from './coverage';
 export { approvalExpiryJob } from './expiry.service';
 export { ownsBookingReference } from './ownership';
+export { customerView } from './views';
 export { readBookingForPayments, readBookingForAutomations, readBalancesDueForCalendar } from './read';
 export type { BookingForPayments, LockedBooking, BookingForAutomations, BalancesDueForCalendar } from './read';
 export { BookingStateMachine, BOOKING_EVENT_TABLE, BOOKING_STATUS_PAIRS } from './state-machine';

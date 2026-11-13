@@ -87,3 +87,45 @@ export const paymentRefreshViewSchema = z.object({
   attempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),
 });
 export type PaymentRefreshView = z.infer<typeof paymentRefreshViewSchema>;
+
+// Payment links (task 5.1, plan docs/plans/5.1-customer-area.md, section 5). The token travels in the body, never in a
+// URL; the page reads it from the URL fragment. A link pays one plan item: the body has no amount, sequence or replace.
+
+const LINK_TOKEN = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+
+/** Body of POST /payment-links/view and /payment-links/refresh. */
+export const paymentLinkTokenSchema = z.strictObject({ token: LINK_TOKEN });
+export type PaymentLinkToken = z.infer<typeof paymentLinkTokenSchema>;
+
+/** Body of POST /payment-links/payments. Any other key, nested or not, is a 422. */
+export const paymentLinkPaySchema = z.strictObject({ token: LINK_TOKEN, method: z.enum(PAYMENT_METHODS) });
+export type PaymentLinkPay = z.infer<typeof paymentLinkPaySchema>;
+
+/** What a link shows without a session: the trip, its dates and the amount due now. Nothing personal. */
+export const paymentLinkViewSchema = z.strictObject({
+  reference: z.string(),
+  package: z.strictObject({ name: z.record(z.string(), z.string()) }),
+  race: z.strictObject({ name: z.record(z.string(), z.string()) }),
+  editionYear: z.number().int(),
+  departureDate: z.string(),
+  returnDate: z.string(),
+  currency: z.string().length(3),
+  amountDueMinor: minor,
+  payable: z.boolean(),
+  notPayableReason: z.string().optional(),
+  methods: z.array(z.enum(PAYMENT_METHODS)),
+  termsAccepted: z.boolean(),
+  liveAttempt: z.strictObject({ status: z.enum(PAYMENT_STATUSES), method: z.enum(PAYMENT_METHODS) }).nullable(),
+  expiresAt: z.string(),
+});
+export type PaymentLinkView = z.infer<typeof paymentLinkViewSchema>;
+
+/** Answer of POST /payment-links/refresh: the latest attempt started through this link, and whether the link has served. */
+export const paymentLinkRefreshViewSchema = z.strictObject({
+  used: z.boolean(),
+  attempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),
+});
+export type PaymentLinkRefreshView = z.infer<typeof paymentLinkRefreshViewSchema>;
+
+/** Body of POST /admin/payments/bookings/:id/payment-links: nothing; the target and the expiry are the server's. */
+export const sendPaymentLinkSchema = z.strictObject({});

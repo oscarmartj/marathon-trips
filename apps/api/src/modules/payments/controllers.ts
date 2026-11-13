@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
-import { acceptTermsSchema, startPaymentSchema } from '@mt/shared';
+import { acceptTermsSchema, paymentLinkPaySchema, paymentLinkTokenSchema, sendPaymentLinkSchema, startPaymentSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { Public, OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
@@ -13,7 +13,8 @@ import { PaymentAttemptsService } from './core/attempts.service';
 import { TermsService } from './core/terms.service';
 import { PaymentWebhooksService } from './core/webhooks.service';
 import { PAYMENTS_PERMISSIONS as P } from './manifest';
-import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard } from './rate-limit.guard';
+import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
+import { PaymentLinksService } from './core/payment-links.service';
 import { PaymentAdminService } from './admin.service';
 
 const uuid = () => new ParseUUIDPipe();
@@ -83,14 +84,58 @@ export class PaymentWebhooksController {
   }
 }
 
-/** The panel's read-only payment routes. */
+/**
+ * Payment links without a session (task 5.1, plan section 5). The token travels in the body, never in the path or query,
+ * so it stays out of access logs; any problem with it is one 404. The amount is always the plan's.
+ */
+@Controller('payment-links')
+@UseGuards(PaymentLinkRateLimitGuard)
+export class PaymentLinksController {
+  constructor(@Inject(PaymentLinksService) private readonly links: PaymentLinksService) {}
+
+  @Post('view') @HttpCode(200)
+  @Public('payment link holders: reference, package, race, dates, currency, amount due now, methods, whether terms were accepted, link expiry')
+  view(@Body(new ZodPipe(paymentLinkTokenSchema)) b: In<typeof paymentLinkTokenSchema>) {
+    return this.links.view(b.token);
+  }
+
+  @Post('payments')
+  @UseGuards(PaymentLinkStartRateLimitGuard)
+  @Public('payment link holders: start (or resume) the payment of the link\'s plan item; the amount is the plan\'s')
+  pay(@Body(new ZodPipe(paymentLinkPaySchema)) b: In<typeof paymentLinkPaySchema>, @Headers('idempotency-key') key: string | undefined) {
+    if (!key || !IDEMPOTENCY_KEY.test(key)) throw unprocessable('idempotency_key_required', 'Send an Idempotency-Key header (16 to 64 letters, digits or hyphens)');
+    return this.links.pay(b.token, b.method, key);
+  }
+
+  @Post('refresh') @HttpCode(200)
+  @Public('payment link holders: status, method and amount of the latest attempt made through this link')
+  refresh(@Body(new ZodPipe(paymentLinkTokenSchema)) b: In<typeof paymentLinkTokenSchema>) {
+    return this.links.refresh(b.token);
+  }
+}
+
+/** The panel's payment routes: read-only, except sending and revoking payment links (task 5.1). */
 @Controller('admin')
 export class PaymentsAdminController {
-  constructor(@Inject(PaymentAdminService) private readonly admin: PaymentAdminService) {}
+  constructor(
+    @Inject(PaymentAdminService) private readonly admin: PaymentAdminService,
+    @Inject(PaymentLinksService) private readonly links: PaymentLinksService,
+  ) {}
 
   @Get('payments/bookings/:id') @RequirePermission(P.paymentRead)
-  bookingPayments(@Param('id', uuid()) id: string) {
-    return this.admin.bookingPayments(id);
+  async bookingPayments(@Param('id', uuid()) id: string) {
+    const view = await this.admin.bookingPayments(id);
+    return { ...view, links: await this.links.adminLinks(id) };
+  }
+
+  @Post('payments/bookings/:id/payment-links') @RequirePermission(P.paymentLinkSend)
+  sendLink(@Param('id', uuid()) id: string, @Body(new ZodPipe(sendPaymentLinkSchema)) _b: In<typeof sendPaymentLinkSchema>, @Req() req: ApiRequest) {
+    return this.links.send(id, actorOf(req));
+  }
+
+  @Post('payments/payment-links/:id/revoke') @HttpCode(200) @RequirePermission(P.paymentLinkSend)
+  revokeLink(@Param('id', uuid()) id: string, @Req() req: ApiRequest) {
+    return this.links.revoke(id, actorOf(req));
   }
 
   @Get('payments/provider-accounts') @RequirePermission(P.accountRead)

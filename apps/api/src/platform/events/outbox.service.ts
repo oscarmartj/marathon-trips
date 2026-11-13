@@ -12,7 +12,7 @@ export interface EventInput {
   aggregateVersion?: number;
   /** Identifiers only. */
   payload?: Record<string, unknown>;
-  actorType: 'staff' | 'customer' | 'system' | 'automation' | 'api_key';
+  actorType: 'staff' | 'customer' | 'system' | 'automation' | 'api_key' | 'payment_link';
   actorId?: string;
 }
 

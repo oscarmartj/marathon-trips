@@ -1,0 +1,44 @@
+import { CUSTOMER_DOCUMENT_KINDS, paymentLinkPaySchema } from '@mt/shared';
+import type { CustomerDocumentKind, PaymentLinkRefreshView, PaymentMethod } from '@mt/shared';
+
+// The customer area and payment links (task 5.1). Pure helpers, tested without a browser. The pages show what the API
+// sends; nothing here adds up an amount.
+
+export const BOOKING_STATUS_KEYS = ['requested', 'approved', 'deposit_paid', 'confirmed', 'balance_paid', 'completed', 'declined', 'expired', 'cancelled', 'refunded'] as const;
+
+/** Message key (under account.status) for a booking status; an unknown one reads as "being reviewed", never as confirmed. */
+export const statusKey = (status: string): string => ((BOOKING_STATUS_KEYS as readonly string[]).includes(status) ? status : 'unknown');
+
+/** Where a document is downloaded: the API through the same-origin proxy, under the booking's reference. */
+export function documentHref(reference: string, kind: string): string | null {
+  if (!/^MT-[0-9A-HJKMNP-TV-Z]{6}$/.test(reference) || !(CUSTOMER_DOCUMENT_KINDS as readonly string[]).includes(kind)) return null;
+  return `/api/account/bookings/${reference}/documents/${kind}`;
+}
+
+export const documentKinds = (kinds: readonly string[]): CustomerDocumentKind[] => kinds.filter((k): k is CustomerDocumentKind => (CUSTOMER_DOCUMENT_KINDS as readonly string[]).includes(k));
+
+/** The body that pays through a link: the token and a method, nothing else (the API's strict schema refuses any other key). */
+export function payByLinkBody(token: string, method: PaymentMethod): { token: string; method: PaymentMethod } {
+  return paymentLinkPaySchema.parse({ token, method });
+}
+
+/** Message key (under payLink.errors) for an answer of the payment link routes. */
+export function payLinkErrorKey(status: number, code: string | undefined): string {
+  if (status === 404) return 'notFound';
+  if (status === 429) return 'tooMany';
+  const known = ['terms_not_accepted', 'terms_unavailable', 'payment_attempt_in_progress', 'payment_already_recorded', 'no_payment_method_available', 'provider_unavailable', 'nothing_to_pay', 'approval_expired', 'booking_not_payable'];
+  if (code && known.includes(code)) return code;
+  if (status === 503) return 'provider_unavailable';
+  return 'generic';
+}
+
+/** What the link's return page says, from the API's answer only. */
+export function linkOutcome(view: PaymentLinkRefreshView): 'paid' | 'processing' | 'failed' | 'none' {
+  if (view.used || view.attempt?.status === 'succeeded') return 'paid';
+  const a = view.attempt;
+  if (!a) return 'none';
+  return ['created', 'pending', 'requires_action'].includes(a.status) ? 'processing' : 'failed';
+}
+
+/** The link's token is kept only for the trip to the provider and back, in this tab, then deleted. */
+export const PAY_LINK_STORAGE_KEY = 'mt.payLinkToken';
