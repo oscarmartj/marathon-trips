@@ -331,7 +331,7 @@ model TermsAcceptance {
 
 /// A payment link (task 5.1, plan docs/plans/5.1-customer-area.md, section 5): a single-use capability that staff send to
 /// the booking's own address to pay one plan item without a session. No amount (P1): the server computes it. The token
-/// is minted in the email's send step and only its SHA-256 is kept. Updates are limited by a trigger (migration 0024).
+/// is minted in the email's send step and only its SHA-256 is kept. Updates are limited by a trigger (migration 0025).
 model PaymentLink {
   id                   String              @id @default(uuid(7)) @db.Uuid
   bookingId            String              @db.Uuid
