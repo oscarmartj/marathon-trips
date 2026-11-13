@@ -83,6 +83,12 @@ export class MailService {
         started = true;
         attemptsBefore = email.attempts;
 
+        // The customer was erased after this email was queued (task 5.5): it is never sent. Erasure also marks its
+        // queued emails, but one enqueued by a path that read the customer before the erasure would still be here.
+        if (email.customerId) {
+          const [owner] = await tx.$queryRaw<Array<{ erased: boolean }>>`SELECT ("anonymisedAt" IS NOT NULL) AS erased FROM customers WHERE id = ${email.customerId}::uuid`;
+          if (owner?.erased) return this.suppress(tx, email.id, 'recipient_erased');
+        }
         const guard = evaluateMailGuard(this.config, email.to);
         if (!guard.allowed) return this.suppress(tx, email.id, guard.reason ?? 'suppressed');
         if (email.category === 'marketing') {
@@ -99,7 +105,8 @@ export class MailService {
         });
         const { providerMessageId } = await this.sender.send({
           from: this.config.MAIL_FROM, to: email.to, subject: rendered.subject, text: rendered.text, html: rendered.html,
-          ...(email.category === 'marketing' ? { headers: { 'List-Unsubscribe': `<${this.config.API_BASE_URL}/unsubscribe/${email.id}.${token}>` } } : {}),
+          // RFC 8058 one-click: mail clients POST to the address (task 5.5); the address alone changes nothing on GET.
+          ...(email.category === 'marketing' ? { headers: { 'List-Unsubscribe': `<${this.config.API_BASE_URL}/unsubscribe/${email.id}.${token}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } } : {}),
         });
         await tx.outboundEmail.update({
           where: { id: email.id },
@@ -130,9 +137,30 @@ export class MailService {
     return 'suppressed';
   }
 
-  /** Records a bounce, unsubscribe or complaint. Only an HMAC of the address is kept. */
-  async addSuppression(email: string, reason: 'unsubscribed' | 'bounced' | 'complaint', scope: 'marketing' | 'all'): Promise<void> {
+  /**
+   * Records a bounce, unsubscribe or complaint. Only an HMAC of the address is kept. A suppression is never downgraded:
+   * an `all` one (bounce, complaint) stays `all` when an unsubscribe (`marketing`) comes in later (task 5.5).
+   */
+  async addSuppression(email: string, reason: 'unsubscribed' | 'bounced' | 'complaint', scope: 'marketing' | 'all', db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<void> {
     const hash = emailHash(this.config.EMAIL_HASH_KEY, email);
-    await this.prisma.emailSuppression.upsert({ where: { emailHash: hash }, create: { emailHash: hash, reason, scope }, update: { reason, scope } });
+    await db.$executeRaw`
+      INSERT INTO email_suppressions (id, "emailHash", reason, scope)
+      VALUES (gen_random_uuid(), ${hash}, ${reason}::"EmailSuppressionReason", ${scope}::"EmailSuppressionScope")
+      ON CONFLICT ("emailHash") DO UPDATE SET reason = EXCLUDED.reason, scope = EXCLUDED.scope
+      WHERE email_suppressions.scope = 'marketing' OR EXCLUDED.scope = 'all'`;
+  }
+
+  /**
+   * Lifts an unsubscribe when the person gives marketing consent again (task 5.5). Only a `marketing` suppression made
+   * by an unsubscribe goes; a bounce or a complaint stays.
+   */
+  async liftMarketingUnsubscribe(email: string, db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<void> {
+    await db.emailSuppression.deleteMany({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, email), reason: 'unsubscribed', scope: 'marketing' } });
+  }
+
+  /** The suppression scope of an address, if any: `all` stops every email, `marketing` only marketing (task 5.5). */
+  async suppressionScope(email: string, db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<'marketing' | 'all' | null> {
+    const row = await db.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, email) }, select: { scope: true } });
+    return row?.scope ?? null;
   }
 }

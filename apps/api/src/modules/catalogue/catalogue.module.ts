@@ -1,6 +1,7 @@
 import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PermissionRegistry } from '../../platform/access/permissions';
 import { CommonModule } from '../../platform/common/common.module';
+import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { CatalogueAdminController } from './admin.controller';
 import { CatalogueCsvService } from './csv.service';
 import { InventoryService } from './inventory.service';
@@ -20,10 +21,18 @@ import { RaceService } from './race.service';
   exports: [InventoryService, PublicCatalogueService, PackageOpenGates, CatalogueChangeGuards, PackagePricingReader],
 })
 export class CatalogueModule implements OnModuleInit {
-  constructor(@Inject(PermissionRegistry) private readonly permissions: PermissionRegistry) {}
+  constructor(
+    @Inject(PermissionRegistry) private readonly permissions: PermissionRegistry,
+    @Inject(EntityRegistry) private readonly entities: EntityRegistry,
+  ) {}
 
   /** Runs before AccessService syncs the permission table (onApplicationBootstrap). */
   onModuleInit(): void {
     this.permissions.register(catalogueManifest.permissions);
+    // A stock movement may name the booking it held places for (task 5.5): no personal data, append-only, kept on erasure.
+    this.entities.register({
+      entityType: 'InventoryMovement', model: 'InventoryMovement', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+      handlers: { export: async () => [], anonymise: async () => undefined },
+    });
   }
 }

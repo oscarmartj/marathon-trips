@@ -37,7 +37,8 @@ export const PAYMENT_ENTITIES: EntityDef[] = [
   {
     entityType: 'WebhookEvent', model: 'WebhookEvent', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
     handlers: {
-      export: (tx: Tx, customerId) => tx.webhookEvent.findMany({ where: { booking: { customerId } }, select: { bookingId: true, type: true, receivedAt: true, status: true } }),
+      // Provider events are internal records (task 5.5): only the owner's `full` export lists them.
+      export: async (tx: Tx, customerId, opts) => (opts?.audience === 'full' ? tx.webhookEvent.findMany({ where: { booking: { customerId } }, select: { bookingId: true, type: true, receivedAt: true, status: true } }) : []),
       anonymise: async (tx: Tx, customerId) => {
         await tx.webhookEvent.updateMany({ where: { booking: { customerId }, rawBody: { not: null } }, data: { rawBody: null } });
       },

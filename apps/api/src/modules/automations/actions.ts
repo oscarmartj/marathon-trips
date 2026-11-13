@@ -221,8 +221,9 @@ export class AutomationActions {
         if (isCustomerTemplate(a.template)) {
           const customer = customerOf(ctx.entity);
           if (!customer || customer.unavailable) return skipped('recipient_unavailable');
-          // Service notices still respect the suppression list (bounces, complaints, unsubscribes), whatever its scope.
-          if (await ctx.tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email) }, select: { id: true } })) return skipped('recipient_suppressed');
+          // Service notices are transactional: only an `all` suppression (bounce, complaint) stops them. Unsubscribing from
+          // marketing (scope `marketing`) never stops a balance reminder or a booking update (task 5.5, review point 2).
+          if (await ctx.tx.emailSuppression.findFirst({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email), scope: 'all' }, select: { id: true } })) return skipped('recipient_suppressed');
           if (ctx.testMode) return simulated();
           const r = await this.mail.enqueue({
             to: customer.email, templateKey: key, templateVersion: 1, locale: customer.preferredLocale, dedupeKey, category: 'transactional',

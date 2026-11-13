@@ -35,10 +35,15 @@ export class CustomerService {
     return rows[0] ?? null;
   }
 
-  async lockOrCreate(tx: Tx, user: { id: string; email: string }, contact: BookingContact, actor: AuditActor): Promise<{ customer: LockedCustomer; created: boolean }> {
+  /**
+   * The customer of a signed-in user, locked FOR UPDATE, without creating one (task 5.5: the privacy routes): the user's
+   * own customer, or a customer with the verified address and no user yet (created by staff, task 2.5), which the
+   * verified address links, once. Null when there is none. Closed (deleted or anonymised) customers are returned as they
+   * are: the caller decides.
+   */
+  async lockForUser(tx: Tx, user: { id: string; email: string }, actor: AuditActor): Promise<LockedCustomer | null> {
     let customer = await this.lockByUser(tx, user.id);
     if (!customer) {
-      // A customer with this address and no user yet (created by staff, task 2.5): the verified address links it, once.
       const linked = await tx.$executeRaw`
         UPDATE customers SET "userId" = ${user.id}::uuid, "updatedAt" = clock_timestamp(), version = version + 1
         WHERE email = ${user.email}::citext AND "userId" IS NULL AND "deletedAt" IS NULL AND "anonymisedAt" IS NULL`;
@@ -47,6 +52,11 @@ export class CustomerService {
         await this.audit.record(tx, { actor, action: 'bookings.customer.linked', entityType: 'Customer', entityId: customer!.id, model: 'Customer', before: { userId: null }, after: { userId: user.id } });
       }
     }
+    return customer;
+  }
+
+  async lockOrCreate(tx: Tx, user: { id: string; email: string }, contact: BookingContact, actor: AuditActor): Promise<{ customer: LockedCustomer; created: boolean }> {
+    let customer = await this.lockForUser(tx, user, actor);
     let created = false;
     if (!customer) {
       const inserted = await tx.customer.createMany({

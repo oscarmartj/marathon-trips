@@ -219,6 +219,17 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  ConsentRecord: {
+    id: 'nopii',
+    customerId: 'nopii',
+    emailHash: 'secret',
+    emailHashKeyVersion: 'nopii',
+    purpose: 'nopii',
+    granted: 'nopii',
+    source: 'nopii',
+    wordingKey: 'nopii',
+    recordedAt: 'nopii'
+  },
   ContentBanner: {
     id: 'nopii',
     locale: 'nopii',
@@ -756,6 +767,17 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     pricedTerms: 'nopii',
     createdAt: 'nopii',
     updatedAt: 'nopii'
+  },
+  PrivacyRequest: {
+    id: 'nopii',
+    customerId: 'nopii',
+    userId: 'nopii',
+    kind: 'nopii',
+    status: 'nopii',
+    requestedBy: 'nopii',
+    requestedAt: 'nopii',
+    completedAt: 'nopii',
+    actorUserId: 'nopii'
   },
   PromoCode: {
     id: 'nopii',
