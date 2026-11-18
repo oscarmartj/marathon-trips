@@ -142,7 +142,7 @@ export class ErasureService {
       // Complaints logged with this address and no customer (review round 2): their ids now, before the handler
       // redacts the address, so their tasks and audit values can be erased too.
       const complaints = (await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id::text AS id FROM complaints WHERE "customerId" IS NULL AND lower("complainantEmail") = ANY(${emails}::text[])`).map((r) => r.id);
+        SELECT id::text AS id FROM complaints WHERE "customerId" IS NULL AND lower("complainantEmail") = ANY(${emails}::text[]) ORDER BY id FOR UPDATE`).map((r) => r.id);
       for (const def of this.registry.withCustomerLink().filter((d) => ADDRESS_LINKED_ENTITIES.includes(d.entityType))) await def.handlers!.anonymise(tx, NO_CUSTOMER, { emails, userId });
       const hash = this.consent.hashOf(u.email);
       if (await tx.consentRecord.findFirst({ where: { emailHash: hash }, select: { id: true } })) {

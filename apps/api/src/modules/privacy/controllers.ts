@@ -129,8 +129,8 @@ export class UnsubscribeController {
    */
   private readonly badLinks = new WindowLimiter(30, 60_000);
   /**
-   * Review round 2: the same valid link repeated. After 20 in an hour the answer is still 200 (the first one already
-   * unsubscribed; it is idempotent) but nothing more is done, so a loop cannot keep locking the customer.
+   * Review round 2: the same valid link repeated. After 20 successful unsubscribes in an hour the answer is still 200 (it
+   * is idempotent) but nothing more is done, so a loop cannot keep locking the customer. Failures are not counted.
    */
   private readonly sameLink = new WindowLimiter(20, 3_600_000);
 
@@ -143,12 +143,16 @@ export class UnsubscribeController {
   @CsrfExempt('one-click unsubscribe (RFC 8058): mail clients POST without a browser origin; protected by the HMAC in the address')
   @Public('the email id with the HMAC from a marketing email; unsubscribes that address from marketing; wrong HMACs are rate limited')
   async unsubscribe(@Param('ref') ref: string, @Req() req: ApiRequest) {
-    if (!this.consent.isValidRef(ref)) {
+    const valid = this.consent.isValidRef(ref);
+    const linkKey = `unsubscribe:${ref.slice(0, 36)}`;
+    if (!valid) {
       if (!this.badLinks.allow(`unsubscribe:${req.ip ?? 'unknown'}`)) throw tooManyRequests(60);
-    } else if (!this.sameLink.allow(`unsubscribe:${ref.slice(0, 36)}`)) {
+    } else if (!this.sameLink.wouldAllow(linkKey)) {
       return { unsubscribed: true };
     }
     await this.consent.unsubscribe(ref);
+    // Counted only once it has worked (round 3): failed attempts never use up the link.
+    if (valid) this.sameLink.allow(linkKey);
     return { unsubscribed: true };
   }
 

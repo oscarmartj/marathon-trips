@@ -243,6 +243,9 @@ describe('rollback, idempotency and the database guards', () => {
     const helper = await db.query(`SELECT has_function_privilege('mt_app', 'public.privacy_account_is_anonymised_customer(uuid)', 'EXECUTE') AS app,
       has_function_privilege('mt_privacy', 'public.privacy_account_is_anonymised_customer(uuid)', 'EXECUTE') AS privacy`);
     expect(helper.rows[0]).toEqual({ app: false, privacy: true });
+    const redacted = await db.query(`SELECT has_function_privilege('mt_app', 'public.privacy_complaints_redacted(uuid[])', 'EXECUTE') AS app,
+      has_function_privilege('mt_privacy', 'public.privacy_complaints_redacted(uuid[])', 'EXECUTE') AS privacy`);
+    expect(redacted.rows[0]).toEqual({ app: false, privacy: true });
     // mt_privacy reads ids, links and statuses only: never a personal column.
     const cols = await db.query(`SELECT has_column_privilege('mt_privacy', 'customers', 'email', 'SELECT') AS email,
       has_column_privilege('mt_privacy', 'customers', 'givenName', 'SELECT') AS name, has_column_privilege('mt_privacy', 'tasks', 'title', 'SELECT') AS title,

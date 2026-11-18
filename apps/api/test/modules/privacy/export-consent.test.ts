@@ -269,6 +269,16 @@ describe('one-click unsubscribe', () => {
     } finally {
       spy.mockRestore();
     }
+    // Failed attempts do not use the link up (round 3): 25 failures, then the real unsubscribe still happens.
+    const flaky = await t.prisma.$transaction((tx) => mail.enqueue({ to: uniqueEmail('flaky'), templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `b:${randomUUID()}`, category: 'marketing' }, tx));
+    const failing = vi.spyOn(consent, 'unsubscribe').mockRejectedValue(new Error('database down'));
+    try {
+      for (let i = 0; i < 25; i++) expect((await t.http().post(`/unsubscribe/${flaky.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, flaky.id)}`)).status).toBe(500);
+    } finally {
+      failing.mockRestore();
+    }
+    expect((await t.http().post(`/unsubscribe/${flaky.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, flaky.id)}`)).status).toBe(200);
+    expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, (await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: flaky.id } })).to) } })).toMatchObject({ scope: 'marketing' });
     // A valid link still goes through while wrong ones are being refused.
     const ok = await t.prisma.$transaction((tx) => mail.enqueue({ to: uniqueEmail('after'), templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `b:${randomUUID()}`, category: 'marketing' }, tx));
     expect((await t.http().post(`/unsubscribe/${ok.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, ok.id)}`)).status).toBe(200);
@@ -336,7 +346,7 @@ describe('erasure requests from the account', () => {
     expect(await history()).toContain('Ana Complainant');
     expect((await as(me).post('/account/privacy/erasure-request', { confirm: true })).body.status).toBe('completed');
     expect(await history()).not.toMatch(/Ana Complainant|Ana words|Ana summary/i);
-    expect(await history()).not.toContain(me.email);
+    expect((await history()).toLowerCase()).not.toContain(me.email.toLowerCase());
     const tasks = await t.prisma.task.findMany({ where: { entityType: 'Complaint', entityId: id } });
     expect(tasks.every((k) => k.title === '[redacted]')).toBe(true);
     expect(await t.prisma.searchDocument.count({ where: { entityType: 'Task', entityId: { in: tasks.map((k) => k.id) } } })).toBe(0);

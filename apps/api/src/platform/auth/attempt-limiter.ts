@@ -103,6 +103,11 @@ export class WindowLimiter {
     this.entries = new Lru<number[]>(10_000, windowMs);
   }
 
+  /** Whether `allow` would pass now, without counting anything (task 5.5: count only what succeeded). */
+  wouldAllow(key: string, now: number = Date.now()): boolean {
+    return (this.entries.get(key, now) ?? []).filter((t) => t > now - this.windowMs).length < this.max;
+  }
+
   allow(key: string, now: number = Date.now()): boolean {
     const recent = (this.entries.get(key, now) ?? []).filter((t) => t > now - this.windowMs);
     if (recent.length >= this.max) {
