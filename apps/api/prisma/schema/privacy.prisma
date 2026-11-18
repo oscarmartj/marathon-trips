@@ -1,0 +1,83 @@
+// ---- Task 5.5: privacy (plan docs/plans/5.5-privacy-export-erase.md) ----
+// Requests to export or erase a customer's data, and the marketing consent record. Neither table holds a plain email
+// address or free text. Triggers and functions live in migration 0027_privacy.
+
+enum PrivacyRequestKind {
+  export
+  erasure
+}
+
+enum PrivacyRequestStatus {
+  received
+  completed
+}
+
+enum PrivacyRequester {
+  customer
+  staff
+}
+
+enum ConsentPurpose {
+  marketing_email
+}
+
+enum ConsentSource {
+  account
+  unsubscribe_link
+  erasure
+}
+
+/// A request to export or erase someone's data, kept as proof that it was made and when it was answered. A rejected
+/// erasure (active trip) leaves the request as it was: staff deal with the trip and try again. Never deleted; only
+/// received -> completed (trigger).
+model PrivacyRequest {
+  id          String               @id @default(uuid(7)) @db.Uuid
+  customerId  String?              @db.Uuid
+  customer    Customer?            @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii a sign-in account with no customer record (account-only erasure); no foreign key, like every user id kept
+  userId      String?              @db.Uuid
+  /// @nopii
+  kind        PrivacyRequestKind
+  /// @nopii
+  status      PrivacyRequestStatus @default(received)
+  /// @nopii
+  requestedBy PrivacyRequester
+  /// @nopii
+  requestedAt DateTime             @default(now()) @db.Timestamptz(3)
+  /// @nopii
+  completedAt DateTime?            @db.Timestamptz(3)
+  /// @nopii staff user who completed it (no foreign key)
+  actorUserId String?              @db.Uuid
+
+  @@index([customerId, kind, status])
+  @@index([status, requestedAt])
+  @@map("privacy_requests")
+}
+
+/// Marketing consent, one row per change (plan 5.5, section 3): the current state is the latest row for the customer or
+/// for the address hash. Never edited or deleted (trigger), except that erasure clears customerId (mt_privacy only).
+/// Not tagged append-only, like TermsAcceptance: the convention lets a tagged model point only at tagged rows,
+/// and a customer row is never deleted but is edited. Its triggers are checked by test/modules/privacy/erasure.test.ts.
+model ConsentRecord {
+  id                  String         @id @default(uuid(7)) @db.Uuid
+  customerId          String?        @db.Uuid
+  customer            Customer?      @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @secret HMAC of the address with EMAIL_HASH_KEY; the address itself is never kept
+  emailHash           String
+  /// @nopii version of EMAIL_HASH_KEY
+  emailHashKeyVersion Int            @default(1)
+  /// @nopii
+  purpose             ConsentPurpose
+  /// @nopii
+  granted             Boolean
+  /// @nopii where the change came from
+  source              ConsentSource
+  /// @nopii code of the wording shown when it was given or withdrawn, such as marketing_email.v1
+  wordingKey          String
+  /// @nopii
+  recordedAt          DateTime       @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  @@index([customerId, purpose, recordedAt])
+  @@index([emailHash, purpose, recordedAt])
+  @@map("consent_records")
+}

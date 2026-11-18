@@ -21,6 +21,8 @@ import { TEST_ADAPTER_ENVS } from './modules/payments/core/gateway';
  *   pnpm api:cli staff:reset --email someone@example.com
  *   pnpm api:cli maintenance:on | maintenance:off | maintenance:status
  *   pnpm api:cli payments:simulator-account [--name <display name>]
+ *   pnpm api:cli privacy:erasures-list > erasures.json
+ *   pnpm api:cli privacy:erasures-reapply erasures.json
  *
  * The maintenance commands exist for the moment nobody can sign in to the panel (task 8.6); they are audited as "system".
  */
@@ -33,8 +35,10 @@ export async function runCli(argv: string[], print: (line: string) => void = con
   };
   if (command === 'maintenance:on' || command === 'maintenance:off' || command === 'maintenance:status') return runMaintenance(command, print);
   if (command === 'payments:simulator-account') return runSimulatorAccount(value('name'), print);
+  if (command === 'privacy:erasures-list') return runErasuresList(print);
+  if (command === 'privacy:erasures-reapply') return runErasuresReapply(rest[0], print);
   if (command !== 'staff:create' && command !== 'staff:reset') {
-    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>]');
+    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>] | privacy:erasures-list | privacy:erasures-reapply <file>');
     return 2;
   }
   const email = emailSchema.safeParse(value('email'));
@@ -128,4 +132,70 @@ async function runSimulatorAccount(name: string | undefined, print: (line: strin
 
 if (require.main === module) {
   runCli(process.argv.slice(2)).then((code) => process.exit(code), () => process.exit(1));
+}
+
+/**
+ * Task 5.5 (plan docs/plans/5.5-privacy-export-erase.md, section 2.11): restoring an older backup brings back customers
+ * erased since. Before a restore, list the completed erasures of the live database (ids only, no personal data); after
+ * it, apply them again. A customer whose restored data has an open trip is listed, not erased: a person decides.
+ */
+async function runErasuresList(print: (line: string) => void): Promise<number> {
+  process.env.JOBS_WORKERS = 'off';
+  loadConfig();
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
+  try {
+    const { ErasureService } = await import('./modules/privacy');
+    const rows = await app.get(ErasureService).erasedIds();
+    print(JSON.stringify(rows.map((r) => ({ customerId: r.customerId, userId: r.userId, completedAt: r.completedAt?.toISOString() ?? null }))));
+    return 0;
+  } catch (e) {
+    print(e instanceof Error ? e.message : 'Failed');
+    return 1;
+  } finally {
+    await app.close();
+  }
+}
+
+async function runErasuresReapply(file: string | undefined, print: (line: string) => void): Promise<number> {
+  if (!file) {
+    print('Usage: privacy:erasures-reapply <file from privacy:erasures-list>');
+    return 2;
+  }
+  const { readFileSync } = await import('node:fs');
+  let list: Array<{ customerId: string | null; userId: string | null }>;
+  try {
+    list = JSON.parse(readFileSync(file, 'utf8')) as typeof list;
+    if (!Array.isArray(list)) throw new Error('not a list');
+  } catch {
+    print('The file is not a list from privacy:erasures-list');
+    return 2;
+  }
+  process.env.JOBS_WORKERS = 'off';
+  loadConfig();
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
+  let failed = 0;
+  try {
+    const { ErasureService } = await import('./modules/privacy');
+    const erasure = app.get(ErasureService);
+    const prisma = app.get(PrismaService);
+    for (const row of list) {
+      try {
+        if (row.customerId) {
+          if (!(await prisma.customer.findUnique({ where: { id: row.customerId }, select: { id: true } }))) continue; // not in this backup
+          const r = await erasure.erase(row.customerId, SYSTEM_ACTOR);
+          print(`${row.customerId}: ${r.alreadyErased ? 'already erased' : 'erased again'}`);
+        } else if (row.userId) {
+          if (!(await prisma.user.findUnique({ where: { id: row.userId }, select: { id: true } }))) continue;
+          await erasure.eraseAccount(row.userId, SYSTEM_ACTOR);
+          print(`${row.userId}: account erased again`);
+        }
+      } catch (e) {
+        failed++;
+        print(`${row.customerId ?? row.userId}: NOT erased (${e instanceof Error ? (e as { code?: string }).code ?? e.message : 'failed'}); decide by hand`);
+      }
+    }
+    return failed > 0 ? 1 : 0;
+  } finally {
+    await app.close();
+  }
 }

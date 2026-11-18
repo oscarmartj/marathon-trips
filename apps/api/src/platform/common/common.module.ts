@@ -1,5 +1,6 @@
 import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PermissionRegistry } from '../access/permissions';
+import { AuditService } from '../audit/audit.service';
 import { EntityRegistry } from '../entities/entity-registry';
 import { BulkService } from './bulk.service';
 import { CommonController } from './common.controller';
@@ -32,11 +33,21 @@ export class CommonModule implements OnModuleInit {
     @Inject(PermissionRegistry) private readonly permissions: PermissionRegistry,
     @Inject(EntityRegistry) private readonly entities: EntityRegistry,
     @Inject(TasksService) private readonly tasks: TasksService,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   onModuleInit(): void {
     this.permissions.register(COMMON_PERMISSIONS);
     this.tasks.table = taskTable(this.tasks);
     this.entities.register({ entityType: 'Task', model: 'Task', table: this.tasks.table });
+    // A task on a customer's record is about that customer (task 5.5, review point 3): its personal audit values carry
+    // the customer as subject, so erasure removes them. A task on nothing, or on a record with no customer, has none.
+    this.audit.registerSubjectResolver('Task', async (tx, id, row) => {
+      const at = typeof row.entityType === 'string' && typeof row.entityId === 'string'
+        ? { entityType: row.entityType, entityId: row.entityId }
+        : await tx.task.findUnique({ where: { id }, select: { entityType: true, entityId: true } });
+      if (!at?.entityType || !at.entityId || at.entityType === 'Task') return {};
+      return this.audit.subjectOf(tx, at.entityType, at.entityId, {});
+    });
   }
 }

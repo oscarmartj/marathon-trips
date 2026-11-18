@@ -156,7 +156,10 @@ export class PaymentWebhooksService {
       if (!p) throw notFound();
       const current = await tx.webhookEvent.findUniqueOrThrow({ where: { id: ev.id }, select: { status: true } });
       if (current.status !== 'received' && current.status !== 'failed') return 'skipped' as const;
-      await tx.webhookEvent.update({ where: { id: ev.id }, data: { bookingId: b.id, paymentId: p.id } });
+      // Matched to an erased customer's booking (task 5.5, review point 9): the raw body can quote the payer, so it is
+      // not kept; the event's type, status and links are enough as a record, and the parsed event is already in memory.
+      const [owner] = await tx.$queryRaw<Array<{ erased: boolean }>>`SELECT ("anonymisedAt" IS NOT NULL) AS erased FROM customers WHERE id = ${b.customerId}::uuid`;
+      await tx.webhookEvent.update({ where: { id: ev.id }, data: { bookingId: b.id, paymentId: p.id, ...(owner?.erased ? { rawBody: null } : {}) } });
       if (p.providerPaymentRef !== null && p.providerPaymentRef !== remote.ref) {
         await this.attempts.mismatchTask(tx, p, b.reference);
         return this.ignoreIn(tx, ev.id, 'reference_mismatch');

@@ -248,13 +248,14 @@ describe('only in development, test and ci (plan 3.6, 10.6)', () => {
     expect(sim.find(acc.id, { ref: s.ref })?.status).toBe('requires_action');
   });
 
-  it('csrf_exempt_routes_are_exactly_webhook_and_simulator_checkout (method only, never a class)', () => {
+  it('csrf_exempt_routes_are_exactly_webhook_simulator_checkout_and_one_click_unsubscribe (method only, never a class)', () => {
     const reflector = new Reflector();
     const routes = allRoutes(t.app);
     const classes = new Set(routes.map((r) => r.controllerClass));
     for (const cls of classes) expect(reflector.get('csrf-exempt', cls), cls.name).toBeUndefined();
     const exempt = routes.filter((r) => reflector.get('csrf-exempt', (r.controllerClass.prototype as Record<string, unknown>)[r.handler] as () => void)).map((r) => `${r.method} ${r.path}`).sort();
-    expect(exempt).toEqual(['POST /payments/simulator/checkout/:token', 'POST /payments/webhooks/:pathToken']);
+    // Task 5.5: RFC 8058 one-click unsubscribe comes from mail clients, protected by the HMAC in its address.
+    expect(exempt).toEqual(['POST /payments/simulator/checkout/:token', 'POST /payments/webhooks/:pathToken', 'POST /unsubscribe/:ref']);
   });
 });
 

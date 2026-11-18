@@ -62,7 +62,10 @@ describe('maintenance mode (task 8.6)', () => {
 
   it('every_route_is_either_exempt_or_blocked_and_the_exempt_set_is_exactly_this', () => {
     const exempt = allRoutes(t.app).filter((r) => isMaintenanceExempt(r.method, r.path)).map((r) => `${r.method} ${r.path}`);
-    expect(exempt.every((r) => r === 'GET /health' || r.split(' ')[1]!.startsWith('/admin/') || r.split(' ')[1]!.startsWith('/auth/staff/'))).toBe(true);
+    // Task 5.5: one-click unsubscribe keeps working (an unsubscribe must be honoured whenever it is sent).
+    expect(exempt.every((r) => r === 'GET /health' || r === 'POST /unsubscribe/:ref' || r.split(' ')[1]!.startsWith('/admin/') || r.split(' ')[1]!.startsWith('/auth/staff/'))).toBe(true);
+    expect(exempt).toContain('POST /unsubscribe/:ref');
+    expect(exempt).not.toContain('GET /unsubscribe/:ref');
     expect(exempt).toContain('GET /health');
     // A customer route can never be exempt by accident.
     expect(allRoutes(t.app).filter((r) => r.path.startsWith('/auth/customer')).some((r) => isMaintenanceExempt(r.method, r.path))).toBe(false);

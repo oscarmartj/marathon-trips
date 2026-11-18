@@ -12,11 +12,38 @@ export type CustomerLink =
   | { kind: 'column'; column: string } // a column on the row holds customerId
   | { kind: 'via'; entityType: string; column: string }; // a column on the row points at another registered entity
 
+/**
+ * Who an export is for (task 5.5, plan docs/plans/5.5-privacy-export-erase.md, section 4). `subject` (the default) is
+ * what the customer may download: no staff notes and no internal text. Staff notes are polymorphic rows that the privacy
+ * module adds itself for `full`, the owner's export for a formal access request.
+ */
+export type ExportAudience = 'subject' | 'full';
+
+export interface ExportOptions {
+  audience?: ExportAudience;
+  /** The customer's and its user's addresses, lower-cased, for rows linked only by address. */
+  emails?: readonly string[];
+}
+
+/** What erasure knows before anything changes: the addresses (lower-cased) and the customer's user, if any. */
+export interface ErasureContext {
+  emails: readonly string[];
+  userId: string | null;
+}
+
+/**
+ * The contract every module with customer data follows (plan 5.5, section 4). Both run inside the privacy module's
+ * transaction, with the customer and its bookings already locked FOR UPDATE; further locks follow plan 0.1, 6.3
+ * (Booking -> Payment -> PaymentLink / waiting list entries / own rows, by id).
+ */
 export interface EntityHandlers {
-  /** Returns this customer's rows for a data export. */
-  export(tx: Prisma.TransactionClient, customerId: string): Promise<unknown[]>;
-  /** Anonymises or deletes this customer's rows. Must never update an immutable table. */
-  anonymise(tx: Prisma.TransactionClient, customerId: string): Promise<void>;
+  /** Returns this customer's rows for a data export, as the customer may see them. Never staff notes. */
+  export(tx: Prisma.TransactionClient, customerId: string, opts?: ExportOptions): Promise<unknown[]>;
+  /**
+   * Anonymises every personal column of this customer's rows, or deletes rows with no value of their own. Idempotent.
+   * Must never update an immutable table. Rows linked only by address match `lower(column) = ANY(ctx.emails)`.
+   */
+  anonymise(tx: Prisma.TransactionClient, customerId: string, ctx?: ErasureContext): Promise<void>;
 }
 
 export interface EntityDef {

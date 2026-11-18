@@ -691,6 +691,18 @@ describe('runs that are skipped', () => {
     expect(await t.prisma.outboundEmail.count({ where: { customerId: { in: [customerId, c2] } } })).toBe(0);
   });
 
+  it('marketing_withdrawal_keeps_balance_reminders: an unsubscribe from marketing never stops a service email (task 5.5)', async () => {
+    const r = await ruleOn({ actions: [{ type: 'send_email', template: 'customer_notice_1' }] }, false);
+    const { bookingId, customerId } = await newBooking();
+    const customer = await t.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+    await t.prisma.emailSuppression.create({ data: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, customer.email), reason: 'unsubscribed', scope: 'marketing' } });
+    await fire('bookings.booking.requested', bookingId);
+    await runPending();
+    const runs = await runsOf(r.id);
+    expect(runs.map((x) => (x.steps as Array<{ status?: string; code?: string }>).map((s) => s.code ?? s.status))).toEqual([['done']]);
+    expect(await t.prisma.outboundEmail.count({ where: { customerId, category: 'transactional' } })).toBe(1);
+  });
+
   it(`at most the hourly cap of real runs per rule, then held back with one system task`, async () => {
     const r = await ruleOn({}, false);
     await t.prisma.$executeRawUnsafe(`INSERT INTO automation_runs (id, "ruleId", "ruleVersion", source, "scheduledFor", "testMode", status, "finishedAt", "startedAt")
