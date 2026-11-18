@@ -37,7 +37,8 @@ export default defineConfig({
     {
       command: 'pnpm start',
       url: 'http://localhost:3000/api/health',
-      env: { ...process.env, API_BASE_URL: 'http://localhost:4000' } as Record<string, string>,
+      // ENABLED_LOCALES: the languages spec needs a second language served; production enables none until Oscar decides (task 8.2).
+      env: { ...process.env, API_BASE_URL: 'http://localhost:4000', ENABLED_LOCALES: 'es-ES' } as Record<string, string>,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

@@ -186,7 +186,8 @@ describe('sitemap', () => {
 });
 
 describe('the proxy and languages', () => {
-  const request = (path: string, cookie?: string) => ({
+  const request = (path: string, cookie?: string, headers: Record<string, string> = {}) => ({
+    headers: new Headers(headers),
     method: 'GET', nextUrl: new URL(`http://localhost:3000${path}`), url: `http://localhost:3000${path}`,
     cookies: { get: (n: string) => (n === 'mt_locale' && cookie ? { value: cookie } : undefined) },
   });
@@ -209,6 +210,17 @@ describe('the proxy and languages', () => {
     expect(switched.status).toBe(308);
     expect(switched.headers.get('location')).toBe('http://localhost:3000/races?page=2');
     expect(switched.cookies.get('mt_locale')?.value).toBe('en-AU');
+  });
+
+  it('does not let the framework’s background fetches change the remembered language', async () => {
+    stubCatalogue({});
+    for (const h of [{ rsc: '1' }, { 'next-router-prefetch': '1' }, { 'sec-fetch-dest': 'empty' }] as Array<Record<string, string>>) {
+      const res = await proxy(request('/es-ES/races', 'en-AU', h) as never);
+      expect(res.headers.get('x-middleware-rewrite')).toBe('http://localhost:3000/es-ES/races');
+      expect(res.cookies.get('mt_locale')).toBeUndefined();
+    }
+    const nav = await proxy(request('/es-ES/races', undefined, { 'sec-fetch-dest': 'document' }) as never);
+    expect(nav.cookies.get('mt_locale')?.value).toBe('es-ES');
   });
 
   it('ignores a remembered language that is no longer enabled', async () => {

@@ -4,6 +4,10 @@ import { findRedirect, loadRedirects } from '@/lib/redirects';
 import { routeLocale } from '@/lib/locale-routing';
 import { LOCALE_COOKIE, enabledLocales, localePath, splitLocale } from '@/lib/locales';
 
+/** A page load by the browser itself, as opposed to the framework's own fetches for a client-side navigation or a prefetch. */
+const isNavigation = (request: NextRequest): boolean =>
+  !request.headers.has('rsc') && !request.headers.has('next-router-prefetch') && (request.headers.get('sec-fetch-dest') ?? 'document') === 'document';
+
 const YEAR_SECONDS = 60 * 60 * 24 * 365;
 
 /**
@@ -33,7 +37,9 @@ export async function proxy(request: NextRequest) {
     url.pathname = route.to;
     res = NextResponse.rewrite(url);
   }
-  if (route.remember) res.cookies.set(LOCALE_COOKIE, route.remember, { path: '/', maxAge: YEAR_SECONDS, sameSite: 'lax', httpOnly: true, secure: request.nextUrl.protocol === 'https:' });
+  // Only a person navigating to a page chooses a language. The framework's background fetches (prefetching a link, loading a
+  // route's data) must not: one still in flight after a switch would put the old language back.
+  if (route.remember && isNavigation(request)) res.cookies.set(LOCALE_COOKIE, route.remember, { path: '/', maxAge: YEAR_SECONDS, sameSite: 'lax', httpOnly: true, secure: request.nextUrl.protocol === 'https:' });
   // With more than one language, the same address can differ by the remembered choice: shared caches must not mix them up.
   if (enabled.length > 1) res.headers.append('Vary', 'Cookie');
   return res;

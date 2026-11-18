@@ -185,7 +185,7 @@ describe('sitemap', () => {
 });
 
 describe('redirect proxy', () => {
-  const request = (path: string, method = 'GET') => ({ method, nextUrl: new URL(`http://localhost:3000${path}`), url: `http://localhost:3000${path}`, cookies: { get: () => undefined } });
+  const request = (path: string, method = 'GET') => ({ method, nextUrl: new URL(`http://localhost:3000${path}`), url: `http://localhost:3000${path}`, cookies: { get: () => undefined }, headers: new Headers() });
 
   it('sends a visitor to the new address with the status staff chose, and leaves other requests alone', async () => {
     stubCatalogue({ content: { redirects: [{ fromPath: '/old-guide', toPath: '/races', statusCode: 301 }] } });
