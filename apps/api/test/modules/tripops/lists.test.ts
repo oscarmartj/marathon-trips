@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TripSummary } from '@mt/shared';
+import { parseCsv, unguardCell } from '../../../src/platform/common/csv';
 import { activeTravellers, buildItinerary, buildRoomingList, buildTransferList, itineraryCsv, roomingCsv, scheduleDay, transfersCsv } from '../../../src/modules/tripops/lists';
 
 const trip: TripSummary = { packageId: 'p', raceName: 'Test Marathon', year: 2027, packageName: 'Race weekend', checkInDate: '2027-06-18', checkOutDate: '2027-06-21', bookings: 1 };
@@ -105,5 +106,42 @@ describe('itinerary builder', () => {
     expect(l.days.find((x) => x.date === '2027-06-20')!.items).toEqual([{ kind: 'extra', title: 'Tour', detail: '09:00' }]);
     expect(l.unscheduled).toEqual([{ kind: 'extra', title: 'Dinner', detail: null }]);
     expect(itineraryCsv(l).split('\r\n').filter(Boolean)).toHaveLength(1 + 4 + 1);
+  });
+});
+
+describe('a list opened with semicolons as the separator (7.fix-5)', () => {
+  // Hotel, room and transfer names are typed by staff; traveller names by customers. A comma file opened in a spreadsheet
+  // that splits on ";" must not turn a fragment of any of them into a formula.
+  const evil = 'Harbour;=HYPERLINK("http://evil.test","x")';
+  const bad = (csv: string) => csv.split(/[,;\r\n]/).map((f) => f.replace(/^[\s"]+/, '')).filter((f) => /^[=+\-@]/.test(f));
+  const guests = activeTravellers([{ slot: 1, isLead: true, removedInVersion: null }], [{ slot: 1, givenName: 'Ana; -1', familyName: 'Garcia,@x' }]);
+
+  it('rooming list: hotel, city, room and guest names are quoted and guarded on every fragment, and read back', () => {
+    const list = buildRoomingList({
+      trip,
+      bookings: [{
+        reference: 'MT-A', status: 'confirmed', checkIn: d('2027-06-18'), checkOut: d('2027-06-21'), travellers: guests,
+        rooms: [{ id: 'r', occupancy: 1, travellerSlots: [1], roomType: 'double', roomName: { 'en-AU': 'Double; +view' }, hotel: { id: 'h', name: evil, city: 'Sydney;@x', displayOrder: 1 } }],
+      }],
+    });
+    const csv = roomingCsv(list);
+    expect(csv).toContain(`"Harbour;'=HYPERLINK(""http://evil.test"",""x"")"`);
+    expect(bad(csv)).toEqual([]);
+    const row = parseCsv(csv)[1]!.map(unguardCell);
+    expect([row[0], row[1], row[5], row[10], row[11]]).toEqual([evil, 'Sydney;@x', 'Double; +view', 'Ana; -1', 'Garcia,@x']);
+  });
+
+  it('transfer list: the transfer name, its schedule and passenger names are quoted and guarded, and read back', () => {
+    const l = buildTransferList({
+      trip,
+      extras: [{
+        id: 'e', name: { 'en-AU': evil }, pricingUnit: 'per_person', schedule: { departure: '2027-06-18; =1', origin: 'Airport;-x', destination: 'Hotel' },
+        rows: [{ bookingReference: 'MT-A', checkIn: d('2027-06-18'), checkOut: d('2027-06-21'), quantity: 1, travellerSlot: 1, travellers: guests }],
+      }],
+    });
+    const csv = transfersCsv(l);
+    expect(bad(csv)).toEqual([]);
+    const row = parseCsv(csv)[1]!.map(unguardCell);
+    expect([row[0], row[1], row[2], row[9], row[10]]).toEqual([evil, '2027-06-18; =1', 'Airport;-x', 'Ana; -1', 'Garcia,@x']);
   });
 });
