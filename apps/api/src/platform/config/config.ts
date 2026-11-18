@@ -95,6 +95,30 @@ function trustProxy(v: string): boolean | number | string {
   return v; // address list or preset such as loopback, uniquelocal
 }
 
+const DEV_KEYS: Record<string, string> = {
+  EMAIL_HASH_KEY: DEV_EMAIL_HASH_KEY, FILE_SIGNING_KEY: DEV_FILE_SIGNING_KEY, AUTH_HMAC_KEY: DEV_AUTH_HMAC_KEY, APP_ENCRYPTION_KEY: DEV_ENCRYPTION_KEY,
+};
+
+/**
+ * Task 8.5 (S-05): outside development, test and ci, the published dev-only keys, one value for two keys, a proxy setting
+ * that trusts every address (any client could then choose its own IP) and a web origin without TLS are all refused.
+ */
+function productionRefusals(data: ParsedConfig): string[] {
+  const bad: string[] = [];
+  const seen = new Map<string, string>();
+  for (const name of Object.keys(DEV_KEYS) as Array<keyof typeof DEV_KEYS & keyof ParsedConfig>) {
+    const value = data[name] as string | undefined;
+    if (!value) continue;
+    if (value === DEV_KEYS[name]) bad.push(name);
+    const other = seen.get(value);
+    if (other) bad.push(other, name);
+    seen.set(value, name);
+  }
+  if (data.TRUST_PROXY === 'true') bad.push('TRUST_PROXY');
+  if (data.WEB_ORIGIN && new URL(data.WEB_ORIGIN).protocol !== 'https:') bad.push('WEB_ORIGIN');
+  return bad;
+}
+
 /** Validates environment variables; throws a readable error naming each bad variable (never its value). */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = configSchema.safeParse(env);
@@ -114,6 +138,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!encKey) missing.push('APP_ENCRYPTION_KEY');
   // Cookies without Secure only where everything runs on http://localhost (plan 4.1).
   if (data.COOKIE_SECURE === 'false' && !dev) missing.push('COOKIE_SECURE');
+  if (!dev) missing.push(...productionRefusals(data));
   if (missing.length > 0) throw new Error(`Invalid configuration: check ${[...new Set(missing)].join(', ')}`);
   return {
     ...data,
