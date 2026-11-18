@@ -12,6 +12,18 @@ Todo lo que en modo autónomo se decidió, se dejó sin verificar o necesita tus
 - [ ] Validar el GST con tu contable (por componente, 1.1).
 - [ ] Cumplir los 8 hallazgos vinculantes del plan 0.1 al retomar el dinero (`docs/BLOCKED.md`).
 
+## Prioridad tras las fases 5 a 7, 8.2 y 8.3 (2026-11-19)
+
+Por importancia. Detalle por fase más abajo.
+
+1. **Repositorio público.** Se hizo público el 2026-11-19 para que GitHub Actions volviera a correr tras un bloqueo de facturación. Revisar que no haya nada sensible en el historial (claves, correos o datos personales en `docs/`, fixtures, `deploy/`) y decidir si volver a privado cuando la facturación se arregle; los minutos de CI de repositorios privados son limitados.
+2. **Publicar la página `terms`** antes de que empiece ningún pago: sin ella 3.5 se niega a iniciar pagos (`terms_unavailable`).
+3. **Asignar permisos** (hoy solo owner; ninguno es alcance de clave de API): `bookings.booking.confirm` y `bookings.booking.amend` (step-up), `templates.*`, `complaints.*`, `keydates.*`, `automations.rule.*` (activar pide step-up), `reports.*`, `common.customField.publish` (step-up), `waitlist.entry.read`, `dashboard.home.read`, `tripops.lists.read`, `exports.runnerData.read|generate` (paso reforzado), `suppliers.*` y los de privacidad de 5.5 (`privacy.customer.read|export|erase`, borrar con step-up).
+4. **Decisiones por confirmar:** (a) la base de precio de 6.3 usa las reglas actuales: una regla creada tras la venta se aplica en silencio a lo añadido (riesgo: reservar lo mínimo pronto y añadir después a precio anticipado); (b) `stackable` por defecto `false`; (c) `instantBooking` es una función del brief sin dueño (2.4, 3.1, 3.2, 3.5, 5.1): decidir quién la construye.
+5. **Redactar plantillas** antes de activar: `payments.balance_reminder` (y decidir `balanceReminderOffsetsDays`), `automations.customer_notice_1..3` y `automations.staff_notice`.
+6. **Proceso de CI:** `ci.yml` está fijado a `ubuntu-24.04` (PR #48) porque `ubuntu-latest` pasó a 26.04, cuyo `pg_restore` rechaza `transaction_timeout` con el PostgreSQL 16 del servicio. Quitar el pin al subir PostgreSQL y comprobar `backup.test.ts`.
+7. **E2E frágil:** `getByText('Ada')` en `apps/web/e2e/customer-area.spec.ts` (~línea 182) es una subcadena sin distinguir mayúsculas; falló una vez en CI contra texto aleatorio y pasó al repetir. Apretarla en una decisión aparte.
+
 ## Recorridos que conviene hacer a mano
 
 - [ ] Como administrador: crear una carrera con paquete, publicarla, gestionar una solicitud. (Fase 1: el alta y la publicación hasta verla en la web ya las recorre la e2e `create_publish_and_view_race`; falta a mano la solicitud.)
@@ -101,3 +113,40 @@ Hechas 3.1, 3.2, 3.5 y 3.6, solo contra el simulador; 3.3 (Stripe) y 3.4 (PayID)
 - **7.3:** antelación fija de 7 días y una tarea de saldos por edición y día. **7.6:** plazos por defecto de 2 y 30 días; sin adjuntos (no hay ruta de subida); `GET /admin/complaints/owners` enseña el correo del personal a quien tenga `manage`.
 - **Proceso:** un verificador ejecutó por error `docker/db/init/01-roles.sql` (tiene `\connect marathon_trips`) contra la base local de desarrollo `marathon_trips`; es idempotente y no se borró nada. Ahora se les dice que creen su propia base a mano, sin ese archivo.
 - **Sin verificar:** `prisma migrate diff` de 0018 a 0023 (sin motor local; lo valida CI); `backup.test.ts` (pide superusuario); lector de pantalla del checkout y de los paneles nuevos; `test:sandbox` contra un sandbox real.
+
+### Fase 5 (cerrada, `docs/done/5.close.md`)
+
+Sección «Revisión de Oscar» de `docs/phases/phase-5.md`: hacer el recorrido completo como cliente y como administrador con un paquete realista; no abrir la fase 6 antes. Los cinco criterios cumplen con prueba automática (`rehearsal.spec.ts` y las de 5.1 a 5.6, contra el simulador, sin recibos ni reembolsos).
+
+- **Límites conocidos de 5.5:** restaurar una copia antigua resucita a los clientes borrados; hay que volver a aplicarlos con `privacy:erasures-reapply` (guía en `docs/deploy/guide.md`). La exportación `?audience=full` lleva notas del personal (solo owner; revisarla antes de enviarla). Un cliente archivado creado por el personal y sin usuario solo se borra desde la ficha.
+- **Límites conocidos de 5.6:** el desfase se consume si hay un pago en curso al enviar; no hay recordatorios de vencidos (los ve el panel); no hay pantalla para editar los desfases (`balanceReminderOffsetsDays`, lista vacía = apagado). El panel suma todos los pagos en cada carga (vale con el volumen actual).
+- **Decisiones de 5.1 a 5.6:** enlaces de pago de un solo uso (caducan a los 7 días o al vencer el depósito, solo al correo de la reserva); documentos generados al pedirlos; datos mínimos de viajeros sin pasaporte ni datos médicos; borrado solo por owner con step-up y 409 con viaje o dinero vivo; la baja de marketing también suprime las alertas.
+- **Sin verificar:** correo real (solo buzón de pruebas), lector de pantalla, `compose-smoke` solo en CI, borrar a un cliente de punta a punta (pide un viaje terminado). El revisor de 5.2 no tuvo ronda final.
+
+### Fase 6 (cerrada con 6.2, 6.4 y 6.6 aparcadas, `docs/done/6.close.md`)
+
+Sección «Revisión de Oscar» de `docs/phases/phase-6.md`: simular un viaje con un cambio y una cancelación y comprobar los números a mano. **No se puede hacer entera**: sin 6.4 no hay penalización ni reembolso y sin 6.6 no hay resultado por viaje. Lo que sí se puede: un cambio (6.3) con su diferencia, una cancelación que promociona a la lista de espera (6.5) y costes y cobertura de stock por proveedor (6.1).
+
+- **Límites conocidos de 6.5:** solo se ofrece al liberarse plazas (no al subir la capacidad ni al unirse con hueco); «el primero al que le cabe» puede dejar esperando siempre a un grupo grande; el correo de oferta es texto simple (sin plantilla 5.4) y sin recordatorio previo; el panel de la lista es de solo lectura; `inventory_movements` no referencia la entrada; el camino de reintento por interbloqueo no tiene prueba.
+- **Límites conocidos de 6.3:** si un cambio llega entre que se encola un recordatorio y se envía, ese correo queda `failed` y ese desfase se pierde (quedan el siguiente, la lista de cobros y la tarea de vencido); el crédito pendiente es una tarea manual; los cambios del cliente están apagados por defecto (`customerAmendmentsEnabled`, activar en Ajustes cuando se quiera); el estado se comprueba por disparador al insertar el cambio, no en `mt_booking_guard`.
+- **Límite de 6.1:** el cupo contratado solo se compara con el stock, no se decrementa al cancelar; el panel no tiene e2e de navegador.
+- **Sin verificar:** `prisma migrate diff` de 0009, 0022 y 0029 (solo CI), lector de pantalla.
+
+### Fase 7 (cerrada, `docs/done/7.close.md`)
+
+Sección «Revisión de Oscar» de `docs/phases/phase-7.md`: crear dos automatizaciones reales y un informe que usarías cada semana. Probar también una reclamación y el calendario de fechas clave (antelación fija de 7 días).
+
+- **Límites conocidos:** 7.2 solo trae dos formatos de ejemplo de organizador (los reales se desconocen) y no tiene pantalla en el panel; 7.7 no tiene prueba unitaria de la exclusión de reservas demo (`NOT b."isDemo"` en `engine.ts`; la existente cubre solo carreras demo); 7.1 solo incluye reservas con depósito pagado y sitúa en un día los traslados con fecha `AAAA-MM-DD`; 7.3 antelación fija; 7.4 sin transiciones de estado ni eventos de pagos; 7.5 las páginas públicas aún no pintan los campos personalizados; 7.6 sin adjuntos y `GET /admin/complaints/owners` enseña el correo del personal a quien tenga `manage`.
+- **Revisiones de Opus pendientes:** 7.2 (datos personales), 7.4 (código) y 7.7.
+- **Sin verificar:** envío real de correo, lector de pantalla.
+
+### Fase 8 (en curso: 8.2 y 8.3 fusionadas)
+
+- **8.2 (idiomas y `hreflang`):** `es-ES` es parcial (cabecera, pie, inicio, carreras, FAQ y legales) y está apagado por defecto; los componentes de cliente (checkout, constructor, formularios, cuenta, enlaces de pago) y el panel de personal siguen en inglés; el compose de producción no pasa `ENABLED_LOCALES` (hay que ponerlo en la construcción y en el contenedor web). Revisar `messages/es-ES.json` antes de activarlo. Sin verificar: lector de pantalla con `lang` mixto y cookies bloqueadas.
+- **8.3 (accesibilidad y rendimiento):** `apps/web/src/lib/amendments.ts` (6.3) importa zod de `@mt/shared` en el navegador y reintroduce la librería en cuenta y admin; hacer como con `checkout.ts` (seguimiento). Sin verificar: lector de pantalla, móvil real, Lighthouse sobre un sitio desplegado y las páginas con sesión. Auditoría propia en lugar de `axe-core` (MPL-2.0): cambiar si la aceptas.
+
+### Lecciones de proceso (fases 5 a 8)
+
+- Cada verificador y revisor debe usar su propia base nueva y nunca `scripts/db-init.sh`. Más de una vez se ejecutó el SQL de roles sin la línea `\connect`, de modo que los `REVOKE`/`GRANT` sobre `marathon_trips` corrieron en la base de mantenimiento (idempotente; no se tocaron datos).
+- Playwright reutiliza servidores existentes fuera de CI: varias ejecuciones e2e locales de distintos hilos se enganchan a los servidores de otros y fallan sin motivo. Manda la e2e de CI.
+- `ubuntu-latest` pasó a 26.04 y su `pg_restore` rechaza `transaction_timeout`: `ci.yml` queda en `ubuntu-24.04` (PR #48).

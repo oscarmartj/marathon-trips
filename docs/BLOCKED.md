@@ -2,7 +2,7 @@
 
 Lo que no se puede terminar sin Oscar o sin un tercero. No detiene el resto del trabajo. Lo actualiza el hilo de cierre de cada fase a partir de `docs/done/`.
 
-Actualizado al cerrar la fase 3 (2026-11-13).
+Actualizado tras cerrar las fases 5, 6 y 7 y fusionar 8.2 y 8.3 (2026-11-19).
 
 | Qué falta | Quién lo desbloquea | Qué se hizo mientras tanto | Tarea |
 |---|---|---|---|
@@ -24,4 +24,8 @@ Actualizado al cerrar la fase 3 (2026-11-13).
 | Claves y cuentas de sandbox de cada pasarela real (Stripe y las demás): sin ellas ningún adaptador real pasa de `experimental`. `test:sandbox` se niega con `simulator` o un adaptador solo de pruebas, exige `SANDBOX_ADAPTER` y credenciales con aspecto de prueba, y `verified` exige la línea de evidencia `test:sandbox <clave> <fecha> N/N` | Oscar, al retomar el dinero (3.3 y 3.4 aparcadas) | Interfaz `PaymentProvider`, simulador, batería de contrato (23 cláusulas) y checkout contra el simulador; la guía `docs/adding-a-payment-adapter.md` | 3.3, 3.4, 3.6, fase 9 |
 | La cuenta del simulador solo se crea con la orden `payments:simulator-account` (no está en la semilla; solo development, test y ci) | Quien pruebe el cobro en local | La semilla no cobra | 3.1, 3.6 |
 | Publicar la página `terms` en el panel: sin una página publicada, 3.5 se niega a iniciar cualquier pago (`terms_unavailable`) | Oscar, antes de cobrar | La aceptación y su texto quedan guardados cuando exista | 3.5 |
-| Asignar permisos nuevos (solo owner los tiene; ninguno es alcance de clave de API): `bookings.booking.confirm` (step-up, solo owner), `templates.template.read\|manage\|publish`, `complaints.complaint.read\|manage`, `keydates.date.read\|manage` y `automations.rule.*` (activar exige step-up) | Oscar, en el panel de roles | Los roles actuales no los reciben solos | 3.2, 5.4, 7.3, 7.4, 7.6 |
+| Asignar permisos nuevos (solo owner los tiene; ninguno es alcance de clave de API): `bookings.booking.confirm` y `bookings.booking.amend` (step-up), `templates.*`, `complaints.*`, `keydates.*`, `automations.rule.*` (activar exige step-up), `reports.*`, `common.customField.publish` (step-up), `waitlist.entry.read`, `dashboard.home.read`, `tripops.lists.read`, `exports.runnerData.read\|generate` (paso reforzado), `suppliers.*` y los de privacidad de 5.5 (`privacy.customer.read\|export\|erase`, borrar con step-up) | Oscar, en el panel de roles | Los roles actuales no los reciben solos | 3.2, 5.4, 5.5, 5.6, 6.1, 6.3, 6.5, 7.1 a 7.7 |
+| Cuenta de pagos a proveedores, penalizaciones, reembolsos y resultado por viaje (6.2, 6.4, 6.6) y recibos (4.6): aparcadas con el dinero | Oscar, al retomar el dinero | 6.1 solo registra costes; el crédito pendiente de un cambio es una tarea manual (6.3) | 6.2, 6.4, 6.6, 4.6 |
+| Seguridad (8.5) sin hacer; `ENABLED_LOCALES` no lo pasa el compose de producción, así que `es-ES` queda apagado | Oscar o un hilo nuevo | `es-ES` parcial y apagado por defecto (8.2) | 8.2, 8.5 |
+| Lector de pantalla, móvil real y Lighthouse sobre un sitio desplegado; prueba manual de las páginas con sesión | Oscar (o una persona con lector de pantalla), cuando haya despliegue | Auditoría automática de 18 páginas contra la build de producción (8.3) | 8.3 |
+| **Cerrada:** Actions bloqueado por un problema de facturación de la cuenta (fases 5 a 7) | ~~Resuelta el 2026-11-19~~: el repositorio se hizo público y Actions volvió a correr; ver `docs/FINAL-REVIEW.md` (decidir si volver a privado) | Los hilos usaron comprobaciones locales con base propia hasta entonces | 5.5, 5.6, 7.1, 7.2 |
