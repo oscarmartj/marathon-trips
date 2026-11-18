@@ -18,7 +18,7 @@ import { Client, closeCatalogue, staffClient } from '../../support/catalogue';
 import { bookingStaff, cleanBookingEvents, makeBookingFor } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
-import { MAX_CUSTOMER_NOTICES_PER_WINDOW, MAX_REAL_RUNS_PER_HOUR } from '@mt/shared';
+import { MARKETING_WORDING_KEY, MAX_CUSTOMER_NOTICES_PER_WINDOW, MAX_REAL_RUNS_PER_HOUR } from '@mt/shared';
 import { AUTOMATIONS_TIME_ZONE } from '../../../src/modules/automations/manifest';
 import { BUSINESS_TIME_ZONE } from '../../../src/modules/pricing/engine/calendar';
 import { AccessService } from '../../../src/platform/access/access.service';
@@ -785,9 +785,9 @@ function holdRun(at = 0): { entered: Promise<void>; release: () => void } {
 
 const notice = (template = 'customer_notice_1') => ({ type: 'send_email', template });
 const customerOfBooking = async (customerId: string) => t.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
-/** Records the customer's marketing consent, as the consent page does. */
-const consentTo = (customerId: string, email: string) => t.prisma.consentRecord.create({
-  data: { customerId, emailHash: emailHash(t.config.EMAIL_HASH_KEY, email), purpose: 'marketing_email', granted: true, source: 'account', wordingKey: 'privacy.marketing.wording' },
+/** Records the customer's marketing consent, as the consent page does (under the current wording unless told otherwise). */
+const consentTo = (customerId: string, email: string, wordingKey: string = MARKETING_WORDING_KEY) => t.prisma.consentRecord.create({
+  data: { customerId, emailHash: emailHash(t.config.EMAIL_HASH_KEY, email), purpose: 'marketing_email', granted: true, source: 'account', wordingKey },
 });
 const stepCodes = async (ruleId: string) => (await runsOf(ruleId)).map((x) => (x.steps as Array<{ status: string; code?: string }>).map((s) => s.code ?? s.status));
 
@@ -869,6 +869,26 @@ describe('7.fix-2: customer notices honour unsubscribes unless acknowledged as s
     await runPending();
     expect(await stepCodes(r.id)).toEqual([['marketing_consent_missing']]);
     expect(await t.prisma.outboundEmail.count({ where: { customerId } })).toBe(0);
+  });
+
+  it('a marketing consent given under the earlier wording (v1) does not allow a notice; the latest record wins, ties by id', async () => {
+    expect(MARKETING_WORDING_KEY).toBe('marketing_email.v2');
+    const r = await ruleOn({ actions: [notice()] }, false);
+    const { bookingId, customerId } = await newBooking();
+    const { email } = await customerOfBooking(customerId);
+    await consentTo(customerId, email, 'marketing_email.v1');
+    await fire('bookings.booking.requested', bookingId);
+    // Same instant: a withdrawal and a grant; the one with the higher id is the latest, as ConsentService.current reads it.
+    const { bookingId: b2, customerId: c2 } = await newBooking();
+    const e2 = (await customerOfBooking(c2)).email;
+    const at = new Date();
+    const ids = [randomUUID(), randomUUID()].sort();
+    await t.prisma.consentRecord.create({ data: { id: ids[0], customerId: c2, emailHash: emailHash(t.config.EMAIL_HASH_KEY, e2), purpose: 'marketing_email', granted: true, source: 'account', wordingKey: MARKETING_WORDING_KEY, recordedAt: at } });
+    await t.prisma.consentRecord.create({ data: { id: ids[1], customerId: c2, emailHash: emailHash(t.config.EMAIL_HASH_KEY, e2), purpose: 'marketing_email', granted: false, source: 'account', wordingKey: MARKETING_WORDING_KEY, recordedAt: at } });
+    await fire('bookings.booking.requested', b2);
+    await runPending();
+    expect(await stepCodes(r.id)).toEqual([['marketing_consent_missing'], ['marketing_consent_missing']]);
+    expect(await t.prisma.outboundEmail.count({ where: { customerId: { in: [customerId, c2] } } })).toBe(0);
   });
 
   it('a service notice is not sent with wording put into use after it was queued', async () => {

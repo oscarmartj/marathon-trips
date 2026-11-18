@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
-  AUTOMATION_EMAIL_TEMPLATES, CUSTOMER_NOTICE_WINDOW_MS, MAX_CUSTOMER_NOTICES_PER_WINDOW, automationTemplateKey, isCustomerTemplate,
+  AUTOMATION_EMAIL_TEMPLATES, CUSTOMER_NOTICE_WINDOW_MS, MARKETING_WORDING_KEY, MAX_CUSTOMER_NOTICES_PER_WINDOW, automationTemplateKey, isCustomerTemplate,
 } from '@mt/shared';
 import type { AutomationAction, AutomationActionType, AutomationEntityType, AutomationStep } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
@@ -234,7 +234,8 @@ export class AutomationActions {
           const hit = await ctx.tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email) }, select: { scope: true } });
           if (hit && (hit.scope === 'all' || !service)) return skipped('recipient_suppressed');
           // A notice that is not a service message may be promotional: only with marketing consent (task 5.5: none by
-          // default), checked like the consent page does (the latest record for the customer or the address).
+          // default): the latest record for the customer or the address, as the consent page reads it, granted under the
+          // current wording. A v1 grant stays valid history for other marketing but never allows an automation notice.
           if (!service && !(await this.hasMarketingConsent(ctx.tx, customer.id, customer.email))) return skipped('marketing_consent_missing');
           // At most MAX_CUSTOMER_NOTICES_PER_WINDOW notices per customer across every rule. The lock serialises runs that
           // could email the same customer until this run commits, so the count holds under concurrency. Lock order is
@@ -304,9 +305,9 @@ export class AutomationActions {
   private async hasMarketingConsent(tx: Tx, customerId: string, email: string): Promise<boolean> {
     const row = await tx.consentRecord.findFirst({
       where: { purpose: 'marketing_email', OR: [{ customerId }, { emailHash: emailHash(this.config.EMAIL_HASH_KEY, email) }] },
-      orderBy: { recordedAt: 'desc' }, select: { granted: true },
+      orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], select: { granted: true, wordingKey: true },
     });
-    return row?.granted === true;
+    return row?.granted === true && row.wordingKey === MARKETING_WORDING_KEY;
   }
 
   /** Emails and webhook calls are audited like the other actions, with the automation as the actor (ids and codes only). */
