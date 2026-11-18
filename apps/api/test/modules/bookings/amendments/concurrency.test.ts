@@ -42,7 +42,6 @@ afterAll(async () => {
 
 const row = (id: string) => t.prisma.booking.findUniqueOrThrow({ where: { id } });
 const consumed = async (poolId: string) => (await t.prisma.inventoryPool.findUniqueOrThrow({ where: { id: poolId } })).consumed;
-const capacity = (poolId: string, n: number) => t.prisma.inventoryPool.update({ where: { id: poolId }, data: { capacity: n } });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Every pool of the world holds exactly what its held claims say, within 0 and its capacity. */
