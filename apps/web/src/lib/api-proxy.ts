@@ -5,7 +5,18 @@
 // idempotency-key: booking requests (task 2.4) carry one, so a retried submission makes one request.
 export const FORWARD_REQUEST_HEADERS = ['cookie', 'origin', 'x-mt-csrf', 'content-type', 'accept', 'user-agent', 'x-request-id', 'idempotency-key'] as const;
 // content-disposition: a customer's booking documents download as files (task 5.1).
-export const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'x-request-id', 'content-disposition'] as const;
+// Task 8.5 (S-08): the API's own security headers reach the browser too (nosniff, no framing, no Referer, and its strict
+// Content-Security-Policy), instead of the page policy; see `apiSecurityHeader` for the one exception.
+export const FORWARD_RESPONSE_HEADERS = [
+  'content-type', 'retry-after', 'cache-control', 'x-request-id', 'content-disposition',
+  'content-security-policy', 'x-content-type-options', 'x-frame-options', 'referrer-policy',
+] as const;
+
+/** Set on every request this proxy forwards, so the API can tell a browser's request from the web app's own calls (S-04). */
+export const PROXIED_HEADER = 'x-mt-proxied';
+
+/** Largest request body the proxy forwards (the API's JSON limit is the same). */
+export const MAX_BODY_BYTES = 100 * 1024;
 
 export const API_KEY_AUTHORIZATION = /^Bearer mtk_[a-z2-7]{12}_[A-Za-z0-9_-]{43}$/;
 
@@ -35,6 +46,7 @@ export function forwardHeaders(incoming: Headers, trustedHops: number): Headers 
   // (Basic, a third-party token, a browser extension's header) is dropped here.
   const authorization = incoming.get('authorization');
   if (authorization !== null && API_KEY_AUTHORIZATION.test(authorization)) out.set('authorization', authorization);
+  out.set(PROXIED_HEADER, '1');
   if (trustedHops > 0) {
     const chain = (incoming.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const client = chain[chain.length - trustedHops];
@@ -45,12 +57,56 @@ export function forwardHeaders(incoming: Headers, trustedHops: number): Headers 
 
 export function responseHeaders(res: Response): Headers {
   const out = new Headers();
+  const pdf = (res.headers.get('content-type') ?? '').toLowerCase().startsWith('application/pdf');
   for (const name of FORWARD_RESPONSE_HEADERS) {
+    // A PDF shown in the browser's own viewer (the template preview, task 7.x) is not given the API's `default-src 'none'`
+    // policy: some viewers run inside the document and would be blocked. nosniff, no framing and no-store still apply.
+    if (name === 'content-security-policy' && pdf) continue;
     const v = res.headers.get(name);
     if (v !== null) out.set(name, v);
   }
   for (const c of res.headers.getSetCookie()) out.append('set-cookie', c);
   return out;
+}
+
+/** The proxy's own answers (bad path, too large, API unreachable): the API's error shape, never cached or sniffed (S-09). */
+export function proxyError(status: number, code: string, message: string): Response {
+  return Response.json({ code, message }, {
+    status, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' },
+  });
+}
+
+export class BodyTooLarge extends Error {}
+
+/**
+ * Reads a request body up to `max` bytes. A declared Content-Length above it is refused before anything is read; a body
+ * without one (chunked) is counted as it arrives and dropped at the first byte past the limit (S-09). Nothing larger is
+ * ever held in memory.
+ */
+export async function readCappedBody(req: Request, max: number = MAX_BODY_BYTES): Promise<ArrayBuffer | undefined> {
+  const declared = req.headers.get('content-length');
+  if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > max)) throw new BodyTooLarge();
+  if (!req.body) return undefined;
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      throw new BodyTooLarge();
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out.buffer;
 }
 
 export const trustedHops = (): number => {

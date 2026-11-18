@@ -21,6 +21,7 @@ import { ExportService } from './export.service';
 import { PRIVACY_PERMISSIONS } from './manifest';
 import { CustomerExportRateLimitGuard, StaffExportRateLimitGuard } from './rate-limit.guard';
 import { StaffPrivacyService } from './staff.service';
+import { contentDisposition } from '../../platform/http/content-disposition';
 
 type In<T extends z.ZodType> = z.infer<T>;
 const uuid = () => new ParseUUIDPipe();
@@ -30,7 +31,7 @@ function sendExport(res: Response, data: Record<string, unknown>): void {
   const day = new Date().toISOString().slice(0, 10);
   res.status(200).set({
     'Content-Type': 'application/json; charset=utf-8',
-    'Content-Disposition': `attachment; filename="marathon-trips-data-${day}.json"`,
+    'Content-Disposition': contentDisposition('attachment', `marathon-trips-data-${day}.json`),
     'Cache-Control': 'no-store',
   }).send(JSON.stringify(data, (_k, v) => (typeof v === 'bigint' ? v.toString() : v), 2));
 }
