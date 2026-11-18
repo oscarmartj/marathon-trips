@@ -331,7 +331,68 @@
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
       "title": "Dashboard",
-      "intro": "Today's bookings, payments needing attention and upcoming races will appear here."
+      "intro": "What needs attention today. Each section shows only what your role can see.",
+      "nothingToShow": "Your role does not include any start page sections. Ask an owner if you need access to booking requests, payments, tasks, places left or alert subscribers.",
+      "requests": {
+        "title": "New booking requests",
+        "summary": "Requests waiting for an answer: {count}.",
+        "caption": "Oldest requests first",
+        "reference": "Reference",
+        "trip": "Trip",
+        "requested": "Requested",
+        "expires": "Request lapses",
+        "all": "Open all bookings"
+      },
+      "payments": {
+        "title": "Payments to collect",
+        "summary": "Overdue: {overdue}. Falling due in the next {days} days: {dueSoon}.",
+        "truncated": "There are more bookings than this page checks at once, so the counts may be higher.",
+        "caption": "Next payment owed on each booking, earliest first",
+        "reference": "Booking",
+        "what": "Payment",
+        "due": "Due",
+        "amount": "Amount due",
+        "overdue": "Overdue",
+        "kinds": {
+          "deposit": "Deposit",
+          "balance": "Balance",
+          "instalment": "Instalment",
+          "adjustment": "Adjustment"
+        }
+      },
+      "tasks": {
+        "title": "Tasks due",
+        "summary": "Overdue: {overdue}. Due in the next week: {dueSoon}.",
+        "caption": "Open tasks, soonest first",
+        "task": "Task",
+        "due": "Due",
+        "overdue": "Overdue",
+        "all": "Open all tasks"
+      },
+      "stock": {
+        "title": "Places left",
+        "summary": "Pools that are low or sold out: {count}.",
+        "caption": "Pools with the fewest places left first",
+        "pool": "Pool",
+        "trip": "Race",
+        "left": "Left",
+        "ofCapacity": "{remaining} of {capacity}",
+        "low": "Low",
+        "soldOut": "Sold out",
+        "kinds": {
+          "entry": "Race entries",
+          "room": "Rooms",
+          "extra": "Extras"
+        }
+      },
+      "subscribers": {
+        "title": "Alert subscribers by race",
+        "summary": "Confirmed: {confirmed}. Waiting to confirm: {pending}.",
+        "caption": "Races with the most confirmed subscribers first",
+        "race": "Race",
+        "confirmed": "Confirmed",
+        "pending": "Waiting to confirm"
+      }
     },
     "races": {
       "title": "Races",

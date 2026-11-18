@@ -70,6 +70,12 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  // Task 5.6: queues the automatic balance reminders that are due (one email per plan item and offset).
+  paymentsReminders: {
+    name: 'payments.reminders',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 0, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
+  },
   crmMaintenance: {
     name: 'crm.maintenance',
     data: z.object({}).strict(),

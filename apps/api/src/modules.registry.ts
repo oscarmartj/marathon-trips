@@ -8,6 +8,7 @@ import { CatalogueModule } from './modules/catalogue';
 import { ComplaintsModule } from './modules/complaints';
 import { ContentModule } from './modules/content';
 import { KeyDatesModule } from './modules/keydates';
+import { DashboardModule } from './modules/dashboard';
 import { OrganiserExportsModule } from './modules/organiser-exports';
 import { ReportsModule } from './modules/reports';
 import { PaymentsModule } from './modules/payments';
@@ -17,4 +18,4 @@ import { TemplatesModule } from './modules/templates';
 import { WaitlistModule } from './modules/waitlist';
 
 // The single list of business modules. Adding a module = a folder, its .prisma file and one line here.
-export const MODULES: ReadonlyArray<Type<unknown>> = [CatalogueModule, PricingModule, AlertsModule, SuppliersModule, ContentModule, WaitlistModule, BookingsModule, CrmModule, PaymentsModule, TemplatesModule, ComplaintsModule, AutomationsModule, KeyDatesModule, ReportsModule, CustomerPortalModule, OrganiserExportsModule];
+export const MODULES: ReadonlyArray<Type<unknown>> = [CatalogueModule, PricingModule, AlertsModule, SuppliersModule, ContentModule, WaitlistModule, BookingsModule, CrmModule, PaymentsModule, TemplatesModule, ComplaintsModule, AutomationsModule, KeyDatesModule, ReportsModule, CustomerPortalModule, DashboardModule, OrganiserExportsModule];
