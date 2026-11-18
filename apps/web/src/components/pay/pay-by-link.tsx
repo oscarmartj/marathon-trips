@@ -83,7 +83,7 @@ export function PayByLink() {
     return (
       <div className="stack">
         <Status message={t(state.kind === 'noToken' ? 'payLink.noToken' : `payLink.errors.${state.key}`)} />
-        <p><Link href="/account/sign-in">{t('payLink.signIn')}</Link></p>
+        <p><Link className="link-block" href="/account/sign-in">{t('payLink.signIn')}</Link></p>
       </div>
     );
   }

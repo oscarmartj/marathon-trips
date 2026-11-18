@@ -1,5 +1,8 @@
-import { acceptTermsSchema, startPaymentSchema } from '@mt/shared';
 import type { CheckoutTermsView, PaymentMethod, PaymentRefreshView } from '@mt/shared';
+import { PAYMENT_METHODS_LIST } from './account';
+
+// Task 8.3: the two bodies below are checked here by hand (the same rules as the shared package's strict schemas), because importing
+// the schemas would put the validation library in the browser bundle of every page that pays. checkout.test.ts compares both with the schemas.
 
 // Checkout helpers (task 3.5). Pure functions, so the rules the page depends on are tested without a browser. The page
 // never works out an amount: it shows what the API sends, and what it sends back is a method, a version and a digest.
@@ -9,12 +12,14 @@ export const isBookingReference = (v: unknown): v is string => typeof v === 'str
 
 /** The body that starts a payment: a method and nothing else (the strict schema of the API refuses any other key). */
 export function startPaymentBody(method: PaymentMethod): { method: PaymentMethod } {
-  return startPaymentSchema.parse({ method });
+  if (!(PAYMENT_METHODS_LIST as readonly string[]).includes(method)) throw new Error('Not a payment method');
+  return { method };
 }
 
 /** The body that accepts the terms the person was shown: the version and digest the server gave. */
 export function acceptTermsBody(terms: Pick<CheckoutTermsView, 'digest'> & { version: number }): { version: number; digest: string } {
-  return acceptTermsSchema.parse({ version: terms.version, digest: terms.digest });
+  if (!Number.isInteger(terms.version) || terms.version < 0 || terms.version > 1_000_000 || !/^[0-9a-f]{64}$/.test(terms.digest)) throw new Error('Not a terms version and digest');
+  return { version: terms.version, digest: terms.digest };
 }
 
 /**

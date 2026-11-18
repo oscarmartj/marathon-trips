@@ -21,6 +21,8 @@
   },
   "common": {
     "skipToContent": "Skip to main content",
+    "notFoundTitle": "Page not found",
+    "notFoundIntro": "We could not find that page. It may have moved, or the address may have a typo.",
     "mainNavigation": "Main navigation",
     "footerNavigation": "Footer navigation",
     "company": "Company",

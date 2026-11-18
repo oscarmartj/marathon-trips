@@ -1,5 +1,11 @@
-import { CUSTOMER_DOCUMENT_KINDS, paymentLinkPaySchema } from '@mt/shared';
 import type { CustomerDocumentKind, PaymentLinkRefreshView, PaymentMethod } from '@mt/shared';
+
+// Task 8.3: these two lists mirror @mt/shared (CUSTOMER_DOCUMENT_KINDS, PAYMENT_METHODS) and the shape of a payment link token.
+// Importing the values would put the validation library into the browser bundle of every page that pays by link (about 114 kB
+// compressed). account.test.ts checks that they still match the shared package, so they cannot drift.
+export const CUSTOMER_DOCUMENT_KINDS = ['confirmation', 'itinerary', 'voucher'] as const;
+export const PAYMENT_METHODS_LIST = ['card', 'apple_pay', 'google_pay', 'payto', 'becs', 'payid_transfer', 'bpay', 'bnpl', 'manual_other'] as const;
+export const LINK_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 // The customer area and payment links (task 5.1). Pure helpers, tested without a browser. The pages show what the API
 // sends; nothing here adds up an amount.
@@ -19,7 +25,8 @@ export const documentKinds = (kinds: readonly string[]): CustomerDocumentKind[] 
 
 /** The body that pays through a link: the token and a method, nothing else (the API's strict schema refuses any other key). */
 export function payByLinkBody(token: string, method: PaymentMethod): { token: string; method: PaymentMethod } {
-  return paymentLinkPaySchema.parse({ token, method });
+  if (!LINK_TOKEN_PATTERN.test(token) || !(PAYMENT_METHODS_LIST as readonly string[]).includes(method)) throw new Error('Not a payment link token or payment method');
+  return { token, method };
 }
 
 /** Message key (under payLink.errors) for an answer of the payment link routes. */

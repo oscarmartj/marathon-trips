@@ -25,6 +25,10 @@
     "./brand": {
       "types": "./dist/brand/index.d.ts",
       "default": "./dist/brand/index.js"
+    },
+    "./iso-countries": {
+      "types": "./dist/iso-countries.d.ts",
+      "default": "./dist/iso-countries.js"
     }
   }
 }

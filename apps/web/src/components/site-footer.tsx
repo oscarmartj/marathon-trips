@@ -11,7 +11,7 @@ export async function SiteFooter() {
   return (
     <footer className="site-footer on-night">
       <div className="container grid grid--3">
-        <nav aria-label={t('common.footerNavigation')} className="grid grid--2" style={{ gridColumn: 'span 2' }}>
+        <nav aria-label={t('common.footerNavigation')} className="footer-nav grid grid--2">
           <div>
             <h2>{t('common.company')}</h2>
             <MenuLinks items={menu.footer_company.length > 0 ? menu.footer_company : builtIn('company')} />

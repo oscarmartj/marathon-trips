@@ -25,7 +25,7 @@ export function AlertUnsubscribe() {
   return (
     <div className="stack">
       <Status tone={state === 'done' ? 'info' : 'error'} message={state === 'done' ? t('alerts.unsubscribe.done') : t('alerts.unsubscribe.invalid')} />
-      <Link href="/races">{t('alerts.unsubscribe.browse')}</Link>
+      <Link className="link-block" href="/races">{t('alerts.unsubscribe.browse')}</Link>
     </div>
   );
 }

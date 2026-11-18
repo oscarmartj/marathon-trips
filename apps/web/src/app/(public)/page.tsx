@@ -53,7 +53,7 @@ export default async function Home() {
             ))}
           </div>
           <p>
-            <Link href="/races">{t('home.seeAll')}</Link>
+            <Link className="link-block" href="/races">{t('home.seeAll')}</Link>
           </p>
         </section>
       ) : null}
