@@ -48,12 +48,27 @@ describe('bounded tables never forget a live count (S-06)', () => {
     expect(() => one.claim('held', 0)).not.toThrow();
   });
 
-  it('one client can bring only so many new addresses an hour, which keeps one client from filling the table', () => {
+  it('one client can make only so many attempts an hour, renewals included, which keeps one client from filling or keeping the table', () => {
     const d = new UnknownAccountDelay(1000, 3);
     for (let i = 0; i < 3; i++) d.reserve(`a${i}`, 'client', 0);
     expect(() => d.reserve('a3', 'client', 0)).toThrow();
-    expect(() => d.reserve('a0', 'client', 0)).not.toThrow(); // an address it already tried keeps its place
+    // Round 4: renewing a place costs quota too, so a table filled once cannot be kept full for free.
+    expect(() => d.reserve('a0', 'client', 0)).toThrow();
     expect(() => d.reserve('b0', 'other-client', 0)).not.toThrow();
+    // An hour later the client has its quota again and its places renew.
+    expect(() => d.reserve('a0', 'client', 3_600_001)).not.toThrow();
+  });
+
+  it('keeping a full table costs as much every hour as filling it: one retry per address an hour is not enough (round 4)', () => {
+    const d = new UnknownAccountDelay(30, 10);
+    // Three clients fill the table with ten addresses each.
+    for (let c = 0; c < 3; c++) for (let i = 0; i < 10; i++) d.reserve(`c${c}-${i}`, `client-${c}`, 0);
+    expect(() => d.reserve('legit', 'staff-office', 1)).toThrow();
+    // Fifty minutes later the same clients try to renew their places: their quota for the hour is already spent, so
+    // they cannot, and keeping the table full would take as many fresh clients as filling it did.
+    for (let c = 0; c < 3; c++) expect(() => d.reserve(`c${c}-0`, `client-${c}`, 50 * 60_000)).toThrow();
+    // Past the hour the attackers' places are gone unless renewed, each renewal charged like a new address.
+    expect(() => d.reserve('legit', 'staff-office', 3_600_001)).not.toThrow();
   });
 
   it('kept full for more than an hour while a known and an unknown address keep being tried: both keep their places alike (round 3)', () => {
@@ -107,15 +122,24 @@ describe('bounded tables never forget a live count (S-06)', () => {
     for (let i = 0; i < 2; i++) expect(() => d.reserve(`office-later-${i}`, 'office', 3_600_001)).not.toThrow();
   });
 
-  it('per-client counters fail closed: a flood of clients cannot evict the counter of one that is over its quota (round 3)', () => {
-    const d = new UnknownAccountDelay(3, 1, 1000);
+  it('per-client counters fail closed: 10,000 other clients cannot evict the counter of one that is over its quota (round 4)', () => {
+    const d = new UnknownAccountDelay(20_000, 1);
     d.reserve('first', 'busy', 0);
     expect(() => d.reserve('second', 'busy', 0)).toThrow();
-    d.reserve('n1', 'c1', 0);
-    d.reserve('n2', 'c2', 0);
-    // Table and counters are full: a new client is refused rather than counted by evicting "busy".
-    expect(() => d.reserve('n3', 'c3', 0)).toThrow();
-    expect(() => d.reserve('second', 'busy', 0)).toThrow();
+    // The old WindowLimiter kept 10,000 keys and evicted the oldest: "busy" would have been forgotten here.
+    for (let i = 0; i < 10_000; i++) d.reserve(`addr-${i}`, `client-${i}`, 1);
+    expect(() => d.reserve('second', 'busy', 2)).toThrow();
+  });
+
+  it('refused attempts leave no counter behind: a full table cannot be used to fill the counters and refuse new clients (round 4)', () => {
+    const d = new UnknownAccountDelay(2, 1000, 1000);
+    d.reserve('x1', 'a', 0);
+    d.reserve('x2', 'b', 0);
+    // While the table is full, many different clients are refused...
+    for (let i = 0; i < 50; i++) expect(() => d.reserve(`flood-${i}`, `2001:db8:9:${i.toString(16)}::/64`, 10)).toThrow();
+    // ...and none of them took a counter, so once places free up a new client is served.
+    expect(() => d.reserve('legit', 'office', 3_600_001)).not.toThrow();
+    expect(Reflect.get(Reflect.get(d, 'perClient'), 'entries').size).toBeLessThanOrEqual(3);
   });
 
   const attempt = (email: string) => t.http().post('/auth/staff/sign-in').set(STATE_HEADERS).send({ email, password: 'definitely-wrong-password' });
@@ -216,7 +240,7 @@ describe('the new-address cap through HTTP: per client address, read from the en
   let h: TestApp;
   beforeAll(async () => {
     // TRUST_PROXY=loopback: the test connects from loopback, so X-Forwarded-For chooses the client address here.
-    h = await makeApp({ AUTH_NEW_ADDRESSES_PER_HOUR_PER_CLIENT: '2', TRUST_PROXY: 'loopback' });
+    h = await makeApp({ AUTH_SIGN_IN_ATTEMPTS_PER_HOUR_PER_CLIENT: '2', TRUST_PROXY: 'loopback' });
   });
   afterAll(async () => h.close());
   const from = (ip: string, email: string) =>

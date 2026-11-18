@@ -12,7 +12,7 @@ const API_ENV = {
   // The limit itself is covered by the API's own tests.
   AUTH_RATE_LIMIT_PER_MINUTE: '120',
   // Task 8.5: the suite signs in many staff accounts from one address; the limit has its own API tests.
-  AUTH_NEW_ADDRESSES_PER_HOUR_PER_CLIENT: '10000',
+  AUTH_SIGN_IN_ATTEMPTS_PER_HOUR_PER_CLIENT: '10000',
 };
 
 export default defineConfig({

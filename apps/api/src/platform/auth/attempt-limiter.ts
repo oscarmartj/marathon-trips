@@ -60,6 +60,16 @@ export class Lru<V> {
 
   private lastSweep = 0;
 
+  /** Whether `trySet` of this key would succeed now, without storing anything (round 4: no empty entries left behind). */
+  canStore(key: string, now = Date.now()): boolean {
+    if (this.get(key, now) !== undefined || this.map.size < this.max) return true;
+    if (now - this.lastSweep >= 1000) {
+      this.lastSweep = now;
+      for (const [k, e] of this.map) if (e.expiresAt <= now) this.map.delete(k);
+    }
+    return this.map.size < this.max;
+  }
+
   get size(): number {
     return this.map.size;
   }
@@ -103,9 +113,9 @@ export async function refundAccountAttempt(db: Db, userId: string): Promise<void
 
 /** Retry-After for an address refused because the table is full or its client added too many new addresses (S-06). */
 export const SATURATION_SECONDS = 60;
-/** New addresses one client (an IPv4 address or an IPv6 /64) may bring to staff sign-in per hour (S-06, review round 2). */
+/** Sign-in attempts one client (an IPv4 address or an IPv6 /64) may make per hour, new addresses and renewals (S-06). */
 export const NEW_ADDRESSES_PER_HOUR_PER_CLIENT = 30;
-/** New addresses one IPv6 /48 (a site's allocation, 65,536 /64s) may bring per hour, all its /64s together (round 3). */
+/** Sign-in attempts one IPv6 /48 (a site's allocation, 65,536 /64s) may make per hour, all its /64s together (round 3). */
 export const NEW_ADDRESSES_PER_HOUR_PER_SITE = 300;
 
 /** The /48 an IPv6 client key (`a:b:c:d::/64`, from rateLimitKey) belongs to; null for IPv4. */
@@ -133,7 +143,7 @@ class ClosedWindowCounter {
   }
 
   hasRoom(key: string, now: number): boolean {
-    return this.entries.get(key, now) !== undefined || this.entries.trySet(key, [], now);
+    return this.entries.canStore(key, now);
   }
 
   record(key: string, now: number): void {
@@ -176,20 +186,19 @@ export class UnknownAccountDelay {
    * every address.
    */
   reserve(key: string, client: string, now: number = Date.now()): void {
-    const held = this.entries.get(key, now);
-    if (held !== undefined) {
-      this.entries.set(key, held, now); // renewed on every attempt, known or unknown alike (round 3)
-      return;
-    }
     const site = siteOf(client);
     const refuse = (): never => {
       throw tooManyRequests(SATURATION_SECONDS);
     };
+    // Every attempt that gets or keeps a place is charged, a renewal as much as a new address, known and unknown alike
+    // (round 4): otherwise a table filled once could be kept full with one cheap retry per address and hour.
     if (this.perClient.count(client, now) >= this.perClientPerHour) refuse();
     if (site && this.perSite.count(site, now) >= this.perSitePerHour) refuse();
     if (!this.perClient.hasRoom(client, now) || (site && !this.perSite.hasRoom(site, now))) refuse();
-    if (!this.entries.trySet(key, { failures: 0, nextAllowedAt: 0, lastFailedAt: 0 }, now)) refuse();
-    // Charged only now that the place is granted (round 3): retries refused for a full table spend no quota.
+    const held = this.entries.get(key, now);
+    if (held !== undefined) this.entries.set(key, held, now); // renewed on every attempt (round 3)
+    else if (!this.entries.trySet(key, { failures: 0, nextAllowedAt: 0, lastFailedAt: 0 }, now)) refuse();
+    // Charged only now that the place is granted or kept (round 3); the counters are created only here (round 4).
     this.perClient.record(client, now);
     if (site) this.perSite.record(site, now);
   }

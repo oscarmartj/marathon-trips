@@ -46,7 +46,7 @@ export class StaffAuthService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
   ) {
-    this.unknown = new UnknownAccountDelay(100_000, config.AUTH_NEW_ADDRESSES_PER_HOUR_PER_CLIENT);
+    this.unknown = new UnknownAccountDelay(100_000, config.AUTH_SIGN_IN_ATTEMPTS_PER_HOUR_PER_CLIENT);
   }
 
   private actor(userId: string | null, meta?: { requestId?: string }): AuditActor {

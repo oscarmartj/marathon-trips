@@ -41,8 +41,8 @@ const configSchema = z.object({
   COOKIE_SECURE: z.enum(['true', 'false']).optional(),
   // Requests per minute and IP on sign-in, code and magic-link routes.
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
-  // Task 8.5 (S-06): new addresses one client (IPv4 address or IPv6 /64) may try at staff sign-in per hour.
-  AUTH_NEW_ADDRESSES_PER_HOUR_PER_CLIENT: z.coerce.number().int().min(1).default(30),
+  // Task 8.5 (S-06): staff sign-in attempts one client (IPv4 address or IPv6 /64) may make per hour, renewals included.
+  AUTH_SIGN_IN_ATTEMPTS_PER_HOUR_PER_CLIENT: z.coerce.number().int().min(1).default(30),
 
   // Task 8.4. Outgoing webhooks outside production go only to these exact origins (scheme://host:port, comma separated);
   // in production the list is ignored with a warning at start-up. Empty by default.
