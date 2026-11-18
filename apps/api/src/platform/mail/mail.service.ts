@@ -28,6 +28,11 @@ export type SendOutcome = 'sent' | 'suppressed' | 'noop' | 'failed';
 const MAX_ATTEMPTS = 5;
 /** A template throws this when the email must never go out (the person or the thing it is about is gone): failed at once, no retries. */
 export const MAIL_NOT_SENDABLE = 'mail_not_sendable';
+/**
+ * A template throws this (message = a short reason code) when the email must not go out now and that is not a failure,
+ * for example its module is switched off: the email is marked suppressed with the reason, and is not retried.
+ */
+export const MAIL_SKIPPED = 'mail_skipped';
 
 @Injectable()
 export class MailService {
@@ -132,6 +137,10 @@ export class MailService {
       });
     } catch (err) {
       if (!started) throw err;
+      if (err instanceof AppError && err.code === MAIL_SKIPPED) {
+        await this.prisma.outboundEmail.updateMany({ where: { id: outboundEmailId, status: 'queued' }, data: { status: 'suppressed', error: err.message } });
+        return 'suppressed';
+      }
       const info = safeError(err);
       const attempts = attemptsBefore + 1;
       const failed = attempts >= MAX_ATTEMPTS || (err instanceof AppError && (err.code === 'mail_template_not_registered' || err.code === MAIL_NOT_SENDABLE));

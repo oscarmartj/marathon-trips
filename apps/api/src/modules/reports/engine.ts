@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { REPORT_ENTITY_CATALOGUE, REPORT_MAX_ROWS } from '@mt/shared';
 import type { ReportDefinition, ReportResult } from '@mt/shared';
 import { Prisma } from '../../generated/prisma/client';
-import { resolveRange } from './dates';
+import { addDays, resolveRange, startOfBusinessDay } from './dates';
 import { REPORTS_TIME_ZONE } from './manifest';
 
 type Tx = Prisma.TransactionClient;
@@ -40,8 +40,10 @@ export const ratePct = (part: number, whole: number): number | null => (whole > 
  */
 @Injectable()
 export class ReportEngine {
-  async run(tx: Tx, def: ReportDefinition, now: Date = new Date()): Promise<ReportResult> {
-    const { from, to } = resolveRange(def.range, now);
+  async run(tx: Tx, def: ReportDefinition, now: Date = new Date(), opts: { completeDaysOnly?: boolean } = {}): Promise<ReportResult> {
+    const { from, to } = resolveRange(def.range, now, opts);
+    // Bounds as instants, so the filter on the request time can use an index (no expression on the column).
+    const [fromAt, beforeAt] = [startOfBusinessDay(from), startOfBusinessDay(addDays(to, 1))];
     const raceFilter = (col: string) => (def.raceIds?.length ? Prisma.sql`AND ${Prisma.raw(col)} = ANY(${def.raceIds}::uuid[])` : Prisma.empty);
     const rows = new Map<string, { label: string; counts: Counts }>();
     const add = (key: string, label: string, counts: Counts) => {
@@ -64,7 +66,7 @@ export class ReportEngine {
       JOIN "race_editions" e ON e."id" = b."editionId"
       JOIN "races" r ON r."id" = e."raceId"
       ${g.joins}
-      WHERE r."deletedAt" IS NULL AND NOT r."isDemo" AND NOT b."isDemo" AND ${requestedDay} BETWEEN ${from}::date AND ${to}::date ${raceFilter('r."id"')}
+      WHERE r."deletedAt" IS NULL AND NOT r."isDemo" AND NOT b."isDemo" AND b."requestedAt" >= ${fromAt}::timestamptz AND b."requestedAt" < ${beforeAt}::timestamptz ${raceFilter('r."id"')}
       GROUP BY 1, 2`);
     for (const b of booked) add(b.key, b.label, { requests: b.requests, bookings: b.requests, approved: b.approved, declined: b.declined, expired: b.expired, cancelled: b.cancelled, paid: b.paid });
 
