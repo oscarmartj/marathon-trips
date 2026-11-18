@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BookingAmendmentService } from '../../../../src/modules/bookings';
 import { BookingAmendmentHooks } from '../../../../src/modules/bookings/amendment-hooks';
+import { WaitlistOffersService } from '../../../../src/modules/bookings/waitlist-offers.service';
+import { TravellerDetailsService } from '../../../../src/modules/customer-portal/traveller.service';
 import { PaymentCoverageService } from '../../../../src/modules/payments/core/coverage.service';
 import { PaymentWebhooksService } from '../../../../src/modules/payments/core/webhooks.service';
 import { STATE_HEADERS, TestApp, makeApp } from '../../../support/auth';
@@ -264,6 +266,34 @@ describe('waiting list (review M5, m6)', () => {
     }
     await stockIsExact(world);
   });
+  it('amendment_vs_offer_expiry_same_pool: the periodic expiry of an offer waits for a change moving the same pool, and the stock stays exact', async () => {
+    const world = await amendWorld(admin, { quadCapacity: 2 });
+    const b = await walked(world, [{ roomOptionId: world.quadId, travellers: [runner(world), supporter] }]);
+    const holder = await walked(world, [{ roomOptionId: world.quadId, travellers: [runner(world)] }]);
+    await soldOut(world);
+    const { entry } = await join(world, [{ roomOptionId: world.quadId, travellers: [runner(world)] }]);
+    const toDoubleOne = { ...toDouble(world), rooms: [{ roomOptionId: world.doubleId, travellers: [{ keepSlot: 1 }] }] };
+    expect((await applyWith(holder.bookingId, toDoubleOne, await digestOf(holder.bookingId, toDoubleOne))).status).toBe(201);
+    expect((await t.prisma.waitlistEntry.findUniqueOrThrow({ where: { id: entry.id } })).status).toBe('offered');
+    // The offer is now past its time: the periodic task will end it and give its place back.
+    await t.prisma.waitlistEntry.update({ where: { id: entry.id }, data: { offerExpiresAt: new Date(Date.now() - 60_000) } });
+    const db = await digestOf(b.bookingId, toDouble(world));
+    const g = gate(BookingAmendmentHooks.prototype, 'runPlaces');
+    try {
+      const change = applyWith(b.bookingId, toDouble(world), db);
+      await enteredOr(g, change);
+      const expiry = t.app.get(WaitlistOffersService).expireOffers();
+      await lockWaiter();
+      g.release();
+      const [rc, re] = await Promise.all([change, expiry]);
+      expect(rc.status).toBe(201);
+      expect(re).toMatchObject({ expired: 1, failed: 0 });
+    } finally {
+      g.restore();
+    }
+    expect((await t.prisma.waitlistEntry.findUniqueOrThrow({ where: { id: entry.id } })).status).toBe('expired');
+    await stockIsExact(world);
+  });
 });
 
 describe('a change against payments, cancellation and the sweeps', () => {
@@ -383,6 +413,47 @@ describe('a change against payments, cancellation and the sweeps', () => {
     }
     expect((await row(y.bookingId)).status).toBe('confirmed');
     expect((await row(y.bookingId)).currentSnapshotVersion).toBe(2);
+    await planMatches(y.bookingId);
+    await stockIsExact(world);
+  });
+  it('amendment_vs_traveller_save_lock_ordered: a customer saving a traveller and a change of the same booking wait for each other, in either order', async () => {
+    const world = await amendWorld(admin);
+    const save = (reference: string, givenName: string) => go(t.http().put(`/account/bookings/${reference}/travellers/1`).set(STATE_HEADERS).set('Cookie', c.cookie).send({ givenName, familyName: 'Ruiz' }));
+    const names = async (bookingId: string) => (await t.prisma.traveller.findMany({ where: { bookingId, slot: 1 } })).map((r) => r.givenName);
+
+    // The change first: the save takes the booking for share and waits for it, then saves into the place that is still current.
+    const x = await walked(world, double(world));
+    const dx = await digestOf(x.bookingId, nightBody(world));
+    const g1 = gate(BookingAmendmentHooks.prototype, 'runPlaces');
+    try {
+      const change = applyWith(x.bookingId, nightBody(world), dx);
+      await enteredOr(g1, change);
+      const saving = save(x.reference, 'Ana');
+      await lockWaiter();
+      g1.release();
+      const [rc, rs] = await Promise.all([change, saving]);
+      expect([rc.status, rs.status]).toEqual([201, 200]);
+    } finally {
+      g1.restore();
+    }
+    expect(await names(x.bookingId)).toEqual(['Ana']);
+
+    // The save first (stopped after it took the booking for share): the change waits for it, then moves on with the details kept.
+    const y = await walked(world, double(world));
+    const dy = await digestOf(y.bookingId, nightBody(world));
+    const g2 = gate(TravellerDetailsService.prototype as unknown as object, 'windowOf');
+    try {
+      const saving = save(y.reference, 'Bea');
+      await enteredOr(g2, saving);
+      const change = applyWith(y.bookingId, nightBody(world), dy);
+      await lockWaiter();
+      g2.release();
+      const [rs, rc] = await Promise.all([saving, change]);
+      expect([rs.status, rc.status]).toEqual([200, 201]);
+    } finally {
+      g2.restore();
+    }
+    expect(await names(y.bookingId)).toEqual(['Bea']);
     await planMatches(y.bookingId);
     await stockIsExact(world);
   });

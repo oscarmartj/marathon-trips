@@ -95,7 +95,7 @@ describe('amendment_database_guards', () => {
     const N = a.newTotalMinor;
     const insert = (over: Record<string, unknown>) => asOwner(
       `INSERT INTO booking_amendments (id, "bookingId", currency, "fromVersion", "toVersion", "initiatedBy", "actorUserId", "reasonCode", changes, "previousTotalMinor", "newTotalMinor", "priceDifferenceMinor", "collectedMinor", "outstandingMinor", "creditPendingMinor", "basisDriftMinor", "basisPriceVersionId", "basisAt", "requestKeyHash", "requestBodyHash")
-       VALUES ($1, $2, 'AUD', 1, 2, $3, $4, $5, '{nights}', $6, $7, $8, 0, $9, 0, $10, $11, now(), $12, $12)`,
+       VALUES ($1, $2, 'AUD', 1, 2, $3, $4, $5, ${'changes' in over ? (over.changes === null ? 'NULL' : `'${String(over.changes)}'`) : `'{nights}'`}, $6, $7, $8, 0, $9, 0, $10, $11, now(), $12, $12)`,
       [randomUUID(), b.bookingId, over.initiatedBy ?? 'staff', a.actorUserId, over.reasonCode ?? 'other', P, N, (over.diff as bigint | undefined) ?? N - P, (over.outstanding as bigint | undefined) ?? N, over.drift ?? 0, a.basisPriceVersionId, 'f'.repeat(64)]);
     expect(await insert({})).toMatch(/booking_amendments_bookingId_toVersion_key/);
     expect(await insert({ diff: N - P - 1n })).toMatch(/booking_amendments_amounts_check/);
@@ -103,6 +103,9 @@ describe('amendment_database_guards', () => {
     expect(await insert({ drift: -5 })).toMatch(/booking_amendments_drift_check/);
     expect(await insert({ drift: 5, reasonCode: 'correction' })).toMatch(/booking_amendments_drift_check/);
     expect(await insert({ initiatedBy: 'customer', reasonCode: 'other' })).toMatch(/booking_amendments_customer_check/);
+    // A change that changes nothing is refused: no list at all, or an empty one.
+    expect(await insert({ changes: null })).toMatch(/booking_amendments_changes_check/);
+    expect(await insert({ changes: '{}' })).toMatch(/booking_amendments_changes_check/);
   });
 
   it('stock claims: one held claim per booking and pool; the version of a claim never changes (m2)', async () => {

@@ -37,35 +37,39 @@ export function handlerInputs(controller: new (...a: never[]) => object, handler
 export async function checkOwnedRoutes(t: TestApp, fixtures: Record<string, OwnedRouteFixture>, a: CustomerSession, b: CustomerSession) {
   const problems: string[] = [];
   let checked = 0;
-  for (const r of allRoutes(t.app).filter((x) => x.marks[0]?.type === 'owned')) {
-    const mark = r.marks[0]!;
-    if (mark.type !== 'owned') continue;
-    const name = `${r.method} ${r.path}`;
-    if (!('owns' in mark.spec)) {
-      const inputs = handlerInputs(r.controllerClass, r.handler);
-      if (/:/.test(r.path) || inputs.params) problems.push(`${name}: self route with a path parameter`);
-      if (inputs.query) problems.push(`${name}: self route reads the query`);
-      // Only declared references to public catalogue records may be ids (task 2.4); anything else is a resource id.
-      const publicRefs = new Set(mark.spec.publicRefs ?? []);
-      const ids = inputs.bodyKeys.filter((k) => /id$|ids$/i.test(k) && !publicRefs.has(k));
-      if (ids.length) problems.push(`${name}: self route takes ${ids.join(', ')} in the body`);
+  try {
+    for (const r of allRoutes(t.app).filter((x) => x.marks[0]?.type === 'owned')) {
+      const mark = r.marks[0]!;
+      if (mark.type !== 'owned') continue;
+      const name = `${r.method} ${r.path}`;
+      if (!('owns' in mark.spec)) {
+        const inputs = handlerInputs(r.controllerClass, r.handler);
+        if (/:/.test(r.path) || inputs.params) problems.push(`${name}: self route with a path parameter`);
+        if (inputs.query) problems.push(`${name}: self route reads the query`);
+        // Only declared references to public catalogue records may be ids (task 2.4); anything else is a resource id.
+        const publicRefs = new Set(mark.spec.publicRefs ?? []);
+        const ids = inputs.bodyKeys.filter((k) => /id$|ids$/i.test(k) && !publicRefs.has(k));
+        if (ids.length) problems.push(`${name}: self route takes ${ids.join(', ')} in the body`);
+        checked++;
+        continue;
+      }
+      const fixture = fixtures[mark.spec.fixture];
+      if (!fixture) {
+        problems.push(`${name}: no fixture "${mark.spec.fixture}"`);
+        continue;
+      }
+      const req = await fixture.create(t, a, b);
+      const mine = await req.asOwner();
+      const theirs = await req.asOther();
+      if (mine.status < 200 || mine.status >= 300) problems.push(`${name}: owner got ${mine.status}`);
+      if (theirs.status !== 404) problems.push(`${name}: other customer got ${theirs.status}, expected 404`);
       checked++;
-      continue;
     }
-    const fixture = fixtures[mark.spec.fixture];
-    if (!fixture) {
-      problems.push(`${name}: no fixture "${mark.spec.fixture}"`);
-      continue;
-    }
-    const req = await fixture.create(t, a, b);
-    const mine = await req.asOwner();
-    const theirs = await req.asOther();
-    if (mine.status < 200 || mine.status >= 300) problems.push(`${name}: owner got ${mine.status}`);
-    if (theirs.status !== 404) problems.push(`${name}: other customer got ${theirs.status}, expected 404`);
-    checked++;
+  } finally {
+    // The amendment fixtures (task 6.3) switch customers' online changes on: back to the default (off) for later tests,
+    // whatever happened above.
+    const { setCustomerAmendments } = await import('./amendments');
+    await setCustomerAmendments(t, false);
   }
-  // The amendment fixtures (task 6.3) switch customers' online changes on: back to the default (off) for later tests.
-  const { setCustomerAmendments } = await import('./amendments');
-  await setCustomerAmendments(t, false);
   return { problems, checked };
 }
