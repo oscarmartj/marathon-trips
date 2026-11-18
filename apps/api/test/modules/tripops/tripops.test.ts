@@ -108,7 +108,7 @@ describe('which bookings are listed', () => {
     for (const status of BOOKING_STATUSES) {
       const t1 = await trip(status);
       await t.prisma.extra.update({ where: { id: t1.extraId }, data: { kind: 'transfer' } });
-      await t.prisma.bookingExtra.create({ data: { bookingId: t1.bookingId, extraId: t1.extraId, quantity: 1, travellerSlot: 1 } }).catch(() => undefined);
+      await t.prisma.bookingExtra.create({ data: { bookingId: t1.bookingId, extraId: t1.extraId, quantity: 1, travellerSlot: 1 } });
       const listed = (TRIP_LIST_BOOKING_STATUSES as readonly string[]).includes(status);
       const r = (await rooming(t1.packageId)).body;
       expect(r.hotels.flatMap((h: { rooms: unknown[] }) => h.rooms), `rooming ${status}`).toHaveLength(listed ? 1 : 0);

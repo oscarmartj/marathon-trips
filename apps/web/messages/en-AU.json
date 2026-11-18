@@ -1207,7 +1207,7 @@
       "pickLabel": "Trip",
       "pickNone": "Choose a trip",
       "pickOption": "{trip} ({count} on the lists)",
-      "listedHint": "Only bookings with a paid deposit are listed. Requested, declined, expired, cancelled and refunded bookings are left out.",
+      "listedHint": "Only bookings with a paid deposit are listed. Requested, declined, expired, called-off and refunded bookings are left out.",
       "namesHint": "Shows names only: no dates of birth, emergency contacts, contact details or payments.",
       "roomingTitle": "Rooming list",
       "roomingTotals": "{rooms} rooms, {guests} guests, {pending} still without details.",
