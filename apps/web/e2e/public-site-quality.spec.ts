@@ -120,9 +120,10 @@ function publicPages(): Array<{ name: string; path: string; lang?: string }> {
 const report = (findings: Finding[]) => findings.map((f) => `${f.rule}: ${f.detail}`);
 
 async function open(page: Page, path: string): Promise<Response | null> {
-  const res = await page.goto(path, { waitUntil: 'networkidle' });
-  // Hydration finished before anything is judged.
-  await page.waitForLoadState('load');
+  // Wait for the page's own load event, then give client code a moment to settle. "networkidle" alone is not used as the gate:
+  // any request that never finishes (a prefetch, a blocked background request on a developer's machine) would hold it for ever.
+  const res = await page.goto(path, { waitUntil: 'load' });
+  await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
   return res;
 }
 

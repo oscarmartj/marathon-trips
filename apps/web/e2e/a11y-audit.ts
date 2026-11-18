@@ -125,7 +125,7 @@ function auditInPage(expectedLang: string): Finding[] {
   document.querySelectorAll('a[href], button, input:not([type="hidden"]), select, textarea, summary').forEach((el) => {
     if (!visible(el) || clipped(el)) return;
     const r = el.getBoundingClientRect();
-    if (r.width >= 23.5 && r.height >= 23.5) return;
+    if (r.width >= 24 && r.height >= 24) return;
     if (el.tagName === 'A') {
       const block = el.closest('p, li, dd, td, label');
       const own = (block?.textContent ?? '').replace(el.textContent ?? '', '').trim();
@@ -185,7 +185,7 @@ function auditInPage(expectedLang: string): Finding[] {
     const size = parseFloat(s.fontSize);
     const bold = Number(s.fontWeight) >= 700;
     const large = size >= 24 || (bold && size >= 18.66);
-    if (ratio < (large ? 3 : 4.5) - 0.01) add('1.4.3 contrast', `${describe(el)} has ${ratio.toFixed(2)}:1 (needs ${large ? 3 : 4.5}:1)`);
+    if (ratio < (large ? 3 : 4.5)) add('1.4.3 contrast', `${describe(el)} has ${ratio.toFixed(2)}:1 (needs ${large ? 3 : 4.5}:1)`);
   }
   return out;
 }
