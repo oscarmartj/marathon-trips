@@ -68,6 +68,12 @@ const ymd = (d: Date | string): string => (typeof d === 'string' ? d : d.toISOSt
  * section 6, review M1). A change of the booking supersedes every item and restates them with new ids; a restated item with
  * the same kind and due date is the same reminder and is not sent again, while what the change added has its own.
  */
+/**
+ * The key 5.6 used before 6.3 (the item's id and the offset). Reminders already sent under it are still honoured, so the
+ * first sweep after the change of key never sends the same reminder twice (code review round 3, point 1).
+ */
+export const legacyReminderDedupeKey = (itemId: string, offset: number): string => `balance-reminder:${itemId}:${offset}`;
+
 export const reminderDedupeKey = (item: { bookingId: string; kind: string; dueDate: Date | string }, offset: number): string =>
   `balance-reminder:${item.bookingId}:${item.kind}:${ymd(item.dueDate)}:${offset}`;
 
@@ -117,7 +123,9 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
         AND b.status::text = ANY(${[...REMINDABLE_STATES]}::text[])
         AND w.off IS NOT NULL
         AND (${only.bookingId ?? null}::uuid IS NULL OR i."bookingId" = ${only.bookingId ?? null}::uuid)
-        AND NOT EXISTS (SELECT 1 FROM outbound_emails e WHERE e."dedupeKey" = 'balance-reminder:' || i."bookingId"::text || ':' || i.kind::text || ':' || to_char(i."dueDate", 'YYYY-MM-DD') || ':' || w.off::text)
+        AND NOT EXISTS (SELECT 1 FROM outbound_emails e WHERE e."dedupeKey" IN (
+          'balance-reminder:' || i."bookingId"::text || ':' || i.kind::text || ':' || to_char(i."dueDate", 'YYYY-MM-DD') || ':' || w.off::text,
+          'balance-reminder:' || i.id::text || ':' || w.off::text))
       ORDER BY i."dueDate", i.id LIMIT ${MAX_PER_RUN}`;
     for (const row of rows) {
       result.examined += 1;
@@ -144,7 +152,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       const offset = reminderOffset(offsets, daysBetween(today, item.dueDate.toISOString().slice(0, 10)));
       if (offset === null) return 'not_due_yet';
       const dedupeKey = reminderDedupeKey(item, offset);
-      if (await tx.outboundEmail.findUnique({ where: { dedupeKey }, select: { id: true } })) return 'already_queued';
+      if (await tx.outboundEmail.findFirst({ where: { dedupeKey: { in: [dedupeKey, legacyReminderDedupeKey(item.id, offset)] } }, select: { id: true } })) return 'already_queued';
       // The plan's own figure: this item must be the first one the money collected does not cover.
       const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
       const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);

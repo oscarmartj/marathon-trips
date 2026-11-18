@@ -62,7 +62,8 @@ export interface ActivePlanItem {
  * bigint only, no rounding. Returns null when the total does not change (the plan stays as it is). Otherwise the items of
  * the next plan version, which always add up to the new total:
  * - a higher total keeps every item (kind, amount, due date) and adds an `adjustment` item for the difference, due on
- *   `adjustmentDue` but never before the last deposit item, so what "deposit covered" asks for never goes up;
+ *   `adjustmentDue` but never before the last deposit item, so what "deposit covered" asks for never goes up; an
+ *   adjustment already due that day takes the difference instead (one adjustment per due date);
  * - a lower total takes the difference from the last item backwards and leaves out items that reach 0.
  * Items are ordered by due date (deposit items first on a tie, then their old order) and numbered from 1.
  */
@@ -75,7 +76,11 @@ export function amendedPlanItems(active: readonly ActivePlanItem[], newTotalMino
   if (newTotalMinor > oldTotal) {
     const lastDeposit = old.filter((i) => i.kind === 'deposit').reduce((d, i) => (i.dueDate > d ? i.dueDate : d), '');
     const due = lastDeposit > adjustmentDue ? lastDeposit : adjustmentDue;
-    items.push({ kind: 'adjustment', amountMinor: newTotalMinor - oldTotal, dueDate: due, order: items.length });
+    // One adjustment per due date (code review round 3, point 2): a second rise falling due the same day adds to it, so
+    // two items never share a reminder key (booking, kind, due date).
+    const same = items.find((i) => i.kind === 'adjustment' && i.dueDate === due);
+    if (same) same.amountMinor += newTotalMinor - oldTotal;
+    else items.push({ kind: 'adjustment', amountMinor: newTotalMinor - oldTotal, dueDate: due, order: items.length });
   } else {
     let cut = oldTotal - newTotalMinor;
     for (let i = items.length - 1; i >= 0 && cut > 0n; i--) {

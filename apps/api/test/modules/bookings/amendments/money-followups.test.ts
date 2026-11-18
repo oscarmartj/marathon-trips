@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BookingAmendmentHooks } from '../../../../src/modules/bookings/amendment-hooks';
 import { ErasureService } from '../../../../src/modules/privacy';
-import { PaymentRemindersService } from '../../../../src/modules/payments/core/reminders.service';
+import { PaymentRemindersService, legacyReminderDedupeKey } from '../../../../src/modules/payments/core/reminders.service';
 import { TestApp, makeApp } from '../../../support/auth';
 import { CATALOGUE_AND_PRICING, closeCatalogue, staffClient } from '../../../support/catalogue';
 import type { Client } from '../../../support/catalogue';
@@ -101,6 +101,40 @@ describe('reminders after a change (review M1, task 5.6)', () => {
     expect(await reminderKeys(b.bookingId)).toHaveLength(1);
   });
 
+  it('legacy_key_honoured: a reminder 5.6 already queued under its old key (item id and offset) is not sent again', async () => {
+    const due = plus(today(), 10);
+    const world = await amendWorld(admin, { balanceDueDate: due });
+    const b = await paidBooking(world);
+    const item = await t.prisma.paymentScheduleItem.findFirstOrThrow({ where: { bookingId: b.bookingId, state: 'active', kind: 'balance' } });
+    const legacy = legacyReminderDedupeKey(item.id, 14);
+    expect(legacy).toBe(`balance-reminder:${item.id}:14`);
+    await t.prisma.outboundEmail.create({ data: { to: 'legacy@example.test', templateKey: 'payment-reminder', templateVersion: 1, locale: 'en-AU', dedupeKey: legacy, status: 'sent' } });
+    // The sweep leaves the line out in SQL...
+    const run = await t.app.get(PaymentRemindersService).run(tenAm(today()), { bookingId: b.bookingId });
+    expect([run.examined, run.queued, run.errors]).toEqual([0, 0, 0]);
+    // ...and the line's own transaction refuses it too (a sweep that read the line before the old row was seen).
+    expect(await t.app.get(PaymentRemindersService).remind(item.id, b.bookingId, [14, 7, 3], today())).toBe('already_queued');
+    expect(await reminderKeys(b.bookingId)).toEqual([]);
+    await t.prisma.outboundEmail.delete({ where: { dedupeKey: legacy } });
+  });
+
+  it('same_day_adjustments_merge: two rises falling due the same day make one adjustment, which keeps its reminders', async () => {
+    const world = await amendWorld(admin);
+    const b = await paidBooking(world);
+    await amend(b.bookingId, keep(world, { extraNightsAfter: 1 }));
+    const first = (await t.prisma.paymentScheduleItem.findMany({ where: { bookingId: b.bookingId, state: 'active', kind: 'adjustment' } }))[0]!;
+    const due = first.dueDate.toISOString().slice(0, 10);
+    expect((await t.app.get(PaymentRemindersService).run(tenAm(plus(due, -3)), { bookingId: b.bookingId })).queued).toBe(1);
+    await amend(b.bookingId, keep(world, { expectedSnapshotVersion: 2, extraNightsAfter: 2 }));
+    const adj = await t.prisma.paymentScheduleItem.findMany({ where: { bookingId: b.bookingId, state: 'active', kind: 'adjustment' } });
+    expect(adj).toHaveLength(1);
+    expect(adj[0]!.dueDate).toEqual(first.dueDate);
+    expect(adj[0]!.amountMinor > first.amountMinor).toBe(true);
+    // Same key as the one already sent: no second reminder for that offset, and nothing lost to a second item.
+    expect((await t.app.get(PaymentRemindersService).run(tenAm(plus(due, -3)), { bookingId: b.bookingId })).queued).toBe(0);
+    expect(await reminderKeys(b.bookingId)).toEqual([`balance-reminder:${b.bookingId}:adjustment:${due}:3`]);
+  });
+
   it('a reminder sweep racing a change waits for it and never reminds a superseded item', async () => {
     const due = plus(today(), 10);
     const world = await amendWorld(admin, { balanceDueDate: due });
@@ -171,7 +205,14 @@ describe('erasure with a credit pending (review M4, task 5.5)', () => {
     await forceStatus(b.bookingId, 'completed');
     expect(await reason(customerId)).toBe('refund_may_be_due');
     expect(await t.prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).toMatchObject({ anonymisedAt: null });
-    // Control: a completed booking paid exactly its total holds nothing back for the rule's last branch.
+    // The database function itself refuses (as 5.5's erasure runs it: the API role, after anonymising, in one transaction).
+    await expect(t.prisma.$transaction(async (tx) => {
+      await tx.customer.update({ where: { id: customerId }, data: { anonymisedAt: new Date() } });
+      await tx.$queryRawUnsafe('SELECT public.privacy_erase_customer($1::uuid)', customerId);
+    })).rejects.toThrow(/active_trip/);
+    expect(await t.prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).toMatchObject({ anonymisedAt: null });
+    // Control: a completed booking that collected no more than its total (only the deposit was paid) holds nothing back
+    // for the rule's last branch.
     const other = await payingCustomer(t);
     const keepC = c;
     c = other;

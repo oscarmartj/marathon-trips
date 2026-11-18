@@ -66,6 +66,20 @@ describe('amended_plan_items_invariants (2 000 seeded cases)', () => {
     // A reduction is taken from the last item backwards.
     expect(amendedPlanItems(active, 82500n, '2026-11-25')!.map((i) => [i.kind, i.amountMinor])).toEqual([['deposit', 82500n]]);
   });
+
+  it('one adjustment per due date: a second rise due the same day adds to it; another day gets its own item', () => {
+    const active = [
+      { kind: 'deposit' as const, sequence: 1, amountMinor: 100000n, dueDate: '2026-11-20' },
+      { kind: 'adjustment' as const, sequence: 2, amountMinor: 30000n, dueDate: '2026-11-25' },
+      { kind: 'balance' as const, sequence: 3, amountMinor: 32500n, dueDate: '2027-04-18' },
+    ];
+    expect(amendedPlanItems(active, 172500n, '2026-11-25')!.map((i) => [i.kind, i.sequence, i.amountMinor, i.dueDate])).toEqual([
+      ['deposit', 1, 100000n, '2026-11-20'], ['adjustment', 2, 40000n, '2026-11-25'], ['balance', 3, 32500n, '2027-04-18'],
+    ]);
+    expect(amendedPlanItems(active, 172500n, '2026-11-26')!.map((i) => [i.kind, i.amountMinor, i.dueDate])).toEqual([
+      ['deposit', 100000n, '2026-11-20'], ['adjustment', 30000n, '2026-11-25'], ['adjustment', 10000n, '2026-11-26'], ['balance', 32500n, '2027-04-18'],
+    ]);
+  });
 });
 
 describe('places across changes', () => {
