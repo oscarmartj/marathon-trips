@@ -25,14 +25,14 @@ describe('loadConfig platform settings', () => {
     expect(() => loadConfig({ ...base, APP_ENV: 'staging' })).toThrow(/EMAIL_HASH_KEY/);
   });
   it('accepts real keys in production and keeps mail on a dev mailbox by default', () => {
-    const key = 'k'.repeat(40);
-    const c = loadConfig({ ...base, APP_ENV: 'production', EMAIL_HASH_KEY: key, FILE_SIGNING_KEY: key, ...authKeys });
+    // Task 8.5: one value may not serve two keys (test/security/config.test.ts), so each key has its own.
+    const c = loadConfig({ ...base, APP_ENV: 'production', EMAIL_HASH_KEY: 'k'.repeat(40), FILE_SIGNING_KEY: 'f'.repeat(40), ...authKeys });
     expect(c).toMatchObject({ MAIL_MODE: 'catch', SMTP_PORT: 1025, JOBS_WORKERS: 'on' });
   });
 });
 
 const authKeys = { APP_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'), AUTH_HMAC_KEY: 'h'.repeat(40), WEB_ORIGIN: 'https://www.example.test' };
-const prodKeys = { EMAIL_HASH_KEY: 'k'.repeat(40), FILE_SIGNING_KEY: 'k'.repeat(40) };
+const prodKeys = { EMAIL_HASH_KEY: 'k'.repeat(40), FILE_SIGNING_KEY: 'f'.repeat(40) };
 
 describe('loadConfig auth settings (task 0.3)', () => {
   it('requires the encryption and HMAC keys outside development, test and ci', () => {
