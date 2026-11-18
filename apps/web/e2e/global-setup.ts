@@ -43,4 +43,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_26 = create();
   // Accessibility and performance of the public site (public-site-quality.spec.ts): an owner.
   process.env.E2E_STAFF_28 = create();
+  // Security headers and the page policy with the panel signed in (security-headers.spec.ts, task 8.5): an owner.
+  process.env.E2E_STAFF_29 = create();
 }
