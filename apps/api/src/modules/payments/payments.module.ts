@@ -11,6 +11,8 @@ import { BookingTransitionHooks, BookingsModule } from '../bookings';
 import { TemplatesModule } from '../templates';
 import { MailTemplateRegistry } from '../../platform/mail/templates';
 import { PAYMENT_LINK_TEMPLATE, PaymentLinksService } from './core/payment-links.service';
+import { PaymentPendingService } from './core/pending.service';
+import { PAYMENT_REMINDER_TEMPLATE, PaymentRemindersService } from './core/reminders.service';
 import { PaymentAdminService } from './admin.service';
 import { adapterOptions, createAdapters } from './adapters';
 import { PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
@@ -40,10 +42,10 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
-    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService,
+    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService,
     SimulatorCheckoutService,
   ],
-  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService],
+  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(
@@ -57,6 +59,7 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(MailTemplateRegistry) private readonly mailTemplates: MailTemplateRegistry,
     @Inject(PaymentLinksService) private readonly links: PaymentLinksService,
+    @Inject(PaymentRemindersService) private readonly reminders: PaymentRemindersService,
   ) {}
 
   /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
@@ -67,6 +70,7 @@ export class PaymentsModule implements OnModuleInit {
     this.schedule.register(this.hooks);
     this.coverage.register(this.hooks);
     this.mailTemplates.register({ ...PAYMENT_LINK_TEMPLATE, render: (ctx) => this.links.renderEmail(ctx) });
+    this.mailTemplates.register({ ...PAYMENT_REMINDER_TEMPLATE, render: (ctx) => this.reminders.renderEmail(ctx) });
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });
   }
 }
