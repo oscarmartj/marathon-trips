@@ -16,11 +16,14 @@ describe('production configuration refusals (S-05)', () => {
   it('a complete production configuration loads, and no error ever shows a value', () => {
     const env = good();
     expect(loadConfig(env).WEB_ORIGIN).toBe('https://trips.example.com');
+    let message = '';
     try {
       loadConfig({ ...env, AUTH_HMAC_KEY: env.EMAIL_HASH_KEY });
     } catch (e) {
-      expect(String(e)).not.toContain(env.EMAIL_HASH_KEY);
+      message = String(e);
     }
+    expect(message).toMatch(/Invalid configuration: check .*AUTH_HMAC_KEY/);
+    expect(message).not.toContain(env.EMAIL_HASH_KEY);
   });
 
   it.each(['production', 'staging'])('refuses the published dev-only keys in %s', (APP_ENV) => {
@@ -36,8 +39,13 @@ describe('production configuration refusals (S-05)', () => {
     refused({ ...env, FILE_SIGNING_KEY: env.AUTH_HMAC_KEY }, 'FILE_SIGNING_KEY');
   });
 
-  it('refuses TRUST_PROXY=true, which would let any client choose its address', () => {
-    refused({ ...good(), TRUST_PROXY: 'true' }, 'TRUST_PROXY');
+  it('refuses a TRUST_PROXY that trusts (almost) every address, which would let any client choose its address', () => {
+    for (const v of ['true', '0.0.0.0/0', '::/0', '0.0.0.0/0,::/0', '10.0.0.0/8,0.0.0.0/0', '1.0.0.0/4', '2000::/3', '99', '4', '0.0.0.0', '::', 'uniquelocal,', 'not-an-address', '10.0.0.0/x']) {
+      expect(() => loadConfig({ ...good(), TRUST_PROXY: v }), v).toThrow(/check .*TRUST_PROXY/);
+    }
+    for (const v of ['1', '3', 'uniquelocal', 'loopback', 'loopback,uniquelocal', '172.18.0.0/16', '10.0.0.0/8', '192.168.1.10', 'fd00::/16', 'false']) {
+      expect(() => loadConfig({ ...good(), TRUST_PROXY: v }), v).not.toThrow();
+    }
     expect(loadConfig({ ...good(), TRUST_PROXY: '1' }).TRUST_PROXY).toBe(1);
   });
 

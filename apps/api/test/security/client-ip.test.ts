@@ -75,6 +75,17 @@ describe('system monitor reports lost client addresses in production (S-04)', ()
     clientIpWatch.reset();
   });
 
+  it('a request the web proxy forwards without a client address (a health check inside the container) is not counted (review round 1)', async () => {
+    clientIpWatch.reset();
+    // The proxy marks only requests it forwards a client address for (apps/web/src/lib/api-proxy.ts): no marker here.
+    for (let i = 0; i < 5; i++) await t.http().get('/health').set('user-agent', 'node');
+    expect([clientIpWatch.proxied, clientIpWatch.privateAddress]).toEqual([0, 0]);
+    const monitor = t.app.get(SystemMonitorService);
+    const prod = new SystemMonitorService(t.prisma, { ...testConfig(), APP_ENV: 'production' }, Reflect.get(monitor, 'flags'));
+    expect((await prod.status()).reasons).not.toContain('client_ip_private');
+    clientIpWatch.reset();
+  });
+
   it('the middleware reads the marker the web proxy sets', async () => {
     clientIpWatch.reset();
     await t.http().get('/health');

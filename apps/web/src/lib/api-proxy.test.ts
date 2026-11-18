@@ -8,9 +8,10 @@ describe('web proxy to the API', () => {
       authorization: 'Bearer stolen', host: 'evil.example', 'x-forwarded-host': 'evil.example', 'x-request-id': 'req-12345678',
     });
     const out = forwardHeaders(incoming, 0);
-    // Task 8.5: plus the proxy's own marker, which a browser cannot set (its value is always the proxy's).
-    expect([...out.keys()].sort()).toEqual(['content-type', 'cookie', 'origin', 'x-mt-csrf', 'x-mt-proxied', 'x-request-id']);
-    expect(forwardHeaders(new Headers({ 'x-mt-proxied': 'forged' }), 0).get('x-mt-proxied')).toBe('1');
+    expect([...out.keys()].sort()).toEqual(['content-type', 'cookie', 'origin', 'x-mt-csrf', 'x-request-id']);
+    // Task 8.5: a browser cannot set the proxy's marker.
+    expect(forwardHeaders(new Headers({ 'x-mt-proxied': '1' }), 0).get('x-mt-proxied')).toBeNull();
+    expect(forwardHeaders(new Headers({ 'x-mt-proxied': '1' }), 1).get('x-mt-proxied')).toBeNull();
     const res = new Response('{}', { headers: { 'content-type': 'application/json', 'set-cookie': 'a=1; HttpOnly', server: 'x', 'x-powered-by': 'y', 'retry-after': '3' } });
     const back = responseHeaders(res);
     expect(back.get('server')).toBeNull();
@@ -78,5 +79,17 @@ describe('web proxy to the API', () => {
     expect(new TextDecoder().decode(await readCappedBody(ok))).toBe('{"a":1}');
     const exact = new Request('http://x/api/a', { method: 'POST', body: new Uint8Array(MAX_BODY_BYTES) });
     expect((await readCappedBody(exact))!.byteLength).toBe(MAX_BODY_BYTES);
+  });
+
+  it('marks a request only when it forwards a client address: the health check from inside the container is not marked (S-04)', () => {
+    const viaCaddy = forwardHeaders(new Headers({ 'x-forwarded-for': '203.0.113.7' }), 1);
+    expect(viaCaddy.get('x-mt-proxied')).toBe('1');
+    expect(viaCaddy.get('x-forwarded-for')).toBe('203.0.113.7');
+    // deploy/docker-compose.prod.yml: the web healthcheck calls localhost:3000/api/health with no X-Forwarded-For.
+    const healthcheck = forwardHeaders(new Headers({ 'user-agent': 'node' }), 1);
+    expect(healthcheck.get('x-mt-proxied')).toBeNull();
+    expect(healthcheck.get('x-forwarded-for')).toBeNull();
+    // Without trusted proxies (development) nothing is forwarded or marked.
+    expect(forwardHeaders(new Headers({ 'x-forwarded-for': '203.0.113.7' }), 0).get('x-mt-proxied')).toBeNull();
   });
 });

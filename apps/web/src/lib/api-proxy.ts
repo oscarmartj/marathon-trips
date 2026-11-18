@@ -12,7 +12,7 @@ export const FORWARD_RESPONSE_HEADERS = [
   'content-security-policy', 'x-content-type-options', 'x-frame-options', 'referrer-policy',
 ] as const;
 
-/** Set on every request this proxy forwards, so the API can tell a browser's request from the web app's own calls (S-04). */
+/** Set when the proxy forwards a client address, so the API can check that address (S-04); never from the browser. */
 export const PROXIED_HEADER = 'x-mt-proxied';
 
 /** Largest request body the proxy forwards (the API's JSON limit is the same). */
@@ -46,11 +46,15 @@ export function forwardHeaders(incoming: Headers, trustedHops: number): Headers 
   // (Basic, a third-party token, a browser extension's header) is dropped here.
   const authorization = incoming.get('authorization');
   if (authorization !== null && API_KEY_AUTHORIZATION.test(authorization)) out.set('authorization', authorization);
-  out.set(PROXIED_HEADER, '1');
   if (trustedHops > 0) {
     const chain = (incoming.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const client = chain[chain.length - trustedHops];
-    if (client) out.set('x-forwarded-for', client);
+    if (client) {
+      out.set('x-forwarded-for', client);
+      // Only a request that came through the proxies in front (Caddy) has a client address to check. The container's own
+      // health check calls localhost:3000/api/health with none, and must not look like a lost address (review round 1).
+      out.set(PROXIED_HEADER, '1');
+    }
   }
   return out;
 }

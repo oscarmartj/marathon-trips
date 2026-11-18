@@ -65,3 +65,20 @@ export function clientIpMiddleware(warn: boolean) {
     next();
   };
 }
+
+/**
+ * Task 8.5 (S-06, review round 1): the key a per-address limit counts under. An IPv6 client usually holds a whole /64
+ * (2^64 addresses), so counting each address alone would let one client spread its attempts over as many keys as it
+ * likes; IPv6 counts per /64, IPv4 (and IPv4-mapped IPv6) per address.
+ */
+export function rateLimitKey(ip: string | undefined): string {
+  if (!ip) return 'unknown';
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (mapped) return mapped[1]!;
+  if (isIPv4(ip) || !ip.includes(':')) return ip;
+  const [head = '', tail = ''] = ip.toLowerCase().split('%')[0]!.split('::');
+  const left = head ? head.split(':') : [];
+  const right = ip.includes('::') && tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right] : left;
+  return `${groups.slice(0, 4).map((g) => (g || '0').replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}

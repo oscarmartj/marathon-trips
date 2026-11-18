@@ -5,6 +5,7 @@ import { WindowLimiter } from '../auth/attempt-limiter';
 import type { AppConfig } from '../config/config';
 import { APP_CONFIG } from '../database/prisma.service';
 import { tooManyRequests } from './api-error';
+import { rateLimitKey } from './client-ip-watch';
 
 const RATE_LIMITED = 'auth-rate-limit';
 /** Sign-in, code and magic-link routes: AUTH_RATE_LIMIT_PER_MINUTE requests per minute and IP, per route (plan 4.1). */
@@ -28,7 +29,8 @@ export class AuthRateLimitGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     if (!this.reflector.getAllAndOverride<boolean | undefined>(RATE_LIMITED, [context.getHandler(), context.getClass()])) return true;
     const req = context.switchToHttp().getRequest<Request>();
-    const key = `${context.getClass().name}.${context.getHandler().name}:${req.ip ?? 'unknown'}`;
+    // Task 8.5: per IPv4 address or per IPv6 /64 (rateLimitKey).
+    const key = `${context.getClass().name}.${context.getHandler().name}:${rateLimitKey(req.ip)}`;
     if (!this.limiter.allow(key)) throw tooManyRequests(60);
     return true;
   }

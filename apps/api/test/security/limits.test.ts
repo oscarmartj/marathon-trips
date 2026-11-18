@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Lru, UnknownAccountDelay } from '../../src/platform/auth/attempt-limiter';
+import { rateLimitKey } from '../../src/platform/http/client-ip-watch';
 import { CustomerAuthService, MAGIC_LINKS_PER_ADDRESS } from '../../src/platform/auth/customer-auth.service';
 import { StaffAuthService } from '../../src/platform/auth/staff-auth.service';
 import { STATE_HEADERS, TestApp, createStaff, makeApp, uniqueEmail } from '../support/auth';
@@ -33,11 +34,11 @@ describe('bounded tables never forget a live count (S-06)', () => {
     }
     d.claim('other', 0);
     expect(() => d.claim('flood-1', 0)).toThrow();
-    expect(d.saturated('flood-2', 1000)).toBe(true);
+    // Saturated for every address, those with an entry too (review round 1): no answer depends on having one.
+    expect(d.saturated(1000)).toBe(true);
     // The guessed address keeps its delay: a flood cannot evict it.
     expect(() => d.claim('target', 500)).toThrow();
-    expect(d.saturated('target', 1000)).toBe(false);
-    expect(d.saturated('flood-2', 61_000)).toBe(false);
+    expect(d.saturated(61_000)).toBe(false);
   });
 
   it('while saturated, a known staff address and an unknown one get the same 429 (no enumeration, T2)', async () => {
@@ -54,6 +55,35 @@ describe('bounded tables never forget a live count (S-06)', () => {
     Reflect.set(svc, 'unknown', new UnknownAccountDelay());
     // Once the table has room again, the known account is checked as before.
     expect((await attempt(staff.email)).status).toBe(401);
+  });
+
+  it('an unknown address tried before the flood and a staff account answer alike while saturated (review round 1)', async () => {
+    const staff = await createStaff(t);
+    const svc = t.app.get(StaffAuthService);
+    Reflect.set(svc, 'unknown', new UnknownAccountDelay(2));
+    const attempt = (email: string) => t.http().post('/auth/staff/sign-in').set(STATE_HEADERS).send({ email, password: 'definitely-wrong-password' });
+    const probe = uniqueEmail('probe');
+    // The attacker tries V once (no account: V gets an entry), fills the table, then tries V and a staff address again.
+    expect((await attempt(probe)).status).toBe(401);
+    expect((await attempt(uniqueEmail('filler'))).status).toBe(401);
+    expect((await attempt(uniqueEmail('overflow'))).status).toBe(429);
+    const unknownWithEntry = await attempt(probe);
+    const known = await attempt(staff.email);
+    expect([unknownWithEntry.status, known.status]).toEqual([429, 429]);
+    expect(unknownWithEntry.body).toEqual(known.body);
+    expect(unknownWithEntry.headers['retry-after']).toBe(known.headers['retry-after']);
+    Reflect.set(svc, 'unknown', new UnknownAccountDelay());
+  });
+
+  it('sign-in rate limits count an IPv6 client per /64, so one client cannot spread its attempts over its own addresses', () => {
+    expect(rateLimitKey('2001:db8:1:2:aaaa::1')).toBe(rateLimitKey('2001:db8:1:2:ffff:ffff:ffff:fffe'));
+    expect(rateLimitKey('2001:db8:1:2::1')).toBe('2001:db8:1:2::/64');
+    expect(rateLimitKey('2001:0db8:0001:0002:0:0:0:1')).toBe('2001:db8:1:2::/64');
+    expect(rateLimitKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
+    expect(rateLimitKey('2001:db8:1:3::1')).not.toBe(rateLimitKey('2001:db8:1:2::1'));
+    expect(rateLimitKey('203.0.113.7')).toBe('203.0.113.7');
+    expect(rateLimitKey('::ffff:203.0.113.7')).toBe('203.0.113.7');
+    expect(rateLimitKey(undefined)).toBe('unknown');
   });
 });
 

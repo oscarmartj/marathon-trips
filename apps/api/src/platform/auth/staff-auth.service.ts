@@ -59,8 +59,8 @@ export class StaffAuthService {
 
   /** Step 1. Always one argon2 verification; unknown and incomplete accounts answer exactly like a wrong password. */
   async signIn(email: string, password: string, requestId?: string): Promise<{ mfaToken: string; maxAgeSeconds: number }> {
-    // S-06: while the unknown-address table is full, every address without a count there is refused, known ones too.
-    if (this.unknown.saturated(emailHash(this.config.AUTH_HMAC_KEY, email))) throw tooManyRequests(SATURATION_SECONDS);
+    // S-06: while the unknown-address table is full, every address is refused, with or without an account.
+    if (this.unknown.saturated()) throw tooManyRequests(SATURATION_SECONDS);
     const user = await this.prisma.user.findUnique({
       where: { kind_email: { kind: 'staff', email } },
       select: { id: true, status: true, passwordHash: true, totpEnabledAt: true },

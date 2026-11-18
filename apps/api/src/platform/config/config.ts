@@ -99,6 +99,28 @@ const DEV_KEYS: Record<string, string> = {
   EMAIL_HASH_KEY: DEV_EMAIL_HASH_KEY, FILE_SIGNING_KEY: DEV_FILE_SIGNING_KEY, AUTH_HMAC_KEY: DEV_AUTH_HMAC_KEY, APP_ENCRYPTION_KEY: DEV_ENCRYPTION_KEY,
 };
 
+const PRESETS = new Set(['false', '', 'loopback', 'linklocal', 'uniquelocal']);
+
+/**
+ * Task 8.5 (S-05, review round 1): a TRUST_PROXY that names the proxies in front, never one that trusts (almost) every
+ * address: not `true`, not more than three hops, no unspecified address and no range wider than /8 (IPv4) or /16 (IPv6).
+ */
+export function narrowTrustProxy(value: string): boolean {
+  if (PRESETS.has(value)) return true;
+  if (/^\d+$/.test(value)) return Number(value) >= 1 && Number(value) <= 3;
+  return value.split(',').map((e) => e.trim()).every((entry) => {
+    if (!entry) return false;
+    if (PRESETS.has(entry) && entry !== 'false' && entry !== '') return true;
+    const [addr = '', bits] = entry.split('/');
+    if (addr === '0.0.0.0' || addr === '::' || /^[0:]+$/.test(addr)) return false;
+    const v6 = addr.includes(':');
+    if (!v6 && !/^\d{1,3}(\.\d{1,3}){3}$/.test(addr)) return false;
+    if (bits === undefined) return true;
+    if (!/^\d+$/.test(bits)) return false;
+    return Number(bits) >= (v6 ? 16 : 8) && Number(bits) <= (v6 ? 128 : 32);
+  });
+}
+
 /**
  * Task 8.5 (S-05): outside development, test and ci, the published dev-only keys, one value for two keys, a proxy setting
  * that trusts every address (any client could then choose its own IP) and a web origin without TLS are all refused.
@@ -114,7 +136,7 @@ function productionRefusals(data: ParsedConfig): string[] {
     if (other) bad.push(other, name);
     seen.set(value, name);
   }
-  if (data.TRUST_PROXY === 'true') bad.push('TRUST_PROXY');
+  if (!narrowTrustProxy(data.TRUST_PROXY)) bad.push('TRUST_PROXY');
   if (data.WEB_ORIGIN && new URL(data.WEB_ORIGIN).protocol !== 'https:') bad.push('WEB_ORIGIN');
   return bad;
 }

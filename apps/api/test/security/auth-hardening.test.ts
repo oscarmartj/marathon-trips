@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { brand } from '@mt/shared';
 import { guessablePassword } from '../../src/platform/auth/passwords';
@@ -18,10 +20,20 @@ describe('guessable passwords (S-01)', () => {
   it.each([
     'qwerty123456', 'QWERTY123456', '1q2w3e4r5t6y', 'iloveyou1234', 'aaaaaaaaaaaa', 'abcdefghijklmnop', '123456789012', '987654321098',
     'MarathonTrips!', 'marathon-trips-2026', 'jane.citizen99', 'JaneCitizen!!',
+    // The zxcvbn list: an entry that meets the length rule, and a common word padded with digits or symbols.
+    '1qaz2wsx3edc4rfv', 'password1234', 'Password1234!', 'Sunshine2026!!', 'football!!!!',
   ])('refuses %s', (p) => expect(guessablePassword(p, ctx)).toBe(true));
 
   it.each(['correct horse battery staple', 'a-long-enough-password', 'Kangaroo paddock at dawn', 'zq8-tram-velvet-ochre'])('accepts %s', (p) => {
     expect(guessablePassword(p, ctx)).toBe(false);
+  });
+
+  it('the password data ships with the full licence of its source (MIT, zxcvbn)', () => {
+    const licence = readFileSync(join(__dirname, '../../src/platform/auth/common-passwords.LICENSE.txt'), 'utf8');
+    expect(licence).toContain('github.com/dropbox/zxcvbn');
+    expect(licence).toContain('Copyright (c) 2012-2016 Dan Wheeler and Dropbox, Inc.');
+    expect(licence).toContain('Permission is hereby granted, free of charge');
+    expect(licence).toContain('THE SOFTWARE IS PROVIDED "AS IS"');
   });
 
   async function newEnrolment() {

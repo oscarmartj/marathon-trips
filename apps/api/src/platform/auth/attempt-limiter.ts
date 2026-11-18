@@ -108,8 +108,8 @@ export const SATURATION_SECONDS = 60;
  * The same schedule for addresses with no account, kept in memory so the two cases look alike (T2). The table is bounded
  * and never evicts a live count (task 8.5, S-06): evicting would let a flood of made-up addresses wipe the delay of the
  * addresses being guessed, and unknown addresses would then answer differently from known ones (counted in the
- * database). When it is full, `saturated()` is true for a minute and the caller refuses every address it has no entry
- * for, known or not, so the answer still does not tell the two apart.
+ * database). When it is full, `saturated()` is true for a minute and the caller refuses every address, known or not,
+ * so the answer still does not tell the two apart.
  */
 export class UnknownAccountDelay {
   private readonly entries: Lru<{ failures: number; nextAllowedAt: number }>;
@@ -119,9 +119,13 @@ export class UnknownAccountDelay {
     this.entries = new Lru(max, COUNT_WINDOW_SECONDS * 1000);
   }
 
-  /** Whether sign-in is refusing addresses it has no count for (the table was full in the last minute). */
-  saturated(key: string, now: number = Date.now()): boolean {
-    return this.saturatedUntil > now && this.entries.get(key, now) === undefined;
+  /**
+   * Whether sign-in is refusing every address (the table was full in the last minute). Every address, with or without an
+   * entry: letting through the ones that have one would tell an address tried before the flood (no account: an entry)
+   * from a staff account (never an entry), which is the enumeration this table exists to prevent (review round 1).
+   */
+  saturated(now: number = Date.now()): boolean {
+    return this.saturatedUntil > now;
   }
 
   claim(key: string, now: number = Date.now()): void {
