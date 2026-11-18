@@ -5,7 +5,7 @@ import { PERMISSIONS } from '../../src/platform/access/permissions';
 import { AuthMaintenanceService } from '../../src/platform/auth/auth-maintenance.service';
 import { FLAGS } from '../../src/platform/flags/flag-registry';
 import { SettingsService } from '../../src/platform/flags/flags.service';
-import { STATE_HEADERS, StaffFixture, TestApp, createStaff, freshCode, makeApp, signInStaff, uniqueEmail } from '../support/auth';
+import { STATE_HEADERS, StaffFixture, TestApp, cookieFrom, createStaff, freshCode, makeApp, signInStaff, uniqueEmail } from '../support/auth';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -20,10 +20,16 @@ afterAll(async () => {
 });
 
 const as = async (s: StaffFixture) => {
-  const cookie = await signInStaff(t, s);
+  let cookie = await signInStaff(t, s);
+  // Task 8.5: a step-up renews the session token, so the client keeps the cookie it is given (as a browser does).
+  const keep = <R extends { headers: Record<string, unknown> }>(r: R): R => {
+    const renewed = cookieFrom(r, 'mt_staff_session');
+    if (renewed) cookie = `mt_staff_session=${renewed}`;
+    return r;
+  };
   return {
     get: (path: string) => t.http().get(path).set('Cookie', cookie),
-    post: (path: string, body: object = {}) => t.http().post(path).set(STATE_HEADERS).set('Cookie', cookie).send(body),
+    post: async (path: string, body: object = {}) => keep(await t.http().post(path).set(STATE_HEADERS).set('Cookie', cookie).send(body)),
     patch: (path: string, body: object) => t.http().patch(path).set(STATE_HEADERS).set('Cookie', cookie).send(body),
     put: (path: string, body: object) => t.http().put(path).set(STATE_HEADERS).set('Cookie', cookie).send(body),
   };

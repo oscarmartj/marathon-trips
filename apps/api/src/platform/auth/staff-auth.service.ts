@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { brand } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { AuditActor, AuditService, NIL_UUID } from '../audit/audit.service';
 import type { AppConfig } from '../config/config';
@@ -8,7 +9,7 @@ import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 import { OutboxService } from '../events/outbox.service';
 import { ApiError, unauthorised, unprocessable } from '../http/api-error';
 import { UnknownAccountDelay, claimAccountAttempt, refundAccountAttempt } from './attempt-limiter';
-import { hashPassword, verifyPassword } from './passwords';
+import { guessablePassword, hashPassword, verifyPassword } from './passwords';
 import type { RequestMeta } from './request-meta';
 import { SessionService } from './session.service';
 import { looksLikeToken, newRecoveryCode, newToken, recoveryCodeHash, tokenHash } from './tokens';
@@ -115,16 +116,18 @@ export class StaffAuthService {
   }
 
   /** Step-up (G3): account delay first, same anti-reuse, no recovery codes, five failures revoke the session. */
-  async stepUp(userId: string, sessionId: string, code: string, requestId?: string): Promise<{ revoked: boolean; ok: boolean }> {
+  async stepUp(userId: string, sessionId: string, code: string, requestId?: string): Promise<{ revoked: boolean; ok: boolean; session?: { token: string; maxAgeSeconds: number } }> {
     const now = new Date();
     await claimAccountAttempt(this.prisma, userId, now);
     if (await this.acceptTotp(userId, code, now)) {
       await refundAccountAttempt(this.prisma, userId);
-      await this.prisma.$transaction(async (tx) => {
+      const session = await this.prisma.$transaction(async (tx) => {
         await tx.session.update({ where: { id: sessionId }, data: { mfaVerifiedAt: now, stepUpFailures: 0 } });
         await this.audit.record(tx, { actor: { type: 'staff', id: userId, sessionId, requestId: requestId ?? null }, action: 'auth.staff.steppedUp', entityType: 'Session', entityId: sessionId });
+        // Task 8.5 (7.2.4): re-authenticated, so the cookie the check was made with stops working.
+        return this.sessions.rotate(tx, sessionId, now);
       });
-      return { revoked: false, ok: true };
+      return { revoked: false, ok: true, session };
     }
     return this.prisma.$transaction(async (tx) => {
       const [row] = await tx.$queryRaw<Array<{ failures: number }>>`
@@ -228,6 +231,10 @@ export class StaffAuthService {
   async completeEnrolment(token: string, password: string, code: string, requestId?: string): Promise<{ recoveryCodes: string[] }> {
     const now = new Date();
     const { row, user } = await this.liveEnrolment(token, now);
+    // Task 8.5 (6.2.4): refused before the code is counted, so choosing a better password costs no attempt.
+    if (guessablePassword(password, { email: user.email, brandName: brand.name })) {
+      throw unprocessable('password_too_common', 'This password is too easy to guess. Choose a longer or less common one.');
+    }
     const counted = await this.prisma.$queryRaw<Array<{ id: string }>>`
       UPDATE login_tokens SET attempts = attempts + 1
       WHERE id = ${row.id}::uuid AND attempts < ${MAX_CODE_ATTEMPTS} AND "consumedAt" IS NULL AND "expiresAt" > ${now}::timestamptz

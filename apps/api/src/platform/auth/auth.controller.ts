@@ -67,7 +67,10 @@ export class AuthController {
   async stepUp(@Body(new ZodPipe(stepUpSchema)) body: { code: string }, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
     const auth = sessionOf(req);
     const r = await this.staff.stepUp(auth.userId, auth.sessionId, body.code, req.requestId);
-    if (r.ok) return { stepUpValidUntil: new Date(Date.now() + STEP_UP_WINDOW_MS).toISOString() };
+    if (r.ok) {
+      setCookie(res, 'staff', this.secure, r.session!.token, r.session!.maxAgeSeconds);
+      return { stepUpValidUntil: new Date(Date.now() + STEP_UP_WINDOW_MS).toISOString() };
+    }
     if (r.revoked) clearCookie(res, 'staff', this.secure);
     throw unauthorised(r.revoked ? 'session_revoked' : 'invalid_code', r.revoked ? 'Too many wrong codes. Sign in again.' : 'That code is not right');
   }

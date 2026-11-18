@@ -3085,6 +3085,7 @@
       "codeLabel": "Code from the app",
       "finish": "Finish set-up",
       "invalidCode": "That code is not right. Check the time on your phone and try again.",
+      "passwordTooCommon": "This password is too easy to guess. Choose a longer one that isn't a common password, the business name or your email address. A few unrelated words work well.",
       "recoveryTitle": "Your recovery codes",
       "recoveryHelp": "Each code works once if you lose your phone. Keep them somewhere safe: they will not be shown again.",
       "goToSignIn": "Go to staff sign-in"
