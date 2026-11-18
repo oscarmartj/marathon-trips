@@ -51,7 +51,7 @@ export async function loadRunners(tx: Tx, format: FormatDefinition, edition: { i
     select: {
       bookingId: true,
       slot: true,
-      booking: { select: { reference: true, customer: { select: { anonymisedAt: true } }, ...(needs.has('country') ? { residenceCountry: true } : {}) } },
+      booking: { select: { reference: true, customer: { select: { anonymisedAt: true, deletedAt: true } }, ...(needs.has('country') ? { residenceCountry: true } : {}) } },
       ...(needs.has('distance') ? { raceDistance: { select: { name: true, distanceMetres: true } } } : {}),
     },
     orderBy: [{ booking: { reference: 'asc' } }, { slot: 'asc' }],
@@ -61,7 +61,8 @@ export async function loadRunners(tx: Tx, format: FormatDefinition, edition: { i
   if (places.length === 0) return { rows: [], erased: 0 };
 
   const travellers = await tx.traveller.findMany({
-    where: { bookingId: { in: [...new Set(places.map((p) => p.bookingId))] } },
+    // Only the places being exported: no supporter, removed place or own-entry runner is loaded.
+    where: { OR: places.map((p) => ({ bookingId: p.bookingId, slot: p.slot })) },
     select: {
       bookingId: true,
       slot: true,
@@ -79,7 +80,7 @@ export async function loadRunners(tx: Tx, format: FormatDefinition, edition: { i
   for (const p of places) {
     const t = byPlace.get(`${p.bookingId}:${p.slot}`) as Record<string, unknown> | undefined;
     const names = [t?.givenName, t?.familyName];
-    if (p.booking.customer.anonymisedAt || t?.anonymisedAt || names.includes(ERASED_MARKER)) {
+    if (p.booking.customer.anonymisedAt || p.booking.customer.deletedAt || t?.anonymisedAt || names.includes(ERASED_MARKER)) {
       erased++;
       continue;
     }

@@ -55,6 +55,7 @@ export function defineFormat(def: FormatDefinition): FormatDefinition {
   const seen = new Set<string>();
   for (const c of def.columns) {
     if (!c.header.trim() || c.header.length > 80 || CONTROL.test(c.header)) fail(`header "${c.header}" is empty, long or has control characters`);
+    if (/^\s*[=+\-@]/.test(c.header)) fail(`header "${c.header}" starts like a spreadsheet formula`);
     if (seen.has(c.header)) fail(`header "${c.header}" is used twice`);
     seen.add(c.header);
     if (!Object.prototype.hasOwnProperty.call(SOURCES, c.source)) fail(`column "${c.header}" reads an unknown source "${String(c.source)}"`);
@@ -66,7 +67,7 @@ export function defineFormat(def: FormatDefinition): FormatDefinition {
 }
 
 /** Two sample formats. A real organiser's format is one more definition here (with `appliesTo.raceSlugs` when it is theirs alone). */
-export const FORMATS: readonly FormatDefinition[] = [
+export const FORMATS: readonly FormatDefinition[] = Object.freeze([
   defineFormat({
     id: 'entry_list_basic', label: 'Entry list (basic)', organiser: 'Any organiser',
     appliesTo: {}, participation: ['runner_with_entry'],
@@ -93,7 +94,7 @@ export const FORMATS: readonly FormatDefinition[] = [
       { header: 'Emergency phone', source: 'emergencyContactPhone', required: false, maxLength: 20 },
     ],
   }),
-];
+]);
 
 /** The formats an edition's race can use: those with no race restriction and those that name its slug. */
 export const formatsForRace = (raceSlug: string, formats: readonly FormatDefinition[] = FORMATS): FormatDefinition[] =>

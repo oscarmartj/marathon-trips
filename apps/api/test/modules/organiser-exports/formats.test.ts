@@ -46,6 +46,7 @@ describe('whitelist_enforced_structurally', () => {
     expect(bad({ columns: [{ header: 'A', source: 'givenName', required: true }, { header: 'A', source: 'familyName', required: true }] })).toThrow(/twice/);
     expect(bad({ columns: [{ header: 'A', source: 'givenName', required: true, as: 'dmy' }] })).toThrow(/not a way to write/);
     expect(bad({ columns: [{ header: ' ', source: 'givenName', required: true }] })).toThrow(/empty/);
+    for (const h of ['=A', '+A', '-A', '@A', ' =A']) expect(bad({ columns: [{ header: h, source: 'givenName', required: true }] })).toThrow(/formula/);
     expect(bad({ columns: [{ header: 'A\nB', source: 'givenName', required: true }] })).toThrow(/control/);
     expect(bad({ participation: ['supporter' as never] })).toThrow(/not a runner type/);
     expect(bad({ participation: [] })).toThrow(/participation/);
@@ -59,6 +60,11 @@ describe('whitelist_enforced_structurally', () => {
     expect(() => (f.columns as unknown as unknown[]).push({ header: 'X', source: 'dateOfBirth', required: false })).toThrow();
     expect(() => { (f.columns[0] as { source: string }).source = 'dateOfBirth'; }).toThrow();
     expect(Object.isFrozen(f.file)).toBe(true);
+    expect(Object.isFrozen(FORMATS)).toBe(true);
+    expect(() => (FORMATS as unknown as unknown[]).push(base)).toThrow();
+    expect(Object.isFrozen(SOURCES)).toBe(true);
+    expect(Object.values(SOURCES).every((d) => Object.isFrozen(d))).toBe(true);
+    expect(() => { (SOURCES as Record<string, unknown>).passport = { type: 'text', needs: 'name', raw: () => 'x' }; }).toThrow();
     for (const shipped of FORMATS) expect(Object.isFrozen(shipped.columns)).toBe(true);
   });
 

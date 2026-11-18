@@ -118,6 +118,19 @@ describe('access', () => {
     expect((await s.post('/admin/organiser-exports/check', body(w))).status).toBe(200); // the check needs none
   });
 
+  it('an API key cannot reach the routes, and cannot be given either permission', async () => {
+    const { INTEGRATIONS_PERMISSIONS: IP } = await import('../../../src/platform/integrations/permissions');
+    const { CATALOGUE_PERMISSIONS: C } = await import('../../../src/modules/catalogue/manifest');
+    const manager = await staffClient(t, [C.raceRead, IP.apiKeyRead, IP.apiKeyManage]);
+    for (const scope of Object.values(X)) expect((await manager.post('/admin/integrations/api-keys', { name: 'Zapier', scopes: [scope] })).status).toBe(422);
+    const made = await manager.post('/admin/integrations/api-keys', { name: 'Zapier', scopes: [C.raceRead] });
+    expect(made.status).toBe(201);
+    const auth = { Authorization: `Bearer ${made.body.token as string}` };
+    expect((await t.http().get(`/admin/organiser-exports/formats?editionId=${w.edition.id}`).set(auth)).status).toBe(403);
+    expect((await t.http().post('/admin/organiser-exports/check').set(STATE_HEADERS).set(auth).send(body(w))).status).toBe(403);
+    expect((await t.http().post('/admin/organiser-exports').set(STATE_HEADERS).set(auth).send(body(w))).status).toBe(403);
+  });
+
   it('neither permission is API-key scopable, none is in a seeded non-owner role, and both are registered', async () => {
     const reg = t.app.get(PermissionRegistry);
     expect(organiserExportsManifest.permissions.map((p) => [p.key, p.apiKeyScopable, p.requiresStepUp])).toEqual([[X.read, false, false], [X.generate, false, true]]);
@@ -210,13 +223,25 @@ describe('minimal reads', () => {
     const { FORMATS } = await import('../../../src/modules/organiser-exports');
     const { loadRunners } = await import('../../../src/modules/organiser-exports/reader');
     const e = await pricedWorld(catalogueAdmin);
-    await seed(e);
-    const seen: Array<Record<string, unknown>> = [];
+    const keep = await seed(e);
+    const own = await seed(e, { type: 'runner_own_entry' });
+    const removed = await seed(e);
+    await t.prisma.$executeRawUnsafe(`UPDATE booking_travellers SET "removedInVersion" = 2 WHERE "bookingId" = '${removed.bookingId}'::uuid AND slot = 1`);
+    const travellerCalls: Array<{ select: Record<string, unknown>; where: { OR: Array<{ bookingId: string; slot: number }> } }> = [];
+    const placeCalls: Array<{ select: { booking: { select: Record<string, unknown> } } & Record<string, unknown> }> = [];
+    const wrap = (model: object, into: unknown[]) => new Proxy(model, { get: (m, fn) => (fn === 'findMany' ? (args: unknown) => { into.push(args); return (m as { findMany: (a: unknown) => unknown }).findMany(args); } : Reflect.get(m, fn)) });
     await t.prisma.$transaction(async (tx) => {
-      const spy = new Proxy(tx, { get: (target, prop) => (prop === 'traveller' ? new Proxy(target.traveller, { get: (m, fn) => (fn === 'findMany' ? (args: { select: Record<string, unknown> }) => { seen.push(args.select); return m.findMany(args as never); } : Reflect.get(m, fn)) }) : Reflect.get(target, prop)) });
+      const spy = new Proxy(tx, { get: (target, prop) => (prop === 'traveller' ? wrap(target.traveller, travellerCalls) : prop === 'bookingTraveller' ? wrap(target.bookingTraveller, placeCalls) : Reflect.get(target, prop)) });
       await loadRunners(spy as never, { ...FORMATS[0]!, columns: [FORMATS[0]!.columns[0]!] }, e.edition);
     });
-    expect(Object.keys(seen[0]!).sort()).toEqual(['anonymisedAt', 'bookingId', 'familyName', 'givenName', 'slot']);
+    expect(Object.keys(travellerCalls[0]!.select).sort()).toEqual(['anonymisedAt', 'bookingId', 'familyName', 'givenName', 'slot']);
+    // only the exported place is asked for: not the supporter, the removed place or the own-entry runner
+    expect(travellerCalls[0]!.where).toEqual({ OR: [{ bookingId: keep.bookingId, slot: 1 }] });
+    expect(JSON.stringify(travellerCalls[0]!.where)).not.toContain(own.bookingId);
+    expect(JSON.stringify(travellerCalls[0]!.where)).not.toContain(removed.bookingId);
+    // the booking's country and the distance are not selected unless the format asks for them
+    expect(Object.keys(placeCalls[0]!.select.booking.select).sort()).toEqual(['customer', 'reference']);
+    expect(placeCalls[0]!.select).not.toHaveProperty('raceDistance');
   });
 });
 
@@ -283,6 +308,23 @@ describe('erased and anonymised travellers', () => {
     expect((await file(owner, body(e))).text).not.toContain(closed.given);
   });
 
+  it('a soft-deleted customer with a paid booking is not exported, is counted, and the file says how many were left out', async () => {
+    const e = await pricedWorld(catalogueAdmin);
+    const keep = await seed(e);
+    const deleted = await seed(e, { status: 'deposit_paid' });
+    await t.prisma.customer.update({ where: { id: deleted.customerId }, data: { deletedAt: new Date() } });
+    expect((await check(body(e))).body).toMatchObject({ runners: 1, ready: 1, erased: 1 });
+    const res = await file(owner, body(e));
+    expect(res.status).toBe(200);
+    expect(res.text).toContain(keep.given);
+    expect(res.text).not.toContain(deleted.given);
+    expect(res.headers['x-row-count']).toBe('1');
+    expect(res.headers['x-excluded-count']).toBe('1');
+    const none = await pricedWorld(catalogueAdmin);
+    await seed(none);
+    expect((await file(owner, body(none))).headers['x-excluded-count']).toBe('0');
+  });
+
   it('a runner erased between the check and the file is not in the file (the file reads again)', async () => {
     const e = await pricedWorld(catalogueAdmin);
     await seed(e);
@@ -309,7 +351,10 @@ describe('the response and the audit entry', () => {
     expect(res.headers['content-disposition']).not.toContain(r.given);
     expect(res.text.charCodeAt(0)).not.toBe(0xfeff);
     expect(rows(res.text)[0]).toBe('Given name,Family name,Date of birth,Distance');
-    expect(rows(res.text)[1]).toBe(`${r.given},${r.family},1988-03-14,${rows(res.text)[1]!.split(',')[3]}`);
+    const dist = await t.prisma.raceDistance.findUniqueOrThrow({ where: { id: e.distanceId }, select: { name: true } });
+    const distanceName = (dist.name as Record<string, string>)['en-AU']!;
+    expect(distanceName.length).toBeGreaterThan(0);
+    expect(rows(res.text)[1]).toBe(`${r.given},${r.family},1988-03-14,${distanceName}`);
     const intl = await file(owner, body(e, { formatId: 'entry_list_international' }));
     expect(intl.text.charCodeAt(0)).toBe(0xfeff);
     expect((await owner.get(`/admin/organiser-exports/formats?editionId=${e.edition.id}`)).headers['cache-control']).toBe('no-store');

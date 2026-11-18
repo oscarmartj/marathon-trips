@@ -28,7 +28,7 @@ export interface CheckResult {
 }
 
 export type GenerateResult =
-  | { kind: 'file'; filename: string; body: string; rowCount: number }
+  | { kind: 'file'; filename: string; body: string; rowCount: number; excluded: number }
   | { kind: 'issues'; issues: ExportIssue[] };
 
 const today = (): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -115,7 +115,7 @@ export class OrganiserExportService {
         after: { formatId: format.id, raceDistanceId: body.raceDistanceId ?? null, rowCount: loaded.rows.length },
         fieldClasses: { formatId: 'nopii', raceDistanceId: 'nopii', rowCount: 'nopii' },
       });
-      return { kind: 'file', filename: safeFilename(ed.raceSlug, ed.year, format.id, today()), body: csv, rowCount: loaded.rows.length } as const;
+      return { kind: 'file', filename: safeFilename(ed.raceSlug, ed.year, format.id, today()), body: csv, rowCount: loaded.rows.length, excluded: loaded.erased } as const;
     });
   }
 }

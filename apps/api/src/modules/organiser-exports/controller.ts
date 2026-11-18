@@ -44,6 +44,7 @@ export class OrganiserExportController {
       'Content-Disposition': `attachment; filename="${r.filename}"`,
       'X-Content-Type-Options': 'nosniff',
       'X-Row-Count': String(r.rowCount),
+      'X-Excluded-Count': String(r.excluded),
     }).send(r.body);
   }
 }

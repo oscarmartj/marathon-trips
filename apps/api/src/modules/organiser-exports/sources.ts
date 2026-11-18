@@ -36,7 +36,7 @@ export interface SourceDef {
   raw(r: Runner): string | number | null;
 }
 
-export const SOURCES = {
+export const SOURCES = Object.freeze({
   givenName: { type: 'text', needs: 'name', raw: (r) => r.givenName },
   familyName: { type: 'text', needs: 'name', raw: (r) => r.familyName },
   dateOfBirth: { type: 'date', needs: 'dateOfBirth', raw: (r) => r.dateOfBirth },
@@ -45,7 +45,8 @@ export const SOURCES = {
   emergencyContactPhone: { type: 'text', needs: 'emergencyContact', raw: (r) => r.emergencyContactPhone },
   distance: { type: 'distance', needs: 'distance', raw: (r) => (r.distanceName !== null || r.distanceMetres !== null ? 'present' : null) },
   countryOfResidence: { type: 'country', needs: 'country', raw: (r) => r.countryOfResidence },
-} as const satisfies Record<string, SourceDef>;
+} as const satisfies Record<string, SourceDef>);
+for (const d of Object.values(SOURCES)) Object.freeze(d);
 
 export type SourceKey = keyof typeof SOURCES;
 export const SOURCE_KEYS = Object.keys(SOURCES) as SourceKey[];
