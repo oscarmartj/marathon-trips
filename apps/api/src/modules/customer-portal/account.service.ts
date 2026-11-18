@@ -2,7 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { AccountBookingItem, BookingStatus, CustomerDocumentKind } from '@mt/shared';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound } from '../../platform/http/api-error';
-import { customerView } from '../bookings';
+import { AMENDABLE_STATES, AMENDMENT_SETTINGS, customerView } from '../bookings';
+import { SettingsService } from '../../platform/flags/flags.service';
 import { PaymentAttemptsService } from '../payments';
 import { TemplatesService } from '../templates';
 import { documentsFor, formatMinor, longDate } from './documents';
@@ -25,6 +26,7 @@ export class CustomerAccountService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PaymentAttemptsService) private readonly payments: PaymentAttemptsService,
     @Inject(TemplatesService) private readonly templates: TemplatesService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   /** The bookings of the signed-in user's customer, newest request first. A closed account, or none, has nothing. */
@@ -56,7 +58,28 @@ export class CustomerAccountService {
     if (!booking) throw notFound();
     const plan = await this.payments.planView(reference);
     const payments = await this.payments.paymentRecords(reference);
-    return { booking, plan, payments, documents: documentsFor((booking as { status: BookingStatus }).status) };
+    return { booking, plan, payments, documents: documentsFor((booking as { status: BookingStatus }).status), changes: await this.changes(reference) };
+  }
+
+  /**
+   * The changes made to a booking (task 6.3), oldest first, as history: what changed, by whom (customer or staff) and the
+   * difference in price. What is owed or owed back now is the plan's (`plan.outstandingMinor`, `plan.overpaidMinor`), never
+   * these rows (plan review M6). Whether the customer can change it online is said too; the API decides at the change.
+   */
+  private async changes(reference: string) {
+    const b = await this.prisma.booking.findUnique({
+      where: { reference },
+      select: { status: true, amendments: { orderBy: { toVersion: 'asc' }, select: { toVersion: true, createdAt: true, initiatedBy: true, changes: true, previousTotalMinor: true, newTotalMinor: true, priceDifferenceMinor: true, currency: true } } },
+    });
+    if (!b) return { items: [], customerChangesEnabled: false };
+    const enabled = await this.settings.get(AMENDMENT_SETTINGS.customerEnabled.key, AMENDMENT_SETTINGS.customerEnabled.fallback);
+    return {
+      items: b.amendments.map((a) => ({
+        version: a.toVersion, at: a.createdAt.toISOString(), by: a.initiatedBy, changes: a.changes, currency: a.currency,
+        previousTotalMinor: a.previousTotalMinor.toString(), newTotalMinor: a.newTotalMinor.toString(), priceDifferenceMinor: a.priceDifferenceMinor.toString(),
+      })),
+      customerChangesEnabled: enabled && (AMENDABLE_STATES as readonly string[]).includes(b.status),
+    };
   }
 
   /** A document as a PDF, rebuilt from the booking's current snapshot and the live template; nothing is stored. */

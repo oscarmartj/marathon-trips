@@ -32,6 +32,19 @@ export const pricingErrorToHttp = (e: PricingError): ApiError | null => {
   return NOT_READY_CODES.has(e.code) ? conflict(e.code, e.message) : unprocessable(e.code, e.message);
 };
 
+/**
+ * The price basis of a change of a booking (task 6.3; plan docs/plans/6.3-booking-amendments.md, decisions 3 and 5): the
+ * price version and the instant the booking was first priced at, and the promo code it redeemed, if any.
+ */
+export interface AmendmentBasis {
+  priceVersionId: string;
+  at: Date;
+  redeemedPromoCodeId: string | null;
+}
+
+/** A configuration to price for a change: the quote fields without a promo code (a change never adds one). */
+export type AmendmentPriceRequest = Pick<QuoteRequest, 'packageId' | 'rooms' | 'extraNightsBefore' | 'extraNightsAfter' | 'extras'>;
+
 export interface PromoRef {
   id: string;
   version: number;
@@ -99,6 +112,39 @@ export class QuoteService {
         }
       }
       return { breakdown: price(request, engine, rates, rules, promo, opts.now), promoRef: null };
+    } catch (e) {
+      if (e instanceof PricingError) {
+        const http = pricingErrorToHttp(e);
+        if (http === null || http.code === 'adjustment_above_limit') this.logger.error(`pricing configuration error: ${e.code} ${String(e.details.origin ?? '')} ${String(e.details.id ?? '')}`);
+        throw http ?? e;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Prices a configuration of an existing booking on its price basis (task 6.3): the given version (not the one in force),
+   * `now` = the basis instant, the package's rules as stored and the booking's redeemed code with its availability taken as
+   * given (the booking already holds the use: enabled, validity and count are not checked again; its conditions and
+   * stacking are, by the engine). No sale status check: the trip is already sold. The engine is the only thing that
+   * computes the total; errors map as for the panel's quote.
+   */
+  async priceAmendmentIn(tx: Prisma.TransactionClient, req: AmendmentPriceRequest, basis: AmendmentBasis): Promise<PriceBreakdown> {
+    const view = await this.catalogue.load(tx, req.packageId);
+    if (!view) throw notFound('package_not_found', 'Package not found');
+    const version = await tx.priceVersion.findFirst({ where: { id: basis.priceVersionId, packageId: req.packageId } });
+    if (!version || version.status === 'draft') throw conflict('amendment_price_basis_unavailable', 'The prices this booking was sold at are no longer available');
+    const rates = await loadRates(tx, version.id, version.currency);
+    const request = { rooms: req.rooms, extraNightsBefore: req.extraNightsBefore, extraNightsAfter: req.extraNightsAfter, extras: req.extras };
+    try {
+      const rules: RuleInput[] = await rulesForPackage(tx, view.packageId, view.editionId);
+      let promo: PromoInput | null = null;
+      if (basis.redeemedPromoCodeId) {
+        const row = await tx.promoCode.findUnique({ where: { id: basis.redeemedPromoCodeId } });
+        if (!row) throw conflict('amendment_price_basis_unavailable', 'The prices this booking was sold at are no longer available');
+        promo = promoInputOf({ ...row, enabled: true, archivedAt: null, validFrom: null, validTo: null, maxRedemptions: null }, basis.at);
+      }
+      return price(request, engineView(view), rates, rules, promo, basis.at);
     } catch (e) {
       if (e instanceof PricingError) {
         const http = pricingErrorToHttp(e);

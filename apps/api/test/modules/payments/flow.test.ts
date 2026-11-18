@@ -55,11 +55,8 @@ async function smallDepositBooking(depositMinor: bigint, totalMinor: bigint): Pr
   // The customer row exists from c's first request.
   if (!(await t.prisma.customer.findFirst({ where: { userId: c.userId } }))) await fresh();
   const customer = await t.prisma.customer.findFirstOrThrow({ where: { userId: c.userId } });
-  const { bookingId } = await makeBookingFor(t, ww, customer.id);
-  await t.prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`UPDATE bookings SET "currentSnapshotVersion" = 2, "totalMinor" = $2, "depositMinor" = $3 WHERE id = $1::uuid`, bookingId, totalMinor, depositMinor);
-    await tx.bookingSnapshot.create({ data: { bookingId, version: 2, kind: 'amendment', configuration: {}, priceBreakdown: {}, totalMinor, depositMinor, currency: 'AUD', priceVersionId: ww.versionId, engineVersion: 'pricing-0.0.0' } });
-  });
+  // Task 6.3: the chosen amounts are the first snapshot's (a snapshot of kind amendment now needs its amendment record).
+  const { bookingId } = await makeBookingFor(t, ww, customer.id, undefined, { totalMinor, depositMinor });
   const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
   const ok = await admin.post(`/admin/bookings/${bookingId}/approve`, { version: b.version });
   if (ok.status !== 200) throw new Error(`approve failed ${ok.status} ${JSON.stringify(ok.body)}`);

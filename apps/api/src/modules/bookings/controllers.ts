@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { approveBookingSchema, bookingRequestSchema, closeBookingSchema, createCustomerSchema, listBookingsQuerySchema, listCustomersQuerySchema, updateCustomerSchema } from '@mt/shared';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
+import { approveBookingSchema, bookingRequestSchema, staffAmendmentPreviewSchema, staffAmendmentSchema, closeBookingSchema, createCustomerSchema, listBookingsQuerySchema, listCustomersQuerySchema, updateCustomerSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
@@ -12,6 +13,7 @@ import { PromoAttemptGuard } from '../pricing';
 import { WaitlistService, ownsWaitlistEntry } from '../waitlist';
 import { WaitlistOffersService } from './waitlist-offers.service';
 import { BookingAdminService } from './admin.service';
+import { BookingAmendmentService } from './amendment.service';
 import { CustomerAdminService } from './customer-admin.service';
 import { BOOKINGS_CRM_PERMISSIONS as C, BOOKINGS_PERMISSIONS as P } from './manifest';
 import { ownsBookingReference } from './ownership';
@@ -75,7 +77,10 @@ export class BookingRequestsController {
 /** The panel's booking routes (plan 2.4, section 7). Each names one permission; cancelling also needs a recent TOTP check. */
 @Controller('admin/bookings')
 export class BookingsAdminController {
-  constructor(@Inject(BookingAdminService) private readonly bookings: BookingAdminService) {}
+  constructor(
+    @Inject(BookingAdminService) private readonly bookings: BookingAdminService,
+    @Inject(BookingAmendmentService) private readonly amendments: BookingAmendmentService,
+  ) {}
 
   @Get() @RequirePermission(P.read)
   list(@Query(new ZodPipe(listBookingsQuerySchema)) q: In<typeof listBookingsQuerySchema>) { return this.bookings.list(q); }
@@ -105,6 +110,22 @@ export class BookingsAdminController {
   @Post(':id/confirm') @HttpCode(200) @RequirePermission(P.confirm)
   confirm(@Param('id', uuid()) id: string, @Body(new ZodPipe(approveBookingSchema)) b: In<typeof approveBookingSchema>, @Req() req: ApiRequest) {
     return this.bookings.transition(id, 'confirm', { actor: actorOf(req), version: b.version, reason: b.reason });
+  }
+
+  /** What a change would do (task 6.3): the engine's price on the booking's basis, the difference and what would be owed. */
+  @Post(':id/amendments/preview') @HttpCode(200) @RequirePermission(P.read)
+  previewAmendment(@Param('id', uuid()) id: string, @Body(new ZodPipe(staffAmendmentPreviewSchema)) b: In<typeof staffAmendmentPreviewSchema>) {
+    return this.amendments.preview({ id }, { initiatedBy: 'staff', ...b });
+  }
+
+  /** Applies a previewed change once per Idempotency-Key (task 6.3); the answer is the booking as the panel sees it. */
+  @Post(':id/amendments') @RequirePermission(P.amend)
+  async amend(@Param('id', uuid()) id: string, @Body(new ZodPipe(staffAmendmentSchema)) b: In<typeof staffAmendmentSchema>, @Headers('idempotency-key') key: string | undefined, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
+    if (!key || !IDEMPOTENCY_KEY.test(key)) throw unprocessable('idempotency_key_required', 'Send an Idempotency-Key header (16 to 64 letters, digits or hyphens)');
+    const r = await this.amendments.apply({ id }, { initiatedBy: 'staff', ...b }, key, actorOf(req));
+    // 201 for the change made now; 200 for a replay of one already made (plan section 5, step 2).
+    if (!r.created) res.status(200);
+    return { created: r.created, amendmentId: r.amendmentId, booking: await this.bookings.get(id) };
   }
 }
 

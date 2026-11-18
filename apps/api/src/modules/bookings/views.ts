@@ -24,7 +24,7 @@ export async function customerView(db: Db, where: { id: string } | { reference: 
   return jsonOf({
     reference: b.reference, status: b.status, isRequest: b.status === 'requested',
     requestedAt: b.requestedAt, requestExpiresAt: b.requestExpiresAt, departureDate: b.departureDate, returnDate: b.returnDate, balanceDueDate: b.balanceDueDate,
-    currency: b.currency, totalMinor: b.totalMinor, depositMinor: b.depositMinor,
+    currency: b.currency, totalMinor: b.totalMinor, depositMinor: b.depositMinor, currentSnapshotVersion: b.currentSnapshotVersion,
     package: { id: b.package.id, slug: b.package.slug, name: b.package.name, editionYear: b.package.edition.year, race: b.package.edition.race },
     price: { ...price, promo: { status: publicPromoStatus(price.promo.status) } },
   });
@@ -39,8 +39,10 @@ export async function staffView(db: Db, id: string) {
       customer: { select: { id: true, email: true, givenName: true, familyName: true, phone: true, countryOfResidence: true } },
       snapshots: { orderBy: { version: 'asc' } },
       travellers: { orderBy: { slot: 'asc' } },
-      rooms: true,
-      extras: true,
+      // As the booking stands (task 6.3: a change marks the rows it replaces removed); the snapshots keep the history.
+      rooms: { where: { removedInVersion: null } },
+      extras: { where: { removedInVersion: null } },
+      amendments: { orderBy: { toVersion: 'asc' }, omit: { requestKeyHash: true, requestBodyHash: true } },
       claims: { orderBy: { poolId: 'asc' } },
       promoRedemptions: { select: { promoCodeId: true, redeemedAt: true, releasedAt: true } },
     },

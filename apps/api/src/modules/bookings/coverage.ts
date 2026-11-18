@@ -17,8 +17,9 @@ export interface CoverageFacts {
 /**
  * The coverage rule C for money coming in (plan 0.1, 6.2; plan 3.2, section 1.2). Pure: from a status, the facts and
  * the package's auto-confirmation, the coverage events to apply, in order. `deposit_paid` never jumps to
- * `balance_paid`: without auto-confirmation it waits for Oscar even when the total is paid. The cells of money going
- * out (balance_paid → confirmed, cancelled ↔ refunded, a deposit no longer covered) are parked with refunds (4.5).
+ * `balance_paid`: without auto-confirmation it waits for Oscar even when the total is paid. `balance_paid` whose total is
+ * no longer covered goes back to `confirmed` (task 6.3: a change raised the total). The cells of money going out
+ * (cancelled ↔ refunded, a deposit no longer covered) are parked with refunds (4.5).
  */
 export function coverageEvents(status: BookingStatus, facts: CoverageFacts, autoConfirm: boolean): CoverageEvent[] {
   const events: CoverageEvent[] = [];
@@ -32,6 +33,8 @@ export function coverageEvents(status: BookingStatus, facts: CoverageFacts, auto
     }
   }
   if (s === 'confirmed' && facts.totalCovered) events.push('total_covered');
+  // Task 6.3: a change raised the total of a booking paid in full; it owes again (plan 0.1, 6.2).
+  if (s === 'balance_paid' && !facts.totalCovered) events.push('total_uncovered');
   return events;
 }
 

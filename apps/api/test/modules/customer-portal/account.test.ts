@@ -123,7 +123,9 @@ describe('one of my bookings', () => {
 
     const res = await detail(reference);
     expect(res.status).toBe(200);
-    expect(Object.keys(res.body).sort()).toEqual(['booking', 'documents', 'payments', 'plan']);
+    expect(Object.keys(res.body).sort()).toEqual(['booking', 'changes', 'documents', 'payments', 'plan']);
+    // Task 6.3: no changes yet, and customers' online changes are off by default.
+    expect(res.body.changes).toEqual({ items: [], customerChangesEnabled: false });
     expect(res.body.booking).toEqual((await c.get(reference)).body);
     expect(res.body.plan).toEqual((await c.plan(reference)).body);
     const ok = await t.prisma.payment.findMany({ where: { bookingId, status: 'succeeded' } });

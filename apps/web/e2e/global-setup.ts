@@ -37,6 +37,8 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_22 = create();
   // Trip lists (trip-lists.spec.ts): an owner.
   process.env.E2E_STAFF_24 = create();
+  // Changes to a booking after its deposit (booking-amendment.spec.ts, task 6.3): an owner.
+  process.env.E2E_STAFF_23 = create();
   // General rehearsal of the whole customer journey (rehearsal.spec.ts): an owner.
   process.env.E2E_STAFF_26 = create();
 }
