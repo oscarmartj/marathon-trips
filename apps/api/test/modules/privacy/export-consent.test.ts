@@ -183,17 +183,43 @@ describe('marketing consent', () => {
     expect(view).toMatchObject({ hasCustomerRecord: true, marketingConsent: { granted: true } });
   });
 
-  it('the account page and an unsubscribe link racing on one address end consistent (advisory lock): last writer wins, one record each', async () => {
-    const me = await bookedCustomer('Race');
+  it('the account page and an unsubscribe link racing on one address are serialised by the advisory lock (barrier)', async () => {
+    // An account with no customer record: neither side takes a customer lock, so only the address lock orders them.
+    const me = await signInCustomer(t, uniqueEmail('race'));
     const mail = t.app.get(MailService);
-    const m = await t.prisma.$transaction((tx) => mail.enqueue({ to: me.email, templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `r:${randomUUID()}`, category: 'marketing', customerId: me.customerId }, tx));
+    const m = await t.prisma.$transaction((tx) => mail.enqueue({ to: me.email, templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `r:${randomUUID()}`, category: 'marketing' }, tx));
     const ref = `${m.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, m.id)}`;
-    await Promise.all([consent(me, true).then((r) => r), t.http().post(`/unsubscribe/${ref}`).then((r) => r)]);
-    const rows = await t.prisma.consentRecord.findMany({ where: { customerId: me.customerId }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
-    const state = await t.app.get(ConsentService).current(t.prisma, { customerId: me.customerId, emailHash: emailHash(t.config.EMAIL_HASH_KEY, me.email) });
-    expect(state.granted).toBe(rows.at(-1)!.granted);
-    const sup = await t.prisma.emailSuppression.findUnique({ where: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, me.email) } });
-    expect(!!sup).toBe(!state.granted);
+    const svc = t.app.get(ConsentService);
+    const current = svc.current.bind(svc);
+    let calls = 0;
+    let inside!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((r) => (inside = r));
+    const gate = new Promise<void>((r) => (release = r));
+    // current() runs after the address lock is taken: the first caller holds the lock at the barrier.
+    const spy = vi.spyOn(svc, 'current').mockImplementation(async (...a: Parameters<typeof current>) => {
+      if (++calls === 1) {
+        inside();
+        await gate;
+      }
+      return current(...a);
+    });
+    try {
+      const granting = as(me).put('/account/privacy/marketing-consent', { granted: true, wordingKey: MARKETING_WORDING_KEY }).then((r) => r);
+      await entered;
+      const unsubscribing = t.http().post(`/unsubscribe/${ref}`).then((r) => r);
+      await new Promise((r) => setTimeout(r, 400));
+      expect(calls).toBe(1); // the unsubscribe is waiting for the address lock
+      release();
+      const [g, u] = await Promise.all([granting, unsubscribing]);
+      expect([g.status, u.status]).toEqual([200, 200]);
+    } finally {
+      spy.mockRestore();
+    }
+    const hash = emailHash(t.config.EMAIL_HASH_KEY, me.email);
+    const rows = await t.prisma.consentRecord.findMany({ where: { emailHash: hash }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
+    expect(rows.map((r) => [r.granted, r.source])).toEqual([[true, 'account'], [false, 'unsubscribe_link']]);
+    expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: hash } })).toMatchObject({ scope: 'marketing' });
   });
 });
 
@@ -218,6 +244,24 @@ describe('one-click unsubscribe', () => {
     const rows = await t.prisma.consentRecord.findMany({ where: { customerId: me.customerId } });
     expect(rows.map((r) => [r.granted, r.source])).toEqual([[false, 'unsubscribe_link']]);
     expect(await t.prisma.emailSuppression.findUnique({ where: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, me.email) } })).toMatchObject({ scope: 'marketing' });
+  });
+
+  it('one-click POSTs from one mail provider address are never refused; only wrong links are limited (review M1)', async () => {
+    const mail = t.app.get(MailService);
+    for (let i = 0; i < 40; i++) {
+      const m = await t.prisma.$transaction((tx) => mail.enqueue({ to: uniqueEmail('bulk'), templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `b:${randomUUID()}`, category: 'marketing' }, tx));
+      expect((await t.http().post(`/unsubscribe/${m.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, m.id)}`)).status).toBe(200);
+    }
+    const statuses: number[] = [];
+    for (let i = 0; i < 35; i++) statuses.push((await t.http().post(`/unsubscribe/${randomUUID()}.${'0'.repeat(64)}`)).status);
+    // 30 wrong links a minute per address (earlier tests in this file may have used a few): 404s, then 429s only.
+    const first429 = statuses.indexOf(429);
+    expect(first429).toBeGreaterThanOrEqual(25);
+    expect(statuses.slice(0, first429).every((x) => x === 404)).toBe(true);
+    expect(statuses.slice(first429).every((x) => x === 429)).toBe(true);
+    // A valid link still goes through while wrong ones are being refused.
+    const ok = await t.prisma.$transaction((tx) => mail.enqueue({ to: uniqueEmail('after'), templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `b:${randomUUID()}`, category: 'marketing' }, tx));
+    expect((await t.http().post(`/unsubscribe/${ok.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, ok.id)}`)).status).toBe(200);
   });
 
   it('marketing_withdrawal_keeps_balance_reminders: a marketing suppression does not stop an automation email; an `all` one does', async () => {
@@ -261,8 +305,20 @@ describe('erasure requests from the account', () => {
     expect(JSON.stringify(view.body)).not.toContain(me.email);
   });
 
+  it('an archived customer (deletedAt) can still download, change consent and ask for erasure (review m7)', async () => {
+    const me = await bookedCustomer('Arch');
+    await t.prisma.customer.update({ where: { id: me.customerId }, data: { deletedAt: new Date() } });
+    expect((await as(me).get('/account/privacy')).status).toBe(200);
+    expect((await download(me)).status).toBe(200);
+    expect((await as(me).put('/account/privacy/marketing-consent', { granted: false, wordingKey: MARKETING_WORDING_KEY })).status).toBe(200);
+    expect((await as(me).post('/account/privacy/erasure-request', {})).body.status).toBe('received');
+  });
+
   it('without a customer record: confirmation required, then the sign-in account is erased and signed out', async () => {
     const me = await signInCustomer(t, uniqueEmail('gone'));
+    // A complaint logged with the address and no customer is theirs too (review m6): in the export, redacted on erasure.
+    const cp = await t.prisma.complaint.create({ data: { reference: `CP-${'ABCDEFGHJK'[Math.floor(Math.random() * 10)]}${Date.now().toString(36).toUpperCase().replace(/[ILOU]/g, 'A').slice(-5)}`, complainantName: 'Gone Person', complainantEmail: me.email.toUpperCase(), channel: 'email', category: 'service', summary: 'Gone summary', description: 'Gone words', receivedDate: new Date(), acknowledgeDueDate: new Date(), resolveDueDate: new Date(), createdById: owner.staff.id } });
+    expect(JSON.stringify(parsed((await download(me)).body))).toContain('Gone words');
     expect((await as(me).post('/account/privacy/erasure-request', {})).status).toBe(422);
     const r = await as(me).post('/account/privacy/erasure-request', { confirm: true });
     expect(r.status).toBe(200);
@@ -272,5 +328,6 @@ describe('erasure requests from the account', () => {
     expect(await t.prisma.session.count({ where: { userId: me.userId } })).toBe(0);
     expect((await as(me).get('/account/privacy')).status).toBe(401);
     expect(await t.prisma.auditPiiValue.count({ where: { subjectUserId: me.userId } })).toBe(0);
+    expect(await t.prisma.complaint.findUniqueOrThrow({ where: { id: cp.id } })).toMatchObject({ complainantName: '[redacted]', complainantEmail: null, description: '[redacted]', customerId: null });
   });
 });

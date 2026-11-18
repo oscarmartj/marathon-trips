@@ -56,6 +56,8 @@ model PrivacyRequest {
 
 /// Marketing consent, one row per change (plan 5.5, section 3): the current state is the latest row for the customer or
 /// for the address hash. Never edited or deleted (trigger), except that erasure clears customerId (mt_privacy only).
+/// Not tagged append-only, like TermsAcceptance: the convention lets a tagged model point only at tagged rows,
+/// and a customer row is never deleted but is edited. Its triggers are checked by test/modules/privacy/erasure.test.ts.
 model ConsentRecord {
   id                  String         @id @default(uuid(7)) @db.Uuid
   customerId          String?        @db.Uuid

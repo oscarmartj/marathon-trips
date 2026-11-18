@@ -217,6 +217,15 @@ describe('rollback, idempotency and the database guards', () => {
     expect(rows.map((r) => [r.customerId, r.granted, r.source])).toEqual([[null, true, 'account'], [null, false, 'erasure']]);
   });
 
+  it('consent_records and privacy_requests carry their guard triggers for UPDATE/DELETE and TRUNCATE (review m2)', async () => {
+    const { rows } = await db.query(`SELECT c.relname AS t, tg.tgname AS name FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid
+      WHERE c.relname IN ('consent_records', 'privacy_requests') AND NOT tg.tgisinternal ORDER BY 1, 2`);
+    expect(rows.map((r) => `${r.t}.${r.name}`)).toEqual([
+      'consent_records.consent_records_append_only', 'consent_records.consent_records_customer_not_erased', 'consent_records.consent_records_no_truncate',
+      'privacy_requests.privacy_requests_guard', 'privacy_requests.privacy_requests_no_truncate',
+    ]);
+  });
+
   it('functions: owners, fixed search_path, no EXECUTE for PUBLIC, EXECUTE for the API role only', async () => {
     const { rows } = await db.query(`
       SELECT p.proname, pg_get_userbyid(p.proowner) AS owner, p.prosecdef, p.proconfig::text AS config,
@@ -230,6 +239,15 @@ describe('rollback, idempotency and the database guards', () => {
       expect(r.app).toBe(true);
       expect(r.acl).not.toMatch(/(^|[{,])=X/); // no grant to PUBLIC
     }
+    // The owner helper that answers the account check is for mt_privacy only (review m3).
+    const helper = await db.query(`SELECT has_function_privilege('mt_app', 'public.privacy_account_is_anonymised_customer(uuid)', 'EXECUTE') AS app,
+      has_function_privilege('mt_privacy', 'public.privacy_account_is_anonymised_customer(uuid)', 'EXECUTE') AS privacy`);
+    expect(helper.rows[0]).toEqual({ app: false, privacy: true });
+    // mt_privacy reads ids, links and statuses only: never a personal column.
+    const cols = await db.query(`SELECT has_column_privilege('mt_privacy', 'customers', 'email', 'SELECT') AS email,
+      has_column_privilege('mt_privacy', 'customers', 'givenName', 'SELECT') AS name, has_column_privilege('mt_privacy', 'tasks', 'title', 'SELECT') AS title,
+      has_column_privilege('mt_privacy', 'customers', 'anonymisedAt', 'SELECT') AS erased`);
+    expect(cols.rows[0]).toEqual({ email: false, name: false, title: false, erased: true });
     const erasers = rows.filter((r) => r.proname !== 'privacy_active_trip_reason');
     for (const r of erasers) expect(r).toMatchObject({ owner: 'mt_privacy', prosecdef: true, owner_exec: false });
   });
@@ -333,7 +351,7 @@ describe('concurrency, forced with barriers', () => {
     expect(JSON.stringify(await t.prisma.complaint.findMany({ where: { complainantName: { contains: 'LateGiven' } } }))).toBe('[]');
   });
 
-  it('(f) an email queued for a customer before the erasure is never sent after it', async () => {
+  it('(f) an email queued for a customer before the erasure is never sent after it; one the erasure did not mark is refused at send', async () => {
     const c = await privacyCustomer(t);
     const mail = t.app.get(MailService);
     const { id } = await t.prisma.$transaction((tx) => mail.enqueue({ to: c.email, templateKey: 'auth.magic_link', templateVersion: 1, locale: 'en-AU', dedupeKey: `privacy-test:${c.id}`, customerId: c.id }, tx));
@@ -341,6 +359,15 @@ describe('concurrency, forced with barriers', () => {
     expect(await mail.processSend(id)).toBe('noop');
     const row = await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id } });
     expect(row).toMatchObject({ status: 'suppressed', error: 'recipient_erased', to: `erased+${id}@invalid` });
+    // The send step's own check (review m4): a queued email whose customer is anonymised but which the executor never
+    // marked (here the customer is anonymised directly) is refused at send time, not sent.
+    const d = await privacyCustomer(t);
+    const queued = await t.prisma.$transaction((tx) => mail.enqueue({ to: d.email, templateKey: 'auth.magic_link', templateVersion: 1, locale: 'en-AU', dedupeKey: `privacy-test:${d.id}`, customerId: d.id }, tx));
+    await t.prisma.customer.update({ where: { id: d.id }, data: { anonymisedAt: new Date() } });
+    const sentBefore = t.mail.sent.length;
+    expect(await mail.processSend(queued.id)).toBe('suppressed');
+    expect(await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: queued.id } })).toMatchObject({ status: 'suppressed', error: 'recipient_erased' });
+    expect(t.mail.sent.length).toBe(sentBefore);
   });
 });
 

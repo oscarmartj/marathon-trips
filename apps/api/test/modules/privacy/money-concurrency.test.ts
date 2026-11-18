@@ -6,6 +6,7 @@ import { ErasureService } from '../../../src/modules/privacy';
 import { PaymentRouting } from '../../../src/modules/payments/core/routing';
 import { WaitlistService } from '../../../src/modules/waitlist/waitlist.service';
 import { MailService } from '../../../src/platform/mail/mail.service';
+import { isRetryableTransactionError } from '../../../src/platform/database/transaction';
 import { MailTemplateRegistry } from '../../../src/platform/mail/templates';
 import { TestApp, makeApp } from '../../support/auth';
 import { bookingStaff, cleanBookingEvents, customerClient } from '../../support/bookings';
@@ -53,14 +54,15 @@ function barrier() {
 }
 
 /** Sets a booking's status as the tables' owner, with the bookings triggers off for that one transaction. */
-async function forceStatus(bookingId: string, status: 'declined' | 'cancelled'): Promise<void> {
+async function forceStatus(bookingId: string, status: 'declined' | 'cancelled' | 'expired'): Promise<void> {
   const { default: pg } = await import('pg');
   const ownerDb = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
   await ownerDb.connect();
   try {
     await ownerDb.query('BEGIN');
     await ownerDb.query('ALTER TABLE bookings DISABLE TRIGGER USER');
-    await ownerDb.query(`UPDATE bookings SET status = $2::"BookingStatus", "declinedAt" = CASE WHEN $2 = 'declined' THEN clock_timestamp() END, "cancelledAt" = CASE WHEN $2 = 'cancelled' THEN clock_timestamp() END WHERE id = $1::uuid`, [bookingId, status]);
+    await ownerDb.query(`UPDATE bookings SET status = $2::"BookingStatus", "declinedAt" = CASE WHEN $2 = 'declined' THEN clock_timestamp() END,
+      "cancelledAt" = CASE WHEN $2 = 'cancelled' THEN clock_timestamp() END, "expiredAt" = CASE WHEN $2 = 'expired' THEN clock_timestamp() END WHERE id = $1::uuid`, [bookingId, status]);
     await ownerDb.query('ALTER TABLE bookings ENABLE TRIGGER USER');
     await ownerDb.query('COMMIT');
   } catch (err) {
@@ -103,6 +105,34 @@ describe('money that is moving or may be owed', () => {
     const r = await erase(c2Id);
     expect(r.status).toBe(409);
     expect(await t.prisma.customer.findUniqueOrThrow({ where: { id: c2Id } })).toMatchObject({ anonymisedAt: null });
+
+    // Review m5: declined and expired bookings with money collected count too, and so does money the customer paid as
+    // payer on someone else's closed booking.
+    for (const status of ['declined', 'expired'] as const) {
+      const c3 = await payingCustomer(t);
+      const b3 = await approvedBooking(t, admin, w, c3);
+      await payDeposit(c3, b3.reference, b3.bookingId);
+      await forceStatus(b3.bookingId, status);
+      expect(await reason(await customerOf(b3.bookingId)), status).toBe('refund_may_be_due');
+    }
+    const c4 = await payingCustomer(t);
+    const b4 = await approvedBooking(t, admin, w, c4);
+    await payDeposit(c4, b4.reference, b4.bookingId);
+    await forceStatus(b4.bookingId, 'cancelled');
+    const payer = (await t.prisma.customer.create({ data: { email: `payer-${Date.now()}@example.test`, givenName: 'Payer', familyName: 'Other', countryOfResidence: 'AU', source: 'panel' } })).id;
+    const { default: pg } = await import('pg');
+    const ownerDb = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await ownerDb.connect();
+    try {
+      await ownerDb.query('BEGIN');
+      await ownerDb.query('ALTER TABLE payments DISABLE TRIGGER USER');
+      await ownerDb.query(`UPDATE payments SET "payerCustomerId" = $2::uuid WHERE "bookingId" = $1::uuid AND status = 'succeeded'`, [b4.bookingId, payer]);
+      await ownerDb.query('ALTER TABLE payments ENABLE TRIGGER USER');
+      await ownerDb.query('COMMIT');
+    } finally {
+      await ownerDb.end();
+    }
+    expect(await reason(payer)).toBe('refund_may_be_due');
   });
 
   it('(b) a payment start holding the booking makes the erasure wait, and then refuse it: nothing changes', async () => {
@@ -195,7 +225,12 @@ describe('the waiting list and mail', () => {
       return send(msg);
     });
     try {
-      const sending = mail.processSend(m.id).catch(() => 'retried');
+      // The send may finish first, or lose a deadlock against the erasure (it locks the email, the erasure the booking
+      // and then the email): then it throws a retryable error and its job runs again. Any other error fails the test.
+      const sending = mail.processSend(m.id).then((r) => r, (err: unknown) => {
+        if (!isRetryableTransactionError(err)) throw err;
+        return 'retried';
+      });
       await bar.entered; // the send step holds the email row
       const erasing = erase(customer.id);
       await new Promise((r) => setTimeout(r, 400));
