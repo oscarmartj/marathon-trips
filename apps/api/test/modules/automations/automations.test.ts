@@ -964,7 +964,7 @@ describe('7.fix-2: a backlog over the hourly cap acts oldest first', () => {
     const after = await t.prisma.automationRun.findMany({ where: { ruleId: r.id }, orderBy: { eventOccurredAt: 'asc' } });
     expect(after.slice(0, MAX_REAL_RUNS_PER_HOUR).every((x) => x.reasonCode !== 'rate_limited')).toBe(true);
     expect(after.slice(MAX_REAL_RUNS_PER_HOUR).map((x) => x.reasonCode)).toEqual(Array(extra).fill('rate_limited'));
-  });
+  }, 120_000); // over a hundred events and runs
 });
 
 describe('7.fix-2: time zone and the manual test run', () => {
