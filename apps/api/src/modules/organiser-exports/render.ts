@@ -1,3 +1,4 @@
+import { guardCell } from '../../platform/common/csv';
 import type { ExportIssue } from '@mt/shared';
 import type { ColumnDef, FormatDefinition } from './formats';
 import { SOURCES, writeValue, type Runner } from './sources';
@@ -16,17 +17,24 @@ export function problemsOf(format: FormatDefinition, r: Runner): ExportIssue['pr
   return out;
 }
 
-// A fragment that, after its leading whitespace, starts with quotes and then a formula character (the same set as the
-// platform guard: = + - @ tab CR). The quote goes in front of that character.
-const FRAGMENT_FORMULA = /^(\s*?)('*[=+\-@\t\r])/;
+// Leading whitespace of a fragment, except tab and CR: those are formula characters themselves, so the guard sees them.
+const LEADING_SPACE = /^[^\S\t\r]*/;
 
 /**
- * The formula guard, on every fragment of the cell split on a comma or a semicolon: an organiser may open a comma file
- * with semicolons (or the reverse), and then each fragment becomes a cell of its own. The first fragment is the start
- * of the cell, so a leading formula character is guarded as before.
+ * The platform formula guard (a leading =, +, -, @, tab or CR, after any quotes, gets a quote in front), on every
+ * fragment of the cell split on a comma or a semicolon and after the fragment's leading whitespace: an organiser may
+ * open a comma file with semicolons (or the reverse), and then each fragment becomes a cell of its own, trimmed. The
+ * first fragment is the start of the cell, so a leading formula character is guarded as before.
  */
 export function guardFragments(text: string): string {
-  return text.split(/([,;])/).map((part, i) => (i % 2 === 1 ? part : part.replace(FRAGMENT_FORMULA, "$1'$2"))).join('');
+  return text
+    .split(/([,;])/)
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      const space = LEADING_SPACE.exec(part)![0];
+      return space + guardCell(part.slice(space.length));
+    })
+    .join('');
 }
 
 /** Quoted when it holds a quote, a comma, a semicolon, CR or LF, whatever the format's delimiter. */

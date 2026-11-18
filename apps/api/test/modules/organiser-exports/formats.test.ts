@@ -126,6 +126,8 @@ describe('formula_injection_neutralised', () => {
     expect(out('Ana, +61 400')).toBe(`"Ana, '+61 400"`);
     expect(out('Ana;-2+3;@SUM(A1)')).toBe(`"Ana;'-2+3;'@SUM(A1)"`);
     expect(out("Ana;'=1")).toBe(`"Ana;''=1"`);
+    expect(out('Ana;\tcmd')).toBe(`"Ana;'\tcmd"`); // a tab is a formula character, not whitespace to skip
+    expect(out('Ana;\u00a0 =1')).toBe(`"Ana;\u00a0 '=1"`);
     expect(out('10 km - fun run')).toBe('10 km - fun run');
     expect(out('Ana;Bea')).toBe('"Ana;Bea"'); // quoted in a comma file too
     expect(lines(renderCsv(intl, [{ ...ana, givenName: 'Ana,Bea' }]))[1]!.startsWith('García-López;"Ana,Bea";')).toBe(true);
