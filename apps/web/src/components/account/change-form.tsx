@@ -65,7 +65,7 @@ export function ChangeForm(p: ChangeFormProps) {
       const r = await api(`/account/bookings/${encodeURIComponent(p.reference)}/amendments`, {
         method: 'POST', body: { ...body(), previewDigest: preview.previewDigest, acceptNewPrice: true }, headers: { 'Idempotency-Key': crypto.randomUUID() },
       });
-      if (r.status === 201) router.push(`/account/bookings/${encodeURIComponent(p.reference)}?changed=1`);
+      if (r.status === 201 || r.status === 200) router.push(`/account/bookings/${encodeURIComponent(p.reference)}?changed=1`);
       else setError(t(amendmentErrorKey(r.body.code)));
     } finally {
       setBusy(false);

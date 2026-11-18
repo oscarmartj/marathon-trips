@@ -54,7 +54,7 @@ interface Row {
   initialExtra?: Record<string, unknown>;
   rooms: (w: AmendWorld) => Array<{ roomOptionId: string; travellers: AmendTraveller[] }>;
   nights?: [number, number];
-  extras?: Array<{ extraId: string; travellerSlots?: number[] }>;
+  extras?: Array<{ extraId: string; travellerSlots?: number[]; quantity?: number }>;
   total: string;
   difference: string;
 }
@@ -70,6 +70,8 @@ const rows = (x: AmendWorld): Row[] => [
   { name: 'extra nights removed', initial: A(x), initialExtra: { extraNightsAfter: 2 }, rooms: () => [{ roomOptionId: x.doubleId, travellers: [{ keepSlot: 1 }, { keepSlot: 2 }] }], nights: [0, 0], total: '132500', difference: '-60000' },
   { name: 'a second room with a supporter', initial: A(x), rooms: () => [{ roomOptionId: x.doubleId, travellers: [{ keepSlot: 1 }, { keepSlot: 2 }] }, { roomOptionId: x.doubleId, travellers: [supporter] }], total: '215000', difference: '82500' },
   { name: 'the supporter becomes a runner (place replaced)', initial: A(x), rooms: () => [{ roomOptionId: x.doubleId, travellers: [{ keepSlot: 1 }, { ...runner(x), replacesSlot: 2 }] }], total: '160000', difference: '27500' },
+  { name: "the runner's distance changes: marathon → half (place replaced)", initial: A(x), rooms: () => [{ roomOptionId: x.doubleId, travellers: [{ participationType: 'runner_with_entry', raceDistanceId: x.halfId, replacesSlot: 1 }, { keepSlot: 2 }] }], total: '122500', difference: '-10000' },
+  { name: 'a per-booking extra: two airport transfers', initial: A(x), rooms: () => [{ roomOptionId: x.doubleId, travellers: [{ keepSlot: 1 }, { keepSlot: 2 }] }], extras: [{ extraId: x.transferId, quantity: 2 }], total: '148500', difference: '16000' },
   { name: 'the tour for both (per-person extra)', initial: A(x), rooms: () => [{ roomOptionId: x.doubleId, travellers: [{ keepSlot: 1 }, { keepSlot: 2 }] }], extras: [{ extraId: x.extraId, travellerSlots: [1, 2] }], total: '156500', difference: '24000' },
 ];
 
@@ -171,6 +173,28 @@ describe('promo codes and rules are re-evaluated on the price basis', () => {
   });
 });
 
+describe('boundary dates and more codes', () => {
+  it('fullPaymentDue: past the balance date the whole new total is the deposit, and the plan still adds up', async () => {
+    const world = await amendWorld(admin, { balanceDueDate: '2026-11-01' });
+    const b = await booked(world, A(world));
+    const v1 = await t.prisma.bookingSnapshot.findUniqueOrThrow({ where: { bookingId_version: { bookingId: b.bookingId, version: 1 } } });
+    expect([v1.depositMinor, (v1.priceBreakdown as { fullPaymentDue: boolean }).fullPaymentDue]).toEqual([132500n, true]);
+    const p = await applyOf(b.bookingId, { expectedSnapshotVersion: 1, rooms: [{ roomOptionId: world.doubleId, travellers: [{ keepSlot: 1 }, { keepSlot: 2 }] }], extraNightsBefore: 0, extraNightsAfter: 1, extras: [], reasonCode: 'customer_request' });
+    expect([p.newTotalMinor, p.price.fullPaymentDue, p.price.depositMinor]).toEqual(['162500', true, '162500']);
+    const items = await t.prisma.paymentScheduleItem.aggregate({ where: { bookingId: b.bookingId, state: 'active' }, _sum: { amountMinor: true } });
+    expect(items._sum.amountMinor).toBe(162500n);
+  });
+
+  it('a fixed-amount code (per booking) still takes its amount off after the change', async () => {
+    const world = await amendWorld(admin);
+    const code = await createCode(admin, freshCode('AM'), { scopeType: 'package', packageId: world.pkgId, effectMode: 'fixed', valueBps: null, valueMinor: '5000', currency: 'AUD', per: 'booking' });
+    const b = await booked(world, A(world), { promoCode: code.code });
+    expect((await t.prisma.booking.findUniqueOrThrow({ where: { id: b.bookingId } })).totalMinor).toBe(127500n);
+    const p = await applyOf(b.bookingId, { expectedSnapshotVersion: 1, rooms: [{ roomOptionId: world.doubleId, travellers: [{ keepSlot: 1 }, { keepSlot: 2 }] }], extraNightsBefore: 0, extraNightsAfter: 1, extras: [], reasonCode: 'customer_request' });
+    expect([p.newTotalMinor, p.priceDifferenceMinor, p.price.promo.status]).toEqual(['157500', '30000', 'applied']);
+  });
+});
+
 describe('basis drift (decision 4, review G1)', () => {
   const nightBody = (w2: AmendWorld, reasonCode = 'customer_request') => ({ expectedSnapshotVersion: 1, rooms: [{ roomOptionId: w2.doubleId, travellers: [{ keepSlot: 1 }, { keepSlot: 2 }] }], extraNightsBefore: 0, extraNightsAfter: 1, extras: [], reasonCode });
 
@@ -206,5 +230,29 @@ describe('basis drift (decision 4, review G1)', () => {
     expect([a.basisDriftMinor, a.reasonCode]).toEqual([-10000n, 'correction']);
     const audit = await t.prisma.auditLog.findFirstOrThrow({ where: { entityId: b.bookingId, action: 'bookings.booking.amended' } });
     expect(JSON.stringify(audit.changes)).toContain('-10000');
+  });
+
+  it('lines_moved_with_total_zero_refused: rules added later that move money between lines without changing the total', async () => {
+    const world = await amendWorld(admin);
+    const b = await booked(world, A(world));
+    // +10 % on accommodation (+10 000) and −10 000 per booking on participation: the total stays 132 500, the lines do not.
+    await createRule(admin, { scopeType: 'package', packageId: world.pkgId, direction: 'surcharge', valueBps: 1000, appliesTo: 'accommodation', stackable: true });
+    await createRule(admin, { scopeType: 'package', packageId: world.pkgId, direction: 'discount', effectMode: 'fixed', valueBps: null, valueMinor: '10000', currency: 'AUD', per: 'booking', appliesTo: 'participation', stackable: true });
+    const again = await admin.post('/admin/pricing/quotes', { packageId: world.pkgId, priceVersionId: world.versionId, rooms: A(world), extraNightsBefore: 0, extraNightsAfter: 0, extras: [] });
+    expect(again.body.totalMinor).toBe('132500');
+    for (const reasonCode of ['customer_request', 'correction']) {
+      const r = await previewOf(b.bookingId, nightBody(world, reasonCode));
+      expect([r.status, r.body.code]).toEqual([409, 'amendment_price_basis_drifted']);
+    }
+  });
+
+  it('basis_unavailable_409_with_task: an option of the booking removed from the catalogue since the sale', async () => {
+    const world = await amendWorld(admin);
+    const b = await booked(world, A(world), { extras: [{ extraId: world.transferId, quantity: 1 }] });
+    await t.prisma.$executeRawUnsafe(`UPDATE extras SET "deletedAt" = now() WHERE id = $1::uuid`, world.transferId);
+    const r = await previewOf(b.bookingId, nightBody(world));
+    expect([r.status, r.body.code]).toEqual([409, 'amendment_price_basis_unavailable']);
+    expect(await t.prisma.task.count({ where: { sourceRef: `bookings:amendment_basis_drift:${b.bookingId}:v1`, status: 'open' } })).toBe(1);
+    expect(await t.prisma.bookingAmendment.count({ where: { bookingId: b.bookingId } })).toBe(0);
   });
 });

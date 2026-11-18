@@ -111,6 +111,9 @@ export class PaymentAmendmentService implements AmendmentMoneyPort {
         FROM payment_schedule_items i JOIN bookings b ON b.id = i."bookingId"
        WHERE i.kind = 'adjustment' AND i.state = 'active' AND i."dueDate" < ${today}::date
          AND b.status IN ('deposit_paid', 'confirmed', 'balance_paid')
+         -- Once per booking and due date, whatever became of the task (code review, point 3): closing it without the money
+         -- does not make it come back every ten minutes, and items already flagged never crowd out new ones.
+         AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t."sourceRef" = 'payments:adjustment_overdue:' || i."bookingId"::text || ':' || to_char(i."dueDate", 'YYYY-MM-DD') AND t."deletedAt" IS NULL)
        ORDER BY i."dueDate", 1 LIMIT 200`;
     const flagged: string[] = [];
     for (const r of rows) {

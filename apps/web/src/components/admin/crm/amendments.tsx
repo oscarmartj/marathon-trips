@@ -119,7 +119,7 @@ export function AmendmentPanel(props: {
       if (!apply && r.status === 200) {
         setPreview(r.body as unknown as AmendmentPreview);
         setMessage(null);
-      } else if (apply && r.status === 201) {
+      } else if (apply && (r.status === 201 || r.status === 200)) {
         setForm(null);
         setPreview(null);
         setMessage({ text: t('admin.crm.amendments.done'), tone: 'info' });

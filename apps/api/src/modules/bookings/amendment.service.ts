@@ -128,6 +128,21 @@ export class BookingAmendmentService {
     }
   }
 
+  /**
+   * The answer already given for this Idempotency-Key, before anything else is checked (code review, point 6): a retry
+   * after success returns the stored change even if the terms, the clock or the booking moved since. Another body with
+   * the same key is a 422. Null when the key is new.
+   */
+  async replay(ref: BookingRef, req: AmendmentRequest, idempotencyKey: string, actor: AuditActor): Promise<{ created: false; amendmentId: string; reference: string } | null> {
+    if (!actor.id) throw unauthorised();
+    const b = await this.prisma.booking.findFirst({ where: 'id' in ref ? { id: ref.id } : { reference: ref.reference }, select: { id: true, reference: true } });
+    if (!b) return null;
+    const row = await this.prisma.bookingAmendment.findUnique({ where: { bookingId_requestKeyHash: { bookingId: b.id, requestKeyHash: sha256Hex(`booking-amendment:${actor.id}:${idempotencyKey}`) } }, select: { id: true, requestBodyHash: true } });
+    if (!row) return null;
+    if (row.requestBodyHash !== sha256Hex(canonicalJson(req))) throw unprocessable('idempotency_key_reused', 'This Idempotency-Key was used with a different request body');
+    return { created: false, amendmentId: row.id, reference: b.reference };
+  }
+
   private async find(tx: Tx, ref: BookingRef): Promise<{ id: string }> {
     const row = await tx.booking.findFirst({ where: 'id' in ref ? { id: ref.id } : { reference: ref.reference }, select: { id: true } });
     if (!row) throw notFound('booking_not_found', 'Booking not found');
@@ -302,6 +317,9 @@ export class BookingAmendmentService {
     const digest = sha256Hex(canonicalJson(jsonOf({
       bookingId: b.id, fromVersion: b.currentSnapshotVersion, configuration: breakdown.configuration, totalMinor: breakdown.totalMinor,
       depositMinor: breakdown.depositMinor, currency: breakdown.currency, promo: breakdown.promo.status, driftMinor, reasonCode,
+      // What happens to the places, not only the priced result: a previewed replacement (details copied) can never be
+      // applied as a removal and an addition (details deleted) with the same digest (code review, point 7).
+      retired: places.retired, added: places.added.map((a) => ({ slot: a.slot, participationType: a.participationType, raceDistanceId: a.raceDistanceId, isLead: a.isLead, replacesSlot: a.replacesSlot })),
     })));
     return {
       bookingId: b.id, reference: b.reference, customerId: b.customerId, packageId: b.packageId, currency: b.currency, fromVersion: b.currentSnapshotVersion,

@@ -4,8 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BookingAmendmentService } from '../../../../src/modules/bookings';
 import { BookingAmendmentHooks } from '../../../../src/modules/bookings/amendment-hooks';
-import { BookingExpiryService } from '../../../../src/modules/bookings/expiry.service';
-import { WaitlistOffersService } from '../../../../src/modules/bookings/waitlist-offers.service';
 import { PaymentCoverageService } from '../../../../src/modules/payments/core/coverage.service';
 import { PaymentWebhooksService } from '../../../../src/modules/payments/core/webhooks.service';
 import { STATE_HEADERS, TestApp, makeApp } from '../../../support/auth';
@@ -46,6 +44,20 @@ const row = (id: string) => t.prisma.booking.findUniqueOrThrow({ where: { id } }
 const consumed = async (poolId: string) => (await t.prisma.inventoryPool.findUniqueOrThrow({ where: { id: poolId } })).consumed;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Waits until another transaction is blocked on a row lock (pg_stat_activity), so a barrier releases only once the
+ * interleaving it forces really happened (code review, point 2). Fails if nobody waits within the time limit.
+ */
+async function lockWaiter(timeoutMs = 15_000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const [r] = await t.prisma.$queryRaw<Array<{ n: number }>>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+    if ((r?.n ?? 0) >= 1) return;
+    await sleep(25);
+  }
+  throw new Error('no transaction waited on a lock: the interleaving did not happen');
+}
+
 /** Every pool of the world holds exactly what its held claims say, within 0 and its capacity. */
 async function stockIsExact(world: AmendWorld): Promise<void> {
   for (const poolId of [world.roomPoolId, world.quadPoolId, world.entryPoolId, world.extraPoolId]) {
@@ -79,7 +91,9 @@ async function digestOf(bookingId: string, body: object): Promise<string> {
   if (p.status !== 200) throw new Error(`preview ${p.status} ${JSON.stringify(p.body)}`);
   return p.body.previewDigest as string;
 }
-const applyWith = (bookingId: string, body: object, digest: string) => admin.post(`/admin/bookings/${bookingId}/amendments`, { ...body, previewDigest: digest }).set('Idempotency-Key', randomUUID());
+/** Sends now: a supertest request is lazy and would otherwise only leave when awaited, after the barrier opened. */
+const go = <T>(req: PromiseLike<T>): Promise<T> => Promise.resolve(req);
+const applyWith = (bookingId: string, body: object, digest: string) => go(admin.post(`/admin/bookings/${bookingId}/amendments`, { ...body, previewDigest: digest }).set('Idempotency-Key', randomUUID()));
 
 /** Waits until the gate is entered; if the gated call ends first, fails with what it answered. */
 async function enteredOr(g: { entered: Promise<void> }, call: Promise<unknown>): Promise<void> {
@@ -117,7 +131,7 @@ describe('two changes of one booking', () => {
       const first = applyWith(b.bookingId, nightBody(world, 1, 1), d1);
       await enteredOr(g, first);
       const second = applyWith(b.bookingId, nightBody(world, 1, 2), d2);
-      await sleep(400);
+      await lockWaiter();
       g.release();
       const [r1, r2] = await Promise.all([first, second]);
       expect([r1.status, r2.status, r2.body.code]).toEqual([201, 409, 'version_conflict']);
@@ -143,7 +157,7 @@ describe('allotments never go below zero or above capacity', () => {
       const first = applyWith(x.bookingId, toQuad(world), dx);
       await enteredOr(g, first);
       const second = applyWith(y.bookingId, toQuad(world), dy);
-      await sleep(400);
+      await lockWaiter();
       g.release();
       const res = await Promise.all([first, second]);
       expect(res.map((r) => r.status).sort()).toEqual([201, 409]);
@@ -240,8 +254,8 @@ describe('waiting list (review M5, m6)', () => {
     try {
       const change = applyWith(b.bookingId, toDouble(world), db);
       await enteredOr(g, change);
-      const accept = t.http().post(`/waitlist/entries/${entry.id}/accept`).set(STATE_HEADERS).set('Cookie', other.cookie).send({});
-      await sleep(400);
+      const accept = go(t.http().post(`/waitlist/entries/${entry.id}/accept`).set(STATE_HEADERS).set('Cookie', other.cookie).send({}));
+      await lockWaiter();
       g.release();
       const [rc, ra] = await Promise.all([change, accept]);
       expect([rc.status, ra.status]).toEqual([201, 200]);
@@ -275,7 +289,7 @@ describe('a change against payments, cancellation and the sweeps', () => {
       const processing = t.app.get(PaymentWebhooksService).process(stored.id);
       await enteredOr(g, processing);
       const change = applyWith(b.bookingId, body, digest);
-      await sleep(400);
+      await lockWaiter();
       g.release();
       const [outcome, r] = await Promise.all([processing, change]);
       expect(outcome).toBe('processed');
@@ -301,8 +315,8 @@ describe('a change against payments, cancellation and the sweeps', () => {
     try {
       const change = applyWith(b.bookingId, body, digest);
       await enteredOr(g, change);
-      const pay = c.pay(b.reference, { method: 'card' });
-      await sleep(400);
+      const pay = go(c.pay(b.reference, { method: 'card' }));
+      await lockWaiter();
       g.release();
       const [rc, rp] = await Promise.all([change, pay]);
       expect([rc.status, rp.status]).toEqual([201, 201]);
@@ -316,28 +330,60 @@ describe('a change against payments, cancellation and the sweeps', () => {
     await planMatches(b.bookingId);
   });
 
-  it('amendment_vs_cancel_and_sweep_lock_ordered: a cancellation and the expiry sweep wait on the booking; no deadlock, stock exact', async () => {
-    const world = await amendWorld(admin);
-    const b = await walked(world, double(world));
-    const digest = await digestOf(b.bookingId, toQuad(world));
-    const g = gate(BookingAmendmentHooks.prototype, 'runPlaces');
+  it('amendment_vs_confirm_lock_ordered: a change and the confirmation of the same booking wait for each other, in either order', async () => {
+    const world = await amendWorld(admin, { autoConfirm: false });
+    const paidDeposit = async () => {
+      const b = await requestIn(t, c.cookie, world, { rooms: double(world) });
+      expect((await admin.post(`/admin/bookings/${b.bookingId}/approve`, { version: (await row(b.bookingId)).version })).status).toBe(200);
+      await acceptCurrentTerms(t, c, b.reference);
+      expect((await c.pay(b.reference, { method: 'card' })).status).toBe(201);
+      const p = (await t.prisma.payment.findMany({ where: { bookingId: b.bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
+      sim.settle(acc.id, p.providerPaymentRef!, 'succeeded');
+      const ev = await eventFor(t, acc, p.id);
+      expect((await sendWebhook(t, acc, ev)).status).toBe(200);
+      const stored = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: acc.id, providerEventId: ev.eventId } } });
+      expect(await t.app.get(PaymentWebhooksService).process(stored.id)).toBe('processed');
+      expect((await row(b.bookingId)).status).toBe('deposit_paid');
+      return b;
+    };
+
+    // The change first: the confirmation read the old version and must wait, then find it moved.
+    const x = await paidDeposit();
+    const dx = await digestOf(x.bookingId, nightBody(world));
+    const g1 = gate(BookingAmendmentHooks.prototype, 'runPlaces');
     try {
-      const change = applyWith(b.bookingId, toQuad(world), digest);
-      await enteredOr(g, change);
-      const cancel = admin.post(`/admin/bookings/${b.bookingId}/cancel`, { version: (await row(b.bookingId)).version, reason: 'Test' });
-      const sweep = t.app.get(BookingExpiryService).run();
-      const offers = t.app.get(WaitlistOffersService).expireOffers();
-      await sleep(400);
-      g.release();
-      const [rc, rx] = await Promise.all([change, cancel, sweep, offers]);
-      expect(rc.status).toBe(201);
-      // The cancellation read the old version: 409 (version, or the money cell of a paid booking), never a 500.
-      expect(rx.status).toBe(409);
+      const change = applyWith(x.bookingId, nightBody(world), dx);
+      await enteredOr(g1, change);
+      const confirm = go(admin.post(`/admin/bookings/${x.bookingId}/confirm`, { version: (await row(x.bookingId)).version }));
+      await lockWaiter();
+      g1.release();
+      const [rc, rf] = await Promise.all([change, confirm]);
+      expect([rc.status, rf.status, rf.body.code]).toEqual([201, 409, 'version_conflict']);
     } finally {
-      g.restore();
+      g1.restore();
     }
-    expect((await row(b.bookingId)).status).toBe('deposit_paid');
+    expect((await row(x.bookingId)).status).toBe('deposit_paid');
+    await planMatches(x.bookingId);
+
+    // The confirmation first (stopped in its coverage step with the booking locked): the change waits, then applies to
+    // the confirmed booking.
+    const y = await paidDeposit();
+    const dy = await digestOf(y.bookingId, nightBody(world));
+    const g2 = gate(PaymentCoverageService.prototype, 'apply');
+    try {
+      const confirm = go(admin.post(`/admin/bookings/${y.bookingId}/confirm`, { version: (await row(y.bookingId)).version }));
+      await enteredOr(g2, confirm);
+      const change = applyWith(y.bookingId, nightBody(world), dy);
+      await lockWaiter();
+      g2.release();
+      const [rf, rc] = await Promise.all([confirm, change]);
+      expect([rf.status, rc.status]).toEqual([200, 201]);
+    } finally {
+      g2.restore();
+    }
+    expect((await row(y.bookingId)).status).toBe('confirmed');
+    expect((await row(y.bookingId)).currentSnapshotVersion).toBe(2);
+    await planMatches(y.bookingId);
     await stockIsExact(world);
-    await planMatches(b.bookingId);
   });
 });

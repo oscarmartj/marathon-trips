@@ -87,9 +87,11 @@ export class CustomerAccountController {
   @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'account-booking-amendment', owns: (ctx) => ownsBookingReference(ctx) })
   @UseGuards(AmendmentRateLimitGuard)
   @Header('Cache-Control', 'no-store')
-  async amend(@Param('reference') reference: string, @Body(new ZodPipe(customerAmendmentSchema)) body: CustomerAmendment, @Headers('idempotency-key') key: string | undefined, @Req() req: ApiRequest) {
+  async amend(@Param('reference') reference: string, @Body(new ZodPipe(customerAmendmentSchema)) body: CustomerAmendment, @Headers('idempotency-key') key: string | undefined, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
     if (!key || !IDEMPOTENCY_KEY.test(key)) throw unprocessable('idempotency_key_required', 'Send an Idempotency-Key header (16 to 64 letters, digits or hyphens)');
     const r = await this.amendments.apply(reference, body, key, actorOf(req));
+    // 201 for the change made now; 200 for a replay of one already made (plan section 5, step 2).
+    if (!r.created) res.status(200);
     return { created: r.created, ...(await this.account.detail(reference)) };
   }
 }

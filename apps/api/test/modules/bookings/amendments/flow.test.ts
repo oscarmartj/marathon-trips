@@ -148,12 +148,42 @@ describe('failure paths: nothing is written', () => {
     const key = randomUUID();
     const first = await apply(b.bookingId, { ...body, previewDigest: p.body.previewDigest }, key);
     const again = await apply(b.bookingId, { ...body, previewDigest: p.body.previewDigest }, key);
-    expect([first.status, first.body.created, again.status, again.body.created]).toEqual([201, true, 201, false]);
+    expect([first.status, first.body.created, again.status, again.body.created]).toEqual([201, true, 200, false]);
     expect(again.body.amendmentId).toBe(first.body.amendmentId);
     const other = await apply(b.bookingId, { ...body, extraNightsAfter: 2, previewDigest: p.body.previewDigest }, key);
     expect([other.status, other.body.code]).toEqual([422, 'idempotency_key_reused']);
     expect(await t.prisma.bookingAmendment.count({ where: { bookingId: b.bookingId } })).toBe(1);
     expect(await t.prisma.bookingSnapshot.count({ where: { bookingId: b.bookingId } })).toBe(2);
+  });
+
+  it('erased_customer_404: a change of a booking whose customer was erased is not found, and nothing is written', async () => {
+    const b = await paidBooking();
+    const body = await keepAll(b.bookingId, { extraNightsAfter: 1 });
+    const p = await preview(b.bookingId, body);
+    expect(p.status).toBe(200);
+    const customerId = (await row(b.bookingId)).customerId;
+    await t.prisma.$executeRawUnsafe(`UPDATE customers SET "anonymisedAt" = now() WHERE id = $1::uuid`, customerId);
+    try {
+      const r = await apply(b.bookingId, { ...body, previewDigest: p.body.previewDigest });
+      expect([r.status, r.body.code]).toEqual([404, 'booking_not_found']);
+      expect(await t.prisma.bookingAmendment.count({ where: { bookingId: b.bookingId } })).toBe(0);
+    } finally {
+      await t.prisma.$executeRawUnsafe(`UPDATE customers SET "anonymisedAt" = NULL WHERE id = $1::uuid`, customerId);
+    }
+  });
+
+  it('digest_covers_places: a previewed replacement cannot be applied as a removal and an addition', async () => {
+    const b = await paidBooking();
+    const replace = { ...(await keepAll(b.bookingId)), rooms: [{ roomOptionId: w.doubleId, travellers: [{ keepSlot: 1 }, { ...runner(w), replacesSlot: 2 }] }], reasonCode: 'correction' };
+    const p = await preview(b.bookingId, replace);
+    expect(p.status).toBe(200);
+    // Same price, same configuration, but place 2's details would be deleted instead of copied.
+    const removeAndAdd = { ...replace, rooms: [{ roomOptionId: w.doubleId, travellers: [{ keepSlot: 1 }, runner(w)] }] };
+    const q = await preview(b.bookingId, removeAndAdd);
+    expect(q.body.newTotalMinor).toBe(p.body.newTotalMinor);
+    const r = await apply(b.bookingId, { ...removeAndAdd, previewDigest: p.body.previewDigest });
+    expect([r.status, r.body.code]).toEqual([409, 'amendment_price_changed']);
+    expect(await t.prisma.bookingAmendment.count({ where: { bookingId: b.bookingId } })).toBe(0);
   });
 
   it('live_attempt_blocks_amendment: a payment in progress refuses the change', async () => {
@@ -204,10 +234,17 @@ describe('failure paths: nothing is written', () => {
       const noTerms = await customerApply(b.reference, { ...cb, previewDigest: p.body.previewDigest, acceptNewPrice: true });
       expect([noTerms.status, noTerms.body.code]).toEqual([409, 'terms_not_accepted']);
       await acceptCurrentTerms(t, c, b.reference);
-      const ok = await customerApply(b.reference, { ...cb, previewDigest: p.body.previewDigest, acceptNewPrice: true });
+      const key = randomUUID();
+      const ok = await customerApply(b.reference, { ...cb, previewDigest: p.body.previewDigest, acceptNewPrice: true }, key);
       expect(ok.status).toBe(201);
       const a = await t.prisma.bookingAmendment.findFirstOrThrow({ where: { bookingId: b.bookingId } });
       expect([a.initiatedBy, a.reasonCode, a.changes]).toEqual(['customer', 'customer_request', ['nights']]);
+      // A retry with the same key after the terms changed again: the stored change, 200, not a 409 (review point 6).
+      await ensureTerms(t, { body: `Changed again ${randomUUID()}` });
+      const replay = await customerApply(b.reference, { ...cb, previewDigest: p.body.previewDigest, acceptNewPrice: true }, key);
+      expect([replay.status, replay.body.created]).toEqual([200, false]);
+      expect(await t.prisma.bookingAmendment.count({ where: { bookingId: b.bookingId } })).toBe(1);
+      await acceptCurrentTerms(t, c, b.reference);
     } finally {
       await setCustomerAmendments(t, false);
     }
@@ -368,6 +405,10 @@ describe('overdue adjustments and erasure (review M2, M4)', () => {
     // The day after the due date (and twice): one task for the unpaid change, none for the paid one.
     const after = new Date(item.dueDate.getTime() + 2 * 86_400_000);
     await t.app.get(PaymentsMaintenanceService).run(after);
+    await t.app.get(PaymentsMaintenanceService).run(after);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:adjustment_overdue:${late.bookingId}:${due}` } })).toBe(1);
+    // Oscar closes it without the money coming in: the sweep does not open it again (review point 3).
+    await t.prisma.task.updateMany({ where: { sourceRef: `payments:adjustment_overdue:${late.bookingId}:${due}` }, data: { status: 'done' } });
     await t.app.get(PaymentsMaintenanceService).run(after);
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:adjustment_overdue:${late.bookingId}:${due}` } })).toBe(1);
     expect(await t.prisma.task.count({ where: { sourceRef: { startsWith: `payments:adjustment_overdue:${paid.bookingId}` } } })).toBe(0);

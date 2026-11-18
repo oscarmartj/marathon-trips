@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { approveBookingSchema, bookingRequestSchema, staffAmendmentPreviewSchema, staffAmendmentSchema, closeBookingSchema, createCustomerSchema, listBookingsQuerySchema, listCustomersQuerySchema, updateCustomerSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
@@ -119,9 +120,11 @@ export class BookingsAdminController {
 
   /** Applies a previewed change once per Idempotency-Key (task 6.3); the answer is the booking as the panel sees it. */
   @Post(':id/amendments') @RequirePermission(P.amend)
-  async amend(@Param('id', uuid()) id: string, @Body(new ZodPipe(staffAmendmentSchema)) b: In<typeof staffAmendmentSchema>, @Headers('idempotency-key') key: string | undefined, @Req() req: ApiRequest) {
+  async amend(@Param('id', uuid()) id: string, @Body(new ZodPipe(staffAmendmentSchema)) b: In<typeof staffAmendmentSchema>, @Headers('idempotency-key') key: string | undefined, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
     if (!key || !IDEMPOTENCY_KEY.test(key)) throw unprocessable('idempotency_key_required', 'Send an Idempotency-Key header (16 to 64 letters, digits or hyphens)');
     const r = await this.amendments.apply({ id }, { initiatedBy: 'staff', ...b }, key, actorOf(req));
+    // 201 for the change made now; 200 for a replay of one already made (plan section 5, step 2).
+    if (!r.created) res.status(200);
     return { created: r.created, amendmentId: r.amendmentId, booking: await this.bookings.get(id) };
   }
 }

@@ -10,7 +10,8 @@ export async function setCustomerAmendments(t: TestApp, on: boolean): Promise<vo
 }
 
 /**
- * A booking of customer `a` walked to deposit_paid (with its plan), the terms accepted and customers' changes on, and a
+ * A booking of customer `a` walked to deposit_paid (with its plan), the terms accepted and customers' changes on (the
+ * caller's file switches them off again in afterAll), and a
  * preview body that adds the package's optional tour for place 1 (a positive difference).
  */
 export async function amendableBookingOf(t: TestApp, a: CustomerSession): Promise<{ reference: string; bookingId: string; body: Record<string, unknown> }> {
@@ -32,6 +33,8 @@ import type { RatesBody } from './pricing';
 
 export interface AmendWorld {
   pkgId: string;
+  halfId: string;
+  transferId: string;
   editionId: string;
   distanceId: string;
   doubleId: string;
@@ -47,9 +50,9 @@ export interface AmendWorld {
 /**
  * The rate card of the change tests. Double (1–2): 80 000 alone, 50 000 each for two; quad (1–4): 90 000, 60 000, 45 000,
  * 40 000 each; extra nights 25 000/15 000 and 30 000/20 000/15 000/12 500 per person and night; marathon 30 000;
- * supporter 2 500; tour 12 000 per person. Deposit 50 000 per person.
+ * half marathon 20 000; supporter 2 500; tour 12 000 per person; transfer 8 000 per booking (up to 3). Deposit 50 000 per person.
  */
-export const amendRates = (w: { doubleId: string; quadId: string; extraId: string; distanceId: string }): RatesBody => ({
+export const amendRates = (w: { doubleId: string; quadId: string; extraId: string; distanceId: string; halfId: string; transferId: string }): RatesBody => ({
   roomRates: [
     { roomOptionId: w.doubleId, occupancy: 1, pricePerPersonMinor: '80000', extraNightPerPersonMinor: '25000' },
     { roomOptionId: w.doubleId, occupancy: 2, pricePerPersonMinor: '50000', extraNightPerPersonMinor: '15000' },
@@ -60,9 +63,10 @@ export const amendRates = (w: { doubleId: string; quadId: string; extraId: strin
   ],
   participationRates: [
     { participationType: 'runner_with_entry', raceDistanceId: w.distanceId, amountPerPersonMinor: '30000' },
+    { participationType: 'runner_with_entry', raceDistanceId: w.halfId, amountPerPersonMinor: '20000' },
     { participationType: 'supporter', raceDistanceId: null, amountPerPersonMinor: '2500' },
   ],
-  extraRates: [{ extraId: w.extraId, amountMinor: '12000' }],
+  extraRates: [{ extraId: w.extraId, amountMinor: '12000' }, { extraId: w.transferId, amountMinor: '8000' }],
 });
 
 /** An open package with a double and a quad room, two extra nights each side, runners and supporters, priced. */
@@ -76,8 +80,8 @@ export async function retireAmendWorlds(t: TestApp): Promise<void> {
   if (worldEditions.length > 0) await t.prisma.$executeRawUnsafe(`UPDATE race_editions SET status = 'completed' WHERE id = ANY($1::uuid[])`, worldEditions.splice(0));
 }
 
-export async function amendWorld(admin: Client, opts: { quadCapacity?: number; doubleCapacity?: number; autoConfirm?: boolean } = {}): Promise<AmendWorld> {
-  const w = await buildWorld(admin, { priced: false, packageOver: { maxExtraNightsBefore: 2, maxExtraNightsAfter: 2, autoConfirmOnDeposit: opts.autoConfirm ?? true } });
+export async function amendWorld(admin: Client, opts: { quadCapacity?: number; doubleCapacity?: number; autoConfirm?: boolean; balanceDueDate?: string } = {}): Promise<AmendWorld> {
+  const w = await buildWorld(admin, { priced: false, packageOver: { maxExtraNightsBefore: 2, maxExtraNightsAfter: 2, autoConfirmOnDeposit: opts.autoConfirm ?? true, ...(opts.balanceDueDate ? { balanceDueDate: opts.balanceDueDate } : {}) } });
   await must(admin.put(`/admin/catalogue/packages/${w.pkg.id}/participation`, { types: ['runner_with_entry', 'supporter'] }), 'participation');
   const pools = (await must(admin.get(`/admin/catalogue/editions/${w.edition.id}/pools`), 'pools')).body as Array<{ id: string; version: number }>;
   for (const [id, capacity] of [[w.roomPoolId, opts.doubleCapacity ?? 1000], [w.entryPoolId, 1000], [w.extraPoolId, 1000]] as const) {
@@ -85,11 +89,15 @@ export async function amendWorld(admin: Client, opts: { quadCapacity?: number; d
     await must(admin.patch(`/admin/catalogue/pools/${id}`, { capacity, version: p.version, reason: 'test' }), 'pool capacity');
   }
   const quadPool = (await must(admin.post(`/admin/catalogue/editions/${w.edition.id}/pools`, { kind: 'room', label: 'quad pool', capacity: opts.quadCapacity ?? 1000, lowStockThreshold: 0 }), 'quad pool', 201)).body.id as string;
+  const half = (await must(admin.post(`/admin/catalogue/races/${w.race.id}/distances`, { kind: 'half', distanceMetres: 21097, name: text('Half marathon') }), 'half', 201)).body.id as string;
+  await must(admin.post(`/admin/catalogue/packages/${w.pkg.id}/entry-options`, { raceDistanceId: half, entryPoolId: w.entryPoolId }), 'half entry', 201);
+  await must(admin.post(`/admin/catalogue/packages/${w.pkg.id}/extras`, { kind: 'transfer', name: text('Airport transfer'), pricingUnit: 'per_booking', maxPerBooking: 3, poolId: w.extraPoolId }), 'transfer', 201);
   let pkg = (await must(admin.get(`/admin/catalogue/packages/${w.pkg.id}`), 'package')).body;
   await must(admin.post(`/admin/catalogue/packages/${w.pkg.id}/hotels/${pkg.hotels[0].id}/rooms`, { roomType: 'quad', name: text('Quad room'), minOccupancy: 1, maxOccupancy: 4, roomPoolId: quadPool }), 'quad room', 201);
   pkg = (await must(admin.get(`/admin/catalogue/packages/${w.pkg.id}`), 'package')).body;
   const rooms = pkg.hotels[0].rooms as Array<{ id: string; roomType: string }>;
-  const ids = { doubleId: rooms.find((r) => r.roomType === 'double')!.id, quadId: rooms.find((r) => r.roomType === 'quad')!.id, extraId: pkg.extras[0].id as string, distanceId: w.distanceId };
+  const extras = pkg.extras as Array<{ id: string; kind: string }>;
+  const ids = { doubleId: rooms.find((r) => r.roomType === 'double')!.id, quadId: rooms.find((r) => r.roomType === 'quad')!.id, extraId: extras.find((x) => x.kind === 'excursion')!.id, transferId: extras.find((x) => x.kind === 'transfer')!.id, distanceId: w.distanceId, halfId: half };
   worldEditions.push(w.edition.id);
   const versionId = await publishWith(admin, w.pkg.id, amendRates(ids));
   await must(admin.post(`/admin/catalogue/races/${w.race.id}/status`, { status: 'published', version: w.race.version }), 'publish race');

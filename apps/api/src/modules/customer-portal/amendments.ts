@@ -36,10 +36,14 @@ export class CustomerAmendmentsService {
   async apply(reference: string, body: CustomerAmendment, key: string, actor: AuditActor) {
     const b = await this.prisma.booking.findUnique({ where: { reference }, select: { id: true } });
     if (!b) throw notFound();
+    const { acceptNewPrice: _accepted, ...rest } = body;
+    const req = { initiatedBy: 'customer' as const, ...rest };
+    // A retry with the same key gets the change it made, whatever changed since (as 3.5 replays before its checks).
+    const done = await this.amendments.replay({ reference }, req, key, actor);
+    if (done) return done;
     // The change is part of the contract: the booking terms in force must be accepted (task 3.5's acceptance).
     await this.terms.assertAccepted(b.id);
-    const { acceptNewPrice: _accepted, ...rest } = body;
-    return this.amendments.apply({ reference }, { initiatedBy: 'customer', ...rest }, key, actor);
+    return this.amendments.apply({ reference }, req, key, actor);
   }
 
   /**

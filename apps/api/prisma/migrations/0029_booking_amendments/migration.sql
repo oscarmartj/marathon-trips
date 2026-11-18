@@ -167,7 +167,7 @@ CREATE CONSTRAINT TRIGGER booking_travellers_one_lead AFTER INSERT OR UPDATE ON 
 -- ---- Amendments: append-only; amounts consistent; written with their snapshot, in an amendable state ----
 ALTER TABLE "booking_amendments"
   ADD CONSTRAINT "booking_amendments_versions_check" CHECK ("fromVersion" >= 1 AND "toVersion" = "fromVersion" + 1),
-  ADD CONSTRAINT "booking_amendments_changes_check" CHECK (cardinality("changes") >= 1),
+  ADD CONSTRAINT "booking_amendments_changes_check" CHECK (coalesce(cardinality("changes"), 0) >= 1),
   ADD CONSTRAINT "booking_amendments_amounts_check" CHECK (
     "previousTotalMinor" >= 0 AND "newTotalMinor" >= 0 AND "collectedMinor" >= 0 AND "outstandingMinor" >= 0 AND "creditPendingMinor" >= 0
     AND "newTotalMinor" = "previousTotalMinor" + "priceDifferenceMinor"
