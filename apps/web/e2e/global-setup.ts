@@ -35,4 +35,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_19 = create();
   // Staff start page (dashboard.spec.ts): an owner.
   process.env.E2E_STAFF_22 = create();
+  // Trip lists (trip-lists.spec.ts): an owner.
+  process.env.E2E_STAFF_24 = create();
 }
