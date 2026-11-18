@@ -62,8 +62,8 @@ export const packageDetail = (over: Partial<PackageDetail> = {}): PackageDetail 
 export interface ContentStub {
   pages?: Record<string, PublicPage>;
   guides?: Record<string, PublicGuide>;
-  faqs?: PublicFaq[];
-  banners?: PublicBanner[];
+  faqs?: Array<PublicFaq & { locale?: string }>;
+  banners?: Array<PublicBanner & { locale?: string }>;
   menu?: Partial<PublicMenu>;
   redirects?: RedirectRule[];
 }
@@ -90,16 +90,19 @@ export function stubCatalogue(options: { search?: RaceSearchResult; race?: RaceD
     if (/\/content\//.test(url)) {
       const c = options.content ?? {};
       const last = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '');
+      // The public API answers for one language at a time (`?locale=`, en-AU when absent). Fixtures carry their `locale` (en-AU when not set).
+      const want = new URL(url).searchParams.get('locale') ?? 'en-AU';
+      const inLocale = <T,>(items: T[]) => items.filter((i) => ((i as { locale?: string }).locale ?? 'en-AU') === want);
       if (/\/content\/pages\/[^/?]+/.test(url)) {
         // The sample slug is a published general page unless the test says otherwise; every other slug has none.
         const pages = c.pages ?? { [SLUG]: contentPage() };
-        return pages[last] ? json(pages[last]) : json({ code: 'not_found' }, 404);
+        return pages[last] && pages[last].locale === want ? json(pages[last]) : json({ code: 'not_found' }, 404);
       }
-      if (/\/content\/pages(\?|$)/.test(url)) return json({ items: Object.values(c.pages ?? {}).filter((p) => p.kind === 'general').map((p) => ({ slug: p.slug, title: p.title, updatedAt: p.updatedAt })) });
-      if (/\/content\/guides\//.test(url)) return c.guides?.[last] ? json(c.guides[last]) : json({ code: 'not_found' }, 404);
-      if (/\/content\/faqs/.test(url)) return json({ items: c.faqs ?? [] });
-      if (/\/content\/banners/.test(url)) return json({ items: c.banners ?? [] });
-      if (/\/content\/menu/.test(url)) return json({ header: [], footer_company: [], footer_legal: [], ...c.menu });
+      if (/\/content\/pages(\?|$)/.test(url)) return json({ items: inLocale(Object.values(c.pages ?? {})).filter((p) => p.kind === 'general').map((p) => ({ slug: p.slug, title: p.title, updatedAt: p.updatedAt })) });
+      if (/\/content\/guides\//.test(url)) return c.guides?.[last] && c.guides[last].locale === want ? json(c.guides[last]) : json({ code: 'not_found' }, 404);
+      if (/\/content\/faqs/.test(url)) return json({ items: inLocale(c.faqs ?? []) });
+      if (/\/content\/banners/.test(url)) return json({ items: inLocale(c.banners ?? []) });
+      if (/\/content\/menu/.test(url)) return json({ header: [], footer_company: [], footer_legal: [], ...(want === 'en-AU' ? c.menu : {}) });
       if (/\/content\/redirects/.test(url)) return json({ items: c.redirects ?? [] });
       return json({}, 404);
     }

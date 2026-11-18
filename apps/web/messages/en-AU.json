@@ -32,6 +32,7 @@
     "placeholderImage": "Placeholder image",
     "externalLink": "(opens an outside website)",
     "announcements": "Announcements",
+    "language": "Language",
     "bannerTones": {
       "info": "Update",
       "notice": "Notice",

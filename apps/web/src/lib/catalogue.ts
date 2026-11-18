@@ -1,3 +1,4 @@
+import { currentLocale } from './i18n';
 import { apiBase } from './api-proxy';
 
 /** What the public catalogue API returns (apps/api/src/modules/catalogue/public.service.ts). The web only displays it. */
@@ -138,8 +139,8 @@ export async function listCountryCodes(selected?: string): Promise<string[]> {
   return [...new Set(codes)].sort();
 }
 
-/** The English (Australia) text of a localised value, falling back to any other language. */
-export function localisedText(value: Record<string, string> | undefined): string {
+/** The text of a localised value in the request's language, else English (Australia), else any language there is. */
+export function localisedText(value: Record<string, string> | undefined, locale: string = currentLocale()): string {
   if (!value) return '';
-  return value['en-AU'] ?? Object.values(value)[0] ?? '';
+  return value[locale] ?? value['en-AU'] ?? Object.values(value)[0] ?? '';
 }

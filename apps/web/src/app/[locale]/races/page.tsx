@@ -5,10 +5,12 @@ import { RaceCard } from '@/components/catalogue/race-card';
 import { RaceFiltersForm } from '@/components/catalogue/race-filters';
 import { CatalogueUnavailableError, PAGE_SIZE, listCountryCodes, parseFilters, racesHref, searchRaces, type RaceSearchResult } from '@/lib/catalogue';
 import { pageMetadata } from '@/lib/seo';
-import { t } from '@/lib/i18n';
+import { localeFromParams } from '@/lib/locale-server';
+import { lp, t } from '@/lib/i18n';
 
 // Filtered and paged results are thin variants of the same list: they point at /races and ask not to be indexed.
-export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
+  await localeFromParams(params);
   const filters = parseFilters(await searchParams);
   const base = pageMetadata({ title: t('races.title'), description: t('races.intro'), path: '/races' });
   return Object.keys(filters).length > 0 ? { ...base, robots: { index: false, follow: true } } : base;
@@ -17,9 +19,10 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
 // The filters are in the URL, so this page is rendered per request; the catalogue data behind it is cached for a minute.
 export const revalidate = 60;
 
-type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+type Props = { params?: Promise<{ locale?: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
 
-export default async function Races({ searchParams }: Props) {
+export default async function Races({ params, searchParams }: Props) {
+  await localeFromParams(params);
   const filters = parseFilters(await searchParams);
   const thisYear = new Date().getUTCFullYear();
   const years = [thisYear, thisYear + 1, thisYear + 2];
@@ -54,9 +57,9 @@ export default async function Races({ searchParams }: Props) {
               </div>
               {pages > 1 ? (
                 <nav aria-label={t('races.pagination')} className="pager">
-                  {page > 1 ? <Link href={racesHref({ ...filters, page: page - 1 })}>{t('races.previousPage')}</Link> : null}
+                  {page > 1 ? <Link href={lp(racesHref({ ...filters, page: page - 1 }))}>{t('races.previousPage')}</Link> : null}
                   <span>{t('races.pageOf', { page, pages })}</span>
-                  {page < pages ? <Link href={racesHref({ ...filters, page: page + 1 })}>{t('races.nextPage')}</Link> : null}
+                  {page < pages ? <Link href={lp(racesHref({ ...filters, page: page + 1 }))}>{t('races.nextPage')}</Link> : null}
                 </nav>
               ) : null}
             </>

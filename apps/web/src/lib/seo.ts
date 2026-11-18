@@ -3,27 +3,37 @@ import { brand } from '@mt/shared/brand';
 import { absoluteUrl } from './site';
 import { localisedText, type RaceDetail } from './catalogue';
 import { countryName } from './catalogue-format';
-import { t } from './i18n';
+import { currentLocale, t } from './i18n';
+import { DEFAULT_LOCALE, enabledLocales, localePath, openGraphLocale, type Locale } from './locales';
 
-export const LOCALE = 'en-AU';
+/** The language of the page being rendered (the request's language; the default outside a request). */
+export const pageLocale = (): Locale => currentLocale();
 
 /**
- * Canonical address and `hreflang` links for a page. Only en-AU exists, so the page points at itself and at
- * `x-default`; adding a language later means adding its entry here.
+ * Canonical address and `hreflang` links for a page: one alternate per language the page exists in (every enabled language
+ * unless `locales` narrows it, as it does for content that is only written in some languages), each pointing at that
+ * language's own address, plus `x-default` for the default language. With one language enabled this is the page itself
+ * and `x-default`. A language that is not enabled is never listed.
  */
-export function pageAlternates(path: string): NonNullable<Metadata['alternates']> {
-  const url = absoluteUrl(path);
-  return { canonical: url, languages: { [LOCALE]: url, 'x-default': url } };
+export function pageAlternates(path: string, locale: Locale = pageLocale(), locales?: readonly Locale[]): NonNullable<Metadata['alternates']> {
+  const enabled = enabledLocales();
+  const present = (locales ?? enabled).filter((l) => enabled.includes(l));
+  const set = present.includes(locale) ? present : [locale, ...present];
+  const languages: Record<string, string> = {};
+  for (const l of set) languages[l] = absoluteUrl(localePath(path, l));
+  languages['x-default'] = absoluteUrl(localePath(path, set.includes(DEFAULT_LOCALE) ? DEFAULT_LOCALE : set[0]!));
+  return { canonical: absoluteUrl(localePath(path, locale)), languages };
 }
 
 /** Title, description, canonical, `hreflang`, Open Graph and Twitter card for a page. The share image comes from the segment's `opengraph-image`. */
-export function pageMetadata(input: { title: string; description?: string; path: string }): Metadata {
+export function pageMetadata(input: { title: string; description?: string; path: string; locale?: Locale; locales?: readonly Locale[] }): Metadata {
   const { title, description, path } = input;
+  const locale = input.locale ?? pageLocale();
   return {
     title,
     ...(description ? { description } : {}),
-    alternates: pageAlternates(path),
-    openGraph: { type: 'website', siteName: brand.name, locale: 'en_AU', url: absoluteUrl(path), title, ...(description ? { description } : {}) },
+    alternates: pageAlternates(path, locale, input.locales),
+    openGraph: { type: 'website', siteName: brand.name, locale: openGraphLocale(locale), url: absoluteUrl(localePath(path, locale)), title, ...(description ? { description } : {}) },
     twitter: { card: 'summary_large_image', title, ...(description ? { description } : {}) },
   };
 }
@@ -71,7 +81,7 @@ export function raceEventsJsonLd(race: Pick<RaceDetail, 'slug' | 'name' | 'summa
     ...(e.endDate ? { endDate: e.endDate.slice(0, 10) } : {}),
     eventStatus: EVENT_STATUS[e.status] ?? 'https://schema.org/EventScheduled',
     eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
-    url: absoluteUrl(`/races/${race.slug}`),
+    url: absoluteUrl(localePath(`/races/${race.slug}`, pageLocale())),
     location: {
       '@type': 'Place',
       name: race.city,

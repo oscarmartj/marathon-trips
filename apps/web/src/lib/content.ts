@@ -1,4 +1,6 @@
 import { apiBase } from './api-proxy';
+import { currentLocale } from './i18n';
+import { enabledLocales, type Locale } from './locales';
 
 /**
  * What the public content API returns (apps/api/src/modules/content/public.service.ts). The web app only displays it.
@@ -34,22 +36,35 @@ export async function contentGet<T>(path: string): Promise<T | null> {
 }
 
 const slugPath = (s: string) => encodeURIComponent(s);
+const withLocale = (path: string, locale: Locale) => `${path}${path.includes('?') ? '&' : '?'}locale=${encodeURIComponent(locale)}`;
 
-export const getPage = (slug: string): Promise<PublicPage | null> => contentGet<PublicPage>(`/content/pages/${slugPath(slug)}`);
-export const getGuide = (raceSlug: string): Promise<PublicGuide | null> => contentGet<PublicGuide>(`/content/guides/${slugPath(raceSlug)}`);
+/**
+ * Every read below takes the language of the request unless one is given. There is no fallback to another language
+ * (8.1): a language with nothing published gets null or an empty list, and the page shows its built-in wording, which is
+ * translated like the rest of the interface. Language is part of the cache key because it is part of the URL.
+ */
+export const getPage = (slug: string, locale: Locale = currentLocale()): Promise<PublicPage | null> => contentGet<PublicPage>(withLocale(`/content/pages/${slugPath(slug)}`, locale));
+export const getGuide = (raceSlug: string, locale: Locale = currentLocale()): Promise<PublicGuide | null> => contentGet<PublicGuide>(withLocale(`/content/guides/${slugPath(raceSlug)}`, locale));
 
-export async function listPageSlugs(): Promise<Array<{ slug: string; title: string }>> {
-  return (await contentGet<{ items: Array<{ slug: string; title: string }> }>('/content/pages'))?.items ?? [];
+export async function listPageSlugs(locale: Locale = currentLocale()): Promise<Array<{ slug: string; title: string }>> {
+  return (await contentGet<{ items: Array<{ slug: string; title: string }> }>(withLocale('/content/pages', locale)))?.items ?? [];
 }
-export async function listFaqs(): Promise<PublicFaq[]> {
-  return (await contentGet<{ items: PublicFaq[] }>('/content/faqs'))?.items ?? [];
+export async function listFaqs(locale: Locale = currentLocale()): Promise<PublicFaq[]> {
+  return (await contentGet<{ items: PublicFaq[] }>(withLocale('/content/faqs', locale)))?.items ?? [];
 }
-export async function listBanners(): Promise<PublicBanner[]> {
-  return (await contentGet<{ items: PublicBanner[] }>('/content/banners'))?.items ?? [];
+export async function listBanners(locale: Locale = currentLocale()): Promise<PublicBanner[]> {
+  return (await contentGet<{ items: PublicBanner[] }>(withLocale('/content/banners', locale)))?.items ?? [];
 }
-export async function getMenu(): Promise<PublicMenu> {
-  const m = await contentGet<Partial<PublicMenu>>('/content/menu');
+export async function getMenu(locale: Locale = currentLocale()): Promise<PublicMenu> {
+  const m = await contentGet<Partial<PublicMenu>>(withLocale('/content/menu', locale));
   return { header: m?.header ?? [], footer_company: m?.footer_company ?? [], footer_legal: m?.footer_legal ?? [] };
+}
+
+/** The enabled languages for which `has` says content exists: what a page's `hreflang` set is built from. */
+export async function localesWithContent(has: (locale: Locale) => Promise<boolean>): Promise<Locale[]> {
+  const enabled = enabledLocales();
+  const flags = await Promise.all(enabled.map((l) => has(l).catch(() => false)));
+  return enabled.filter((_, i) => flags[i]);
 }
 
 /** Paragraphs of a plain-text field: split at blank lines, trimmed, empty ones dropped. */

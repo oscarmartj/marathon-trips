@@ -1,10 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import Races from './(public)/races/page';
-import RacePage from './(public)/races/[slug]/page';
-import Home from './(public)/page';
-import ConfirmPage from './(public)/alerts/confirm/page';
-import UnsubscribePage from './(public)/alerts/unsubscribe/page';
+import Races from './[locale]/races/page';
+import RacePage from './[locale]/races/[slug]/page';
+import Home from './[locale]/page';
+import ConfirmPage from './[locale]/alerts/confirm/page';
+import UnsubscribePage from './[locale]/alerts/unsubscribe/page';
 import { detail, SLUG, stubCatalogue, summary } from '@/test/catalogue-fixtures';
 
 afterEach(() => vi.unstubAllGlobals());
