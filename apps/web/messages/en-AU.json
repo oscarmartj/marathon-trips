@@ -66,6 +66,8 @@
     "accountTravellers": "Traveller details",
     "payLink": "Pay with your link",
     "payLinkReturn": "Your payment",
+    "accountPrivacy": "Privacy and marketing",
+    "mailUnsubscribe": "Unsubscribe from marketing emails",
     "accountChange": "Change your booking"
   },
   "footer": {
@@ -326,13 +328,75 @@
       "automations": "Automations",
       "automation": "Automation",
       "keydates": "Key dates",
+      "triplists": "Trip lists",
       "reports": "Reports",
       "waitlist": "Waiting list"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
       "title": "Dashboard",
-      "intro": "Today's bookings, payments needing attention and upcoming races will appear here."
+      "intro": "What needs attention today. Each section shows only what your role can see.",
+      "nothingToShow": "Your role does not include any start page sections. Ask an owner if you need access to booking requests, payments, tasks, places left or alert subscribers.",
+      "requests": {
+        "title": "New booking requests",
+        "summary": "Requests waiting for an answer: {count}.",
+        "caption": "Oldest requests first",
+        "reference": "Reference",
+        "trip": "Trip",
+        "requested": "Requested",
+        "expires": "Request lapses",
+        "all": "Open all bookings"
+      },
+      "payments": {
+        "title": "Payments to collect",
+        "summary": "Overdue: {overdue}. Falling due in the next {days} days: {dueSoon}.",
+        "truncated": "There are more bookings than this page checks at once, so the counts may be higher.",
+        "caption": "Next payment owed on each booking, earliest first",
+        "reference": "Booking",
+        "what": "Payment",
+        "due": "Due",
+        "amount": "Amount due",
+        "overdue": "Overdue",
+        "kinds": {
+          "deposit": "Deposit",
+          "balance": "Balance",
+          "instalment": "Instalment",
+          "adjustment": "Adjustment"
+        }
+      },
+      "tasks": {
+        "title": "Tasks due",
+        "summary": "Overdue: {overdue}. Due in the next week: {dueSoon}.",
+        "caption": "Open tasks, soonest first",
+        "task": "Task",
+        "due": "Due",
+        "overdue": "Overdue",
+        "all": "Open all tasks"
+      },
+      "stock": {
+        "title": "Places left",
+        "summary": "Pools that are low or sold out: {count}.",
+        "caption": "Pools with the fewest places left first",
+        "pool": "Pool",
+        "trip": "Race",
+        "left": "Left",
+        "ofCapacity": "{remaining} of {capacity}",
+        "low": "Low",
+        "soldOut": "Sold out",
+        "kinds": {
+          "entry": "Race entries",
+          "room": "Rooms",
+          "extra": "Extras"
+        }
+      },
+      "subscribers": {
+        "title": "Alert subscribers by race",
+        "summary": "Confirmed: {confirmed}. Waiting to confirm: {pending}.",
+        "caption": "Races with the most confirmed subscribers first",
+        "race": "Race",
+        "confirmed": "Confirmed",
+        "pending": "Waiting to confirm"
+      }
     },
     "races": {
       "title": "Races",
@@ -1199,6 +1263,50 @@
       "saved": "Report saved.",
       "preview": "Preview",
       "cancelEdit": "Cancel"
+    },
+    "triplists": {
+      "title": "Trip lists",
+      "intro": "The rooming list, transfers list and day-by-day itinerary of a trip. The first two show travellers' names, so download them only when a hotel or transport provider needs them.",
+      "pickTitle": "Choose a trip",
+      "pickLabel": "Trip",
+      "pickNone": "Choose a trip",
+      "pickOption": "{trip} ({count} on the lists)",
+      "listedHint": "Only bookings with a paid deposit are listed. Requested, declined, expired, called-off and refunded bookings are left out.",
+      "namesHint": "Shows names only: no dates of birth, emergency contacts, contact details or payments.",
+      "roomingTitle": "Rooming list",
+      "roomingTotals": "{rooms} rooms, {guests} guests, {pending} still without details.",
+      "roomingEmpty": "No rooms to list yet.",
+      "hotelCaption": "{hotel}, {city}",
+      "roomLine": "{room} ({occupancy} in the room)",
+      "transfersTitle": "Transfers list",
+      "transfersTotals": "{passengers} passengers, {pending} still without details.",
+      "transfersEmpty": "No transfers have been booked yet.",
+      "route": "{origin} to {destination}",
+      "itineraryTitle": "Itinerary",
+      "dayHeading": "Day {day}, {date}",
+      "provisional": "The race dates are provisional.",
+      "unscheduledTitle": "Not placed on a day",
+      "unscheduledHint": "These have no date in their schedule. Add one in the catalogue to place them.",
+      "itemKinds": {
+        "check_in": "Check in",
+        "check_out": "Check out",
+        "race": "Race",
+        "extra": "Included"
+      },
+      "columns": {
+        "booking": "Booking",
+        "room": "Room",
+        "guests": "Guests",
+        "passengers": "Passengers",
+        "quantity": "Quantity",
+        "checkIn": "Check in",
+        "checkOut": "Check out"
+      },
+      "detailsPending": "Details not entered yet",
+      "lead": "lead",
+      "nobody": "No one",
+      "download": "Download CSV",
+      "downloadList": "Download {list} as CSV"
     },
     "keydates": {
       "title": "Key dates",
@@ -2895,6 +3003,53 @@
       "loadMore": "Load more",
       "loading": "Loading…",
       "error": "We could not load the waiting list."
+    },
+    "privacy": {
+      "heading": "Privacy",
+      "loading": "Loading privacy details",
+      "erased": "This customer's personal data has been erased.",
+      "consent": "Marketing emails: {state}",
+      "consentYes": "yes, since {date}",
+      "consentNo": "no",
+      "history": "Consent history",
+      "historyLine": "{date}: {state} ({source})",
+      "granted": "agreed",
+      "withdrawn": "withdrawn",
+      "source": {
+        "account": "account page",
+        "unsubscribe_link": "unsubscribe link",
+        "erasure": "erasure"
+      },
+      "requests": "Requests",
+      "requestLine": "{date}: {kind}, {status} (asked by {by})",
+      "kind": {
+        "export": "data export",
+        "erasure": "erasure"
+      },
+      "status": {
+        "received": "waiting",
+        "completed": "done"
+      },
+      "by": {
+        "customer": "the customer",
+        "staff": "staff"
+      },
+      "noRequests": "No requests yet.",
+      "export": "Download their data",
+      "exportFull": "Download with staff notes (for a formal access request)",
+      "exportHelp": "Owners only. The file is made now and not kept. Check the version with staff notes before you send it to anyone.",
+      "eraseHeading": "Erase this customer",
+      "eraseHelp": "Owners only. Removes their name, contact details, notes, messages and sign-in. Keeps bookings, payments and booking terms without their name. This cannot be undone.",
+      "eraseConfirm": "I have checked this is the right customer and want to erase their personal data",
+      "erase": "Erase personal data",
+      "erasedDone": "Erased.",
+      "blocked": {
+        "open_booking": "Cannot erase yet: a booking is still open. Close it first.",
+        "trip_not_finished": "Cannot erase yet: a paid trip has not finished.",
+        "live_payment": "Cannot erase yet: a payment is still in progress.",
+        "refund_may_be_due": "Cannot erase yet: a closed booking has money paid that may need to be refunded."
+      },
+      "ownerOnly": "Only an owner can do this."
     }
   },
   "auth": {
@@ -3385,6 +3540,41 @@
         "generic": "We could not save these details. Try again in a moment.",
         "network": "We could not reach the server. Check your connection and try again."
       }
+    },
+    "privacy": {
+      "title": "Privacy and marketing",
+      "intro": "Choose whether we email you about new trips, download a copy of your data, or ask us to delete it.",
+      "link": "Privacy and marketing choices",
+      "loading": "Loading your choices",
+      "signIn": "Sign in to manage your privacy choices.",
+      "error": "Something went wrong. Please try again.",
+      "closed": "This account is closed.",
+      "marketing": {
+        "heading": "Marketing emails",
+        "wording": "Email me about new race trips, offers and travel tips. You can unsubscribe at any time with the link in each email. This is separate from emails about your bookings, which we always send.",
+        "label": "Yes, email me about new trips and offers",
+        "save": "Save my choice",
+        "saved": "Your choice is saved.",
+        "outdated": "This page is out of date. Reload it and try again.",
+        "since": "Your current choice was recorded on {date}.",
+        "alertsNote": "Saying no also stops race opening alerts, because they are marketing emails."
+      },
+      "download": {
+        "heading": "Your data",
+        "body": "Download a copy of the personal data we hold about you, as a file you can open in any text editor. We make it when you ask and do not keep it.",
+        "link": "Download my data",
+        "limit": "You can download it up to five times an hour."
+      },
+      "erase": {
+        "heading": "Delete your data",
+        "body": "Ask us to delete your personal data. We remove your name, contact details and messages. We keep the records the law requires, such as payments and booking dates, without your name. We cannot delete your data while you have a trip or a payment that is not finished.",
+        "ask": "Ask us to delete my data",
+        "received": "We received your request on {date}. We will be in touch when it is done.",
+        "accountBody": "You have no bookings with us, so your sign-in account can be deleted straight away. This signs you out and cannot be undone.",
+        "confirmLabel": "I understand that this deletes my sign-in account and cannot be undone",
+        "deleteAccount": "Delete my sign-in account",
+        "deleted": "Your sign-in account has been deleted."
+      }
     }
   },
   "payLink": {
@@ -3424,6 +3614,15 @@
       "booking_not_payable": "This booking cannot take a payment right now.",
       "generic": "Something went wrong. Nothing has been charged. Try again shortly."
     }
+  },
+  "mailUnsubscribe": {
+    "title": "Unsubscribe from marketing emails",
+    "body": "Stop all marketing emails from us to this address, including race opening alerts. Emails about your bookings still come.",
+    "button": "Unsubscribe",
+    "working": "Unsubscribing",
+    "done": "You are unsubscribed. We will not send you marketing emails any more. You can change your mind in your account.",
+    "invalid": "This unsubscribe link is not valid. Use the link in the latest email we sent you.",
+    "noScript": "This page needs JavaScript. You can also unsubscribe in your account, under Privacy and marketing choices."
   },
   "amendments": {
     "changesHeading": "Changes to this booking",

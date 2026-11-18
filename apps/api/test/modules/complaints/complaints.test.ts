@@ -400,7 +400,7 @@ describe('notes, history, export and erasure', () => {
     expect(JSON.stringify(history)).toContain('common.note.added');
   });
 
-  it('exports a customer\'s complaints with their notes, and erasure redacts the words but keeps the dates, status and outcome', async () => {
+  it('exports a customer\'s complaints (staff notes only in the owner\'s full export, task 5.5), and erasure redacts the words but keeps the dates, status and outcome', async () => {
     const customerId = await makeCustomer(t, { email: uniqueEmail('erase') });
     const otherId = await makeCustomer(t, { email: uniqueEmail('other') });
     const mine = await log({ customerId, summary: 'Mine to erase', description: 'Names and details', complainantName: 'Erin Erased' });
@@ -411,7 +411,10 @@ describe('notes, history, export and erasure', () => {
 
     const handlers = t.app.get(EntityRegistry).get('Complaint')!.handlers!;
     const exported = (await t.prisma.$transaction((tx) => handlers.export(tx, customerId))) as Array<Record<string, unknown>>;
-    expect(exported.map((r) => r.summary ?? r.body)).toEqual(['Mine to erase', 'Her phone number is 0400 000 000']);
+    // Task 5.5 (plan review point 7): staff notes are not part of the customer's export; the privacy module adds them to
+    // the owner's `full` export (test/modules/privacy/export-consent.test.ts).
+    expect(exported.map((r) => r.summary ?? r.body)).toEqual(['Mine to erase']);
+    expect(JSON.stringify(exported)).not.toContain('0400 000 000');
     expect(exported[0]).toMatchObject({ reference: mine.reference, complainantName: 'Erin Erased', status: 'resolved', outcome: 'upheld', resolutionSummary: resolution.resolutionSummary });
 
     await t.prisma.$transaction((tx) => handlers.anonymise(tx, customerId));

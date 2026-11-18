@@ -4,11 +4,12 @@ import type { Tx } from './support';
 
 const ERASED = '[redacted]';
 
-/** The team's notes on a customer and on their bookings (task 2.5) are free text and can hold anything: all of them are exported (a deleted note is still stored) and all are redacted on erasure. */
+/**
+ * The team's notes on a customer and on their bookings (task 2.5) are free text and can hold anything. They are staff
+ * notes, so they are not part of these exports (task 5.5: the privacy module adds them to the owner's `full` export);
+ * erasure redacts all of them, deleted ones included (the privacy module does it again for every registered entity).
+ */
 const bookingIdsOf = (tx: Tx, customerId: string) => tx.booking.findMany({ where: { customerId }, select: { id: true } }).then((rows) => rows.map((r) => r.id));
-async function exportNotes(tx: Tx, entityType: 'Customer' | 'Booking', ids: string[]) {
-  return ids.length === 0 ? [] : tx.note.findMany({ where: { entityType, entityId: { in: ids } }, select: { entityType: true, entityId: true, body: true, pinned: true, createdAt: true, deletedAt: true }, orderBy: { createdAt: 'asc' } });
-}
 async function redactNotes(tx: Tx, entityType: 'Customer' | 'Booking', ids: string[]) {
   if (ids.length > 0) await tx.note.updateMany({ where: { entityType, entityId: { in: ids } }, data: { body: ERASED } });
 }
@@ -21,10 +22,8 @@ export const BOOKING_ENTITIES: EntityDef[] = [
   {
     entityType: 'Customer', model: 'Customer', customerLink: { kind: 'self' }, table: customerTable,
     handlers: {
-      export: async (tx: Tx, customerId) => [
-        ...(await tx.customer.findMany({ where: { id: customerId }, select: { email: true, givenName: true, familyName: true, phone: true, countryOfResidence: true, preferredLocale: true, createdAt: true } })),
-        ...(await exportNotes(tx, 'Customer', [customerId])),
-      ],
+      export: (tx: Tx, customerId) =>
+        tx.customer.findMany({ where: { id: customerId }, select: { email: true, givenName: true, familyName: true, phone: true, countryOfResidence: true, preferredLocale: true, createdAt: true } }),
       anonymise: async (tx: Tx, customerId) => {
         await redactNotes(tx, 'Customer', [customerId]);
         await tx.customer.updateMany({
@@ -37,10 +36,8 @@ export const BOOKING_ENTITIES: EntityDef[] = [
   {
     entityType: 'Booking', model: 'Booking', customerLink: { kind: 'column', column: 'customerId' }, table: bookingTable,
     handlers: {
-      export: async (tx: Tx, customerId) => [
-        ...(await tx.booking.findMany({ where: { customerId }, select: { reference: true, status: true, departureDate: true, returnDate: true, residenceCountry: true, requestedAt: true } })),
-        ...(await exportNotes(tx, 'Booking', await bookingIdsOf(tx, customerId))),
-      ],
+      export: (tx: Tx, customerId) =>
+        tx.booking.findMany({ where: { customerId }, select: { reference: true, status: true, departureDate: true, returnDate: true, residenceCountry: true, requestedAt: true }, orderBy: { requestedAt: 'asc' } }),
       anonymise: async (tx: Tx, customerId) => {
         await redactNotes(tx, 'Booking', await bookingIdsOf(tx, customerId));
         await tx.booking.updateMany({ where: { customerId }, data: { residenceCountry: 'ZZ', customFields: {}, requestContactHmac: null } });

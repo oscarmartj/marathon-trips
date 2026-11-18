@@ -1,6 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import { ZodError } from 'zod';
+import { isCustomerErasedError } from '../database/transaction';
 import { AppError, safeError } from '../errors/safe-error';
 import { ApiError } from './api-error';
 
@@ -30,6 +31,7 @@ export class ApiErrorFilter implements ExceptionFilter {
       const code = status === 404 ? 'not_found' : status === 405 ? 'method_not_allowed' : status === 413 ? 'payload_too_large' : status < 500 ? 'bad_request' : 'unexpected_error';
       return { status, body: { code, message: status === 404 ? 'Not found' : 'The request could not be processed' }, headers: {} };
     }
+    if (isCustomerErasedError(err)) return { status: 409, body: { code: 'customer_closed', message: 'This account is closed' }, headers: {} };
     const info = safeError(err);
     if (!(err instanceof AppError)) this.logger.error(`unhandled error: ${info.code}`);
     return { status: 500, body: { code: 'unexpected_error', message: 'An unexpected error occurred' }, headers: {} };

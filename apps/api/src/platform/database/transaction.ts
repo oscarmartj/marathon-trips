@@ -19,6 +19,17 @@ export function isRetryableTransactionError(err: unknown): boolean {
   return /could not serialize access|deadlock detected/.test(text);
 }
 
+/**
+ * True when the database refused to write something for an erased customer (trigger mt_customer_not_erased, task 5.5,
+ * SQLSTATE MT409), however Prisma wraps it. The API answers 409 customer_closed.
+ */
+export function isCustomerErasedError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === 'MT409') return true;
+  const text = err instanceof Error ? `${err.message} ${JSON.stringify((err as { meta?: unknown }).meta ?? {})} ${String((err as { cause?: unknown }).cause ?? '')}` : '';
+  return /MT409|customer_erased/.test(text);
+}
+
 export interface RunTransactionOptions {
   isolationLevel?: Prisma.TransactionIsolationLevel;
   /** Including the first. Default 3 (plan 0.1, 6.3). */

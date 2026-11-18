@@ -80,6 +80,12 @@ Registro de la prueba hecha en la tarea 8.6 (en este repositorio, con PostgreSQL
 4. Si la base destino es la viva, el script exige además `--replace --i-know-this-replaces-live-data`: úsalo solo si has comprobado el paquete en otra base antes.
 5. Cambia las claves o contraseñas que pudieran haberse filtrado si el motivo del desastre fue una intrusión, y anota lo ocurrido.
 
+**Borrados de datos personales (tarea 5.5).** Una copia anterior trae de vuelta a los clientes borrados después de hacerla. Por eso:
+
+- **Antes** de restaurar (paso 2), guarda la lista de borrados de la base viva, si todavía responde: `docker compose ... exec -T api pnpm --silent api:cli privacy:erasures-list > /restore/erasures.json`. Solo contiene identificadores, sin datos personales.
+- **Después** de arrancar con la base restaurada (paso 3): `docker compose ... cp /restore/erasures.json api:/tmp/erasures.json` y `docker compose ... exec api pnpm api:cli privacy:erasures-reapply /tmp/erasures.json`. Vuelve a borrar cada cliente o cuenta de la lista; los que en la copia tenían un viaje o un pago abierto salen como `NOT erased` y los decides tú (cierra el viaje en el panel y bórralo desde la ficha).
+- Si la base viva ya no existe, la API escribe una línea `privacy.customer.erased <id>` (o `privacy.account.erased <id>`) en su registro por cada borrado: con esos identificadores se monta el mismo archivo (`[{"customerId":"<id>","userId":null}, ...]`).
+
 ## Monitor del sistema y modo mantenimiento (tarea 8.6)
 
 - **Monitor:** `GET /admin/system/status` (permiso `platform.system.read`; el rol de propietario lo tiene). Devuelve el estado de la base, cada cola de tareas (esperando, activas, fallidas en 24 h, antigüedad de la más antigua), eventos pendientes y fallidos, correos en cola y fallidos, y la última copia (`ok`, `stale` si pasa de 26 h, `unknown` si no hay archivo). `status` es `ok` o `attention`, con `reasons` en códigos fijos (`queue_backlog:mail.send`, `mail_failed`, `backup_stale`...). Solo cuentas, edades y nombres de cola: nunca direcciones ni datos de trabajos. Aún no hay pantalla en el panel; hasta entonces, con la sesión del panel abierta, se consulta en el navegador `https://<dominio>/api/admin/system/status`. Para avisos externos, un servicio de vigilancia gratuito puede comprobar `https://<dominio>/` (solo dice que la web responde: el monitor exige sesión, y `/api/health` de la web tampoco mira la base).

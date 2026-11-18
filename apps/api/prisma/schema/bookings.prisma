@@ -109,6 +109,8 @@ model Customer {
   payments           Payment[]
   waitlistEntries    WaitlistEntry[]
   complaints         Complaint[]
+  privacyRequests    PrivacyRequest[]
+  consentRecords     ConsentRecord[]
 
   @@unique([userId, userKind])
   @@map("customers")

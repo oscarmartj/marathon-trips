@@ -5,9 +5,13 @@ import { hasAuthorization } from '../integrations/api-key-token';
 import { ApiError } from './api-error';
 import type { ApiRequest } from './request-context';
 
-/** Paths that keep working in maintenance mode: liveness, staff sign-in, and the admin API (to see the monitor and switch it off). */
+/**
+ * Paths that keep working in maintenance mode: liveness, staff sign-in, the admin API (to see the monitor and switch it
+ * off), and one-click unsubscribe (task 5.5: an unsubscribe must work whenever it is sent, Spam Act 2003).
+ */
 export function isMaintenanceExempt(method: string, path: string): boolean {
   if (method === 'GET' && (path === '/health' || path === '/health/')) return true;
+  if (method === 'POST' && /^\/unsubscribe\/[^/]+$/.test(path)) return true;
   return path === '/admin' || path.startsWith('/admin/') || path.startsWith('/auth/staff/');
 }
 

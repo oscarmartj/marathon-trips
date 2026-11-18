@@ -33,12 +33,18 @@ export class AlertsModule implements OnModuleInit {
       name: 'alerts.notify_open', module: 'alerts', events: ['catalogue.package.sale_status_changed'], whenDisabled: 'skip', notifyOnly: true,
       handle: async (event, { tx }) => void (await this.alerts.notifyOpen(event, tx)),
     });
-    // Subscriptions are not customer data until a customer account is linked (5.1); the handlers are ready for 5.5.
+    // Subscriptions made through the public form carry only an address (task 5.5, review point 1): a customer's are
+    // theirs by customer id or by any of their addresses, compared case-insensitively. Erasure deletes them.
     this.entities.register({
       entityType: 'AlertSubscription', model: 'AlertSubscription', customerLink: { kind: 'column', column: 'customerId' },
       handlers: {
-        export: (tx, customerId) => tx.alertSubscription.findMany({ where: { customerId }, select: { email: true, raceId: true, editionId: true, status: true, createdAt: true, confirmedAt: true } }),
-        anonymise: async (tx, customerId) => void (await tx.alertSubscription.deleteMany({ where: { customerId } })),
+        export: (tx, customerId, opts) => tx.$queryRaw`
+          SELECT s.email::text AS email, r.slug AS race, e.year AS "editionYear", s.status::text AS status, s."createdAt", s."confirmedAt", s."unsubscribedAt"
+            FROM alert_subscriptions s JOIN races r ON r.id = s."raceId" LEFT JOIN race_editions e ON e.id = s."editionId"
+           WHERE s."customerId" = ${customerId}::uuid OR lower(s.email::text) = ANY(${[...(opts?.emails ?? [])]}::text[])
+           ORDER BY s."createdAt"`,
+        anonymise: async (tx, customerId, ctx) => void (await tx.$executeRaw`
+          DELETE FROM alert_subscriptions WHERE "customerId" = ${customerId}::uuid OR lower(email::text) = ANY(${[...(ctx?.emails ?? [])]}::text[])`),
       },
     });
   }

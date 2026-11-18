@@ -11,6 +11,8 @@ const nextConfig = {
       // Task 5.1: a payment link's page holds a token from the fragment; neither page is framed or sends a Referer.
       { source: '/pay', headers: [...noReferrer, { key: 'X-Frame-Options', value: 'DENY' }] },
       { source: '/pay/return', headers: [...noReferrer, { key: 'X-Frame-Options', value: 'DENY' }] },
+      // Task 5.5: the unsubscribe page reads the email's reference from the fragment.
+      { source: '/unsubscribe', headers: noReferrer },
       { source: '/admin/:path*', headers: [{ key: 'X-Frame-Options', value: 'DENY' }] },
     ];
   },

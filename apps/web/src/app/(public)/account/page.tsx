@@ -35,6 +35,7 @@ export default async function Page() {
             <p><Link href="/races">{t('account.list.findRace')}</Link></p>
           </section>
         ) : null}
+        <p><Link href="/account/privacy">{t('account.privacy.link')}</Link></p>
         <AccountSummary />
       </div>
     </>

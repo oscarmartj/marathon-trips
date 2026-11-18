@@ -35,7 +35,7 @@ import { ReferenceGenerator } from './support';
     ReferenceGenerator, BookingRequestRateLimitGuard, CustomerAdminService, QuotedBookingService, BookingCoverage, WaitlistOffersService,
     BookingAmendmentHooks, BookingAmendmentService,
   ],
-  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage, BookingAmendmentHooks, BookingAmendmentService],
+  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage, CustomerService, BookingAmendmentHooks, BookingAmendmentService],
 })
 export class BookingsModule implements OnModuleInit {
   constructor(
