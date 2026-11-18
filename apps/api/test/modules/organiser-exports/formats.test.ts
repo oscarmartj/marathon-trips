@@ -46,7 +46,8 @@ describe('whitelist_enforced_structurally', () => {
     expect(bad({ columns: [{ header: 'A', source: 'givenName', required: true }, { header: 'A', source: 'familyName', required: true }] })).toThrow(/twice/);
     expect(bad({ columns: [{ header: 'A', source: 'givenName', required: true, as: 'dmy' }] })).toThrow(/not a way to write/);
     expect(bad({ columns: [{ header: ' ', source: 'givenName', required: true }] })).toThrow(/empty/);
-    for (const h of ['=A', '+A', '-A', '@A', ' =A']) expect(bad({ columns: [{ header: h, source: 'givenName', required: true }] })).toThrow(/formula/);
+    for (const h of ['=A', '+A', '-A', '@A', ' =A', 'A;=B', 'A, @B']) expect(bad({ columns: [{ header: h, source: 'givenName', required: true }] })).toThrow(/formula/);
+    expect(() => defineFormat({ ...base, columns: [{ header: 'Event (km), 10 - 42', source: 'givenName', required: true }] })).not.toThrow();
     expect(bad({ columns: [{ header: 'A\nB', source: 'givenName', required: true }] })).toThrow(/control/);
     expect(bad({ participation: ['supporter' as never] })).toThrow(/not a runner type/);
     expect(bad({ participation: [] })).toThrow(/participation/);
@@ -95,10 +96,39 @@ describe('formula_injection_neutralised', () => {
   });
   it('also in a cell that has to be quoted (a comma or a newline) and in the other columns', () => {
     const csv = renderCsv(intl, [{ ...ana, givenName: '=A1,B1', emergencyContactName: '@x\ny', emergencyContactPhone: '+61 400' }]);
-    expect(csv).toContain(";'=A1,B1;"); // a comma is not special when the delimiter is a semicolon
+    // a comma is quoted and its fragments guarded even when the delimiter is a semicolon (7.fix-3): the organiser may split on it
+    expect(csv).toContain(`;"'=A1,B1";`);
     expect(renderCsv(base, [{ ...ana, givenName: '=A1,B1' }])).toContain(`"'=A1,B1"`);
     expect(csv).toContain(`"'@x\ny"`);
     expect(csv).toContain(";'+61 400");
+  });
+  // 7.fix-3: a spreadsheet may split the file on the other separator, and then each fragment of a cell is a cell.
+  const hyperlink = 'Marathon;=HYPERLINK("http://evil.test","x")';
+  const fragmentsOf = (cell: string) => cell.split(/[,;]/).map((x) => x.trim());
+  const unquote = (cell: string) => (cell.startsWith('"') && cell.endsWith('"') ? cell.slice(1, -1).replace(/""/g, '"') : cell);
+  // The international format writes the distance in km, so the semicolon case is the basic columns with a semicolon.
+  const semicolon = defineFormat({ ...basic, id: 'basic_semicolon', file: { delimiter: ';', bom: true, eol: '\r\n' } });
+  it.each([
+    ['the basic (comma) format', basic, ','],
+    ['a semicolon format', semicolon, ';'],
+  ])('a distance name with a formula after a semicolon is quoted and guarded in %s', (_n, f, d) => {
+    const csv = renderCsv(f, [{ ...ana, distanceName: hyperlink, distanceMetres: 42_195 }]);
+    const row = lines(csv)[1]!;
+    // the whole value is one quoted cell, whatever the delimiter
+    expect(row).toContain(`"Marathon;'=HYPERLINK(""http://evil.test"",""x"")"`);
+    expect(row).toBe(['Ana', 'García-López', '1988-03-14', `"Marathon;'=HYPERLINK(""http://evil.test"",""x"")"`].join(d));
+    // split as a spreadsheet would with either separator, ignoring the quotes: no fragment starts like a formula
+    for (const sep of [',', ';']) for (const cell of row.split(sep)) for (const part of fragmentsOf(unquote(cell))) expect([sep, part, /^"?[=+\-@\t\r]/.test(part)]).toEqual([sep, part, false]);
+  });
+  it('comma fragments, leading spaces and every formula character are guarded; a dash inside a fragment is not', () => {
+    const out = (v: string) => lines(renderCsv(base, [{ ...ana, givenName: v }]))[1]!;
+    expect(out('Ana,=1+1')).toBe(`"Ana,'=1+1"`);
+    expect(out('Ana, +61 400')).toBe(`"Ana, '+61 400"`);
+    expect(out('Ana;-2+3;@SUM(A1)')).toBe(`"Ana;'-2+3;'@SUM(A1)"`);
+    expect(out("Ana;'=1")).toBe(`"Ana;''=1"`);
+    expect(out('10 km - fun run')).toBe('10 km - fun run');
+    expect(out('Ana;Bea')).toBe('"Ana;Bea"'); // quoted in a comma file too
+    expect(lines(renderCsv(intl, [{ ...ana, givenName: 'Ana,Bea' }]))[1]!.startsWith('García-López;"Ana,Bea";')).toBe(true);
   });
   it('a normal name is untouched, and generated dates, durations and distances never start with a formula character', () => {
     expect(lines(renderCsv(base, [ana]))[1]).toBe('Ana');

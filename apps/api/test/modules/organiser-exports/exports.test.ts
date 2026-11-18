@@ -227,6 +227,61 @@ describe('who is exported, and nothing from another race', () => {
   });
 });
 
+describe('demo data (7.fix-3)', () => {
+  /**
+   * A draft demo race with an edition and a package, as in the reports tests: `isDemo` can only be set when the row is
+   * created and a demo race can never be published.
+   */
+  async function demoWorld(base: PricedWorld): Promise<PricedWorld> {
+    const { id: _r, createdAt: _c, updatedAt: _u, ...race } = await t.prisma.race.findUniqueOrThrow({ where: { id: base.race.id } });
+    const demo = await t.prisma.race.create({ data: { ...race, slug: `demo-${base.race.slug}`, isDemo: true, status: 'draft', publishedAt: null } as never });
+    const { id: _e, raceId: _er, createdAt: _ec, updatedAt: _eu, ...edition } = await t.prisma.raceEdition.findUniqueOrThrow({ where: { id: base.edition.id } });
+    const ed = await t.prisma.raceEdition.create({ data: { ...edition, raceId: demo.id } as never });
+    const { id: _p, editionId: _pe, createdAt: _pc, updatedAt: _pu, ...pkg } = await t.prisma.package.findUniqueOrThrow({ where: { id: base.pkg.id } });
+    const pk = await t.prisma.package.create({ data: { ...pkg, editionId: ed.id, saleStatus: 'draft' } as never });
+    const dist = await t.prisma.raceDistance.create({ data: { raceId: demo.id, kind: 'marathon', distanceMetres: 42_195, name: { 'en-AU': 'Marathon' } } });
+    return { ...base, race: { ...base.race, id: demo.id, slug: demo.slug }, edition: { ...base.edition, id: ed.id }, pkg: { ...base.pkg, id: pk.id }, distanceId: dist.id };
+  }
+
+  /** Like `seed`, but the booking or its customer can be demo data (both flags are only set on creation). */
+  async function seedDemo(world: PricedWorld, o: { booking?: boolean; customer?: boolean }): Promise<Seeded> {
+    const customerId = await makeCustomer(t, o.customer ? { isDemo: true } : {});
+    const { bookingId } = await makeBookingFor(t, world, customerId, undefined, undefined, { isDemo: !!o.booking });
+    await walkTo(t, bookingId, 'deposit_paid');
+    await t.prisma.bookingTraveller.create({ data: { bookingId, customerId, slot: 1, participationType: 'runner_with_entry', raceDistanceId: world.distanceId, isLead: true } });
+    const d = full();
+    await t.prisma.traveller.create({ data: { bookingId, customerId, slot: 1, ...d } as never });
+    const reference = (await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, select: { reference: true } })).reference;
+    return { reference, bookingId, customerId, given: d.givenName, family: d.familyName, supporterGiven: '' };
+  }
+
+  it('a demo booking or a demo customer on a real race is not exported, not counted and not in the audit entry', async () => {
+    const e = await pricedWorld(catalogueAdmin);
+    const real = await seed(e);
+    const demoBooking = await seedDemo(e, { booking: true });
+    const demoCustomer = await seedDemo(e, { customer: true });
+    expect((await t.prisma.booking.findMany({ where: { editionId: e.edition.id }, select: { isDemo: true } })).map((b) => b.isDemo).sort()).toEqual([false, false, true]);
+    expect((await check(body(e))).body).toMatchObject({ runners: 1, ready: 1, erased: 0, issues: [] });
+    const res = await file(owner, body(e));
+    expect([res.status, res.headers['x-row-count'], res.headers['x-excluded-count']]).toEqual([200, '1', '0']);
+    expect(res.text).toContain(real.given);
+    for (const d of [demoBooking, demoCustomer]) expect([res.text.includes(d.given), res.text.includes(d.family)]).toEqual([false, false]);
+    const [a] = await audits(e.edition.id);
+    expect((a!.changes as Record<string, { after: unknown }>).places!.after).toEqual([{ reference: real.reference, slot: 1 }]);
+  });
+
+  it('a demo race has nothing to export, even with a real-looking booking on it', async () => {
+    const base = await pricedWorld(catalogueAdmin);
+    const demo = await demoWorld(base);
+    const d = await seedDemo(demo, {});
+    expect((await check(body(demo))).body).toMatchObject({ runners: 0, ready: 0, erased: 0 });
+    const res = await file(owner, body(demo));
+    expect([res.status, res.body.code]).toEqual([422, 'no_runners']);
+    expect(JSON.stringify(res.body)).not.toContain(d.given);
+    expect(await audits(demo.edition.id)).toEqual([]);
+  });
+});
+
 describe('minimal reads', () => {
   it('the database read of a format that does not ask for date of birth, finish time or emergency contact does not select them', async () => {
     const { FORMATS } = await import('../../../src/modules/organiser-exports');
@@ -380,10 +435,11 @@ describe('the response and the audit entry', () => {
     expect(res.text).toContain(';(07) 3000 0000');
   });
 
-  it('one audit row per file with only formatId, distance and row count, no personal value rows, nothing stored on disk', async () => {
+  it('one audit row per file with only formatId, distance, row count and the exported places, no personal value rows, nothing stored on disk', async () => {
     const e = await pricedWorld(catalogueAdmin);
     const r = await seed(e);
-    await seed(e);
+    const r2 = await seed(e);
+    const places = [r, r2].map((x) => ({ reference: x.reference, slot: 1 })).sort((a, b) => (a.reference < b.reference ? -1 : 1));
     const dir = process.env.FILE_STORAGE_DIR!;
     const filesBefore = existsSync(dir) ? readdirSync(dir, { recursive: true }).length : 0;
     expect((await file(owner, body(e))).status).toBe(200);
@@ -393,12 +449,42 @@ describe('the response and the audit entry', () => {
     expect(a.map((x) => x.entityType)).toEqual(['RaceEdition', 'RaceEdition']);
     expect(a.every((x) => x.actorType === 'staff' && x.actorId === owner.staff.id)).toBe(true);
     expect(a.map((x) => x.changes)).toEqual([
-      { formatId: { before: null, after: 'entry_list_basic' }, raceDistanceId: { before: null, after: null }, rowCount: { before: null, after: 2 } },
-      { formatId: { before: null, after: 'entry_list_international' }, raceDistanceId: { before: null, after: null }, rowCount: { before: null, after: 2 } },
+      { formatId: { before: null, after: 'entry_list_basic' }, places: { before: null, after: places }, raceDistanceId: { before: null, after: null }, rowCount: { before: null, after: 2 } },
+      { formatId: { before: null, after: 'entry_list_international' }, places: { before: null, after: places }, raceDistanceId: { before: null, after: null }, rowCount: { before: null, after: 2 } },
     ]);
     expect(a.flatMap((x) => x.piiValues)).toEqual([]);
     expect(JSON.stringify(a)).not.toContain(r.given);
     expect(existsSync(dir) ? readdirSync(dir, { recursive: true }).length : 0).toBe(filesBefore);
+  });
+
+  it('the audit entry names who was in the file by reference and place only: no name, date of birth or contact (7.fix-3)', async () => {
+    const e = await pricedWorld(catalogueAdmin);
+    const kept = await seed(e, { details: { emergencyContactName: 'Quilla Brightwater', emergencyContactPhone: '0400 987 654', dateOfBirth: new Date('1979-11-02T00:00:00Z') } });
+    const erased = await seed(e);
+    await t.prisma.$transaction(async (tx) => { await TRAVELLER_ENTITIES[0]!.handlers!.anonymise(tx, erased.customerId); });
+    const notPaid = await seed(e, { status: 'approved' });
+    const half = await t.prisma.raceDistance.create({ data: { raceId: e.race.id, kind: 'half', distanceMetres: 21_097, name: { 'en-AU': 'Half marathon' } } });
+    const other = await seed(e, { distanceId: half.id });
+    expect((await file(owner, body(e, { formatId: 'entry_list_international' }))).status).toBe(200);
+    expect((await file(owner, body(e, { raceDistanceId: half.id }))).status).toBe(200);
+    const [all, onlyHalf] = await audits(e.edition.id);
+    const after = (x: typeof all) => (x!.changes as Record<string, { after: unknown }>).places!.after;
+    expect(after(all)).toEqual([kept, other].map((x) => ({ reference: x.reference, slot: 1 })).sort((a, b) => (a.reference < b.reference ? -1 : 1)));
+    expect(after(onlyHalf)).toEqual([{ reference: other.reference, slot: 1 }]);
+    for (const left of [erased, notPaid]) expect(JSON.stringify(after(all))).not.toContain(left.reference);
+    const text = JSON.stringify([all, onlyHalf]);
+    for (const personal of [kept.given, kept.family, other.given, other.family, kept.supporterGiven, 'Quilla', 'Brightwater', '987 654', '1979-11-02', '02/11/1979', 'Australia']) expect([personal, text.includes(personal)]).toEqual([personal, false]);
+    expect([...all!.piiValues, ...onlyHalf!.piiValues]).toEqual([]);
+  });
+
+  it('the 61st dry-run check in an hour by one staff user is 429 with Retry-After, and another user is not affected', async () => {
+    const e = await pricedWorld(catalogueAdmin);
+    const s = await staffClient(t, [X.read]);
+    for (let i = 0; i < 60; i++) expect((await s.post('/admin/organiser-exports/check', body(e))).status).toBe(200);
+    const res = await s.post('/admin/organiser-exports/check', body(e));
+    expect(res.status).toBe(429);
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+    expect((await check(body(e))).status).toBe(200);
   });
 
   it('the 11th file in an hour is 429 with Retry-After', async () => {
