@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { automationTemplateKey, isCustomerTemplate } from '@mt/shared';
+import {
+  AUTOMATION_EMAIL_TEMPLATES, CUSTOMER_NOTICE_WINDOW_MS, MAX_CUSTOMER_NOTICES_PER_WINDOW, automationTemplateKey, isCustomerTemplate,
+} from '@mt/shared';
 import type { AutomationAction, AutomationActionType, AutomationEntityType, AutomationStep } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { AccessService } from '../../platform/access/access.service';
@@ -30,7 +32,7 @@ export type StepResult = Pick<AutomationStep, 'status' | 'code' | 'entityType' |
 export interface ActionRunContext {
   tx: Tx;
   testMode: boolean;
-  rule: { id: string; name: string; ownerUserId: string };
+  rule: { id: string; name: string; ownerUserId: string; serviceNoticeAckAt: Date | null };
   run: { id: string; triggerEventType: string | null; scheduledFor: Date | null };
   index: number;
   entity: LoadedEntity | null;
@@ -108,6 +110,9 @@ export class ActionRegistry {
 const done = (entityType?: string, entityId?: string): StepResult => ({ status: 'done', ...(entityType && entityId ? { entityType, entityId } : {}) });
 const simulated = (): StepResult => ({ status: 'simulated' });
 const skipped = (code: NonNullable<StepResult['code']>): StepResult => ({ status: 'skipped', code });
+
+/** The template keys of the customer notices: the per-customer cap counts these, whatever rule queued them. */
+export const CUSTOMER_NOTICE_KEYS: readonly string[] = AUTOMATION_EMAIL_TEMPLATES.filter(isCustomerTemplate).map(automationTemplateKey);
 
 /** The record's reference and its customer, for the records that have one (bookings and quotes). */
 function customerOf(entity: LoadedEntity | null) {
@@ -221,12 +226,24 @@ export class AutomationActions {
         if (isCustomerTemplate(a.template)) {
           const customer = customerOf(ctx.entity);
           if (!customer || customer.unavailable) return skipped('recipient_unavailable');
-          // Service notices are transactional: only an `all` suppression (bounce, complaint) stops them. Unsubscribing from
-          // marketing (scope `marketing`) never stops a balance reminder or a booking update (task 5.5, review point 2).
-          if (await ctx.tx.emailSuppression.findFirst({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email), scope: 'all' }, select: { id: true } })) return skipped('recipient_suppressed');
+          // Task 7.fix-2. The wording is staff text, so a notice counts as a service message only when the rule was
+          // switched on with that acknowledgement and neither the rule nor the wording changed since. A service message
+          // is stopped only by an `all` suppression (bounce, complaint; task 5.5); any other notice also honours a
+          // marketing unsubscribe and goes out as marketing, with the one-click unsubscribe header.
+          const service = await this.isServiceNotice(ctx.tx, ctx.rule.serviceNoticeAckAt, key);
+          const hit = await ctx.tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email) }, select: { scope: true } });
+          if (hit && (hit.scope === 'all' || !service)) return skipped('recipient_suppressed');
+          // At most MAX_CUSTOMER_NOTICES_PER_WINDOW notices per customer across every rule. The lock serialises runs that
+          // could email the same customer until this run commits, so the count holds under concurrency. Lock order is
+          // always the rule's lock, then the customer's (a rule sends one customer email at most): no deadlock cycle.
+          if (!ctx.testMode) await ctx.tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`automation_customer:${customer.id}`}))`;
+          const recent = await ctx.tx.outboundEmail.count({
+            where: { customerId: customer.id, templateKey: { in: [...CUSTOMER_NOTICE_KEYS] }, createdAt: { gt: new Date(ctx.now.getTime() - CUSTOMER_NOTICE_WINDOW_MS) } },
+          });
+          if (recent >= MAX_CUSTOMER_NOTICES_PER_WINDOW) return skipped('customer_rate_limited');
           if (ctx.testMode) return simulated();
           const r = await this.mail.enqueue({
-            to: customer.email, templateKey: key, templateVersion: 1, locale: customer.preferredLocale, dedupeKey, category: 'transactional',
+            to: customer.email, templateKey: key, templateVersion: 1, locale: customer.preferredLocale, dedupeKey, category: service ? 'transactional' : 'marketing',
             customerId: customer.id, relatedEntityType: ctx.entity!.entityType, relatedEntityId: ctx.entity!.id,
           }, ctx.tx);
           await this.auditSend(ctx, 'automations.action.email_queued', 'OutboundEmail', r.id, a.template);
@@ -269,6 +286,16 @@ export class AutomationActions {
     };
 
     return [createTask, tagAction('add'), tagAction('remove'), closeTasks, sendEmail, callWebhook] as unknown as Array<ActionDef<never>>;
+  }
+
+  /**
+   * Whether a customer notice is a service message now: the rule was switched on with the acknowledgement, and every
+   * wording of the template in use was put into use (or last changed) before it (task 7.fix-2).
+   */
+  async isServiceNotice(tx: Tx, ackAt: Date | null, templateKey: string): Promise<boolean> {
+    if (!ackAt) return false;
+    const changed = await tx.messageTemplate.count({ where: { channel: 'email', key: templateKey, status: 'active', updatedAt: { gt: ackAt } } });
+    return changed === 0;
   }
 
   /** Emails and webhook calls are audited like the other actions, with the automation as the actor (ids and codes only). */

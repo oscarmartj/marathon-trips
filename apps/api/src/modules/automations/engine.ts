@@ -47,13 +47,6 @@ export interface Outcome {
   conditions: boolean[];
 }
 
-/** A failure with a code from the closed list, rolled back and recorded (never retried). */
-class RunStop extends AppError {
-  constructor(readonly reason: AutomationReasonCode) {
-    super(reason, 'The automation run stopped');
-  }
-}
-
 /**
  * Runs automations (task 7.4): the outbox consumer that starts runs for events, the schedule tick, the run job and
  * the panel's test. A run happens in one transaction: every action or none. Test mode records what would happen and
@@ -62,8 +55,8 @@ class RunStop extends AppError {
 @Injectable()
 export class AutomationEngine {
   private readonly logger = new Logger('Automations');
-  /** Test seam: called before each action runs (index), inside the run's transaction. */
-  beforeAction: ((index: number) => Promise<void> | void) | null = null;
+  /** Test seam: called before each action runs (index), inside the run's transaction (after every lock is taken). */
+  beforeAction: ((index: number, tx: Tx) => Promise<void> | void) | null = null;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -97,8 +90,8 @@ export class AutomationEngine {
     let created = 0;
     for (const rule of rules) {
       const rows = await tx.$queryRaw<Array<{ id: string }>>`
-        INSERT INTO automation_runs (id, "ruleId", "ruleVersion", source, "triggerEventId", "triggerEventType", "entityType", "entityId", facts, "testMode", status, "reasonCode", "finishedAt")
-        VALUES (gen_random_uuid(), ${rule.id}::uuid, ${rule.version}, 'event', ${event.id}::uuid, ${event.type}, ${trigger.entityType}, ${event.aggregateId}::uuid,
+        INSERT INTO automation_runs (id, "ruleId", "ruleVersion", source, "triggerEventId", "triggerEventType", "eventOccurredAt", "entityType", "entityId", facts, "testMode", status, "reasonCode", "finishedAt")
+        VALUES (gen_random_uuid(), ${rule.id}::uuid, ${rule.version}, 'event', ${event.id}::uuid, ${event.type}, ${event.occurredAt}::timestamptz, ${trigger.entityType}, ${event.aggregateId}::uuid,
           ${facts ? JSON.stringify(facts) : null}::jsonb, ${rule.testMode},
           ${tooOld ? 'skipped' : 'pending'}::"AutomationRunStatus", ${tooOld ? 'event_too_old' : null}, ${tooOld ? now : null}::timestamptz)
         ON CONFLICT ("ruleId", "triggerEventId", "scheduledFor") WHERE source <> 'manual' DO NOTHING
@@ -142,8 +135,8 @@ export class AutomationEngine {
 
   /**
    * The `automations.run` job. Only a `pending` run is processed and its row is locked, so a repeated job does
-   * nothing. A known stop rolls back and is recorded at once; any other error rolls back, keeps the run pending and
-   * lets pg-boss retry, until the last attempt marks it failed.
+   * nothing. A known error (AppError) rolls back and is recorded at once; any other error rolls back, keeps the run
+   * pending and lets pg-boss retry, until the last attempt marks it failed.
    */
   async processRun(runId: string, now: Date = new Date()): Promise<'noop' | Outcome['status'] | 'retry'> {
     const steps: AutomationStep[] = [];
@@ -177,8 +170,7 @@ export class AutomationEngine {
       });
     } catch (err) {
       if (!started) throw err;
-      const stop = err instanceof RunStop ? err.reason : null;
-      const known = stop !== null || err instanceof AppError;
+      const known = err instanceof AppError;
       const attempts = attemptsBefore + 1;
       const final = known || attempts >= MAX_RUN_ATTEMPTS;
       const code: AutomationStepCode = known ? 'action_failed' : 'transient_error';
@@ -187,7 +179,7 @@ export class AutomationEngine {
       await this.prisma.automationRun.updateMany({
         where: { id: runId, status: 'pending' },
         data: final
-          ? { status: 'failed', reasonCode: stop ?? (known ? 'action_failed' : 'transient_error'), steps: recorded as unknown as Prisma.InputJsonValue, attempts, finishedAt: new Date() }
+          ? { status: 'failed', reasonCode: known ? 'action_failed' : 'transient_error', steps: recorded as unknown as Prisma.InputJsonValue, attempts, finishedAt: new Date() }
           : { attempts, steps: recorded as unknown as Prisma.InputJsonValue },
       });
       this.logger.warn(`automation run ${runId} failed (${code}): ${safeError(err).code}`);
@@ -213,11 +205,16 @@ export class AutomationEngine {
       });
       const steps: AutomationStep[] = [];
       let out: Outcome;
+      // A savepoint (task 7.fix-2): a PostgreSQL error aborts the transaction, so without it the update below would fail
+      // and the panel would get a 500 instead of a run recorded as failed.
+      await tx.$executeRaw`SAVEPOINT automation_test`;
       try {
         out = await this.execute(tx, run, now, steps);
-      } catch (err) {
+        await tx.$executeRaw`RELEASE SAVEPOINT automation_test`;
+      } catch {
+        await tx.$executeRaw`ROLLBACK TO SAVEPOINT automation_test`;
         // A test never retries: the run is recorded as failed with a code.
-        out = { status: 'failed', reasonCode: err instanceof RunStop ? err.reason : 'action_failed', steps, testMode: true, ruleVersion: rule.version, conditions: [] };
+        out = { status: 'failed', reasonCode: 'action_failed', steps, testMode: true, ruleVersion: rule.version, conditions: [] };
       }
       await tx.automationRun.update({
         where: { id: run.id },
@@ -277,7 +274,15 @@ export class AutomationEngine {
       // Serialises the count with other runs of the same rule, so the cap holds under concurrency.
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`automation_run:${rule.id}`}))`;
       const recent = await tx.automationRun.count({ where: { ruleId: rule.id, testMode: false, source: { not: 'manual' }, status: { in: ['succeeded', 'failed'] }, startedAt: { gt: new Date(now.getTime() - 3_600_000) } } });
-      if (recent >= MAX_REAL_RUNS_PER_HOUR) {
+      // Oldest first (task 7.fix-2): a backlog (events held while the module was off) can exceed the cap. A run never
+      // takes a place an older pending real run of the same rule could take, so whatever order the jobs run in, the
+      // oldest events act and the newest are held back. Order: when the event happened (or the schedule time), then id.
+      const orderKey = run.eventOccurredAt ?? run.scheduledFor ?? run.startedAt;
+      const [older] = await tx.$queryRaw<Array<{ n: number }>>`
+        SELECT count(*)::int AS n FROM automation_runs o
+        WHERE o."ruleId" = ${rule.id}::uuid AND o.status = 'pending' AND NOT o."testMode" AND o.source <> 'manual' AND o.id <> ${run.id}::uuid
+          AND (COALESCE(o."eventOccurredAt", o."scheduledFor", o."startedAt"), o.id) < (${orderKey}::timestamptz, ${run.id}::uuid)`;
+      if (recent + (older?.n ?? 0) >= MAX_REAL_RUNS_PER_HOUR) {
         await this.notify(tx, rule, 'rate_limited', 'An automation ran too often in the last hour and was held back');
         return stop('skipped', 'rate_limited', rule.version, testMode);
       }
@@ -300,9 +305,9 @@ export class AutomationEngine {
     for (const [index, action] of def.actions.entries()) {
       const d = this.actions.registry.get(action.type);
       try {
-        if (this.beforeAction) await this.beforeAction(index);
+        if (this.beforeAction) await this.beforeAction(index, tx);
         const r = await d.run(action as never, {
-          tx, testMode, rule: { id: rule.id, name: rule.name, ownerUserId: rule.ownerUserId },
+          tx, testMode, rule: { id: rule.id, name: rule.name, ownerUserId: rule.ownerUserId, serviceNoticeAckAt: rule.serviceNoticeAckAt },
           run: { id: run.id, triggerEventType: run.triggerEventType, scheduledFor: run.scheduledFor }, index, entity, actor, now,
         });
         if (r.code && !STEP_CODES.has(r.code)) throw new AppError('automation_step_code_unknown', 'An action returned an unknown code');

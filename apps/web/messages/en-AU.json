@@ -2942,7 +2942,8 @@
         "not_tagged": "did not have the tag",
         "nothing_to_close": "nothing to close",
         "action_failed": "it failed",
-        "transient_error": "a temporary problem"
+        "transient_error": "a temporary problem",
+        "customer_rate_limited": "the customer already had the most automation emails allowed in 24 hours"
       },
       "errors": {
         "validation_failed": "Some fields are not valid. Check the highlighted values and try again.",

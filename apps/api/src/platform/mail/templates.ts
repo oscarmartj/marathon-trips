@@ -21,6 +21,12 @@ export interface MailTemplate {
   version: number;
   /** Builds the message from ids at send time. The result is never stored; only its SHA-256 is. */
   render(ctx: RenderContext): Promise<RenderedMail>;
+  /**
+   * Task 7.fix-2: `all` = a transactional email of this template is checked at send time too, and an `all` suppression
+   * (bounce, complaint) that came in after it was queued stops it (`suppressed`, never retried). Marketing email is
+   * always checked against any suppression. Left out for sign-in, booking and payment emails that must still go out.
+   */
+  suppressedBy?: 'all';
 }
 
 @Injectable()

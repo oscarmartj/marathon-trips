@@ -86,6 +86,13 @@ export const MAX_CONDITIONS = 10;
 export const MAX_ACTIONS = 10;
 export const MAX_ENABLED_RULES = 50;
 export const MAX_REAL_RUNS_PER_HOUR = 100;
+/**
+ * Task 7.fix-2: at most this many automation emails to one customer, across all rules, in a rolling window. Counted on
+ * the emails queued (any status), atomically per customer. One booking event can match many rules; the customer gets
+ * at most this many notices a day.
+ */
+export const MAX_CUSTOMER_NOTICES_PER_WINDOW = 3;
+export const CUSTOMER_NOTICE_WINDOW_MS = 24 * 3_600_000;
 
 const factKey = z.string().regex(/^[a-z][a-zA-Z]{0,39}$/);
 const enumValue = z.string().regex(/^[a-z][a-z_]{0,39}$/);
@@ -162,7 +169,11 @@ export type AutomationRuleDefinition = z.infer<typeof automationRuleDefinitionSc
 
 export const createAutomationSchema = automationRuleDefinitionSchema;
 export const updateAutomationSchema = z.strictObject({ ...ruleFields, version: versionSchema }).superRefine(shapeCheck);
-export const enableAutomationSchema = z.strictObject({ version: versionSchema, testMode: z.boolean() });
+/**
+ * `serviceMessageAck`: whoever switches the rule on confirms its customer notices are service messages, not promotion
+ * (task 7.fix-2). Without it, or once the rule or the notice's wording changes, a notice honours marketing unsubscribes.
+ */
+export const enableAutomationSchema = z.strictObject({ version: versionSchema, testMode: z.boolean(), serviceMessageAck: z.boolean().optional() });
 export const disableAutomationSchema = z.strictObject({ version: versionSchema });
 export const deleteAutomationQuerySchema = z.strictObject({ version: z.coerce.number().int().min(0) });
 export const testAutomationSchema = z.strictObject({ entityId: uuid.optional() });
@@ -187,7 +198,7 @@ export type AutomationStepStatus = (typeof AUTOMATION_STEP_STATUSES)[number];
 /** Why a step was skipped or failed. Codes only, never text from a person or a receiver. */
 export const AUTOMATION_STEP_CODES = [
   'assignee_unavailable', 'recipient_unavailable', 'recipient_suppressed', 'webhook_unavailable', 'tag_unavailable', 'entity_gone',
-  'already_tagged', 'not_tagged', 'nothing_to_close', 'action_failed', 'transient_error',
+  'already_tagged', 'not_tagged', 'nothing_to_close', 'action_failed', 'transient_error', 'customer_rate_limited',
 ] as const;
 export type AutomationStepCode = (typeof AUTOMATION_STEP_CODES)[number];
 

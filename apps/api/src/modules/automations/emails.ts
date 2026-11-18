@@ -29,7 +29,11 @@ export class AutomationEmails {
   ) {}
 
   mailTemplates(): MailTemplate[] {
-    return AUTOMATION_EMAIL_TEMPLATES.map((t) => ({ key: automationTemplateKey(t), version: 1, render: (ctx: RenderContext) => this.render(t, ctx) }));
+    // Customer notices are checked for an `all` suppression again at send time (task 7.fix-2): a bounce or complaint after
+    // queueing stops a retry. Those queued as marketing (no service acknowledgement) are checked for any suppression.
+    return AUTOMATION_EMAIL_TEMPLATES.map((t) => ({
+      key: automationTemplateKey(t), version: 1, render: (ctx: RenderContext) => this.render(t, ctx), ...(isCustomerTemplate(t) ? { suppressedBy: 'all' as const } : {}),
+    }));
   }
 
   private url(path: string): string {
