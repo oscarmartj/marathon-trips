@@ -70,6 +70,20 @@ async function booking(w: World, versionId: string, state: 'requested' | (typeof
   });
   return bookingId;
 }
+/**
+ * A draft demo race with an edition and a package, made through Prisma: `isDemo` can only be set when the row is created
+ * (a trigger keeps it), and a demo race can never be published (a CHECK), so this is the only shape one can take.
+ */
+async function demoWorld(): Promise<{ race: { id: string; slug: string }; edition: { id: string }; pkg: { id: string } }> {
+  const base = await buildWorld(admin);
+  const { id: _r, createdAt: _c, updatedAt: _u, ...race } = await t.prisma.race.findUniqueOrThrow({ where: { id: base.race.id } });
+  const demo = await t.prisma.race.create({ data: { ...race, slug: `demo-${base.race.slug}`, isDemo: true, status: 'draft', publishedAt: null } });
+  const { id: _e, raceId: _er, createdAt: _ec, updatedAt: _eu, ...edition } = await t.prisma.raceEdition.findUniqueOrThrow({ where: { id: base.edition.id } });
+  const ed = await t.prisma.raceEdition.create({ data: { ...edition, raceId: demo.id } });
+  const { id: _p, editionId: _pe, createdAt: _pc, updatedAt: _pu, ...pkg } = await t.prisma.package.findUniqueOrThrow({ where: { id: base.pkg.id } });
+  const pk = await t.prisma.package.create({ data: { ...pkg, editionId: ed.id, saleStatus: 'draft' } });
+  return { race: { id: demo.id, slug: demo.slug }, edition: { id: ed.id }, pkg: { id: pk.id } };
+}
 const versionOf = async (w: World): Promise<string> => (await t.prisma.priceVersion.findFirstOrThrow({ where: { packageId: w.pkg.id } })).id;
 
 describe('visits', () => {
@@ -123,19 +137,12 @@ describe('visits', () => {
   it('a draft, a deleted, a demo or an unknown race counts nothing and the answer is the same', async () => {
     const draft = await buildWorld(admin);
     const gone = await publishedWorld();
-    const demo = await publishedWorld();
+    const demo = await demoWorld();
     await t.prisma.$executeRawUnsafe(`UPDATE races SET "deletedAt" = now(), "deletedById" = (SELECT id FROM users LIMIT 1) WHERE id = '${gone.race.id}'::uuid`);
-    // Demo data can never be published (a CHECK); if the database ever allows it, the counter still ignores it.
-    const flagged = await t.prisma.$executeRawUnsafe(`UPDATE races SET "isDemo" = true WHERE id = '${demo.race.id}'::uuid`).then(() => true, () => false);
     for (const slug of [draft.race.slug, gone.race.slug, demo.race.slug, 'no-such-race']) expect((await beacon({ raceSlug: slug, kind: 'view' })).status).toBe(204);
     expect(await sum(draft.race.id, 'views')).toBe(0);
     expect(await sum(gone.race.id, 'views')).toBe(0);
-    expect(flagged ? await sum(demo.race.id, 'views') : -1).toBe(flagged ? 0 : -1);
-    // The report side leaves demo races out too, whatever the counters hold.
-    if (flagged) {
-      await t.prisma.$executeRawUnsafe(`INSERT INTO race_daily_stats ("raceId", day, views) VALUES ('${demo.race.id}'::uuid, CURRENT_DATE, 7)`);
-      expect((await preview(admin, funnelDef([demo.race.id]))).rows).toEqual([]);
-    }
+    expect(await sum(demo.race.id, 'views')).toBe(0);
   });
 
   it('refuses a body with more than a slug and a kind', async () => {
@@ -278,6 +285,25 @@ describe('funnel and booking figures', () => {
     expect(Date.parse(def.to) - Date.parse(def.from)).toBe(29 * 86_400_000);
     expect((await admin.get('/admin/reports/funnel?days=7')).status).toBe(200);
     for (const q of ['days=0', 'days=400', 'from=2027-01-01', 'to=2027-01-01', 'from=2027-02-01&to=2027-01-01', 'from=2020-01-01&to=2027-01-01', 'x=1']) expect([q, (await admin.get(`/admin/reports/funnel?${q}`)).status]).toEqual([q, 422]);
+  });
+
+  it('demo bookings and demo races are left out of every figure', async () => {
+    const w = await publishedWorld();
+    const v = await versionOf(w);
+    // A demo booking can sit on a real race, so the filter is also per booking.
+    await makeBookingFor(t, { pkg: w.pkg, edition: w.edition, versionId: v });
+    await makeBookingFor(t, { pkg: w.pkg, edition: w.edition, versionId: v }, undefined, undefined, undefined, { isDemo: true });
+    expect((await t.prisma.booking.findMany({ where: { editionId: w.edition.id }, select: { isDemo: true } })).map((b) => b.isDemo).sort()).toEqual([false, true]);
+    expect((await preview(admin, bookingDef([w.race.id]))).rows[0]!.values.bookings).toBe(1);
+    expect((await preview(admin, funnelDef([w.race.id], { groupBy: 'none', columns: ['requests'] }))).rows).toEqual([{ key: 'all', label: 'All races', values: { requests: 1 } }]);
+    // A demo race (a draft: the database refuses a published one) with counters and a demo booking shows nothing.
+    const demo = await demoWorld();
+    await t.prisma.$executeRawUnsafe(`INSERT INTO race_daily_stats ("raceId", day, views) VALUES ('${demo.race.id}'::uuid, CURRENT_DATE, 7)`);
+    await makeBookingFor(t, { pkg: demo.pkg, edition: demo.edition, versionId: v }, undefined, undefined, undefined, { isDemo: true });
+    await makeBookingFor(t, { pkg: demo.pkg, edition: demo.edition, versionId: v });
+    expect((await t.prisma.raceDailyStat.count({ where: { raceId: demo.race.id } }))).toBe(1);
+    expect((await preview(admin, funnelDef([demo.race.id]))).rows).toEqual([]);
+    expect((await preview(admin, bookingDef([demo.race.id]))).rows).toEqual([]);
   });
 
   it('a report holds counts only: no reference, name or address of a customer', async () => {
