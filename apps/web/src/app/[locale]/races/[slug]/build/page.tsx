@@ -36,7 +36,7 @@ export default async function Build(props: Props) {
   const name = localisedText(pkg.name);
   const back = (
     <p>
-      <Link href={`/races/${slug}`}>{t('builder.backToRace')}</Link>
+      <Link className="link-block" href={`/races/${slug}`}>{t('builder.backToRace')}</Link>
     </p>
   );
   const joinable = pkg.saleStatus === 'waitlist' || pkg.saleStatus === 'sold_out';

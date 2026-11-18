@@ -2,6 +2,8 @@
 const nextConfig = {
   output: 'standalone',
   poweredByHeader: false,
+  // Task 8.3: the 404 for an address that matches no page keeps the site's language, menu and footer (src/app/global-not-found.tsx).
+  experimental: { globalNotFound: true },
   // Pages that read a one-time token from the URL fragment never send a Referer (plan 4.1).
   async headers() {
     const noReferrer = [{ key: 'Referrer-Policy', value: 'no-referrer' }];

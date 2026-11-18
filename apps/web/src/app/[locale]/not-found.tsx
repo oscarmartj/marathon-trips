@@ -8,7 +8,7 @@ export default function NotFound() {
       <PageHeader title={t('pages.notFoundTitle')} />
       <div className="container">
         <p>
-          <Link href={lp('/')}>{t('nav.home')}</Link>
+          <Link className="link-block" href={lp('/')}>{t('nav.home')}</Link>
         </p>
       </div>
     </>

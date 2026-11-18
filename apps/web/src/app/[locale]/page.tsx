@@ -60,7 +60,7 @@ export default async function Home({ params }: Props = {}) {
             ))}
           </div>
           <p>
-            <Link href={lp('/races')}>{t('home.seeAll')}</Link>
+            <Link className="link-block" href={lp('/races')}>{t('home.seeAll')}</Link>
           </p>
         </section>
       ) : null}

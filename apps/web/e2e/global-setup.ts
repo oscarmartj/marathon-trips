@@ -41,4 +41,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_23 = create();
   // General rehearsal of the whole customer journey (rehearsal.spec.ts): an owner.
   process.env.E2E_STAFF_26 = create();
+  // Accessibility and performance of the public site (public-site-quality.spec.ts): an owner.
+  process.env.E2E_STAFF_28 = create();
 }

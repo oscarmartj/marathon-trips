@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { startPaymentSchema } from '@mt/shared';
+import { acceptTermsSchema, startPaymentSchema } from '@mt/shared';
 import { acceptTermsBody, checkoutErrorKey, isBookingReference, notPayableKey, outcomeOf, refreshErrorOf, safeRedirect, startPaymentBody } from './checkout';
 import { messageCatalogue, t } from './i18n';
 
@@ -15,6 +15,29 @@ describe('checkout request bodies', () => {
     expect(acceptTermsBody({ version: 3, digest: 'a'.repeat(64) })).toEqual({ version: 3, digest: 'a'.repeat(64) });
     expect(() => acceptTermsBody({ version: 3, digest: 'not a digest' })).toThrow();
     expect(() => acceptTermsBody({ version: -1, digest: 'a'.repeat(64) })).toThrow();
+  });
+});
+
+describe('the hand-written checks agree with the shared schemas (8.3)', () => {
+  it('start_body: every method the schema takes is accepted, anything else refused by both', () => {
+    for (const method of ['card', 'apple_pay', 'google_pay', 'payto', 'becs', 'payid_transfer', 'bpay', 'bnpl', 'manual_other', 'cash', '', 'CARD']) {
+      const schema = startPaymentSchema.safeParse({ method }).success;
+      let local = true;
+      try { startPaymentBody(method as never); } catch { local = false; }
+      expect(local, method).toBe(schema);
+    }
+  });
+
+  it('accept_body: version and digest limits match', () => {
+    const digests = ['a'.repeat(64), 'A'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), ''];
+    for (const version of [-1, 0, 1, 1_000_000, 1_000_001, 1.5]) {
+      for (const digest of digests) {
+        const schema = acceptTermsSchema.safeParse({ version, digest }).success;
+        let local = true;
+        try { acceptTermsBody({ version, digest }); } catch { local = false; }
+        expect(local, `${version} ${digest.length}`).toBe(schema);
+      }
+    }
   });
 });
 

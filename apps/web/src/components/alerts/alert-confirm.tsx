@@ -31,7 +31,7 @@ export function AlertConfirm() {
     return (
       <div className="stack">
         <Status message={t('alerts.confirm.invalid')} />
-        <Link href="/races">{t('alerts.confirm.browse')}</Link>
+        <Link className="link-block" href="/races">{t('alerts.confirm.browse')}</Link>
       </div>
     );
   }

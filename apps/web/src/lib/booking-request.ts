@@ -1,4 +1,6 @@
-import { ISO_COUNTRY_CODES, type BookingContact, type QuoteRequest } from '@mt/shared';
+import type { BookingContact, QuoteRequest } from '@mt/shared';
+// A sub-path of its own: the main entry point of the shared package carries the validation library, which the browser must not download.
+import { ISO_COUNTRY_CODES } from '@mt/shared/iso-countries';
 
 // Booking requests from the web (task 2.4, plan docs/plans/2.4-booking-requests.md, section 9). The body is the
 // configuration and the lead contact: never an amount, a currency, a date or a status. The API prices it.
