@@ -41,6 +41,8 @@ describe('coverage_events_table (section 1.2): ten states × facts × auto-confi
   const expected = (s: BookingStatus, f: (typeof facts)[number], auto: boolean): string[] => {
     if (s === 'approved' && f.depositCovered) return auto ? (f.totalCovered ? ['deposit_covered', 'auto_confirm', 'total_covered'] : ['deposit_covered', 'auto_confirm']) : ['deposit_covered'];
     if (s === 'confirmed' && f.totalCovered) return ['total_covered'];
+    // Task 6.3: a change raised the total of a booking paid in full (plan 0.1, 6.2).
+    if (s === 'balance_paid' && !f.totalCovered) return ['total_uncovered'];
     return [];
   };
   const cells = STATES.flatMap((s) => facts.flatMap((f) => [true, false].map((auto) => [s, f, auto] as const)));
@@ -66,6 +68,7 @@ describe('booking_event_table_within_status_pairs (section 1.3)', () => {
     expect(BOOKING_EVENT_TABLE.auto_confirm).toEqual({ deposit_paid: 'confirmed' });
     expect(BOOKING_EVENT_TABLE.confirm).toEqual({ deposit_paid: 'confirmed' });
     expect(BOOKING_EVENT_TABLE.total_covered).toEqual({ confirmed: 'balance_paid' });
+    expect(BOOKING_EVENT_TABLE.total_uncovered).toEqual({ balance_paid: 'confirmed' });
     expect(BOOKING_EVENT_TABLE.expire_approval).toEqual({ approved: 'expired' });
     // Cancelling a paid booking stays a 409 until refunds exist.
     expect(BOOKING_EVENT_TABLE.cancel).toEqual({ requested: 'cancelled', approved: 'cancelled' });
@@ -147,7 +150,7 @@ describe('static checks (sections 1.3 and 11.11)', () => {
   const files = readSources(src);
 
   it('only_coverage_applies_money_events: the coverage events appear in the state machine table and applyCoverage only', () => {
-    const using = files.filter((f) => /'(deposit_covered|auto_confirm|total_covered)'/.test(f.text)).map((f) => f.name).sort();
+    const using = files.filter((f) => /'(deposit_covered|auto_confirm|total_covered|total_uncovered)'/.test(f.text)).map((f) => f.name).sort();
     expect(using).toEqual(['modules/bookings/coverage.ts', 'modules/bookings/state-machine.ts']);
     // The panel's route type takes no coverage event.
     expect(readFileSync(join(src, 'modules/bookings/state-machine.ts'), 'utf8')).toMatch(/export type StaffBookingEvent = 'approve' \| 'decline' \| 'cancel' \| 'confirm';/);

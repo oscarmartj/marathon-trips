@@ -18,6 +18,7 @@ import type { AmendmentMoneyAfter } from './amendment-hooks';
 import { changesBetween, keepAllRooms, linesByKey, planPlaces, relabelSlots, requestOf, slotToPosition } from './amendment-slots';
 import type { AmendmentChangeKind, PlacePlan, RoomRequest } from './amendment-slots';
 import { BOOKING_EVENTS } from './manifest';
+import { BookingStateMachine } from './state-machine';
 import { readBookingForPayments } from './read';
 import type { LockedBooking } from './read';
 import { REQUEST_TX_OPTIONS, mapLoadError, todayInBrisbane } from './request.service';
@@ -95,6 +96,7 @@ export class BookingAmendmentService {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
+    @Inject(BookingStateMachine) private readonly machine: BookingStateMachine,
   ) {}
 
   /** What the change would do, without writing anything (plan section 5, "Preview"). */
@@ -167,11 +169,10 @@ export class BookingAmendmentService {
         totalMinor: e.breakdown.totalMinor, depositMinor: e.breakdown.depositMinor!, currency: e.currency, priceVersionId: e.breakdown.priceVersionId, engineVersion: e.breakdown.engineVersion,
       },
     });
-    const moved = await tx.$executeRaw`
-      UPDATE bookings SET "currentSnapshotVersion" = ${to}, "totalMinor" = ${e.breakdown.totalMinor}, "depositMinor" = ${e.breakdown.depositMinor!},
-        "departureDate" = ${toDate(e.breakdown.departureDate)}, "returnDate" = ${toDate(e.breakdown.returnDate)}, "balanceDueDate" = ${toDate(e.breakdown.balanceDueDate)},
-        version = version + 1, "updatedAt" = ${at}
-      WHERE id = ${e.bookingId}::uuid AND "currentSnapshotVersion" = ${e.fromVersion}`;
+    const moved = await this.machine.moveToSnapshot(tx, e.bookingId, e.fromVersion, {
+      totalMinor: e.breakdown.totalMinor, depositMinor: e.breakdown.depositMinor!, departureDate: toDate(e.breakdown.departureDate), returnDate: toDate(e.breakdown.returnDate),
+      balanceDueDate: toDate(e.breakdown.balanceDueDate), at,
+    });
     if (moved !== 1) throw conflict('version_conflict', 'Someone else changed this booking. Reload and try again.');
 
     // 5. Places (retired first, so the immediate one-lead constraint never sees two), rooms and extras.

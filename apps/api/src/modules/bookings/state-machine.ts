@@ -181,6 +181,18 @@ export class BookingStateMachine {
   }
 
   /**
+   * Moves a booking to its next snapshot (task 6.3), compare-and-set on the version read under the caller's lock: the
+   * totals and dates mirror the new snapshot (checked at commit by 0014's trigger). It never touches the status, which
+   * only `transition` changes; returns the rows moved (0 means someone else moved it first).
+   */
+  async moveToSnapshot(tx: Tx, bookingId: string, fromVersion: number, to: { totalMinor: bigint; depositMinor: bigint; departureDate: Date; returnDate: Date; balanceDueDate: Date; at: Date }): Promise<number> {
+    return tx.$executeRaw`
+      UPDATE bookings SET "currentSnapshotVersion" = ${fromVersion + 1}, "totalMinor" = ${to.totalMinor}, "depositMinor" = ${to.depositMinor},
+        "departureDate" = ${to.departureDate}, "returnDate" = ${to.returnDate}, "balanceDueDate" = ${to.balanceDueDate}, version = version + 1, "updatedAt" = ${to.at}
+      WHERE id = ${bookingId}::uuid AND "currentSnapshotVersion" = ${fromVersion}`;
+  }
+
+  /**
    * Gives back the code and the stock, once even if two transitions race: the redemption and each claim are released
    * by a compare-and-set, and only what that statement released is returned to the pool.
    */
