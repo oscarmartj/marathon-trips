@@ -193,6 +193,20 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.privacy_account_is_anonymised_customer(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.privacy_account_is_anonymised_customer(uuid) TO mt_privacy;
+
+-- Same idea for complaints (review round 2): "these complaints are unlinked and already redacted", without mt_privacy
+-- reading a complaint's text or address.
+CREATE FUNCTION public.privacy_complaints_redacted(p_complaints uuid[]) RETURNS boolean
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT NOT EXISTS (SELECT 1 FROM public.complaints x WHERE x.id = ANY(p_complaints)
+                       AND (x."customerId" IS NOT NULL OR x."complainantEmail" IS NOT NULL OR x."complainantName" <> '[redacted]'))
+$$;
+REVOKE ALL ON FUNCTION public.privacy_complaints_redacted(uuid[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.privacy_complaints_redacted(uuid[]) TO mt_privacy;
 GRANT SELECT (id, "customerId") ON "consent_records" TO mt_privacy;
 GRANT UPDATE ("customerId") ON "consent_records" TO mt_privacy;
 
@@ -252,14 +266,18 @@ BEGIN
 END;
 $$;
 
--- Erasing a sign-in account that never became a customer (plan 5.5, section 2.1): its audit values only.
-CREATE FUNCTION public.privacy_erase_account(p_user uuid) RETURNS integer
+-- Erasing a sign-in account that never became a customer (plan 5.5, section 2.1): its audit values, and (review round 2)
+-- the subject-less values of the complaints logged with its address and no customer, and of tasks on them. The API
+-- passes those complaint ids; each must be unlinked and already redacted (its address cleared by the complaints
+-- handler in the same transaction), so the call cannot reach a live complaint's values.
+CREATE FUNCTION public.privacy_erase_account(p_user uuid, p_complaints uuid[] DEFAULT '{}') RETURNS integer
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   deleted integer;
+  more integer;
 BEGIN
   IF NOT public.privacy_account_is_anonymised_customer(p_user) THEN
     RAISE EXCEPTION 'privacy_account_not_anonymised' USING ERRCODE = 'insufficient_privilege';
@@ -267,8 +285,21 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.customers c WHERE c."userId" = p_user) THEN
     RAISE EXCEPTION 'privacy_account_has_customer' USING ERRCODE = 'insufficient_privilege';
   END IF;
+  IF NOT public.privacy_complaints_redacted(p_complaints) THEN
+    RAISE EXCEPTION 'privacy_complaint_not_redacted' USING ERRCODE = 'insufficient_privilege';
+  END IF;
   DELETE FROM public.audit_pii_values v WHERE v."subjectUserId" = p_user;
   GET DIAGNOSTICS deleted = ROW_COUNT;
+  WITH targets AS (
+    SELECT 'Complaint'::text AS t, x.id FROM public.complaints x WHERE x.id = ANY(p_complaints)
+    UNION ALL SELECT 'Task', k.id FROM public.tasks k WHERE k."entityType" = 'Complaint' AND k."entityId" = ANY(p_complaints)
+  )
+  DELETE FROM public.audit_pii_values v
+   USING public.audit_logs l
+   WHERE v."auditLogId" = l.id AND v."subjectCustomerId" IS NULL AND v."subjectUserId" IS NULL
+     AND EXISTS (SELECT 1 FROM targets g WHERE g.t = l."entityType" AND g.id = l."entityId");
+  GET DIAGNOSTICS more = ROW_COUNT;
+  deleted := deleted + more;
   INSERT INTO public.audit_logs (id, "actorType", action, "entityType", "entityId", changes)
   VALUES (pg_catalog.gen_random_uuid(), 'system', 'privacy.account.audit_values_erased', 'User', p_user,
           pg_catalog.jsonb_build_object('deleted', deleted));
@@ -278,12 +309,12 @@ $$;
 
 -- Same hand-over as privacy_purge_expired (migration 0004): privileges first, then the owner.
 REVOKE ALL ON FUNCTION public.privacy_erase_customer(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.privacy_erase_account(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.privacy_erase_account(uuid, uuid[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.privacy_erase_customer(uuid) TO mt_app;
-GRANT EXECUTE ON FUNCTION public.privacy_erase_account(uuid) TO mt_app;
+GRANT EXECUTE ON FUNCTION public.privacy_erase_account(uuid, uuid[]) TO mt_app;
 GRANT CREATE ON SCHEMA public TO mt_privacy;
 ALTER FUNCTION public.privacy_erase_customer(uuid) OWNER TO mt_privacy;
-ALTER FUNCTION public.privacy_erase_account(uuid) OWNER TO mt_privacy;
+ALTER FUNCTION public.privacy_erase_account(uuid, uuid[]) OWNER TO mt_privacy;
 REVOKE CREATE ON SCHEMA public FROM mt_privacy;
 REVOKE ALL ON FUNCTION public.mt_privacy_request_guard() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.mt_consent_record_guard() FROM PUBLIC;

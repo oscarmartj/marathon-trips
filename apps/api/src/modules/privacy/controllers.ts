@@ -128,6 +128,11 @@ export class UnsubscribeController {
    * a valid link is never refused (it is idempotent and only ever withdraws consent).
    */
   private readonly badLinks = new WindowLimiter(30, 60_000);
+  /**
+   * Review round 2: the same valid link repeated. After 20 in an hour the answer is still 200 (the first one already
+   * unsubscribed; it is idempotent) but nothing more is done, so a loop cannot keep locking the customer.
+   */
+  private readonly sameLink = new WindowLimiter(20, 3_600_000);
 
   constructor(
     @Inject(ConsentService) private readonly consent: ConsentService,
@@ -140,6 +145,8 @@ export class UnsubscribeController {
   async unsubscribe(@Param('ref') ref: string, @Req() req: ApiRequest) {
     if (!this.consent.isValidRef(ref)) {
       if (!this.badLinks.allow(`unsubscribe:${req.ip ?? 'unknown'}`)) throw tooManyRequests(60);
+    } else if (!this.sameLink.allow(`unsubscribe:${ref.slice(0, 36)}`)) {
+      return { unsubscribed: true };
     }
     await this.consent.unsubscribe(ref);
     return { unsubscribed: true };

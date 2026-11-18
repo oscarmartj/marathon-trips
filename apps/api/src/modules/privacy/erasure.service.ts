@@ -139,13 +139,18 @@ export class ErasureService {
         throw conflict('customer_record_exists', 'Ask us to erase your data instead');
       }
       const emails = lower([u.email]);
+      // Complaints logged with this address and no customer (review round 2): their ids now, before the handler
+      // redacts the address, so their tasks and audit values can be erased too.
+      const complaints = (await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id::text AS id FROM complaints WHERE "customerId" IS NULL AND lower("complainantEmail") = ANY(${emails}::text[])`).map((r) => r.id);
       for (const def of this.registry.withCustomerLink().filter((d) => ADDRESS_LINKED_ENTITIES.includes(d.entityType))) await def.handlers!.anonymise(tx, NO_CUSTOMER, { emails, userId });
       const hash = this.consent.hashOf(u.email);
       if (await tx.consentRecord.findFirst({ where: { emailHash: hash }, select: { id: true } })) {
         await tx.consentRecord.create({ data: { emailHash: hash, purpose: 'marketing_email', granted: false, source: 'erasure', wordingKey: 'marketing_email.v1' } });
       }
       await erasePlatformRows(tx, { customerId: null, userId, emails });
-      await tx.$queryRaw`SELECT public.privacy_erase_account(${userId}::uuid)`;
+      await erasePolymorphic(tx, new Map([['Complaint', complaints]]));
+      await tx.$queryRaw`SELECT public.privacy_erase_account(${userId}::uuid, ${complaints}::uuid[])`;
       await tx.privacyRequest.create({ data: { userId, kind: 'erasure', status: 'completed', requestedBy: 'customer', completedAt: new Date(), actorUserId: userId } });
       await this.audit.record(tx, { actor, action: 'privacy.account.erased', entityType: 'User', entityId: userId });
     });

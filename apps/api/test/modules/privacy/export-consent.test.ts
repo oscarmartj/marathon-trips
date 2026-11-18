@@ -259,6 +259,16 @@ describe('one-click unsubscribe', () => {
     expect(first429).toBeGreaterThanOrEqual(25);
     expect(statuses.slice(0, first429).every((x) => x === 404)).toBe(true);
     expect(statuses.slice(first429).every((x) => x === 429)).toBe(true);
+    // The same valid link repeated: always 200, but after 20 an hour nothing more is done (no lock taken, no record).
+    const same = await t.prisma.$transaction((tx) => mail.enqueue({ to: uniqueEmail('same'), templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `b:${randomUUID()}`, category: 'marketing' }, tx));
+    const consent = t.app.get(ConsentService);
+    const spy = vi.spyOn(consent, 'unsubscribe');
+    try {
+      for (let i = 0; i < 25; i++) expect((await t.http().post(`/unsubscribe/${same.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, same.id)}`)).status).toBe(200);
+      expect(spy).toHaveBeenCalledTimes(20);
+    } finally {
+      spy.mockRestore();
+    }
     // A valid link still goes through while wrong ones are being refused.
     const ok = await t.prisma.$transaction((tx) => mail.enqueue({ to: uniqueEmail('after'), templateKey: 'alerts.package_open', templateVersion: 1, locale: 'en-AU', dedupeKey: `b:${randomUUID()}`, category: 'marketing' }, tx));
     expect((await t.http().post(`/unsubscribe/${ok.id}.${unsubscribeToken(t.config.EMAIL_HASH_KEY, ok.id)}`)).status).toBe(200);
@@ -312,6 +322,25 @@ describe('erasure requests from the account', () => {
     expect((await download(me)).status).toBe(200);
     expect((await as(me).put('/account/privacy/marketing-consent', { granted: false, wordingKey: MARKETING_WORDING_KEY })).status).toBe(200);
     expect((await as(me).post('/account/privacy/erasure-request', {})).body.status).toBe('received');
+  });
+
+  it('account-only erasure also clears the audit history and tasks of a complaint staff logged with the address (review round 2)', async () => {
+    const me = await signInCustomer(t, uniqueEmail('ana'));
+    const staff = await privacyStaff(t, { permissions: ['complaints.complaint.read', 'complaints.complaint.manage'] });
+    const logged = await staff.post('/admin/complaints', { complainantName: 'Ana Complainant', complainantEmail: me.email.toUpperCase(), channel: 'email', category: 'service', summary: 'Ana summary', description: 'Ana words' });
+    expect(logged.status, JSON.stringify(logged.body)).toBe(201);
+    const id = logged.body.id as string;
+    const { TasksService } = await import('../../../src/platform/common/tasks/tasks.service');
+    await t.prisma.$transaction((tx) => t.app.get(TasksService).createSystemIn(tx, { title: 'Call Ana Complainant back', entityType: 'Complaint', entityId: id, sourceRef: `t:${randomUUID()}` }));
+    const history = async () => JSON.stringify(await t.prisma.auditPiiValue.findMany({ where: { auditLog: { OR: [{ entityType: 'Complaint', entityId: id }, { entityType: 'Task' }] } }, select: { before: true, after: true } }));
+    expect(await history()).toContain('Ana Complainant');
+    expect((await as(me).post('/account/privacy/erasure-request', { confirm: true })).body.status).toBe('completed');
+    expect(await history()).not.toMatch(/Ana Complainant|Ana words|Ana summary/i);
+    expect(await history()).not.toContain(me.email);
+    const tasks = await t.prisma.task.findMany({ where: { entityType: 'Complaint', entityId: id } });
+    expect(tasks.every((k) => k.title === '[redacted]')).toBe(true);
+    expect(await t.prisma.searchDocument.count({ where: { entityType: 'Task', entityId: { in: tasks.map((k) => k.id) } } })).toBe(0);
+    expect(await t.prisma.complaint.findUniqueOrThrow({ where: { id } })).toMatchObject({ complainantName: '[redacted]', complainantEmail: null, summary: '[redacted]' });
   });
 
   it('without a customer record: confirmation required, then the sign-in account is erased and signed out', async () => {
