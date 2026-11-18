@@ -64,5 +64,8 @@ export async function checkOwnedRoutes(t: TestApp, fixtures: Record<string, Owne
     if (theirs.status !== 404) problems.push(`${name}: other customer got ${theirs.status}, expected 404`);
     checked++;
   }
+  // The amendment fixtures (task 6.3) switch customers' online changes on: back to the default (off) for later tests.
+  const { setCustomerAmendments } = await import('./amendments');
+  await setCustomerAmendments(t, false);
   return { problems, checked };
 }

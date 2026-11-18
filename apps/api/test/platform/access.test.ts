@@ -21,12 +21,7 @@ let t: TestApp;
 beforeAll(async () => {
   t = await makeApp();
 });
-afterAll(async () => {
-  // The amendment fixtures (task 6.3) switch customers' online changes on; the default (off) is restored for later files.
-  const { setCustomerAmendments } = await import('../support/amendments');
-  await setCustomerAmendments(t, false);
-  await t.close();
-});
+afterAll(async () => t.close());
 
 const stepUpOld = (userId: string) => t.prisma.session.updateMany({ where: { userId, revokedAt: null }, data: { mfaVerifiedAt: new Date(Date.now() - 6 * 60_000) } });
 
