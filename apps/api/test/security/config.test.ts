@@ -40,10 +40,12 @@ describe('production configuration refusals (S-05)', () => {
   });
 
   it('refuses a TRUST_PROXY that trusts (almost) every address, which would let any client choose its address', () => {
-    for (const v of ['true', '0.0.0.0/0', '::/0', '0.0.0.0/0,::/0', '10.0.0.0/8,0.0.0.0/0', '1.0.0.0/4', '2000::/3', '99', '4', '0.0.0.0', '::', 'uniquelocal,', 'not-an-address', '10.0.0.0/x']) {
+    for (const v of ['true', '0.0.0.0/0', '::/0', '0.0.0.0/0,::/0', '10.0.0.0/8,0.0.0.0/0', '1.0.0.0/4', '2000::/3', '99', '4', '0.0.0.0', '::', 'uniquelocal,', 'not-an-address', '10.0.0.0/x',
+      // Review round 2: IPv4-mapped ranges that proxy-addr would turn into (nearly) every IPv4 address.
+      '::ffff:0:0/96', '::ffff:0.0.0.0/96', '::ffff:0.0.0.0/97', '::ffff:0:0/103', '0:0:0:0:0:ffff:0:0/100', '::1/16', '::ffff:0:0/80', '::ffff:10.0.0.0/96']) {
       expect(() => loadConfig({ ...good(), TRUST_PROXY: v }), v).toThrow(/check .*TRUST_PROXY/);
     }
-    for (const v of ['1', '3', 'uniquelocal', 'loopback', 'loopback,uniquelocal', '172.18.0.0/16', '10.0.0.0/8', '192.168.1.10', 'fd00::/16', 'false']) {
+    for (const v of ['1', '3', 'uniquelocal', 'loopback', 'loopback,uniquelocal', '172.18.0.0/16', '10.0.0.0/8', '192.168.1.10', 'fd00::/16', 'false', '::ffff:0:0/104', '::ffff:10.0.0.0/104', '::ffff:172.18.0.0/112', '::ffff:10.0.0.1', '2001:db8::/32', '::1']) {
       expect(() => loadConfig({ ...good(), TRUST_PROXY: v }), v).not.toThrow();
     }
     expect(loadConfig({ ...good(), TRUST_PROXY: '1' }).TRUST_PROXY).toBe(1);

@@ -49,12 +49,12 @@ export function forwardHeaders(incoming: Headers, trustedHops: number): Headers 
   if (trustedHops > 0) {
     const chain = (incoming.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const client = chain[chain.length - trustedHops];
-    if (client) {
-      out.set('x-forwarded-for', client);
-      // Only a request that came through the proxies in front (Caddy) has a client address to check. The container's own
-      // health check calls localhost:3000/api/health with none, and must not look like a lost address (review round 1).
-      out.set(PROXIED_HEADER, '1');
-    }
+    if (client) out.set('x-forwarded-for', client);
+    // Only a request that came through the proxies in front (Caddy) has a client address to check, so it is marked as soon
+    // as any X-Forwarded-For arrives: even when WEB_TRUSTED_PROXY_HOPS is more than the real proxies and no client comes
+    // out, so the API sees the web container's address and the monitor says so (review round 2). A call made inside the
+    // container (a health check) carries none and is not marked (review round 1).
+    if (chain.length > 0) out.set(PROXIED_HEADER, '1');
   }
   return out;
 }

@@ -23,8 +23,9 @@ describe('bounded tables never forget a live count (S-06)', () => {
     expect(lru.trySet('c', 1, 60_001)).toBe(true);
   });
 
-  it('a full unknown-address table refuses new addresses for a minute instead of wiping the guessed ones', () => {
+  it('a full table refuses every address without a place for as long as it stays full, and never wipes a guessed one', () => {
     const d = new UnknownAccountDelay(2);
+    d.reserve('target', 'c1', 0);
     for (let i = 0; i < 3; i++) {
       try {
         d.claim('target', 0);
@@ -32,47 +33,77 @@ describe('bounded tables never forget a live count (S-06)', () => {
         // the third failure sets a delay
       }
     }
-    d.claim('other', 0);
-    expect(() => d.claim('flood-1', 0)).toThrow();
-    // Saturated for every address, those with an entry too (review round 1): no answer depends on having one.
-    expect(d.saturated(1000)).toBe(true);
+    d.reserve('other', 'c2', 0);
+    expect(() => d.reserve('flood-1', 'c3', 0)).toThrow();
+    // Review round 2: not only for a minute: an hour later minus a second the table is still full, and still refuses.
+    expect(() => d.reserve('flood-2', 'c3', 3_599_000)).toThrow();
     // The guessed address keeps its delay: a flood cannot evict it.
     expect(() => d.claim('target', 500)).toThrow();
-    expect(d.saturated(61_000)).toBe(false);
+    // Once its entries expire, there is room again.
+    expect(() => d.reserve('later', 'c4', 3_600_001)).not.toThrow();
+    // Without a place and without room, a failure is refused, never stored over someone else's count.
+    const one = new UnknownAccountDelay(1);
+    one.reserve('held', 'c', 0);
+    expect(() => one.claim('never-reserved', 0)).toThrow();
+    expect(() => one.claim('held', 0)).not.toThrow();
   });
 
-  it('while saturated, a known staff address and an unknown one get the same 429 (no enumeration, T2)', async () => {
-    const staff = await createStaff(t);
-    const svc = t.app.get(StaffAuthService);
-    const full = new UnknownAccountDelay(1);
-    Reflect.set(svc, 'unknown', full);
-    const attempt = (email: string) => t.http().post('/auth/staff/sign-in').set(STATE_HEADERS).send({ email, password: 'definitely-wrong-password' });
-    expect((await attempt(uniqueEmail('filler'))).status).toBe(401);
-    const unknown = await attempt(uniqueEmail('nobody'));
-    const known = await attempt(staff.email);
-    expect([unknown.status, known.status]).toEqual([429, 429]);
-    expect(unknown.body).toEqual(known.body);
-    Reflect.set(svc, 'unknown', new UnknownAccountDelay());
-    // Once the table has room again, the known account is checked as before.
-    expect((await attempt(staff.email)).status).toBe(401);
+  it('one client can bring only so many new addresses an hour, which keeps one client from filling the table', () => {
+    const d = new UnknownAccountDelay(1000, 3);
+    for (let i = 0; i < 3; i++) d.reserve(`a${i}`, 'client', 0);
+    expect(() => d.reserve('a3', 'client', 0)).toThrow();
+    expect(() => d.reserve('a0', 'client', 0)).not.toThrow(); // an address it already tried keeps its place
+    expect(() => d.reserve('b0', 'other-client', 0)).not.toThrow();
   });
 
-  it('an unknown address tried before the flood and a staff account answer alike while saturated (review round 1)', async () => {
-    const staff = await createStaff(t);
+  const attempt = (email: string) => t.http().post('/auth/staff/sign-in').set(STATE_HEADERS).send({ email, password: 'definitely-wrong-password' });
+
+  it('with the table full, long after it filled, a known and an unknown address answer the same (review round 2)', async () => {
     const svc = t.app.get(StaffAuthService);
-    Reflect.set(svc, 'unknown', new UnknownAccountDelay(2));
-    const attempt = (email: string) => t.http().post('/auth/staff/sign-in').set(STATE_HEADERS).send({ email, password: 'definitely-wrong-password' });
-    const probe = uniqueEmail('probe');
-    // The attacker tries V once (no account: V gets an entry), fills the table, then tries V and a staff address again.
-    expect((await attempt(probe)).status).toBe(401);
-    expect((await attempt(uniqueEmail('filler'))).status).toBe(401);
-    expect((await attempt(uniqueEmail('overflow'))).status).toBe(429);
-    const unknownWithEntry = await attempt(probe);
-    const known = await attempt(staff.email);
-    expect([unknownWithEntry.status, known.status]).toEqual([429, 429]);
-    expect(unknownWithEntry.body).toEqual(known.body);
-    expect(unknownWithEntry.headers['retry-after']).toBe(known.headers['retry-after']);
-    Reflect.set(svc, 'unknown', new UnknownAccountDelay());
+    const staffTried = await createStaff(t);
+    const staffNew = await createStaff(t);
+    const unknownTried = uniqueEmail('tried');
+    Reflect.set(svc, 'unknown', new UnknownAccountDelay(2, 100_000));
+    // Before the flood the attacker tries one staff address and one address with no account.
+    expect((await attempt(staffTried.email)).status).toBe(401);
+    expect((await attempt(unknownTried)).status).toBe(401);
+    // The table is now full. Addresses tried before keep answering as before, the same for both kinds.
+    const [a, b] = [await attempt(staffTried.email), await attempt(unknownTried)];
+    expect([a.status, b.status]).toEqual([401, 401]);
+    expect(a.body).toEqual(b.body);
+    // New addresses are refused the same, staff or not, and the minute passing changes nothing (the table is still full).
+    const later = Date.now() + 2 * 60_000;
+    const realNow = Date.now;
+    Date.now = () => later;
+    try {
+      const [k, u] = [await attempt(staffNew.email), await attempt(uniqueEmail('new'))];
+      expect([k.status, u.status]).toEqual([429, 429]);
+      expect(k.body).toEqual(u.body);
+      expect(k.headers['retry-after']).toBe(u.headers['retry-after']);
+    } finally {
+      Date.now = realNow;
+      Reflect.set(svc, 'unknown', new UnknownAccountDelay(100_000, 100_000));
+    }
+  });
+
+  it('a parallel burst on a nearly full table is decided before any lookup: known and unknown get the same answers', async () => {
+    const svc = t.app.get(StaffAuthService);
+    const staff = await Promise.all([createStaff(t), createStaff(t), createStaff(t)]);
+    for (let round = 0; round < 3; round++) {
+      Reflect.set(svc, 'unknown', new UnknownAccountDelay(3, 100_000));
+      // Known and unknown interleaved; only the first three to arrive get a place, whichever they are.
+      const emails = round % 2 ? [uniqueEmail('u'), staff[0]!.email, uniqueEmail('u'), staff[1]!.email, uniqueEmail('u'), staff[2]!.email] : [staff[0]!.email, uniqueEmail('u'), staff[1]!.email, uniqueEmail('u'), staff[2]!.email, uniqueEmail('u')];
+      const results = await Promise.all(emails.map((e) => attempt(e)));
+      // Supertest opens the connections in order; in memory the places go to the first three requests that reach the
+      // service. Whatever the order, exactly three get the normal answer and three the 429, and every answer of one
+      // kind is identical for staff and non-staff addresses.
+      expect(results.filter((r) => r.status === 401)).toHaveLength(3);
+      expect(results.filter((r) => r.status === 429)).toHaveLength(3);
+      const bodies = (status: number) => new Set(results.filter((r) => r.status === status).map((r) => JSON.stringify(r.body)));
+      expect(bodies(401).size).toBe(1);
+      expect(bodies(429).size).toBe(1);
+    }
+    Reflect.set(svc, 'unknown', new UnknownAccountDelay(100_000, 100_000));
   });
 
   it('sign-in rate limits count an IPv6 client per /64, so one client cannot spread its attempts over its own addresses', () => {

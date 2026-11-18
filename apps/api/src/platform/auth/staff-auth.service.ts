@@ -7,8 +7,8 @@ import { SecretBox } from '../crypto/secret-box';
 import { emailHash } from '../crypto/hmac';
 import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 import { OutboxService } from '../events/outbox.service';
-import { ApiError, tooManyRequests, unauthorised, unprocessable } from '../http/api-error';
-import { SATURATION_SECONDS, UnknownAccountDelay, claimAccountAttempt, refundAccountAttempt } from './attempt-limiter';
+import { ApiError, unauthorised, unprocessable } from '../http/api-error';
+import { UnknownAccountDelay, claimAccountAttempt, refundAccountAttempt } from './attempt-limiter';
 import { guessablePassword, hashPassword, verifyPassword } from './passwords';
 import type { RequestMeta } from './request-meta';
 import { SessionService } from './session.service';
@@ -36,7 +36,7 @@ const totpAad = (userId: string) => `totp:${userId}`;
  */
 @Injectable()
 export class StaffAuthService {
-  private readonly unknown = new UnknownAccountDelay();
+  private readonly unknown: UnknownAccountDelay;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -45,7 +45,9 @@ export class StaffAuthService {
     @Inject(SessionService) private readonly sessions: SessionService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
-  ) {}
+  ) {
+    this.unknown = new UnknownAccountDelay(100_000, config.AUTH_NEW_ADDRESSES_PER_HOUR_PER_CLIENT);
+  }
 
   private actor(userId: string | null, meta?: { requestId?: string }): AuditActor {
     return { type: userId ? 'staff' : 'system', id: userId, requestId: meta?.requestId ?? null };
@@ -58,15 +60,16 @@ export class StaffAuthService {
   }
 
   /** Step 1. Always one argon2 verification; unknown and incomplete accounts answer exactly like a wrong password. */
-  async signIn(email: string, password: string, requestId?: string): Promise<{ mfaToken: string; maxAgeSeconds: number }> {
-    // S-06: while the unknown-address table is full, every address is refused, with or without an account.
-    if (this.unknown.saturated()) throw tooManyRequests(SATURATION_SECONDS);
+  async signIn(email: string, password: string, requestId?: string, client = 'unknown'): Promise<{ mfaToken: string; maxAgeSeconds: number }> {
+    // S-06: every address takes its place in the in-memory table first, known or not, before any await (review round 2).
+    const key = emailHash(this.config.AUTH_HMAC_KEY, email);
+    this.unknown.reserve(key, client);
     const user = await this.prisma.user.findUnique({
       where: { kind_email: { kind: 'staff', email } },
       select: { id: true, status: true, passwordHash: true, totpEnabledAt: true },
     });
     if (user) await claimAccountAttempt(this.prisma, user.id);
-    else this.unknown.claim(emailHash(this.config.AUTH_HMAC_KEY, email));
+    else this.unknown.claim(key);
     const passwordOk = await verifyPassword(user?.passwordHash ?? null, password);
     if (!user || !passwordOk || user.status !== 'active' || !user.totpEnabledAt) {
       await this.auditFailure(user?.id ?? null, 'auth.staff.signInFailed', user ? 'bad_password_or_inactive' : 'unknown_account', requestId);

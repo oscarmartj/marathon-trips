@@ -41,6 +41,8 @@ const configSchema = z.object({
   COOKIE_SECURE: z.enum(['true', 'false']).optional(),
   // Requests per minute and IP on sign-in, code and magic-link routes.
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
+  // Task 8.5 (S-06): new addresses one client (IPv4 address or IPv6 /64) may try at staff sign-in per hour.
+  AUTH_NEW_ADDRESSES_PER_HOUR_PER_CLIENT: z.coerce.number().int().min(1).default(30),
 
   // Task 8.4. Outgoing webhooks outside production go only to these exact origins (scheme://host:port, comma separated);
   // in production the list is ignored with a warning at start-up. Empty by default.
@@ -115,10 +117,39 @@ export function narrowTrustProxy(value: string): boolean {
     if (addr === '0.0.0.0' || addr === '::' || /^[0:]+$/.test(addr)) return false;
     const v6 = addr.includes(':');
     if (!v6 && !/^\d{1,3}(\.\d{1,3}){3}$/.test(addr)) return false;
+    const groups = v6 ? ipv6Groups(addr) : null;
+    if (v6 && !groups) return false;
     if (bits === undefined) return true;
     if (!/^\d+$/.test(bits)) return false;
-    return Number(bits) >= (v6 ? 16 : 8) && Number(bits) <= (v6 ? 128 : 32);
+    const n = Number(bits);
+    if (!v6) return n >= 8 && n <= 32;
+    if (n < 16 || n > 128) return false;
+    // Review round 2: proxy-addr matches an IPv4 client against an IPv6 range through its IPv4-mapped form
+    // (::ffff:a.b.c.d), so ::ffff:0:0/96 trusts every IPv4 address and ::1/16 covers the whole mapped block. A range
+    // whose first min(bits, 80) bits are all zero reaches that block: it needs /104 or narrower (an IPv4 /8 at most).
+    const zeroPrefix = groups!.slice(0, Math.ceil(Math.min(n, 80) / 16)).every((g, i) => (i < Math.floor(Math.min(n, 80) / 16) ? g === 0 : g >> (16 - (Math.min(n, 80) % 16)) === 0));
+    return !(zeroPrefix && n < 104);
   });
+}
+
+/** The eight 16-bit groups of an IPv6 address (an embedded IPv4 tail included), or null if it is not one. */
+function ipv6Groups(addr: string): number[] | null {
+  let text = addr.toLowerCase();
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
+  if (v4) {
+    const b = v4.slice(1).map(Number);
+    if (b.some((x) => x > 255)) return null;
+    text = `${text.slice(0, v4.index)}${((b[0]! << 8) | b[1]!).toString(16)}:${((b[2]! << 8) | b[3]!).toString(16)}`;
+  }
+  if (!/^[0-9a-f:]+$/.test(text) || (text.match(/::/g) ?? []).length > 1) return null;
+  const [head = '', tail] = text.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const fill = tail === undefined ? 0 : 8 - left.length - right.length;
+  if (fill < 0 || (tail === undefined && left.length !== 8)) return null;
+  const parts = [...left, ...Array(fill).fill('0'), ...right];
+  if (parts.length !== 8 || parts.some((p) => !/^[0-9a-f]{1,4}$/.test(p))) return null;
+  return parts.map((p) => parseInt(p, 16));
 }
 
 /**

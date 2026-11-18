@@ -89,6 +89,12 @@ describe('web proxy to the API', () => {
     const healthcheck = forwardHeaders(new Headers({ 'user-agent': 'node' }), 1);
     expect(healthcheck.get('x-mt-proxied')).toBeNull();
     expect(healthcheck.get('x-forwarded-for')).toBeNull();
+    // Review round 2: more hops configured than real proxies (2 with only Caddy): no client comes out, but the request
+    // is still marked, so the API counts the web container's private address and the monitor reports it.
+    const tooMany = forwardHeaders(new Headers({ 'x-forwarded-for': '203.0.113.7' }), 2);
+    expect(tooMany.get('x-forwarded-for')).toBeNull();
+    expect(tooMany.get('x-mt-proxied')).toBe('1');
+    expect(forwardHeaders(new Headers({ 'x-forwarded-for': ' , ' }), 1).get('x-mt-proxied')).toBeNull();
     // Without trusted proxies (development) nothing is forwarded or marked.
     expect(forwardHeaders(new Headers({ 'x-forwarded-for': '203.0.113.7' }), 0).get('x-mt-proxied')).toBeNull();
   });

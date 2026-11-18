@@ -101,41 +101,49 @@ export async function refundAccountAttempt(db: Db, userId: string): Promise<void
     WHERE id = ${userId}::uuid`;
 }
 
-/** How long sign-in stays refused for every new address once the table of unknown addresses is full (S-06). */
+/** Retry-After for an address refused because the table is full or its client added too many new addresses (S-06). */
 export const SATURATION_SECONDS = 60;
+/** New addresses one client (an IPv4 address or an IPv6 /64) may bring to staff sign-in per hour (S-06, review round 2). */
+export const NEW_ADDRESSES_PER_HOUR_PER_CLIENT = 30;
 
 /**
- * The same schedule for addresses with no account, kept in memory so the two cases look alike (T2). The table is bounded
- * and never evicts a live count (task 8.5, S-06): evicting would let a flood of made-up addresses wipe the delay of the
- * addresses being guessed, and unknown addresses would then answer differently from known ones (counted in the
- * database). When it is full, `saturated()` is true for a minute and the caller refuses every address, known or not,
- * so the answer still does not tell the two apart.
+ * The same schedule for addresses with no account, kept in memory so the two cases look alike (T2), in a bounded table
+ * that never evicts a live count (task 8.5, S-06).
+ *
+ * Review rounds 1 and 2: every address takes a place in the table *before* anything is looked up, known accounts too
+ * (their place holds no count: the database counts them). So when the table is full, every address without a place is
+ * refused the same way, staff or not, for as long as it stays full; and a burst of parallel attempts is decided
+ * address by address in memory, before the first await, so the answers cannot depend on which addresses exist. A
+ * client can add only `perClientPerHour` new addresses an hour, so filling the table takes thousands of clients.
  */
 export class UnknownAccountDelay {
   private readonly entries: Lru<{ failures: number; nextAllowedAt: number }>;
-  private saturatedUntil = 0;
+  private readonly newPerClient: WindowLimiter;
 
-  constructor(max = 100_000) {
+  constructor(max = 100_000, perClientPerHour = NEW_ADDRESSES_PER_HOUR_PER_CLIENT) {
     this.entries = new Lru(max, COUNT_WINDOW_SECONDS * 1000);
+    this.newPerClient = new WindowLimiter(perClientPerHour, COUNT_WINDOW_SECONDS * 1000);
   }
 
   /**
-   * Whether sign-in is refusing every address (the table was full in the last minute). Every address, with or without an
-   * entry: letting through the ones that have one would tell an address tried before the flood (no account: an entry)
-   * from a staff account (never an entry), which is the enumeration this table exists to prevent (review round 1).
+   * Gives this address a place in the table, or refuses it (429) when the table is full or this client has brought too
+   * many new addresses this hour. Synchronous on purpose: called before any database lookup, for every address.
    */
-  saturated(now: number = Date.now()): boolean {
-    return this.saturatedUntil > now;
+  reserve(key: string, client: string, now: number = Date.now()): void {
+    if (this.entries.get(key, now) !== undefined) return;
+    if (!this.newPerClient.allow(client, now)) throw tooManyRequests(SATURATION_SECONDS);
+    if (!this.entries.trySet(key, { failures: 0, nextAllowedAt: 0 }, now)) throw tooManyRequests(SATURATION_SECONDS);
   }
 
+  /**
+   * Counts a failure for an address with no account (its place is normally reserved just before). If the place has gone
+   * and the table has no room, the failure is refused (429), never stored by evicting someone else's count.
+   */
   claim(key: string, now: number = Date.now()): void {
     const e = this.entries.get(key, now) ?? { failures: 0, nextAllowedAt: 0 };
     if (e.nextAllowedAt > now) throw tooManyRequests((e.nextAllowedAt - now) / 1000);
     const failures = e.failures + 1;
-    if (!this.entries.trySet(key, { failures, nextAllowedAt: now + delaySeconds(failures) * 1000 }, now)) {
-      this.saturatedUntil = now + SATURATION_SECONDS * 1000;
-      throw tooManyRequests(SATURATION_SECONDS);
-    }
+    if (!this.entries.trySet(key, { failures, nextAllowedAt: now + delaySeconds(failures) * 1000 }, now)) throw tooManyRequests(SATURATION_SECONDS);
   }
 }
 

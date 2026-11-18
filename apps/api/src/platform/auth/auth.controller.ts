@@ -10,6 +10,7 @@ import { PrismaService } from '../database/prisma.service';
 import { RequiresFlag } from '../flags/requires-flag.guard';
 import { FLAGS } from '../flags/flag-registry';
 import { unauthorised } from '../http/api-error';
+import { rateLimitKey } from '../http/client-ip-watch';
 import { AuthRateLimit } from '../http/rate-limit.guard';
 import type { ApiRequest } from '../http/request-context';
 import { ZodPipe } from '../http/zod.pipe';
@@ -44,7 +45,7 @@ export class AuthController {
   @Public('password check; on success only a short-lived second-factor step cookie, never a session')
   @AuthRateLimit()
   async staffSignIn(@Body(new ZodPipe(staffSignInSchema)) body: { email: string; password: string }, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
-    const step = await this.staff.signIn(body.email, body.password, req.requestId);
+    const step = await this.staff.signIn(body.email, body.password, req.requestId, rateLimitKey(req.ip));
     setCookie(res, 'staff_mfa', this.secure, step.mfaToken, step.maxAgeSeconds);
     return { next: 'second_factor' };
   }
