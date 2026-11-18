@@ -159,8 +159,12 @@ test('public_pages_take_200_percent_text_without_losing_content', async ({ brows
   for (const path of ['/', `/races/${raceSlug}`, `/races/${raceSlug}/build?edition=2027&package=${packageSlug}`, '/faq']) {
     await open(page, path);
     await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
-    const o = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, c: document.documentElement.clientWidth }));
-    expect.soft(o.s, `${path} scrolls sideways with text at 200%`).toBeLessThanOrEqual(o.c + 1);
+    const o = await page.evaluate(() => {
+      const c = document.documentElement.clientWidth;
+      const wide = Array.from(document.body.querySelectorAll('*')).filter((e) => e.getBoundingClientRect().right > c + 1 && e.getBoundingClientRect().width > 0).slice(0, 4).map((e) => `<${e.tagName.toLowerCase()} class="${e.getAttribute('class') ?? ''}"> ${Math.round(e.getBoundingClientRect().width)}px`);
+      return { s: document.documentElement.scrollWidth, c, wide };
+    });
+    expect.soft(o.s, `${path} scrolls sideways with text at 200%; wide: ${o.wide.join(', ')}`).toBeLessThanOrEqual(o.c + 1);
   }
   await context.close();
 });
