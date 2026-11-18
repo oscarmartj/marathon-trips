@@ -24,3 +24,4 @@ export * from './schemas/reports';
 export * from './schemas/dashboard';
 export * from './schemas/travellers';
 export * from './schemas/privacy';
+export * from './schemas/trip-ops';
