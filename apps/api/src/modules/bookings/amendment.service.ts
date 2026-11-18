@@ -220,9 +220,9 @@ export class BookingAmendmentService {
       before: { currentSnapshotVersion: e.fromVersion, totalMinor: e.previousTotalMinor.toString(), customerId: e.customerId },
       after: { currentSnapshotVersion: to, totalMinor: e.breakdown.totalMinor.toString(), customerId: e.customerId },
       context: {
-        amendmentId: row.id, initiatedBy: req.initiatedBy, reasonCode: e.reasonCode, changes: e.changes.join(','), priceDifferenceMinor: e.differenceMinor.toString(),
+        amendmentId: row.id, initiatedBy: req.initiatedBy, reasonCode: e.reasonCode, changes: e.changes.join(':'), priceDifferenceMinor: e.differenceMinor.toString(),
         basisDriftMinor: e.driftMinor.toString(), outstandingMinor: money.outstandingMinor.toString(), creditPendingMinor: money.creditPendingMinor.toString(),
-        retiredPlaces: e.places.retired.join(','), addedPlaces: e.places.added.map((a) => a.slot).join(','), releasedPlaces: released,
+        retiredPlaces: e.places.retired.join(':'), addedPlaces: e.places.added.map((a) => a.slot).join(':'), releasedPlaces: released,
       },
     });
     await this.outbox.publish(tx, {
