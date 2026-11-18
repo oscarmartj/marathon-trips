@@ -131,15 +131,18 @@ describe('bounded tables never forget a live count (S-06)', () => {
     expect(() => d.reserve('second', 'busy', 2)).toThrow();
   });
 
-  it('refused attempts leave no counter behind: a full table cannot be used to fill the counters and refuse new clients (round 4)', () => {
-    const d = new UnknownAccountDelay(2, 1000, 1000);
+  it('refused attempts leave no counter behind: a full table cannot be used to fill the counters and refuse new clients (round 5)', () => {
+    const MIN = 60_000;
+    const d = new UnknownAccountDelay(3, 1000, 1000);
     d.reserve('x1', 'a', 0);
-    d.reserve('x2', 'b', 0);
-    // While the table is full, many different clients are refused...
-    for (let i = 0; i < 50; i++) expect(() => d.reserve(`flood-${i}`, `2001:db8:9:${i.toString(16)}::/64`, 10)).toThrow();
-    // ...and none of them took a counter, so once places free up a new client is served.
-    expect(() => d.reserve('legit', 'office', 3_600_001)).not.toThrow();
-    expect(Reflect.get(Reflect.get(d, 'perClient'), 'entries').size).toBeLessThanOrEqual(3);
+    d.reserve('x2', 'a', 30 * MIN);
+    d.reserve('x3', 'a', 30 * MIN);
+    // The address table is full and the counters hold only "a". Two other clients are refused...
+    expect(() => d.reserve('f1', 'f1', 31 * MIN)).toThrow();
+    expect(() => d.reserve('f2', 'f2', 31 * MIN)).toThrow();
+    // ...and, refused, they took no counter. When x1 expires a new client is admitted. Code that created the counters
+    // first would have filled them with f1 and f2 and refused "office" here.
+    expect(() => d.reserve('office', 'office', 60 * MIN + 1)).not.toThrow();
   });
 
   const attempt = (email: string) => t.http().post('/auth/staff/sign-in').set(STATE_HEADERS).send({ email, password: 'definitely-wrong-password' });
