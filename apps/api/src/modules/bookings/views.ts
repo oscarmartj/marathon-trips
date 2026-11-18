@@ -24,7 +24,7 @@ export async function customerView(db: Db, where: { id: string } | { reference: 
   return jsonOf({
     reference: b.reference, status: b.status, isRequest: b.status === 'requested',
     requestedAt: b.requestedAt, requestExpiresAt: b.requestExpiresAt, departureDate: b.departureDate, returnDate: b.returnDate, balanceDueDate: b.balanceDueDate,
-    currency: b.currency, totalMinor: b.totalMinor, depositMinor: b.depositMinor,
+    currency: b.currency, totalMinor: b.totalMinor, depositMinor: b.depositMinor, currentSnapshotVersion: b.currentSnapshotVersion,
     package: { id: b.package.id, slug: b.package.slug, name: b.package.name, editionYear: b.package.edition.year, race: b.package.edition.race },
     price: { ...price, promo: { status: publicPromoStatus(price.promo.status) } },
   });

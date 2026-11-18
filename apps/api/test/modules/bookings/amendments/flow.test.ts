@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BOOKINGS_PERMISSIONS } from '../../../../src/modules/bookings';
 import { PermissionRegistry } from '../../../../src/platform/access/permissions';
+import { PaymentsMaintenanceService } from '../../../../src/modules/payments/core/maintenance.service';
+import { EntityRegistry } from '../../../../src/platform/entities/entity-registry';
 import { STATE_HEADERS, TestApp, makeApp } from '../../../support/auth';
 import { CATALOGUE_AND_PRICING, closeCatalogue, staffClient } from '../../../support/catalogue';
 import type { Client } from '../../../support/catalogue';
@@ -349,5 +351,39 @@ describe('places and traveller details (plan section 7)', () => {
     expect((await save(1, { givenName: 'Old', familyName: 'Place' })).status).toBe(404);
     const view = await t.http().get(`/account/bookings/${b.reference}/travellers`).set('Cookie', c.cookie);
     expect(view.body.travellers.map((x: { slot: number }) => x.slot)).toEqual([2, 3]);
+  });
+});
+
+describe('overdue adjustments and erasure (review M2, M4)', () => {
+  it('adjustment_overdue_opens_task_once and adjustment_paid_no_task', async () => {
+    const late = await paidBooking();
+    await amend(late.bookingId, await keepAll(late.bookingId, { extraNightsAfter: 1 }));
+    const paid = await paidBooking();
+    await amend(paid.bookingId, await keepAll(paid.bookingId, { extraNightsAfter: 1 }));
+    await payNext(paid.reference, paid.bookingId);
+    const item = (await activeItems(late.bookingId)).find((i) => i.kind === 'adjustment')!;
+    const due = item.dueDate.toISOString().slice(0, 10);
+    // The day after the due date (and twice): one task for the unpaid change, none for the paid one.
+    const after = new Date(item.dueDate.getTime() + 2 * 86_400_000);
+    await t.app.get(PaymentsMaintenanceService).run(after);
+    await t.app.get(PaymentsMaintenanceService).run(after);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:adjustment_overdue:${late.bookingId}:${due}` } })).toBe(1);
+    expect(await t.prisma.task.count({ where: { sourceRef: { startsWith: `payments:adjustment_overdue:${paid.bookingId}` } } })).toBe(0);
+    // Not before it is due.
+    const early = await paidBooking();
+    await amend(early.bookingId, await keepAll(early.bookingId, { extraNightsAfter: 1 }));
+    await t.app.get(PaymentsMaintenanceService).run(new Date());
+    expect(await t.prisma.task.count({ where: { sourceRef: { startsWith: `payments:adjustment_overdue:${early.bookingId}` } } })).toBe(0);
+  });
+
+  it('erasure registry: amendments are exported with the customer and hold nothing to erase', async () => {
+    const b = await paidBooking();
+    await amend(b.bookingId, await keepAll(b.bookingId, { extraNightsAfter: 1 }));
+    const def = t.app.get(EntityRegistry).get('BookingAmendment')!;
+    expect(def.customerLink).toEqual({ kind: 'via', entityType: 'Booking', column: 'bookingId' });
+    const customerId = (await row(b.bookingId)).customerId;
+    const exported = await t.prisma.$transaction((tx) => def.handlers!.export(tx, customerId));
+    expect(exported.length).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(exported, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))).not.toMatch(/Ada|Runner|@/);
   });
 });

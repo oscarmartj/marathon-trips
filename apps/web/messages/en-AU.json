@@ -65,7 +65,8 @@
     "accountBooking": "Your booking",
     "accountTravellers": "Traveller details",
     "payLink": "Pay with your link",
-    "payLinkReturn": "Your payment"
+    "payLinkReturn": "Your payment",
+    "accountChange": "Change your booking"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -2142,7 +2143,8 @@
         "traveller_slot_duplicated": "A traveller is listed twice for one extra.",
         "extra_audience_mismatch": "That extra is not available to the travellers chosen.",
         "edition_not_found": "That edition does not exist.",
-        "deposit_not_configured": "Set the deposit on the package before it can open for booking."
+        "deposit_not_configured": "Set the deposit on the package before it can open for booking.",
+        "amendment_price_basis_unavailable": "The prices a booking was sold at are no longer available."
       }
     },
     "crm": {
@@ -2329,6 +2331,61 @@
         "revoke": "Revoke",
         "revoked": "Payment link revoked.",
         "forbidden": "You do not have permission to send or revoke payment links."
+      },
+      "amendments": {
+        "title": "Changes",
+        "intro": "Change rooms, travellers, nights or extras of a booking after its deposit. The pricing engine prices the change on the prices the booking was sold at; refunds, fees and penalties are not available yet, so money owed back is recorded as credit pending.",
+        "none": "No changes yet.",
+        "historyCaption": "Changes to this booking",
+        "columns": {
+          "version": "Version",
+          "when": "When",
+          "by": "By",
+          "what": "What changed",
+          "previous": "Before",
+          "next": "After",
+          "difference": "Difference",
+          "outstanding": "Left to pay then",
+          "credit": "Credit then"
+        },
+        "currentCredit": "Credit pending now: {amount}. Refunds are not available yet: arrange it by hand (there is a task).",
+        "formHeading": "Change this booking",
+        "notAmendable": "Only bookings with the deposit paid can be changed.",
+        "room": "Room {n}",
+        "roomOption": "Room type",
+        "place": "Place {slot}",
+        "placeLead": "Place {slot} (lead)",
+        "newTraveller": "New traveller",
+        "replaces": "replaces place {slot}",
+        "participation": "Traveller",
+        "distance": "Distance",
+        "keep": "Keep",
+        "replace": "Change entry",
+        "remove": "Remove",
+        "addTraveller": "Add a traveller",
+        "addRoom": "Add a room",
+        "nightsBefore": "Extra nights before",
+        "nightsAfter": "Extra nights after",
+        "extras": "Extras",
+        "extraFor": "{extra}: {who}",
+        "quantity": "{extra}: how many",
+        "reason": "Reason",
+        "reasons": {
+          "customer_request": "The customer asked",
+          "correction": "Correction",
+          "supplier_change": "Supplier change",
+          "other": "Other"
+        },
+        "preview": "Preview the change",
+        "apply": "Apply the change",
+        "previewHeading": "Preview from the pricing engine",
+        "drift": "Price basis drift (in the customer's favour): {amount}",
+        "done": "The booking has been changed.",
+        "participationTypes": {
+          "runner_with_entry": "Runner with entry",
+          "runner_own_entry": "Runner with own entry",
+          "supporter": "Supporter"
+        }
       }
     },
     "templates": {
@@ -3366,6 +3423,70 @@
       "approval_expired": "The time to pay the deposit for this booking has run out.",
       "booking_not_payable": "This booking cannot take a payment right now.",
       "generic": "Something went wrong. Nothing has been charged. Try again shortly."
+    }
+  },
+  "amendments": {
+    "changesHeading": "Changes to this booking",
+    "noChanges": "This booking has not been changed.",
+    "changeLine": "{when}: changed by {by} ({what}). Total {from} → {to}, a difference of {difference}.",
+    "by": {
+      "customer": "you",
+      "staff": "our team"
+    },
+    "byStaffView": {
+      "customer": "the customer",
+      "staff": "staff"
+    },
+    "kinds": {
+      "room": "rooms",
+      "nights": "extra nights",
+      "travellers_added": "travellers added",
+      "travellers_removed": "travellers removed",
+      "participation": "a traveller's entry",
+      "extras": "extras"
+    },
+    "creditPending": "We owe you {amount} after a change. Refunds are not available online yet: this credit is pending and our team will contact you to arrange it.",
+    "changeLink": "Change nights or extras",
+    "contactUs": "To change this booking, contact us.",
+    "pageTitle": "Change your booking",
+    "pageIntro": "Add or remove extra nights and extras. We show the new price before anything changes; you can only make changes here that do not lower the price.",
+    "nightsBefore": "Extra nights before",
+    "nightsAfter": "Extra nights after",
+    "extrasLegend": "Extras",
+    "extraFor": "{extra} for place {slot}",
+    "extraQuantity": "{extra}: how many",
+    "preview": "Show the new price",
+    "previewHeading": "The new price",
+    "previousTotal": "Price now",
+    "newTotal": "New price",
+    "difference": "Difference",
+    "outstandingAfter": "Left to pay after this change",
+    "creditAfter": "Paid beyond the new price (credit pending; refunds are not available online yet)",
+    "dueNote": "What this change adds is due within a few days. You pay it from your booking page.",
+    "accept": "I accept the new price and want to make this change",
+    "confirm": "Make this change",
+    "done": "Your booking has been changed.",
+    "back": "Back to your booking",
+    "acceptRequired": "Tick the box to accept the new price.",
+    "errors": {
+      "amendment_not_allowed": "This booking cannot be changed in its current state.",
+      "amendment_too_late": "It is too late to change this booking here. Contact us.",
+      "amendment_needs_staff": "This change lowers the price. Contact us to make it.",
+      "amendment_price_changed": "The price of this change has changed. Show the new price again.",
+      "amendment_price_basis_drifted": "The prices behind this booking have changed since it was sold, so this change cannot be priced here. We have told the team.",
+      "amendment_price_basis_unavailable": "This booking cannot be re-priced now. We have told the team.",
+      "amendment_blocked_by_payment": "A payment for this booking is in progress. Try again when it has finished.",
+      "amendment_has_no_change": "Nothing would change.",
+      "amendments_unavailable": "Changes cannot be made online yet. Contact us to change your booking.",
+      "version_conflict": "This booking has just changed. Reload the page and try again.",
+      "inventory_unavailable": "There is not enough room for this change.",
+      "lead_place_required": "The lead traveller's place can only be replaced, not removed.",
+      "place_unknown": "That place is not part of this booking.",
+      "place_listed_twice": "A place is listed twice.",
+      "place_missing": "Every place of the booking must be kept.",
+      "amendment_limit_reached": "This booking cannot take more changes of travellers.",
+      "terms_not_accepted": "Accept the current booking terms first, from the payment page.",
+      "generic": "The change could not be made. Try again."
     }
   }
 }
