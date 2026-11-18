@@ -8,6 +8,18 @@ import { documentHref, documentKinds, statusKey } from '@/lib/account';
 import { t } from '@/lib/i18n';
 import { progress, showTravellerSection, travellerHref } from '@/lib/travellers';
 import { DeadlineNote } from '@/components/account/traveller-forms';
+import type { ConfigurationView } from '@/lib/amendments';
+
+export interface AccountChange {
+  version: number;
+  at: string;
+  by: 'customer' | 'staff';
+  changes: string[];
+  currency: string;
+  previousTotalMinor: string;
+  newTotalMinor: string;
+  priceDifferenceMinor: string;
+}
 
 export interface AccountBookingDetail {
   booking: {
@@ -18,9 +30,12 @@ export interface AccountBookingDetail {
     currency: string;
     totalMinor: string;
     depositMinor: string;
-    package: { name: Record<string, string>; editionYear: number; race: { name: Record<string, string> } };
-    price: { subtotals?: { accommodation?: string; participation?: string; extras?: string } };
+    currentSnapshotVersion?: number;
+    package: { name: Record<string, string>; slug?: string; editionYear: number; race: { name: Record<string, string>; slug?: string } };
+    price: { subtotals?: { accommodation?: string; participation?: string; extras?: string }; configuration?: ConfigurationView };
   };
+  /** Task 6.3: the changes made (history) and whether the customer can change nights and extras online. */
+  changes?: { items: AccountChange[]; customerChangesEnabled: boolean };
   plan: PaymentPlanView;
   payments: AccountPaymentRecord[];
   documents: string[];
@@ -106,6 +121,8 @@ export function BookingOverview({ view, travellers = null }: { view: AccountBook
         <p>{t('account.detail.receiptsNote')}</p>
       </section>
 
+      <ChangesSection view={view} />
+
       {showTravellerSection(travellers) ? <TravellerSummary reference={b.reference} travellers={travellers} /> : null}
 
       <section className="stack" aria-labelledby="documents-heading">
@@ -134,6 +151,37 @@ function TravellerSummary({ reference, travellers }: { reference: string; travel
       <p>{t('account.travellers.summary.progress', { done, total })}</p>
       <DeadlineNote view={travellers} />
       {href ? <p><Link href={href}>{t(travellers.editable ? 'account.travellers.summary.manage' : 'account.travellers.summary.view')}</Link></p> : null}
+    </section>
+  );
+}
+
+/**
+ * Changes made to the booking (task 6.3): the history as recorded, and what is owed back NOW from the payment plan (never
+ * the amount a past change recorded). A credit is pending: refunds are not available online yet.
+ */
+function ChangesSection({ view }: { view: AccountBookingDetail }) {
+  const changes = view.changes;
+  if (!changes) return null;
+  const credit = view.plan.overpaidMinor;
+  return (
+    <section className="stack" aria-labelledby="changes-heading">
+      <h2 id="changes-heading">{t('amendments.changesHeading')}</h2>
+      {changes.items.length === 0 ? <p>{t('amendments.noChanges')}</p> : (
+        <ul>
+          {changes.items.map((c) => (
+            <li key={c.version}>
+              {t('amendments.changeLine', {
+                when: formatInstant(c.at), by: t(`amendments.by.${c.by}`), what: c.changes.map((k) => t(`amendments.kinds.${k}`)).join(', '),
+                from: formatMoney(c.previousTotalMinor, c.currency), to: formatMoney(c.newTotalMinor, c.currency), difference: formatMoney(c.priceDifferenceMinor, c.currency),
+              })}
+            </li>
+          ))}
+        </ul>
+      )}
+      {credit && credit !== '0' ? <p className="notice" role="status">{t('amendments.creditPending', { amount: formatMoney(credit, view.plan.currency) })}</p> : null}
+      {changes.customerChangesEnabled ? (
+        <p><Link href={`/account/bookings/${encodeURIComponent(view.booking.reference)}/change`}>{t('amendments.changeLink')}</Link></p>
+      ) : <p>{t('amendments.contactUs')}</p>}
     </section>
   );
 }

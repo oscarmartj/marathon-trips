@@ -66,6 +66,15 @@ async function seed(world: PricedWorld, o: { status?: BookingStatus; details?: R
   return { reference, bookingId, customerId, given: String(d?.givenName ?? ''), family: String(d?.familyName ?? ''), supporterGiven: sup.givenName };
 }
 
+/**
+ * The runner's place is removed by a change (task 6.3): a booking always keeps exactly one current lead (deferred check),
+ * so the change that retires place 1 adds the lead's new place (a supporter, never exported) in the same transaction.
+ */
+const retireLead = (b: Seeded) => t.prisma.$transaction([
+  t.prisma.$executeRawUnsafe(`UPDATE booking_travellers SET "removedInVersion" = 2 WHERE "bookingId" = '${b.bookingId}'::uuid AND slot = 1`),
+  t.prisma.bookingTraveller.create({ data: { bookingId: b.bookingId, customerId: b.customerId, slot: 3, participationType: 'supporter', isLead: true, addedInVersion: 2 } }),
+]);
+
 const body = (world: PricedWorld, over: Record<string, unknown> = {}) => ({ editionId: world.edition.id, formatId: 'entry_list_basic', ...over });
 const file = (who: { post: (p: string, b?: object) => ReturnType<typeof owner.post> }, b: object) => who.post('/admin/organiser-exports', b);
 const check = (b: object) => owner.post('/admin/organiser-exports/check', b);
@@ -179,7 +188,7 @@ describe('who is exported, and nothing from another race', () => {
     const completed = await seed(e, { status: 'completed' });
     const ownEntry = await seed(e, { type: 'runner_own_entry' });
     const removed = await seed(e);
-    await t.prisma.$executeRawUnsafe(`UPDATE booking_travellers SET "removedInVersion" = 2 WHERE "bookingId" = '${removed.bookingId}'::uuid AND slot = 1`);
+    await retireLead(removed);
     const elsewhere = await seed(other);
     const res = await file(owner, body(e));
     expect(res.status).toBe(200);
@@ -226,7 +235,7 @@ describe('minimal reads', () => {
     const keep = await seed(e);
     const own = await seed(e, { type: 'runner_own_entry' });
     const removed = await seed(e);
-    await t.prisma.$executeRawUnsafe(`UPDATE booking_travellers SET "removedInVersion" = 2 WHERE "bookingId" = '${removed.bookingId}'::uuid AND slot = 1`);
+    await retireLead(removed);
     const travellerCalls: Array<{ select: Record<string, unknown>; where: { OR: Array<{ bookingId: string; slot: number }> } }> = [];
     const placeCalls: Array<{ select: { booking: { select: Record<string, unknown> } } & Record<string, unknown> }> = [];
     const wrap = (model: object, into: unknown[]) => new Proxy(model, { get: (m, fn) => (fn === 'findMany' ? (args: unknown) => { into.push(args); return (m as { findMany: (a: unknown) => unknown }).findMany(args); } : Reflect.get(m, fn)) });

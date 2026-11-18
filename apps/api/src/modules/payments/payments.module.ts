@@ -7,7 +7,7 @@ import { APP_CONFIG } from '../../platform/database/prisma.service';
 import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { RawBodyRoutes } from '../../platform/http/raw-body';
-import { BookingTransitionHooks, BookingsModule } from '../bookings';
+import { BookingAmendmentHooks, BookingTransitionHooks, BookingsModule } from '../bookings';
 import { TemplatesModule } from '../templates';
 import { MailTemplateRegistry } from '../../platform/mail/templates';
 import { PAYMENT_LINK_TEMPLATE, PaymentLinksService } from './core/payment-links.service';
@@ -31,6 +31,7 @@ import { WEBHOOK_MAX_BYTES, WEBHOOK_PATH_PREFIX, PaymentWebhooksService } from '
 import { PAYMENT_ENTITIES } from './entities';
 import { paymentsManifest } from './manifest';
 import { TermsService } from './core/terms.service';
+import { PaymentAmendmentService } from './core/amendment-plan.service';
 import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
 
@@ -42,10 +43,10 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
-    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService,
+    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
     SimulatorCheckoutService,
   ],
-  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService],
+  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(
@@ -60,6 +61,8 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(MailTemplateRegistry) private readonly mailTemplates: MailTemplateRegistry,
     @Inject(PaymentLinksService) private readonly links: PaymentLinksService,
     @Inject(PaymentRemindersService) private readonly reminders: PaymentRemindersService,
+    @Inject(BookingAmendmentHooks) private readonly amendmentHooks: BookingAmendmentHooks,
+    @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
   ) {}
 
   /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
@@ -69,6 +72,7 @@ export class PaymentsModule implements OnModuleInit {
     for (const e of PAYMENT_ENTITIES) this.entities.register(e);
     this.schedule.register(this.hooks);
     this.coverage.register(this.hooks);
+    this.amendments.register(this.amendmentHooks);
     this.mailTemplates.register({ ...PAYMENT_LINK_TEMPLATE, render: (ctx) => this.links.renderEmail(ctx) });
     this.mailTemplates.register({ ...PAYMENT_REMINDER_TEMPLATE, render: (ctx) => this.reminders.renderEmail(ctx) });
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });

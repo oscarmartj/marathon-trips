@@ -49,6 +49,17 @@ export const BOOKING_ENTITIES: EntityDef[] = [
     entityType: 'BookingTraveller', model: 'BookingTraveller', customerLink: { kind: 'column', column: 'customerId' },
     handlers: { export: (tx: Tx, customerId) => tx.bookingTraveller.findMany({ where: { customerId }, select: { bookingId: true, slot: true, participationType: true } }), anonymise: async () => undefined },
   },
+  {
+    // Task 6.3: a change holds no personal data (codes, versions and amounts); export lists it, erasure leaves it.
+    entityType: 'BookingAmendment', model: 'BookingAmendment', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: {
+      export: (tx: Tx, customerId) => tx.bookingAmendment.findMany({
+        where: { booking: { customerId } },
+        select: { bookingId: true, fromVersion: true, toVersion: true, initiatedBy: true, changes: true, previousTotalMinor: true, newTotalMinor: true, priceDifferenceMinor: true, currency: true, createdAt: true },
+      }),
+      anonymise: async () => undefined,
+    },
+  },
   ...(['BookingSnapshot', 'BookingRoom', 'BookingExtra', 'InventoryClaim'] as const).map((model): EntityDef => ({
     entityType: model, model, customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
     handlers: {

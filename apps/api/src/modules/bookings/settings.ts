@@ -11,8 +11,35 @@ export const BOOKING_SETTINGS = {
   maxHeldPlaces: { key: 'maxHeldPlacesPerCustomer', fallback: 12, schema: z.number().int().min(1).max(200), description: 'Stock places (rooms, entries, extras) one customer may hold at once with unreviewed requests' },
 } as const;
 
+/**
+ * Changes to a booking after its deposit (task 6.3; plan docs/plans/6.3-booking-amendments.md, decision 6 and section 6).
+ * Customers' own changes start switched off (plan review M2): Oscar turns them on once he has read the overdue rule.
+ */
+export const AMENDMENT_SETTINGS = {
+  customerEnabled: { key: 'customerAmendmentsEnabled', fallback: false as boolean, schema: z.boolean(), financial: true, description: 'Customers may change the extra nights and extras of a booking after the deposit themselves (they can never lower the price)' },
+  customerCutoffDays: { key: 'bookingAmendmentCustomerCutoffDays', fallback: 14, schema: z.number().int().min(0).max(365), description: 'Days before departure after which customers can no longer change a booking themselves' },
+  paymentDays: { key: 'amendmentPaymentDays', fallback: 7, schema: z.number().int().min(1).max(60), financial: true, description: 'Days a customer has to pay what a change of a booking adds' },
+} as const;
+
+export interface AmendmentSettings {
+  customerEnabled: boolean;
+  customerCutoffDays: number;
+  paymentDays: number;
+}
+
+/** Read before the transaction (a caller inside one must not read settings there). */
+export async function readAmendmentSettings(settings: SettingsService): Promise<AmendmentSettings> {
+  const S = AMENDMENT_SETTINGS;
+  return {
+    customerEnabled: await settings.get(S.customerEnabled.key, S.customerEnabled.fallback),
+    customerCutoffDays: await settings.get(S.customerCutoffDays.key, S.customerCutoffDays.fallback),
+    paymentDays: await settings.get(S.paymentDays.key, S.paymentDays.fallback),
+  };
+}
+
 export function defineBookingSettings(settings: SettingsService): void {
   for (const s of Object.values(BOOKING_SETTINGS)) settings.define(s.key, s.schema, 1, { description: s.description });
+  for (const s of Object.values(AMENDMENT_SETTINGS)) settings.define(s.key, s.schema, 1, { description: s.description, ...('financial' in s ? { financial: s.financial } : {}) });
 }
 
 export interface BookingLimits {
