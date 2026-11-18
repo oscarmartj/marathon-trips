@@ -76,6 +76,18 @@ export class AccessService implements OnApplicationBootstrap {
     return computeEffective(rows, this.declaredKeys());
   }
 
+  /** `effective` for many users in one query. A user who is not active staff has no entry in the answer's keys (empty set). */
+  async effectiveMany(db: Db, userIds: readonly string[]): Promise<Map<string, Effective>> {
+    const rows = await db.userRole.findMany({
+      where: { userId: { in: [...userIds] }, user: { kind: 'staff', status: 'active' } },
+      select: { userId: true, scope: true, role: { select: { key: true, permissions: { select: { permissionKey: true } } } } },
+    });
+    const byUser = new Map<string, typeof rows>();
+    for (const r of rows) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), r]);
+    const declared = this.declaredKeys();
+    return new Map(userIds.map((id) => [id, computeEffective(byUser.get(id) ?? [], declared)]));
+  }
+
   /**
    * What this request may do. For a session: the user's permissions. For an API key (task 8.4): the owner's current
    * permissions intersected with the key's scopes, keeping only API-key-scopable permissions, and never owner status.

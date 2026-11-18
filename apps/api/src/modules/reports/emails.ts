@@ -3,12 +3,13 @@ import { REPORT_EMAIL_ROWS, reportDefinitionSchema } from '@mt/shared';
 import type { ReportResult } from '@mt/shared';
 import type { AppConfig } from '../../platform/config/config';
 import { APP_CONFIG } from '../../platform/database/prisma.service';
+import { FeatureFlagService } from '../../platform/flags/flags.service';
 import { AccessService } from '../../platform/access/access.service';
 import { AppError } from '../../platform/errors/safe-error';
-import { MAIL_NOT_SENDABLE } from '../../platform/mail/mail.service';
+import { MAIL_NOT_SENDABLE, MAIL_SKIPPED } from '../../platform/mail/mail.service';
 import type { MailTemplate, RenderContext, RenderedMail } from '../../platform/mail/templates';
 import { ReportEngine } from './engine';
-import { REPORTS_PERMISSIONS as P, REPORT_EMAIL_TEMPLATE } from './manifest';
+import { REPORTS_MODULE, REPORTS_PERMISSIONS as P, REPORT_EMAIL_TEMPLATE } from './manifest';
 import { entityPermission } from './reports.service';
 
 const pad = (s: string, n: number) => s.padEnd(n, ' ');
@@ -43,6 +44,7 @@ export class ReportEmails {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(AccessService) private readonly access: AccessService,
     @Inject(ReportEngine) private readonly engine: ReportEngine,
+    @Inject(FeatureFlagService) private readonly flags: FeatureFlagService,
   ) {}
 
   mailTemplates(): MailTemplate[] {
@@ -50,6 +52,8 @@ export class ReportEmails {
   }
 
   private async render(ctx: RenderContext): Promise<RenderedMail> {
+    // With the module off nothing goes out, also what was queued before it was switched off.
+    if (!(await this.flags.isModuleEnabled(REPORTS_MODULE, ctx.tx))) throw new AppError(MAIL_SKIPPED, 'module_disabled');
     const runId = ctx.email.relatedEntityType === 'ReportRun' ? ctx.email.relatedEntityId : null;
     const run = runId ? await ctx.tx.reportRun.findUnique({ where: { id: runId }, select: { scheduledFor: true, report: { select: { id: true, name: true, definition: true, deletedAt: true, ownerUserId: true, recipientUserIds: true } } } }) : null;
     if (!run || run.report.deletedAt) throw new AppError(MAIL_NOT_SENDABLE, 'The report is gone');
@@ -62,7 +66,8 @@ export class ReportEmails {
     if (!user || !run.report.recipientUserIds.includes(user.id)) throw new AppError(MAIL_NOT_SENDABLE, 'The recipient is no longer on this report');
     const ownerEff = await this.access.effective(ctx.tx, run.report.ownerUserId);
     if (!ownerEff.keys.has(P.read) || !ownerEff.keys.has(entityPermission(def.data.entity))) throw new AppError(MAIL_NOT_SENDABLE, 'The owner of the report can no longer see its data');
-    const result = await this.engine.run(ctx.tx, def.data, run.scheduledFor);
+    // Whole days that ended before the scheduled time, so one report starts where the last one ended.
+    const result = await this.engine.run(ctx.tx, def.data, run.scheduledFor, { completeDaysOnly: true });
     const link = `${new URL(this.config.WEB_ORIGIN).origin}/admin/reports`;
     return { subject: `Report: ${run.report.name}`, text: formatReportText(run.report.name, result, link) };
   }

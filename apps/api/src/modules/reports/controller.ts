@@ -6,7 +6,7 @@ import { actorOf } from '../../platform/access/actor';
 import { RequiresModule } from '../../platform/flags/requires-module.guard';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
-import { VisitDeduper, VisitRateLimitGuard } from './rate-limit.guard';
+import { ReportRunRateLimitGuard, VisitDeduper, VisitRateLimitGuard } from './rate-limit.guard';
 import { REPORTS_MODULE, REPORTS_PERMISSIONS as P } from './manifest';
 import { ReportsService } from './reports.service';
 import type { Caller } from './reports.service';
@@ -44,7 +44,7 @@ export class ReportsAdminController {
   @Get('catalogue') @RequirePermission(P.read)
   catalogue(@Req() req: ApiRequest) { return this.service.catalogue(req.auth!); }
 
-  @Post('preview') @HttpCode(200) @RequirePermission(P.read)
+  @Post('preview') @HttpCode(200) @RequirePermission(P.read) @UseGuards(ReportRunRateLimitGuard)
   preview(@Body(new ZodPipe(previewReportSchema)) b: In<typeof previewReportSchema>, @Req() req: ApiRequest) { return this.service.preview(req.auth!, b.definition); }
 
   @Get() @RequirePermission(P.read)
@@ -56,7 +56,7 @@ export class ReportsAdminController {
   @Get(':id') @RequirePermission(P.read)
   get(@Param('id', uuid()) id: string) { return this.service.get(id); }
 
-  @Post(':id/run') @HttpCode(200) @RequirePermission(P.read)
+  @Post(':id/run') @HttpCode(200) @RequirePermission(P.read) @UseGuards(ReportRunRateLimitGuard)
   run(@Param('id', uuid()) id: string, @Req() req: ApiRequest) { return this.service.runSaved(req.auth!, id); }
 
   @Patch(':id') @RequirePermission(P.manage)

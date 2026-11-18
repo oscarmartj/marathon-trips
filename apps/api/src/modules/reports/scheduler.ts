@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { reportDefinitionSchema, reportScheduleSchema } from '@mt/shared';
 import type { ReportDefinition } from '@mt/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { AccessService } from '../../platform/access/access.service';
 import { TasksService } from '../../platform/common/tasks/tasks.service';
 import { PrismaService } from '../../platform/database/prisma.service';
+import { safeError } from '../../platform/errors/safe-error';
 import { FeatureFlagService } from '../../platform/flags/flags.service';
 import { MailService } from '../../platform/mail/mail.service';
 import { SCHEDULE_WINDOW_MS, latestOccurrence } from './dates';
@@ -21,6 +22,8 @@ type Tx = Prisma.TransactionClient;
  */
 @Injectable()
 export class ReportScheduler {
+  private readonly logger = new Logger('Reports');
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AccessService) private readonly access: AccessService,
@@ -35,13 +38,31 @@ export class ReportScheduler {
     let runs = 0;
     let emails = 0;
     for (const { id } of candidates) {
-      const made = await this.prisma.$transaction((tx) => this.runOne(tx, id, now));
-      if (made) {
-        runs += 1;
-        emails += made.emails;
+      try {
+        const made = await this.prisma.$transaction((tx) => this.runOne(tx, id, now));
+        if (made) {
+          runs += 1;
+          emails += made.emails;
+        }
+      } catch (err) {
+        // One report that cannot be made never stops the others. Its transaction rolled back, so it is tried again at
+        // the next tick while its occurrence is inside the window. The log holds the id and a code, nothing else.
+        this.logger.error(`report ${id} could not be run: ${safeError(err).code}`);
+        await this.noteFailure(id);
       }
     }
     return { runs, emails };
+  }
+
+  /** One open system task per report that fails, so someone looks at it. Best effort: it must not throw. */
+  private async noteFailure(reportId: string): Promise<void> {
+    try {
+      await this.prisma.$transaction((tx) =>
+        this.tasks.createSystemIn(tx, { title: 'A scheduled report could not be made', entityType: 'SavedReport', entityId: reportId, sourceRef: `reports:run_failed:${reportId}` }),
+      );
+    } catch (err) {
+      this.logger.error(`report ${reportId}: the failure could not be recorded: ${safeError(err).code}`);
+    }
   }
 
   private async eligible(tx: Tx, userId: string, entity: ReportDefinition['entity']): Promise<{ id: string; email: string } | null> {
