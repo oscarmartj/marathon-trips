@@ -23,7 +23,7 @@ export async function makeCustomer(t: TestApp, over: Record<string, unknown> = {
  * transaction: the snapshot is required at commit by the "totals mirror the snapshot" trigger. For tests of other
  * modules that need a booking to point at (plan 2.4, section 13: the promo redemption tests of 2.2).
  */
-export async function makeBookingFor(t: TestApp, w: { pkg: { id: string }; edition: { id: string }; versionId: string }, customerId?: string, requestedAt?: Date, amounts: { totalMinor: bigint; depositMinor: bigint } = { totalMinor: 10000n, depositMinor: 0n }): Promise<{ customerId: string; bookingId: string }> {
+export async function makeBookingFor(t: TestApp, w: { pkg: { id: string }; edition: { id: string }; versionId: string }, customerId?: string, requestedAt?: Date, amounts: { totalMinor: bigint; depositMinor: bigint } = { totalMinor: 10000n, depositMinor: 0n }, opts: { isDemo?: boolean } = {}): Promise<{ customerId: string; bookingId: string }> {
   const cid = customerId ?? (await makeCustomer(t));
   const now = requestedAt ?? new Date();
   const bookingId = await t.prisma.$transaction(async (tx) => {
@@ -32,7 +32,7 @@ export async function makeBookingFor(t: TestApp, w: { pkg: { id: string }; editi
         reference: reference(), customerId: cid, kind: 'catalogue', packageId: w.pkg.id, editionId: w.edition.id, status: 'requested', currentSnapshotVersion: 1,
         departureDate: new Date('2027-06-18'), returnDate: new Date('2027-06-21'), currency: 'AUD', totalMinor: amounts.totalMinor, depositMinor: amounts.depositMinor, balanceDueDate: new Date('2027-04-18'),
         residenceCountry: 'AU', requestedAt: now, requestExpiresAt: new Date(now.getTime() + 86_400_000), sourceChannel: 'panel',
-        requestKeyHash: hex64(), requestConfigHash: hex64(), requestContactHmac: hex64(),
+        requestKeyHash: hex64(), requestConfigHash: hex64(), requestContactHmac: hex64(), ...(opts.isDemo ? { isDemo: true } : {}),
       },
       select: { id: true },
     });
