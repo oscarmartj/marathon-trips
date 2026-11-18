@@ -16,7 +16,7 @@ import { checkConditions, referencedIds } from './conditions';
 import { AUTOMATIONS_PERMISSIONS as P, ENTITY_READ_PERMISSION } from './manifest';
 
 type Tx = Prisma.TransactionClient;
-const CUSTOMER_CODES: ReadonlySet<string> = new Set(['recipient_unavailable', 'recipient_suppressed']);
+const CUSTOMER_CODES: ReadonlySet<string> = new Set(['recipient_unavailable', 'recipient_suppressed', 'customer_rate_limited', 'marketing_consent_missing']);
 type Scope = AutomationEntityType | 'schedule';
 export interface Caller {
   auth: AuthContext;
@@ -32,7 +32,7 @@ const definitionOf = (r: RuleRow) => ({
 });
 const audited = (r: RuleRow) => ({
   name: r.name, triggerType: r.triggerType, eventType: r.eventType, schedule: r.schedule, conditions: r.conditions, actions: r.actions,
-  enabled: r.enabled, testMode: r.testMode, ownerUserId: r.ownerUserId, deletedAt: r.deletedAt,
+  enabled: r.enabled, testMode: r.testMode, ownerUserId: r.ownerUserId, deletedAt: r.deletedAt, serviceNoticeAckAt: r.serviceNoticeAckAt,
 });
 
 export const scopeOf = (d: Pick<AutomationRuleDefinition, 'triggerType' | 'eventType'>): Scope =>
@@ -102,6 +102,10 @@ export class AutomationRulesService {
     }
   }
 
+  private emailsCustomers(def: AutomationRuleDefinition): boolean {
+    return def.actions.some((a) => a.type === 'send_email' && isCustomerTemplate(a.template));
+  }
+
   private async lockRule(tx: Tx, id: string): Promise<RuleRow> {
     await tx.$queryRaw`SELECT id FROM automation_rules WHERE id = ${id}::uuid FOR UPDATE`;
     const rule = await tx.automationRule.findUnique({ where: { id } });
@@ -140,6 +144,8 @@ export class AutomationRulesService {
         data: {
           name: def.name, triggerType: def.triggerType, eventType: def.eventType ?? null, schedule: def.schedule ? (def.schedule as Prisma.InputJsonValue) : Prisma.DbNull,
           conditions: def.conditions as Prisma.InputJsonValue, actions: def.actions as Prisma.InputJsonValue, ownerUserId: caller.actor.id, version: { increment: 1 },
+          // A changed rule needs a new service-message acknowledgement (task 7.fix-2): until then its notices honour unsubscribes.
+          serviceNoticeAckAt: null,
         },
       });
       await this.audit.record(tx, { actor: caller.actor, action: 'automations.rule.updated', entityType: 'AutomationRule', entityId: id, model: 'AutomationRule', before: audited(rule), after: audited(after) });
@@ -148,7 +154,7 @@ export class AutomationRulesService {
   }
 
   /** Switches a rule on (or changes its test mode while on). The caller becomes its owner. */
-  async enable(caller: Caller, id: string, input: { version: number; testMode: boolean }, now: Date = new Date()) {
+  async enable(caller: Caller, id: string, input: { version: number; testMode: boolean; serviceMessageAck?: boolean }, now: Date = new Date()) {
     return this.prisma.$transaction(async (tx) => {
       // Serialises switching rules on, so two requests cannot both pass the count.
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext('automation_rules:enable'))`;
@@ -162,7 +168,14 @@ export class AutomationRulesService {
       }
       const after = await tx.automationRule.update({
         where: { id },
-        data: { enabled: true, testMode: input.testMode, enabledAt: rule.enabled ? rule.enabledAt : now, ownerUserId: caller.actor.id, version: { increment: 1 } },
+        data: {
+          enabled: true, testMode: input.testMode, enabledAt: rule.enabled ? rule.enabledAt : now, ownerUserId: caller.actor.id, version: { increment: 1 },
+          // Task 7.fix-2: recorded (and audited) only for a rule that emails customers. `false` removes it. Left out, a
+          // rule that was off gets none (switching on needs it again), while one already on keeps it unchanged, so
+          // changing only its test mode from the panel never drops it silently (review round 1).
+          serviceNoticeAckAt: !this.emailsCustomers(def.data) || input.serviceMessageAck === false ? null
+            : input.serviceMessageAck === true ? now : rule.enabled ? rule.serviceNoticeAckAt : null,
+        },
       });
       await this.audit.record(tx, { actor: caller.actor, action: 'automations.rule.enabled', entityType: 'AutomationRule', entityId: id, model: 'AutomationRule', before: audited(rule), after: audited(after) });
       return this.view(after);
@@ -235,7 +248,7 @@ export class AutomationRulesService {
 
   view(r: RuleRow) {
     return {
-      id: r.id, ...definitionOf(r), enabled: r.enabled, testMode: r.testMode, enabledAt: r.enabledAt, ownerUserId: r.ownerUserId, version: r.version,
+      id: r.id, ...definitionOf(r), enabled: r.enabled, testMode: r.testMode, enabledAt: r.enabledAt, serviceNoticeAckAt: r.serviceNoticeAckAt, ownerUserId: r.ownerUserId, version: r.version,
       createdAt: r.createdAt, updatedAt: r.updatedAt, permissions: (() => {
         const d = automationRuleDefinitionSchema.safeParse(definitionOf(r));
         try {

@@ -29,7 +29,11 @@ export class AutomationEmails {
   ) {}
 
   mailTemplates(): MailTemplate[] {
-    return AUTOMATION_EMAIL_TEMPLATES.map((t) => ({ key: automationTemplateKey(t), version: 1, render: (ctx: RenderContext) => this.render(t, ctx) }));
+    // Customer notices are checked for an `all` suppression again at send time (task 7.fix-2): a bounce or complaint after
+    // queueing stops a retry. Those queued as marketing (no service acknowledgement) are checked for any suppression.
+    return AUTOMATION_EMAIL_TEMPLATES.map((t) => ({
+      key: automationTemplateKey(t), version: 1, render: (ctx: RenderContext) => this.render(t, ctx), ...(isCustomerTemplate(t) ? { suppressedBy: 'all' as const } : {}),
+    }));
   }
 
   private url(path: string): string {
@@ -38,9 +42,20 @@ export class AutomationEmails {
 
   private async render(template: AutomationEmailTemplate, ctx: RenderContext): Promise<RenderedMail> {
     const values = isCustomerTemplate(template) ? await this.customerValues(ctx) : await this.staffValues(ctx);
-    const out = await this.templates.renderEmail(ctx.tx, automationTemplateKey(template), ctx.email.locale, values);
+    const key = automationTemplateKey(template);
+    if (isCustomerTemplate(template) && ctx.email.category === 'transactional' && ctx.email.queuedAt) {
+      // Task 7.fix-2: a notice was a service message for the wording in use when it was queued. Wording put into use
+      // since then was never confirmed as one, so the notice is not sent (failed at once, no retries).
+      const changed = await ctx.tx.messageTemplate.count({ where: { channel: 'email', key, status: 'active', updatedAt: { gt: ctx.email.queuedAt } } });
+      if (changed > 0) throw new AppError(MAIL_NOT_SENDABLE, 'The wording changed after this service notice was queued');
+    }
+    const out = await this.templates.renderEmail(ctx.tx, key, ctx.email.locale, values);
     if (!out) throw new AppError(MAIL_NOT_SENDABLE, 'The template for this email is not in use');
-    return { subject: out.subject, text: out.text };
+    // A notice queued as marketing carries the unsubscribe link in its body too, not only the List-Unsubscribe header.
+    const footer = ctx.email.category === 'marketing'
+      ? `\n\n--\nTo stop these emails, unsubscribe in one click: ${this.url(`/unsubscribe#ref=${ctx.email.id}.${ctx.unsubscribeToken}`)}\n`
+      : '';
+    return { subject: out.subject, text: `${out.text}${footer}` };
   }
 
   private async customerValues(ctx: RenderContext): Promise<Record<string, string>> {
