@@ -2,6 +2,10 @@
 # Caddy replaces any X-Forwarded-For sent by the browser with the real client address, so the web app trusts one hop.
 {$SITE_ADDRESS} {
 	encode zstd gzip
+	# Task 8.5 (S-09): bodies over 1 MB never reach the web app (the /api proxy itself refuses anything over 100 kB).
+	request_body {
+		max_size 1MB
+	}
 	reverse_proxy web:3000
 	header {
 		Strict-Transport-Security "max-age=31536000"

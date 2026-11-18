@@ -18,7 +18,9 @@ const ROOT_ROUTES = /^\/(opengraph-image|twitter-image)(-[A-Za-z0-9]+)?$/;
 export function routeLocale(pathname: string, remembered: string | undefined, enabled: readonly Locale[]): LocaleRoute {
   if (ROOT_ROUTES.test(pathname)) return { kind: 'pass' };
   const { locale, rest } = splitLocale(pathname);
-  if (locale === DEFAULT_LOCALE) return { kind: 'redirect', to: rest, remember: DEFAULT_LOCALE };
+  // Task 8.5 (S-12): the target is always a path on this site. Next.js already turns `//` and `\` in a request path
+  // into a 308 to the cleaned path before this runs, but `/en-AU//other.example` must never become `//other.example`.
+  if (locale === DEFAULT_LOCALE) return { kind: 'redirect', to: rest.replace(/^[\\/]+/, '/'), remember: DEFAULT_LOCALE };
   if (locale) return enabled.includes(locale) ? { kind: 'rewrite', to: pathname, remember: locale } : { kind: 'pass' };
   const chosen = isRegistered(remembered) && enabled.includes(remembered) ? remembered : DEFAULT_LOCALE;
   return { kind: 'rewrite', to: `/${chosen}${pathname === '/' ? '' : pathname}` };

@@ -71,6 +71,8 @@ export function checkDeployConfig(compose, caddyfile) {
   if (!Number.isInteger(hops) || hops < 1 || hops > 5) errors.push('web WEB_TRUSTED_PROXY_HOPS must be an integer from 1 to 5 (the hosting proxy count)');
   if (!/reverse_proxy\s+web:3000/.test(caddyfile)) errors.push('Caddyfile must reverse_proxy to web:3000');
   if (/reverse_proxy\s+api/.test(caddyfile)) errors.push('Caddyfile must not proxy to the API');
+  // Task 8.5 (S-09): Caddy caps request bodies, so a huge upload never reaches the web app.
+  if (!/request_body\s*\{[^}]*max_size\s+\d+(kB|KB|MB)/.test(caddyfile)) errors.push('Caddyfile must set request_body max_size');
   if (/_dev\b|postgres_dev/.test(compose)) errors.push('development passwords appear in the production compose file');
   return errors;
 }

@@ -57,3 +57,7 @@ test('task 1.fix-1: WEB_ORIGIN must reach the web build and the web container, a
   assert.match(problems(compose.replace(webEnv, '      API_BASE_URL: http://api:4000\n      WEB_ORIGIN: http://localhost:3000\n')), /localhost or http/);
   assert.match(problems(compose.replace(webEnv, '      API_BASE_URL: http://api:4000\n      WEB_ORIGIN: http://example.com.au\n')), /localhost or http/);
 });
+
+test('Caddyfile without a request body limit fails (task 8.5)', () => {
+  assert.match(problems(compose, caddy.replace(/request_body\s*\{[^}]*\}/, '')), /request_body max_size/);
+});
