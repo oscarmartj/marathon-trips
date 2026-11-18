@@ -13,6 +13,7 @@ import { customerClient } from '../../../support/bookings';
 import type { CustomerClient } from '../../../support/bookings';
 import { STATE_HEADERS } from '../../../support/auth';
 import { AmendWorld, Traveller, amendWorld, requestIn, runner, setCustomerAmendments, supporter } from '../../../support/amendments';
+import { retireAmendWorlds } from '../../../support/amendments';
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
@@ -27,6 +28,7 @@ beforeAll(async () => {
   w = await amendWorld(admin);
 });
 afterAll(async () => {
+  await retireAmendWorlds(t);
   await setCustomerAmendments(t, false);
   await cleanPayments(t);
   await cleanBookingEvents(t);

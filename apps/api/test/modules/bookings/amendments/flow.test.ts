@@ -15,6 +15,7 @@ import {
   ALL_PAYMENT_PERMISSIONS, PayingCustomer, SimAccount, acceptCurrentTerms, cleanPayments, deliver, ensureTerms, eventFor, onlyAccount, payingCustomer, sim, simulatorAccount,
 } from '../../../support/payments';
 import { AmendWorld, amendWorld, requestIn, runner, setCustomerAmendments, supporter } from '../../../support/amendments';
+import { retireAmendWorlds } from '../../../support/amendments';
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -33,6 +34,7 @@ beforeAll(async () => {
   await setCustomerAmendments(t, false);
 });
 afterAll(async () => {
+  await retireAmendWorlds(t);
   await setCustomerAmendments(t, false);
   await cleanPayments(t);
   await cleanBookingEvents(t);

@@ -66,6 +66,16 @@ export const amendRates = (w: { doubleId: string; quadId: string; extraId: strin
 });
 
 /** An open package with a double and a quad room, two extra nights each side, runners and supporters, priced. */
+const worldEditions: string[] = [];
+
+/**
+ * Marks the editions of this file's worlds completed, so the panel's low-stock list (oldest 200 pools) is not filled with
+ * the small, full pools these tests make on purpose. Call in afterAll.
+ */
+export async function retireAmendWorlds(t: TestApp): Promise<void> {
+  if (worldEditions.length > 0) await t.prisma.$executeRawUnsafe(`UPDATE race_editions SET status = 'completed' WHERE id = ANY($1::uuid[])`, worldEditions.splice(0));
+}
+
 export async function amendWorld(admin: Client, opts: { quadCapacity?: number; doubleCapacity?: number; autoConfirm?: boolean } = {}): Promise<AmendWorld> {
   const w = await buildWorld(admin, { priced: false, packageOver: { maxExtraNightsBefore: 2, maxExtraNightsAfter: 2, autoConfirmOnDeposit: opts.autoConfirm ?? true } });
   await must(admin.put(`/admin/catalogue/packages/${w.pkg.id}/participation`, { types: ['runner_with_entry', 'supporter'] }), 'participation');
@@ -80,6 +90,7 @@ export async function amendWorld(admin: Client, opts: { quadCapacity?: number; d
   pkg = (await must(admin.get(`/admin/catalogue/packages/${w.pkg.id}`), 'package')).body;
   const rooms = pkg.hotels[0].rooms as Array<{ id: string; roomType: string }>;
   const ids = { doubleId: rooms.find((r) => r.roomType === 'double')!.id, quadId: rooms.find((r) => r.roomType === 'quad')!.id, extraId: pkg.extras[0].id as string, distanceId: w.distanceId };
+  worldEditions.push(w.edition.id);
   const versionId = await publishWith(admin, w.pkg.id, amendRates(ids));
   await must(admin.post(`/admin/catalogue/races/${w.race.id}/status`, { status: 'published', version: w.race.version }), 'publish race');
   await must(announceEdition(admin, w.edition.id), 'announce edition');

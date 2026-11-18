@@ -15,6 +15,7 @@ import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, customerClient } from '../
 import { walkTo } from '../../../support/customer-portal';
 import { ALL_PAYMENT_PERMISSIONS, PayingCustomer, SimAccount, acceptCurrentTerms, cleanPayments, eventFor, onlyAccount, payingCustomer, sendWebhook, sim, simulatorAccount } from '../../../support/payments';
 import { AmendWorld, amendWorld, requestIn, runner, supporter } from '../../../support/amendments';
+import { retireAmendWorlds } from '../../../support/amendments';
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
@@ -34,6 +35,7 @@ beforeEach(async () => {
   await t.prisma.session.updateMany({ where: { userId: (admin as Client & { staff: { id: string } }).staff.id, revokedAt: null }, data: { mfaVerifiedAt: new Date() } });
 });
 afterAll(async () => {
+  await retireAmendWorlds(t);
   vi.restoreAllMocks();
   await cleanPayments(t);
   await cleanBookingEvents(t);

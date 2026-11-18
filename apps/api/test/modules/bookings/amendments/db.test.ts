@@ -10,6 +10,7 @@ import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, customerClient } from '../
 import { walkTo } from '../../../support/customer-portal';
 import { ALL_PAYMENT_PERMISSIONS } from '../../../support/payments';
 import { AmendWorld, amendWorld, requestIn, runner, supporter } from '../../../support/amendments';
+import { retireAmendWorlds } from '../../../support/amendments';
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -27,6 +28,7 @@ beforeAll(async () => {
   await owner.connect();
 });
 afterAll(async () => {
+  await retireAmendWorlds(t);
   await owner.end();
   await cleanBookingEvents(t);
   await closeCatalogue(t);
