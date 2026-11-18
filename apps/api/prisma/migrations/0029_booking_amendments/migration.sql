@@ -219,3 +219,32 @@ $$;
 CREATE CONSTRAINT TRIGGER booking_snapshots_amendment_row AFTER INSERT ON "booking_snapshots"
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION public.mt_amendment_snapshot_has_row();
+
+-- ---- Erasure with credit pending (plan section 6, review M4; builds on 0027_privacy) ----
+-- After a change lowered the price, a booking in any state (completed included) can hold more succeeded payments than its
+-- total: money that may be owed back (refunds are parked). Erasure is refused, as for closed bookings with money paid.
+CREATE OR REPLACE FUNCTION public.privacy_active_trip_reason(p_customer uuid) RETURNS text
+  LANGUAGE sql
+  STABLE
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM public.bookings b WHERE b."customerId" = p_customer
+                   AND b.status IN ('requested', 'approved', 'deposit_paid', 'confirmed')) THEN 'open_booking'
+    WHEN EXISTS (SELECT 1 FROM public.bookings b WHERE b."customerId" = p_customer AND b.status = 'balance_paid'
+                   AND b."returnDate" >= (pg_catalog.now() AT TIME ZONE 'Australia/Brisbane')::date) THEN 'trip_not_finished'
+    WHEN EXISTS (SELECT 1 FROM public.payments p
+                  WHERE (p."payerCustomerId" = p_customer OR p."bookingId" IN (SELECT b.id FROM public.bookings b WHERE b."customerId" = p_customer))
+                    AND p.status IN ('created', 'pending', 'requires_action')) THEN 'live_payment'
+    WHEN EXISTS (SELECT 1 FROM public.bookings b JOIN public.payments p ON p."bookingId" = b.id
+                  WHERE (b."customerId" = p_customer OR p."payerCustomerId" = p_customer)
+                    AND b.status IN ('cancelled', 'declined', 'expired') AND p.status = 'succeeded') THEN 'refund_may_be_due'
+    -- Task 6.3: paid beyond the booking's (changed) total, whatever its status: a credit is pending.
+    WHEN EXISTS (SELECT 1 FROM public.bookings b
+                  WHERE (b."customerId" = p_customer OR EXISTS (SELECT 1 FROM public.payments q WHERE q."bookingId" = b.id AND q."payerCustomerId" = p_customer))
+                    AND (SELECT COALESCE(sum(p."amountMinor"), 0) FROM public.payments p WHERE p."bookingId" = b.id AND p.status = 'succeeded') > b."totalMinor") THEN 'refund_may_be_due'
+  END
+$$;
+-- The two amounts the new branch reads (no personal data), for the erasure functions' role.
+GRANT SELECT ("totalMinor") ON "bookings" TO mt_privacy;
+GRANT SELECT ("amountMinor") ON "payments" TO mt_privacy;

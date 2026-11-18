@@ -22,7 +22,7 @@ import { PAYMENT_SETTINGS } from './settings';
 
 export const PAYMENT_REMINDER_TEMPLATE = { key: 'payments.balance_reminder', version: 1 } as const;
 
-/** Booking states whose later payments can be reminded: the deposit is in, so the next item is a balance or instalment. */
+/** Booking states whose later payments can be reminded: the deposit is in, so the next item is a balance, an instalment or what a change added (6.3). */
 const REMINDABLE_STATES = ['deposit_paid', 'confirmed'] as const;
 /** Reminders go out during Brisbane business hours only (from 8:00 up to, not including, 18:00). */
 export const REMINDER_HOURS = { from: 8, to: 18 } as const;
@@ -59,7 +59,17 @@ export function reminderOffset(offsets: readonly number[], daysUntil: number): n
   return reached.length === 0 ? null : Math.min(...reached);
 }
 
-export const reminderDedupeKey = (itemId: string, offset: number): string => `balance-reminder:${itemId}:${offset}`;
+/** The items a reminder can be about: later payments, and what a change of the booking added (task 6.3, an `adjustment`). */
+export const REMINDABLE_KINDS = ['balance', 'instalment', 'adjustment'] as const;
+const ymd = (d: Date | string): string => (typeof d === 'string' ? d : d.toISOString().slice(0, 10));
+
+/**
+ * The reminder's identity: the booking, the kind of item, its due date and the offset, never the item's id (task 6.3, plan
+ * section 6, review M1). A change of the booking supersedes every item and restates them with new ids; a restated item with
+ * the same kind and due date is the same reminder and is not sent again, while what the change added has its own.
+ */
+export const reminderDedupeKey = (item: { bookingId: string; kind: string; dueDate: Date | string }, offset: number): string =>
+  `balance-reminder:${item.bookingId}:${item.kind}:${ymd(item.dueDate)}:${offset}`;
 
 /**
  * Automatic balance reminders (task 5.6). Money is parked: this only reads the payment plan that exists and queues an
@@ -102,12 +112,12 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       SELECT i.id::text AS id, i."bookingId"::text AS "bookingId"
       FROM payment_schedule_items i JOIN bookings b ON b.id = i."bookingId"
       CROSS JOIN LATERAL (SELECT min(o) AS off FROM unnest(${offsets}::int[]) AS o WHERE o >= (i."dueDate" - ${today}::date)) AS w
-      WHERE i.state = 'active' AND i.kind IN ('balance', 'instalment')
+      WHERE i.state = 'active' AND i.kind::text = ANY(${[...REMINDABLE_KINDS]}::text[])
         AND i."dueDate" >= ${today}::date AND i."dueDate" <= ${addDays(today, Math.max(...offsets))}::date
         AND b.status::text = ANY(${[...REMINDABLE_STATES]}::text[])
         AND w.off IS NOT NULL
         AND (${only.bookingId ?? null}::uuid IS NULL OR i."bookingId" = ${only.bookingId ?? null}::uuid)
-        AND NOT EXISTS (SELECT 1 FROM outbound_emails e WHERE e."dedupeKey" = 'balance-reminder:' || i.id::text || ':' || w.off::text)
+        AND NOT EXISTS (SELECT 1 FROM outbound_emails e WHERE e."dedupeKey" = 'balance-reminder:' || i."bookingId"::text || ':' || i.kind::text || ':' || to_char(i."dueDate", 'YYYY-MM-DD') || ':' || w.off::text)
       ORDER BY i."dueDate", i.id LIMIT ${MAX_PER_RUN}`;
     for (const row of rows) {
       result.examined += 1;
@@ -130,10 +140,10 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       const b = await readBookingForPayments(tx, { id: bookingId }, true);
       if (!b || !(REMINDABLE_STATES as readonly string[]).includes(b.status)) return 'booking_not_payable';
       const item = await tx.paymentScheduleItem.findUnique({ where: { id: itemId }, select: { id: true, bookingId: true, state: true, kind: true, sequence: true, dueDate: true } });
-      if (!item || item.bookingId !== b.id || item.state !== 'active' || (item.kind !== 'balance' && item.kind !== 'instalment')) return 'item_changed';
+      if (!item || item.bookingId !== b.id || item.state !== 'active' || !(REMINDABLE_KINDS as readonly string[]).includes(item.kind)) return 'item_changed';
       const offset = reminderOffset(offsets, daysBetween(today, item.dueDate.toISOString().slice(0, 10)));
       if (offset === null) return 'not_due_yet';
-      const dedupeKey = reminderDedupeKey(item.id, offset);
+      const dedupeKey = reminderDedupeKey(item, offset);
       if (await tx.outboundEmail.findUnique({ where: { dedupeKey }, select: { id: true } })) return 'already_queued';
       // The plan's own figure: this item must be the first one the money collected does not cover.
       const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
