@@ -89,7 +89,7 @@ test.beforeAll(async ({ browser }) => {
   await context.close();
 });
 
-function publicPages(): Array<{ name: string; path: string }> {
+function publicPages(): Array<{ name: string; path: string; lang?: string }> {
   return [
     { name: 'home', path: '/' },
     { name: 'race finder', path: '/races' },
@@ -108,6 +108,11 @@ function publicPages(): Array<{ name: string; path: string }> {
     { name: 'alert confirmation', path: '/alerts/confirm' },
     { name: 'alert unsubscribe', path: '/alerts/unsubscribe' },
     { name: 'mail unsubscribe', path: '/unsubscribe' },
+    // The web server of this suite enables es-ES (playwright.config.ts), so the second language is audited too.
+    { name: 'home (es-ES)', path: '/es-ES', lang: 'es-ES' },
+    { name: 'race finder (es-ES)', path: '/es-ES/races', lang: 'es-ES' },
+    { name: 'race (es-ES)', path: `/es-ES/races/${raceSlug}`, lang: 'es-ES' },
+    { name: 'faq (es-ES)', path: '/es-ES/faq', lang: 'es-ES' },
     { name: 'not found', path: '/no-such-page-here' },
   ];
 }
@@ -126,7 +131,7 @@ test('public_pages_meet_wcag_22_aa_checks', async ({ page }) => {
   const problems: string[] = [];
   for (const p of publicPages()) {
     await open(page, p.path);
-    const findings = [...(await auditPage(page)), ...(await auditReflow(page)), ...(await auditKeyboard(page))];
+    const findings = [...(await auditPage(page, p.lang)), ...(await auditReflow(page)), ...(await auditKeyboard(page))];
     problems.push(...report(findings).map((f) => `[${p.name} ${p.path}] ${f}`));
   }
   expect.soft(problems, problems.join('\n')).toEqual([]);

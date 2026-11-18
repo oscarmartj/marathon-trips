@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import RacePage, { generateMetadata as raceMetadata } from './(public)/races/[slug]/page';
-import { generateMetadata as racesMetadata } from './(public)/races/page';
-import RaceImage from './(public)/races/[slug]/opengraph-image';
+import RacePage, { generateMetadata as raceMetadata } from './[locale]/races/[slug]/page';
+import { generateMetadata as racesMetadata } from './[locale]/races/page';
+import RaceImage from './[locale]/races/[slug]/opengraph-image';
 import RootImage from './opengraph-image';
 import robots from './robots';
 import sitemap from './sitemap';

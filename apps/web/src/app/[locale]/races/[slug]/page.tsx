@@ -13,7 +13,8 @@ import { getRace, listRaceSlugs, localisedText } from '@/lib/catalogue';
 import { getGuide } from '@/lib/content';
 import { JsonLdScript } from '@/components/json-ld';
 import { breadcrumbJsonLd, pageMetadata, raceDescription, raceEventsJsonLd } from '@/lib/seo';
-import { t } from '@/lib/i18n';
+import { localeFromParams } from '@/lib/locale-server';
+import { lp, t } from '@/lib/i18n';
 
 // Built ahead for the races known at deploy time, and on first request for new ones; refreshed at most once a minute.
 export const revalidate = 60;
@@ -21,9 +22,10 @@ export async function generateStaticParams() {
   return (await listRaceSlugs()).map((slug) => ({ slug }));
 }
 
-type Props = { params: Promise<{ slug: string }> };
+type Props = { params: Promise<{ locale?: string; slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  await localeFromParams(params);
   const slug = (await params).slug;
   const [race, guide] = await Promise.all([getRace(slug), getGuide(slug)]);
   return race
@@ -32,6 +34,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function RacePage({ params }: Props) {
+  await localeFromParams(params);
   const { slug } = await params;
   const [race, guide] = await Promise.all([getRace(slug), getGuide(slug)]);
   if (!race) notFound();
@@ -45,9 +48,9 @@ export default async function RacePage({ params }: Props) {
       <JsonLdScript
         data={[
           breadcrumbJsonLd([
-            { name: t('nav.home'), path: '/' },
-            { name: t('nav.races'), path: '/races' },
-            { name, path: `/races/${race.slug}` },
+            { name: t('nav.home'), path: lp('/') },
+            { name: t('nav.races'), path: lp('/races') },
+            { name, path: lp(`/races/${race.slug}`) },
           ]),
           ...raceEventsJsonLd(race),
         ]}

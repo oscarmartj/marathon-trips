@@ -1,0 +1,163 @@
+{
+  "home": {
+    "title": "{brand}",
+    "tagline": "Viajes de carreras para corredores, desde Australia.",
+    "heroHeading": "Corre el mundo. Nosotros organizamos el viaje.",
+    "heroBody": "Dorsales, hoteles y logística para maratones y medias maratones, para que solo tengas que pensar en la línea de salida.",
+    "heroCta": "Buscar una carrera",
+    "stepsHeading": "Cómo funciona",
+    "step1Title": "Elige tu carrera",
+    "step1Body": "Busca por distancia, mes y país.",
+    "step2Title": "Crea tu viaje",
+    "step2Body": "Elige hotel, habitación y noches, y consulta el precio total al instante.",
+    "step3Title": "Listo para el día de la carrera",
+    "step3Body": "Todo en un solo lugar antes de volar.",
+    "imageAlt": "Imagen de marcador de posición de corredores en una salida",
+    "upcomingHeading": "Carreras destacadas",
+    "upcomingIntro": "Algunas carreras en torno a las que puedes planificar un viaje.",
+    "seeAll": "Ver todas las carreras",
+    "searchLabel": "Buscar una carrera",
+    "searchButton": "Buscar"
+  },
+  "common": {
+    "skipToContent": "Saltar al contenido principal",
+    "mainNavigation": "Navegación principal",
+    "footerNavigation": "Navegación del pie de página",
+    "company": "Empresa",
+    "legal": "Legal",
+    "comingSoon": "Esta página es un marcador de posición y se completará pronto.",
+    "legalPending": "Contenido provisional, pendiente de revisión legal.",
+    "backToRaces": "Volver a las carreras",
+    "logoLabel": "Inicio de {brand}",
+    "placeholderImage": "Imagen de marcador de posición",
+    "externalLink": "(se abre en un sitio web externo)",
+    "announcements": "Avisos",
+    "language": "Idioma",
+    "bannerTones": {
+      "info": "Novedad",
+      "notice": "Aviso",
+      "warning": "Advertencia"
+    }
+  },
+  "nav": {
+    "home": "Inicio",
+    "races": "Carreras",
+    "race": "Carrera",
+    "build": "Crea tu paquete",
+    "checkout": "Pago",
+    "about": "Sobre nosotros",
+    "faq": "Preguntas frecuentes",
+    "contact": "Contacto",
+    "terms": "Condiciones de reserva",
+    "privacy": "Política de privacidad",
+    "complaints": "Reclamaciones",
+    "page": "Página"
+  },
+  "footer": {
+    "rights": "{brand}. Todos los derechos reservados.",
+    "note": "Pie de página provisional. Los datos de la empresa se añadirán antes del lanzamiento."
+  },
+  "about": {
+    "title": "Sobre {brand}",
+    "intro": "Somos un pequeño equipo de corredores que organiza viajes de carreras para corredores."
+  },
+  "faqPage": {
+    "title": "Preguntas frecuentes",
+    "intro": "Respuestas a las dudas habituales sobre dorsales, paquetes y pagos.",
+    "empty": "Las preguntas y respuestas aparecerán aquí pronto.",
+    "generalHeading": "Preguntas generales"
+  },
+  "contact": {
+    "title": "Contacto",
+    "intro": "¿Dudas sobre una carrera o una reserva? Aquí aparecerán nuestros datos de contacto y el formulario."
+  },
+  "legalPages": {
+    "intro": "El texto completo se publicará aquí antes del lanzamiento.",
+    "terms": {
+      "title": "Condiciones de reserva"
+    },
+    "privacy": {
+      "title": "Política de privacidad"
+    },
+    "complaints": {
+      "title": "Reclamaciones"
+    }
+  },
+  "seo": {
+    "raceDescription": "Planifica tu viaje a {name} en {city}, {country}: datos de la carrera, ediciones y paquetes de viaje.",
+    "shareImageAlt": "{name}: viajes de carreras para corredores",
+    "shareImageTagline": "Viajes de carreras para corredores, desde Australia.",
+    "shareImageRaceLine": "{city}, {country}"
+  },
+  "pages": {
+    "notFoundTitle": "Página no encontrada"
+  },
+  "races": {
+    "title": "Encuentra una carrera",
+    "intro": "Busca por distancia, tipo de carrera, mes, año y país. Los filtros se guardan en la dirección web, así que puedes compartir o guardar una búsqueda.",
+    "filtersHeading": "Filtros",
+    "filterSearch": "Carrera o ciudad",
+    "filterDistance": "Distancia",
+    "filterType": "Tipo de carrera",
+    "filterMonth": "Mes",
+    "filterYear": "Año",
+    "filterCountry": "País",
+    "anyOption": "Cualquiera",
+    "applyFilters": "Mostrar carreras",
+    "clearFilters": "Quitar filtros",
+    "resultsHeading": "Carreras",
+    "resultsCount": "{count} carreras encontradas",
+    "resultsCountOne": "1 carrera encontrada",
+    "noResults": "Ninguna carrera coincide con esos filtros. Prueba a quitar alguno para ver más.",
+    "previousPage": "Página anterior",
+    "nextPage": "Página siguiente",
+    "pagination": "Páginas de resultados",
+    "pageOf": "Página {page} de {pages}",
+    "unavailable": "No se pueden cargar las carreras ahora mismo. Inténtalo de nuevo en unos minutos.",
+    "location": "{city}, {country}",
+    "distancesLabel": "Distancias",
+    "dateNotSet": "Fecha por anunciar",
+    "dateUnconfirmed": "Fecha aún sin confirmar. Puede cambiar, así que vuelve a comprobarla antes de reservar vuelos.",
+    "months": {
+      "january": "enero",
+      "february": "febrero",
+      "march": "marzo",
+      "april": "abril",
+      "may": "mayo",
+      "june": "junio",
+      "july": "julio",
+      "august": "agosto",
+      "september": "septiembre",
+      "october": "octubre",
+      "november": "noviembre",
+      "december": "diciembre"
+    },
+    "distanceKinds": {
+      "marathon": "Maratón",
+      "half": "Media maratón",
+      "ten_k": "10 km",
+      "five_k": "5 km",
+      "ultra": "Ultra",
+      "other": "Otra distancia"
+    },
+    "raceTypes": {
+      "road": "Asfalto",
+      "trail": "Montaña",
+      "ultra": "Ultra",
+      "other": "Otro"
+    },
+    "detail": {
+      "intro": "La guía de la carrera, las ediciones y los paquetes disponibles.",
+      "guideHeading": "Guía de la carrera",
+      "editionsHeading": "Ediciones y paquetes",
+      "buildCta": "Crear este paquete",
+      "aboutHeading": "Sobre la carrera",
+      "whereHeading": "Dónde y cuándo",
+      "distancesHeading": "Distancias",
+      "website": "Web de la carrera",
+      "packagesHeading": "Paquetes",
+      "noPackages": "Todavía no hay paquetes a la venta para esta edición. Vuelve pronto.",
+      "notFoundTitle": "Carrera no encontrada"
+    }
+  }
+}

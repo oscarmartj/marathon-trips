@@ -6,11 +6,11 @@ import { SiteHeader } from '@/components/site-header';
 import { proxy } from '@/proxy';
 import { resetRedirectCache } from '@/lib/redirects';
 import { SLUG, contentGuide, contentPage, stubCatalogue } from '@/test/catalogue-fixtures';
-import AboutPage from './(public)/about/page';
-import ContentPage, { generateMetadata as contentMetadata } from './(public)/pages/[slug]/page';
-import FaqPage from './(public)/faq/page';
-import RacePage, { generateMetadata as raceMetadata } from './(public)/races/[slug]/page';
-import TermsPage from './(public)/legal/terms/page';
+import AboutPage from './[locale]/about/page';
+import ContentPage, { generateMetadata as contentMetadata } from './[locale]/pages/[slug]/page';
+import FaqPage from './[locale]/faq/page';
+import RacePage, { generateMetadata as raceMetadata } from './[locale]/races/[slug]/page';
+import TermsPage from './[locale]/legal/terms/page';
 import sitemap from './sitemap';
 
 afterEach(() => {
@@ -185,7 +185,7 @@ describe('sitemap', () => {
 });
 
 describe('redirect proxy', () => {
-  const request = (path: string, method = 'GET') => ({ method, nextUrl: new URL(`http://localhost:3000${path}`), url: `http://localhost:3000${path}` });
+  const request = (path: string, method = 'GET') => ({ method, nextUrl: new URL(`http://localhost:3000${path}`), url: `http://localhost:3000${path}`, cookies: { get: () => undefined }, headers: new Headers() });
 
   it('sends a visitor to the new address with the status staff chose, and leaves other requests alone', async () => {
     stubCatalogue({ content: { redirects: [{ fromPath: '/old-guide', toPath: '/races', statusCode: 301 }] } });

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { notFound } from 'next/navigation';
-import Build from './(public)/races/[slug]/build/page';
+import Build from './[locale]/races/[slug]/build/page';
 import { QuoteSummary } from '@/components/builder/quote-summary';
 import { PackageBuilder } from '@/components/builder/package-builder';
 import { defaultState } from '@/lib/builder';

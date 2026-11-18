@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { isExternalHref, listBanners } from '@/lib/content';
-import { t } from '@/lib/i18n';
+import { lp, t } from '@/lib/i18n';
 
 /**
  * Site-wide banners from the content manager, above the header. Each one says what kind it is in words (not only colour).
@@ -20,7 +20,7 @@ export async function Banners() {
               isExternalHref(b.linkHref) ? (
                 <a href={b.linkHref} rel="noopener noreferrer">{b.linkLabel}</a>
               ) : (
-                <Link href={b.linkHref}>{b.linkLabel}</Link>
+                <Link href={lp(b.linkHref)}>{b.linkLabel}</Link>
               )
             ) : null}
           </li>

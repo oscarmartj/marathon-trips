@@ -12,7 +12,7 @@ export interface Finding {
 }
 
 /** Runs in the browser; kept self-contained (no imports) because Playwright serialises it. */
-function auditInPage(): Finding[] {
+function auditInPage(expectedLang: string): Finding[] {
   const out: Finding[] = [];
   const add = (rule: string, detail: string) => out.push({ rule, detail });
   const describe = (el: Element): string => {
@@ -33,7 +33,7 @@ function auditInPage(): Finding[] {
   };
 
   const root = document.documentElement;
-  if (root.lang !== 'en-AU') add('3.1.1 language', `html lang is "${root.lang}", expected en-AU`);
+  if (root.lang !== expectedLang) add('3.1.1 language', `html lang is "${root.lang}", expected ${expectedLang}`);
   if (!document.title.trim()) add('2.4.2 page title', 'the page has no title');
 
   const viewport = document.querySelector('meta[name="viewport"]')?.getAttribute('content') ?? '';
@@ -190,8 +190,8 @@ function auditInPage(): Finding[] {
   return out;
 }
 
-export async function auditPage(page: Page): Promise<Finding[]> {
-  return page.evaluate(auditInPage);
+export async function auditPage(page: Page, lang = 'en-AU'): Promise<Finding[]> {
+  return page.evaluate(auditInPage, lang);
 }
 
 /** Reflow (1.4.10) at 320px wide, and with the text spacing of 1.4.12 applied: nothing may need a sideways scroll. */
