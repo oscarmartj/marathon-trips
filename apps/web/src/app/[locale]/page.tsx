@@ -4,13 +4,19 @@ import { PlaceholderImage } from '@/components/placeholder-image';
 import { RaceCard } from '@/components/catalogue/race-card';
 import { searchRaces, type RaceSummary } from '@/lib/catalogue';
 import { pageMetadata } from '@/lib/seo';
-import { t } from '@/lib/i18n';
+import { localeFromParams } from '@/lib/locale-server';
+import { lp, t } from '@/lib/i18n';
 import { brand } from '@mt/shared/brand';
 
 // Built ahead and refreshed at most once a minute. The only script on the page is the framework's.
 export const revalidate = 60;
 
-export const metadata: Metadata = pageMetadata({ title: brand.name, description: t('home.tagline'), path: '/' });
+type Props = { params?: Promise<{ locale?: string }> };
+
+export async function generateMetadata({ params }: Props = {}): Promise<Metadata> {
+  const locale = await localeFromParams(params);
+  return pageMetadata({ title: brand.name, description: t('home.tagline'), path: '/', locale });
+}
 
 async function featuredRaces(): Promise<RaceSummary[]> {
   try {
@@ -20,7 +26,8 @@ async function featuredRaces(): Promise<RaceSummary[]> {
   }
 }
 
-export default async function Home() {
+export default async function Home({ params }: Props = {}) {
+  await localeFromParams(params);
   const featured = await featuredRaces();
   return (
     <>
@@ -29,14 +36,14 @@ export default async function Home() {
           <div className="stack">
             <h1>{t('home.heroHeading')}</h1>
             <p>{t('home.heroBody')}</p>
-            <form method="get" action="/races" role="search" className="hero__search">
+            <form method="get" action={lp('/races')} role="search" className="hero__search">
               <label htmlFor="home-q">{t('home.searchLabel')}</label>
               <input id="home-q" name="q" type="search" maxLength={80} />
               <button className="btn btn--accent" type="submit">
                 {t('home.searchButton')}
               </button>
             </form>
-            <Link className="btn btn--accent" href="/races">
+            <Link className="btn btn--accent" href={lp('/races')}>
               {t('home.heroCta')}
             </Link>
           </div>
@@ -53,7 +60,7 @@ export default async function Home() {
             ))}
           </div>
           <p>
-            <Link href="/races">{t('home.seeAll')}</Link>
+            <Link href={lp('/races')}>{t('home.seeAll')}</Link>
           </p>
         </section>
       ) : null}

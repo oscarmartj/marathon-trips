@@ -2,16 +2,24 @@ import type { Metadata } from 'next';
 import { JsonLdScript } from '@/components/json-ld';
 import { PageHeader } from '@/components/page-header';
 import { Prose } from '@/components/prose';
-import { groupFaqs, listFaqs } from '@/lib/content';
+import { groupFaqs, listFaqs, localesWithContent } from '@/lib/content';
 import { faqJsonLd, pageMetadata } from '@/lib/seo';
+import { localeFromParams } from '@/lib/locale-server';
 import { t } from '@/lib/i18n';
 
 // Questions and answers come from the content manager and are refreshed at most once a minute.
 export const revalidate = 60;
 
-export const metadata: Metadata = pageMetadata({ title: t('faqPage.title'), description: t('faqPage.intro'), path: '/faq' });
+type Props = { params?: Promise<{ locale?: string }> };
 
-export default async function Page() {
+// The page is listed in a language's `hreflang` set only for languages that have published questions.
+export async function generateMetadata({ params }: Props = {}): Promise<Metadata> {
+  const locale = await localeFromParams(params);
+  return pageMetadata({ title: t('faqPage.title'), description: t('faqPage.intro'), path: '/faq', locale, locales: await localesWithContent(async (l) => (await listFaqs(l)).length > 0) });
+}
+
+export default async function Page({ params }: Props = {}) {
+  await localeFromParams(params);
   const faqs = await listFaqs();
   const groups = groupFaqs(faqs);
   return (

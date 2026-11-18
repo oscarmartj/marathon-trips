@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { editionDateText, countryName, formatDistance, monthName, nextEdition } from '@/lib/catalogue-format';
 import { localisedText, type RaceSummary } from '@/lib/catalogue';
-import { t } from '@/lib/i18n';
+import { lp, t } from '@/lib/i18n';
 import { DateNotice } from './date-notice';
 
 /** One race in a list. Claim badges are exactly the claims the API reports as switched on for this race. */
@@ -12,7 +12,7 @@ export function RaceCard({ race, headingLevel = 3 }: { race: RaceSummary; headin
   return (
     <article className="card stack race-card">
       <Heading>
-        <Link href={`/races/${race.slug}`}>{name}</Link>
+        <Link href={lp(`/races/${race.slug}`)}>{name}</Link>
       </Heading>
       <p>{t('races.location', { city: race.city, country: countryName(race.countryCode) })}</p>
       {race.distances.length > 0 ? (
