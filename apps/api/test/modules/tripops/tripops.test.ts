@@ -7,16 +7,14 @@ import { TestApp, makeApp } from '../../support/auth';
 import { cleanBookingEvents } from '../../support/bookings';
 import { Client, anonymous, closeCatalogue, staffClient } from '../../support/catalogue';
 import { customerBookingIn } from '../../support/customer-portal';
-import { cleanPayments, paymentsStaff } from '../../support/payments';
+import { cleanPayments } from '../../support/payments';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 let t: TestApp;
-let staff: Client;
 let reader: Client;
 beforeAll(async () => {
   t = await makeApp();
-  staff = await paymentsStaff(t);
   reader = await staffClient(t, [P.read]);
 });
 afterAll(async () => {
@@ -30,6 +28,7 @@ const EMERGENCY_NAME = 'Zelda Emergencycontact';
 const EMERGENCY_PHONE = '+61 400 777 888';
 const FINISH = 13_579;
 const base = '/admin/trip-ops';
+const BOM = String.fromCharCode(0xfeff);
 
 interface Trip { packageId: string; reference: string; bookingId: string; customerId: string; extraId: string; hotelName: string }
 
@@ -149,7 +148,7 @@ describe('no personal data outside the whitelist', () => {
   it('the CSV has the same whitelist and nothing else', async () => {
     const t1 = await trip();
     const res = await rooming(t1.packageId, '?format=csv');
-    const [header, ...rows] = res.text.replace(/^﻿/, '').trim().split('\r\n');
+    const [header, ...rows] = res.text.replace(BOM, '').trim().split('\r\n');
     expect(header).toBe('hotel,city,booking_reference,booking_status,room_type,room_name,occupancy,check_in,check_out,guest_slot,given_name,family_name,lead_guest');
     expect(rows).toHaveLength(2);
     for (const v of PII) expect(res.text, v).not.toContain(v);
@@ -167,7 +166,7 @@ describe('no personal data outside the whitelist', () => {
     expect(g.bookings[0].passengers).toEqual([{ slot: 2, givenName: 'Luis', familyName: 'Perez', isLead: false }]);
     for (const v of [...PII, 'amount', 'price', 'deposit', 'Minor', 'currency']) expect(JSON.stringify(res.body), v).not.toContain(v);
     const csv = await transfers(t1.packageId, '?format=csv');
-    expect(csv.text.replace(/^﻿/, '').split('\r\n')[0]).toBe('transfer,departure,origin,destination,booking_reference,check_in,check_out,quantity,passenger_slot,given_name,family_name');
+    expect(csv.text.replace(BOM, '').split('\r\n')[0]).toBe('transfer,departure,origin,destination,booking_reference,check_in,check_out,quantity,passenger_slot,given_name,family_name');
     for (const v of PII) expect(csv.text, v).not.toContain(v);
   });
 

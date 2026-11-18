@@ -33,4 +33,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_18 = create();
   // Funnel and report builder (reports.spec.ts): an owner.
   process.env.E2E_STAFF_19 = create();
+  // Trip lists (trip-lists.spec.ts): an owner.
+  process.env.E2E_STAFF_24 = create();
 }

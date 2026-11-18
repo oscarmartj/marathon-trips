@@ -325,6 +325,7 @@
       "automations": "Automations",
       "automation": "Automation",
       "keydates": "Key dates",
+      "triplists": "Trip lists",
       "reports": "Reports",
       "waitlist": "Waiting list"
     },
@@ -1198,6 +1199,50 @@
       "saved": "Report saved.",
       "preview": "Preview",
       "cancelEdit": "Cancel"
+    },
+    "triplists": {
+      "title": "Trip lists",
+      "intro": "The rooming list, transfers list and day-by-day itinerary of a trip. The first two show travellers' names, so download them only when a hotel or transport provider needs them.",
+      "pickTitle": "Choose a trip",
+      "pickLabel": "Trip",
+      "pickNone": "Choose a trip",
+      "pickOption": "{trip} ({count} on the lists)",
+      "listedHint": "Only bookings with a paid deposit are listed. Requested, declined, expired, cancelled and refunded bookings are left out.",
+      "namesHint": "Shows names only: no dates of birth, emergency contacts, contact details or payments.",
+      "roomingTitle": "Rooming list",
+      "roomingTotals": "{rooms} rooms, {guests} guests, {pending} still without details.",
+      "roomingEmpty": "No rooms to list yet.",
+      "hotelCaption": "{hotel}, {city}",
+      "roomLine": "{room} ({occupancy} in the room)",
+      "transfersTitle": "Transfers list",
+      "transfersTotals": "{passengers} passengers, {pending} still without details.",
+      "transfersEmpty": "No transfers have been booked yet.",
+      "route": "{origin} to {destination}",
+      "itineraryTitle": "Itinerary",
+      "dayHeading": "Day {day}, {date}",
+      "provisional": "The race dates are provisional.",
+      "unscheduledTitle": "Not placed on a day",
+      "unscheduledHint": "These have no date in their schedule. Add one in the catalogue to place them.",
+      "itemKinds": {
+        "check_in": "Check in",
+        "check_out": "Check out",
+        "race": "Race",
+        "extra": "Included"
+      },
+      "columns": {
+        "booking": "Booking",
+        "room": "Room",
+        "guests": "Guests",
+        "passengers": "Passengers",
+        "quantity": "Quantity",
+        "checkIn": "Check in",
+        "checkOut": "Check out"
+      },
+      "detailsPending": "Details not entered yet",
+      "lead": "lead",
+      "nobody": "No one",
+      "download": "Download CSV",
+      "downloadList": "Download {list} as CSV"
     },
     "keydates": {
       "title": "Key dates",
