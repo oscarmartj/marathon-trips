@@ -72,6 +72,11 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 | 2026-11-19 | Accesibilidad: umbrales estrictos (contraste 4,5:1 y 3:1, objetivo 24 px); auditoría propia en lugar de `axe-core` (MPL-2.0); zod fuera del navegador de pagos con comprobación a mano igual a los esquemas | 8.3; `axe-core` si Oscar acepta la licencia |
 | 2026-11-19 | CI fijado a `ubuntu-24.04` (PR #48) porque `ubuntu-latest` pasó a 26.04, cuyo `pg_restore` rechaza `transaction_timeout` con el PostgreSQL 16 del servicio | fix-ci-runner-pin; quitar el pin al subir PostgreSQL |
 | 2026-11-19 | Repositorio público desde el 2026-11-19 para que GitHub Actions volviera a correr tras un bloqueo de facturación | Decisión del coordinador; Oscar revisa el historial y decide si vuelve a privado (`docs/FINAL-REVIEW.md`) |
+| 2026-11-19 | Seguridad: informe ASVS 5.0.0 nivel 2 (24 hallazgos: 0 críticos, 3 altos, 8 medios); corregidos los 3 altos, 6 medios y 3 bajos; S-13 (sesiones) y S-14 (segundo factor de clientes) quedan para Oscar; CSP con nonce solo en páginas dinámicas; lista de contraseñas de zxcvbn (MIT) como datos, no dependencia; límites de IP por /64 y /48 con tablas que no expulsan contadores; migración 0031 | 8.5; se deshace revirtiendo el PR y la migración |
+| 2026-11-19 | 8.5 necesitó 5 rondas de revisión, más de las 3 habituales de `docs/autonomous.md`, por instrucción de Oscar de seguir hasta que funcionara | 8.5 |
+| 2026-11-19 | Docker con IP real del cliente (S-04) es un paso obligatorio de la guía de despliegue, no un cambio de código: la API lo detecta y avisa | 8.5, 8.7 |
+| 2026-11-19 | Informes: demo excluida de reservas y contadores; programados `last_days` acaban el día de Brisbane anterior; módulo apagado al enviar deja el correo `suppressed` (`module_disabled`); el fallo de un informe no escribe ejecución, deja tarea de sistema y log | 7.fix-1; índice en `bookings."requestedAt"` aplazado |
+| 2026-11-19 | Automatizaciones: tope de 3 avisos por cliente en 24 h; el aviso sin acuse (`serviceMessageAck`) se trata como marketing: exige consentimiento con la redacción actual `marketing_email.v2` (un consentimiento v1 no vale: quien lo dio debe retirarlo y volver a darlo; aún no hay datos reales), respeta la baja y lleva enlace; el panel no tiene casilla del acuse, así que hoy todos los avisos van por esa vía; migración 0030 | 7.fix-2; se cambia con el ajuste y la casilla |
 
 ## Abiertas
 
@@ -83,3 +88,7 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 - Base de precio de 6.3 con las reglas actuales (una regla posterior se aplica en silencio a lo añadido): confirmar o exigir congelar la base (6.3).
 - `instantBooking`: función del brief sin dueño; decidir si se crea una tarea de riesgo alto.
 - Repositorio público: revisar el historial y decidir si vuelve a privado.
+- S-13 (pantalla de sesiones) y S-14 (segundo factor para clientes), de 8.5: decisión de producto de Oscar.
+- Casilla del panel para `serviceMessageAck` (7.fix-2): sin ella, todo aviso al cliente va como marketing.
+- Permisos nuevos de las fases 5 a 8 (solo owner): asignarlos en el panel de roles (lista en `docs/BLOCKED.md`).
+- Página `terms`: publicarla antes de cualquier pago (3.5 se niega sin ella).

@@ -12,17 +12,45 @@ Todo lo que en modo autónomo se decidió, se dejó sin verificar o necesita tus
 - [ ] Validar el GST con tu contable (por componente, 1.1).
 - [ ] Cumplir los 8 hallazgos vinculantes del plan 0.1 al retomar el dinero (`docs/BLOCKED.md`).
 
-## Prioridad tras las fases 5 a 7, 8.2 y 8.3 (2026-11-19)
+## Prioridad al cerrar la fase 8 (2026-11-19)
 
-Por importancia. Detalle por fase más abajo.
+Todo lo abierto, por importancia: seguridad y legal, luego corrección y por último pulido. Cada punto lleva su fuente; el detalle por fase está más abajo.
 
-1. **Repositorio público.** Se hizo público el 2026-11-19 para que GitHub Actions volviera a correr tras un bloqueo de facturación. Revisar que no haya nada sensible en el historial (claves, correos o datos personales en `docs/`, fixtures, `deploy/`) y decidir si volver a privado cuando la facturación se arregle; los minutos de CI de repositorios privados son limitados.
-2. **Publicar la página `terms`** antes de que empiece ningún pago: sin ella 3.5 se niega a iniciar pagos (`terms_unavailable`).
-3. **Asignar permisos** (hoy solo owner; ninguno es alcance de clave de API): `bookings.booking.confirm` y `bookings.booking.amend` (step-up), `templates.*`, `complaints.*`, `keydates.*`, `automations.rule.*` (activar pide step-up), `reports.*`, `common.customField.publish` (step-up), `waitlist.entry.read`, `dashboard.home.read`, `tripops.lists.read`, `exports.runnerData.read|generate` (paso reforzado), `suppliers.*` y los de privacidad de 5.5 (`privacy.customer.read|export|erase`, borrar con step-up).
-4. **Decisiones por confirmar:** (a) la base de precio de 6.3 usa las reglas actuales: una regla creada tras la venta se aplica en silencio a lo añadido (riesgo: reservar lo mínimo pronto y añadir después a precio anticipado); (b) `stackable` por defecto `false`; (c) `instantBooking` es una función del brief sin dueño (2.4, 3.1, 3.2, 3.5, 5.1): decidir quién la construye.
-5. **Redactar plantillas** antes de activar: `payments.balance_reminder` (y decidir `balanceReminderOffsetsDays`), `automations.customer_notice_1..3` y `automations.staff_notice`.
-6. **Proceso de CI:** `ci.yml` está fijado a `ubuntu-24.04` (PR #48) porque `ubuntu-latest` pasó a 26.04, cuyo `pg_restore` rechaza `transaction_timeout` con el PostgreSQL 16 del servicio. Quitar el pin al subir PostgreSQL y comprobar `backup.test.ts`.
-7. **E2E frágil:** `getByText('Ada')` en `apps/web/e2e/customer-area.spec.ts` (~línea 182) es una subcadena sin distinguir mayúsculas; falló una vez en CI contra texto aleatorio y pasó al repetir. Apretarla en una decisión aparte.
+### Seguridad y legal
+
+1. **Repositorio público** desde el 2026-11-19 (para que Actions volviera a correr tras un bloqueo de facturación). Revisar el historial por claves, correos o datos personales en `docs/`, fixtures y `deploy/`, y decidir si vuelve a privado. Fuente: `docs/decisions.md`; 8.5 no halló secretos en `git log --all -p`.
+2. **IP real tras Caddy (S-04):** el paso de Docker de la guía es obligatorio antes de abrir; comprobarlo con dos conexiones y el monitor (`clientIp.privateAddressRequests` en 0). Si no, el límite por IP cuenta todo el sitio junto. Fuente: `docs/done/8.5.md`, `docs/BLOCKED.md`.
+3. **S-13 (pantalla de sesiones) y S-14 (segundo factor para clientes)** abiertos: decisión de producto de Oscar. Fuente: `docs/security/asvs-review.md`.
+4. **Publicar la página `terms`** antes de ningún pago: sin ella 3.5 se niega a iniciar pagos (`terms_unavailable`). Fuente: `docs/done/3.5.md`.
+5. **Páginas legales provisionales:** sustituirlas y quitar el aviso de revisión pendiente. Fuente: `docs/done/8.1.md`.
+6. **Asignar los permisos nuevos** (hoy solo owner; ninguno es alcance de clave de API, varios piden step-up): lista completa en `docs/BLOCKED.md`, incluidos los de 7.x y 8.x. Fuente: `docs/done/7.close.md`, `docs/done/8.4.md`.
+7. **Consentimiento de avisos (7.fix-2):** un aviso sin acuse exige consentimiento `marketing_email.v2`; quien dio el v1 debe retirarlo y volver a darlo para recibirlos (no hay datos reales aún). Fuente: `docs/done/7.fix-2.md`.
+8. **Casilla de `serviceMessageAck` en el panel: no existe**, así que todos los avisos al cliente salen como marketing. Decidir si se quiere avisos de servicio. Fuente: `docs/done/7.fix-2.md`.
+9. **Datos personales:** riesgo residual aceptado en la fase 0; 5.5 ya borra, pero restaurar una copia antigua resucita a los clientes borrados (`privacy:erasures-reapply`) y `?audience=full` lleva notas del personal. Fuente: `docs/done/5.5.md`.
+10. **Revisiones de Opus pendientes:** 7.2 (datos personales) y 7.7; la de 7.4 se hizo y sus puntos están en 7.fix-2. Fuente: `docs/done/7.close.md`.
+11. **Pendientes de 8.5:** ZAP y SSL Labs contra el entorno de pruebas, `includeSubDomains` en HSTS (S-24), y para 9.x S-19 y ampliar la CSP y `Permissions-Policy: payment`. Fuente: `docs/done/8.5.md`.
+12. **Antes de dinero real:** lista de arriba, cuando se retome el dinero (3.3, 3.4, 4.x, 6.2, 6.4, 6.6 y 9.x, aparcados).
+
+### Corrección
+
+13. **Prueba inestable `pending_collections_skip_paid_lines`** (y `payments/flow.test.ts` «drive against expiry»): fallan por datos acumulados o carreras ajenas y pasan al repetir. Aislarlas con su propio estado. Fuente: `docs/done/7.fix-2.md`.
+14. **Consulta de atrasos de automatizaciones O(n^2)** con una cola grande; vale con el volumen actual. Fuente: `docs/done/7.fix-2.md`.
+15. **Base de precio de 6.3 con las reglas actuales:** una regla posterior se aplica en silencio a lo añadido; confirmar o exigir congelar la base. Fuente: `docs/done/6.3.md`.
+16. **`stackable` por defecto `false`** en reglas y códigos: confirmar o cambiar. Fuente: `docs/done/2.2.md`.
+17. **`instantBooking`** es una función del brief sin dueño (2.4, 3.1, 3.2, 3.5, 5.1): decidir si se crea una tarea de riesgo alto. Fuente: `docs/done/5.close.md`.
+18. **Límites conocidos:** 5.5 (copias antiguas, `audience=full`, archivados sin usuario), 5.6 (desfase consumido con pago en curso, sin recordatorios de vencidos, sin pantalla de desfases), 6.3 (recordatorio `failed` si llega un cambio, crédito manual), 6.5 (solo al liberarse plazas, «el primero al que le cabe», sin prueba del reintento por interbloqueo) y 7.2 (dos formatos de ejemplo, sin pantalla). Fuente: `docs/done/5.5.md`, `5.6.md`, `6.3.md`, `6.5.md`, `7.2.md`.
+19. **Informes (7.fix-1):** índice sobre `bookings."requestedAt"` aplazado (pide migración); el fallo de un informe no deja ejecución. Fuente: `docs/done/7.fix-1.md`.
+20. **CI:** `ci.yml` fijado a `ubuntu-24.04` (PR #48) por `pg_restore` y `transaction_timeout`; quitar el pin al subir PostgreSQL y comprobar `backup.test.ts`. Fuente: `docs/done/fix-ci-runner-pin.md`.
+21. **Sin verificar:** Docker, Caddy, TLS y `rclone` reales; correo real; lector de pantalla, móvil real y Lighthouse sobre un sitio desplegado. Fuente: `docs/done/8.5.md`, `8.6.md`, `8.3.md`.
+
+### Pulido
+
+22. **Idiomas (8.2):** `es-ES` parcial y apagado; el compose de producción no pasa `ENABLED_LOCALES` (hay que ponerlo en la construcción y en el contenedor web); cliente y panel siguen en inglés. Fuente: `docs/done/8.2.md`.
+23. **`apps/web/src/lib/amendments.ts`** mete zod en el navegador de cuenta y admin; hacer como con `checkout.ts`. Fuente: `docs/done/8.3.md`.
+24. **E2E frágil:** `getByText('Ada')` en `apps/web/e2e/customer-area.spec.ts` (~línea 182) es una subcadena sin distinguir mayúsculas y falló una vez contra texto aleatorio. Apretarla en una decisión aparte. Fuente: `docs/done/5.7.md`.
+25. **Prueba del limitador (nit):** falta el caso espejo del desempate por id en `apps/api/test/modules/automations/automations.test.ts`. Fuente: `docs/done/7.fix-2.md`.
+26. **Plantillas por redactar** antes de activar: `payments.balance_reminder` (y `balanceReminderOffsetsDays`), `automations.customer_notice_1..3` y `automations.staff_notice`. Fuente: `docs/done/7.close.md`, `5.6.md`.
+27. **Auditoría de accesibilidad propia** en lugar de `axe-core` (MPL-2.0): cambiar si Oscar acepta la licencia. Fuente: `docs/done/8.3.md`.
 
 ## Recorridos que conviene hacer a mano
 
@@ -140,10 +168,14 @@ Sección «Revisión de Oscar» de `docs/phases/phase-7.md`: crear dos automatiz
 - **Revisiones de Opus pendientes:** 7.2 (datos personales), 7.4 (código) y 7.7.
 - **Sin verificar:** envío real de correo, lector de pantalla.
 
-### Fase 8 (en curso: 8.2 y 8.3 fusionadas)
+### Fase 8 (cerrada, `docs/done/8.close.md`)
 
-- **8.2 (idiomas y `hreflang`):** `es-ES` es parcial (cabecera, pie, inicio, carreras, FAQ y legales) y está apagado por defecto; los componentes de cliente (checkout, constructor, formularios, cuenta, enlaces de pago) y el panel de personal siguen en inglés; el compose de producción no pasa `ENABLED_LOCALES` (hay que ponerlo en la construcción y en el contenedor web). Revisar `messages/es-ES.json` antes de activarlo. Sin verificar: lector de pantalla con `lang` mixto y cookies bloqueadas.
-- **8.3 (accesibilidad y rendimiento):** `apps/web/src/lib/amendments.ts` (6.3) importa zod de `@mt/shared` en el navegador y reintroduce la librería en cuenta y admin; hacer como con `checkout.ts` (seguimiento). Sin verificar: lector de pantalla, móvil real, Lighthouse sobre un sitio desplegado y las páginas con sesión. Auditoría propia en lugar de `axe-core` (MPL-2.0): cambiar si la aceptas.
+Sección «Revisión de Oscar» de `docs/phases/phase-8.md`: leer el informe de seguridad (`docs/security/asvs-review.md`) y seguir la guía de despliegue en un entorno de pruebas. Los cinco criterios cumplen con prueba automática; sin tareas `8.fix-N`.
+
+- **8.2 (idiomas y `hreflang`):** `es-ES` es parcial (cabecera, pie, inicio, carreras, FAQ y legales) y está apagado por defecto; componentes de cliente y panel en inglés; el compose de producción no pasa `ENABLED_LOCALES`. Revisar `messages/es-ES.json` antes de activarlo. Sin verificar: lector de pantalla con `lang` mixto y cookies bloqueadas.
+- **8.3 (accesibilidad y rendimiento):** `amendments.ts` (6.3) mete zod en cuenta y admin. Sin verificar: lector de pantalla, móvil real, Lighthouse desplegado y páginas con sesión.
+- **8.5 (seguridad):** 24 hallazgos, 3 altos corregidos; S-04 solo se ve en el servidor; S-13 y S-14 abiertos. Necesitó 5 rondas de revisión (más de las 3 habituales, por instrucción de Oscar). Migración 0031.
+- **7.fix-1 y 7.fix-2:** informes y automatizaciones corregidos tras la revisión de 7.4; migración 0030. Ver puntos 7, 8, 13, 14 y 19 de la lista de arriba.
 
 ### Lecciones de proceso (fases 5 a 8)
 
