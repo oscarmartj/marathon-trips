@@ -56,6 +56,68 @@ describe('bounded tables never forget a live count (S-06)', () => {
     expect(() => d.reserve('b0', 'other-client', 0)).not.toThrow();
   });
 
+  it('kept full for more than an hour while a known and an unknown address keep being tried: both keep their places alike (round 3)', () => {
+    const d = new UnknownAccountDelay(4, 1000, 1000);
+    const S = 'known-staff';
+    const U = 'unknown';
+    const tryKnown = (now: number) => d.reserve(S, 'attacker', now); // the database counts a known account
+    const tryUnknown = (now: number) => {
+      d.reserve(U, 'attacker', now);
+      d.claim(U, now);
+    };
+    tryKnown(0);
+    tryUnknown(0);
+    d.reserve('flood-1', 'f1', 0);
+    d.reserve('flood-2', 'f2', 0);
+    const outcome = (fn: () => void) => {
+      try {
+        fn();
+        return 'ok';
+      } catch {
+        return '429';
+      }
+    };
+    // Every 50 minutes for five hours the flood refills whatever room appears, and S and U are tried again.
+    for (let n = 1; n <= 6; n++) {
+      const now = n * 50 * 60_000;
+      for (let i = 0; i < 4; i++) outcome(() => d.reserve(`flood-${n}-${i}`, `f${n}${i}`, now));
+      expect([outcome(() => tryKnown(now)), outcome(() => tryUnknown(now))], `round ${n}`).toEqual(['ok', 'ok']);
+    }
+    // Tried at once again, U is delayed by its count (six failures)...
+    expect(outcome(() => tryUnknown(6 * 50 * 60_000 + 1))).toBe('429');
+    // ...which starts again after an hour without a failure, like the database's: two free tries in a row.
+    const later = 6 * 50 * 60_000 + 61 * 60_000;
+    expect([outcome(() => tryUnknown(later)), outcome(() => tryUnknown(later + 1))]).toEqual(['ok', 'ok']);
+  });
+
+  it('an IPv6 /48 brings only so many new addresses an hour, whatever /64s it uses (round 3)', () => {
+    const d = new UnknownAccountDelay(100_000, 30, 5);
+    for (let i = 0; i < 5; i++) d.reserve(`a${i}`, `2001:db8:1:${i.toString(16)}::/64`, 0);
+    expect(() => d.reserve('a5', '2001:db8:1:ff::/64', 0)).toThrow();
+    expect(() => d.reserve('b0', '2001:db8:2:0::/64', 0)).not.toThrow();
+    expect(() => d.reserve('c0', '203.0.113.7', 0)).not.toThrow();
+  });
+
+  it('a client spends quota only for places it is granted; refused retries while the table is full cost nothing (round 3)', () => {
+    const d = new UnknownAccountDelay(2, 3, 1000);
+    d.reserve('x1', 'other', 0);
+    d.reserve('x2', 'other', 0);
+    for (let i = 0; i < 10; i++) expect(() => d.reserve(`office-${i}`, 'office', 1000)).toThrow();
+    // Room again an hour later: the office still has its whole quota.
+    for (let i = 0; i < 2; i++) expect(() => d.reserve(`office-later-${i}`, 'office', 3_600_001)).not.toThrow();
+  });
+
+  it('per-client counters fail closed: a flood of clients cannot evict the counter of one that is over its quota (round 3)', () => {
+    const d = new UnknownAccountDelay(3, 1, 1000);
+    d.reserve('first', 'busy', 0);
+    expect(() => d.reserve('second', 'busy', 0)).toThrow();
+    d.reserve('n1', 'c1', 0);
+    d.reserve('n2', 'c2', 0);
+    // Table and counters are full: a new client is refused rather than counted by evicting "busy".
+    expect(() => d.reserve('n3', 'c3', 0)).toThrow();
+    expect(() => d.reserve('second', 'busy', 0)).toThrow();
+  });
+
   const attempt = (email: string) => t.http().post('/auth/staff/sign-in').set(STATE_HEADERS).send({ email, password: 'definitely-wrong-password' });
 
   it('with the table full, long after it filled, a known and an unknown address answer the same (review round 2)', async () => {
@@ -147,5 +209,27 @@ describe('per-address email caps are counted in the database (S-07)', () => {
     for (let i = 0; i < 20; i++) await svc.requestLink(uniqueEmail(`noise${i}`));
     await svc.requestLink(email);
     expect(await t.prisma.outboundEmail.count({ where: { to: email, templateKey: 'auth.magic_link' } })).toBe(MAGIC_LINKS_PER_ADDRESS);
+  });
+});
+
+describe('the new-address cap through HTTP: per client address, read from the environment (round 3)', () => {
+  let h: TestApp;
+  beforeAll(async () => {
+    // TRUST_PROXY=loopback: the test connects from loopback, so X-Forwarded-For chooses the client address here.
+    h = await makeApp({ AUTH_NEW_ADDRESSES_PER_HOUR_PER_CLIENT: '2', TRUST_PROXY: 'loopback' });
+  });
+  afterAll(async () => h.close());
+  const from = (ip: string, email: string) =>
+    h.http().post('/auth/staff/sign-in').set(STATE_HEADERS).set('X-Forwarded-For', ip).send({ email, password: 'definitely-wrong-password' });
+
+  it('the third new address from one client is refused, another client is not, and one IPv6 /64 is one client', async () => {
+    expect((await from('203.0.113.10', uniqueEmail('a'))).status).toBe(401);
+    expect((await from('203.0.113.10', uniqueEmail('b'))).status).toBe(401);
+    expect((await from('203.0.113.10', uniqueEmail('c'))).status).toBe(429);
+    expect((await from('203.0.113.11', uniqueEmail('d'))).status).toBe(401);
+    expect((await from('2001:db8:5:6::1', uniqueEmail('e'))).status).toBe(401);
+    expect((await from('2001:db8:5:6::ffff', uniqueEmail('f'))).status).toBe(401);
+    expect((await from('2001:db8:5:6:1:2:3:4', uniqueEmail('g'))).status).toBe(429);
+    expect((await from('2001:db8:5:7::1', uniqueEmail('h'))).status).toBe(401);
   });
 });
