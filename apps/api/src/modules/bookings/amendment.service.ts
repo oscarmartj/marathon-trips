@@ -1,3 +1,4 @@
+import { safeError } from '../../platform/errors/safe-error';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { AmendmentReason } from '@mt/shared';
 import { Prisma } from '../../generated/prisma/client';
@@ -422,7 +423,8 @@ export class BookingAmendmentService {
         entityType: 'Booking', entityId: b.id, sourceRef: `bookings:amendment_basis_drift:${b.id}:v${b.currentSnapshotVersion}`,
       }));
     } catch (taskErr) {
-      this.logger.error(`could not open the price basis task: ${taskErr instanceof Error ? taskErr.message : 'unknown'}`);
+      // Task 8.5 (S-10): a code only; an error message can carry values from the database.
+      this.logger.error(`could not open the price basis task: ${safeError(taskErr).code}`);
     }
   }
 }

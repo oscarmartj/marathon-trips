@@ -8,6 +8,7 @@ import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import { TRIPOPS_PERMISSIONS as P } from './manifest';
 import { TripOpsService, type ListResult } from './tripops.service';
+import { contentDisposition } from '../../platform/http/content-disposition';
 
 type Q = z.infer<typeof tripListQuerySchema>;
 const id = () => new ParseUUIDPipe();
@@ -18,7 +19,7 @@ function send<T>(res: Response, r: ListResult<T>): T | string {
   res.setHeader('Cache-Control', 'no-store');
   if (r.csv === null) return r.data;
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${r.filename}"`);
+  res.setHeader('Content-Disposition', contentDisposition('attachment', r.filename));
   return r.csv;
 }
 

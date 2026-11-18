@@ -4,6 +4,7 @@ import { AppConfig } from '../config/config';
 import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 import { FLAGS } from '../flags/flag-registry';
 import { FeatureFlagService } from '../flags/flags.service';
+import { clientIpWatch } from '../http/client-ip-watch';
 import { QUEUE_LIST } from '../jobs/queues';
 
 /** Thresholds, in seconds unless the name says otherwise. One place, so the monitor and its tests agree. */
@@ -12,6 +13,7 @@ export const MONITOR_LIMITS = {
   outboxPendingSeconds: 300,
   mailQueuedSeconds: 600,
   backupStaleHours: 26,
+  clientIpPrivateHours: 1,
 } as const;
 
 export type BackupState = 'ok' | 'stale' | 'unknown';
@@ -30,6 +32,8 @@ export interface SystemStatus {
   backup: { state: BackupState; finishedAt: string | null; ageHours: number | null; offsite: boolean | null; encrypted: boolean | null };
   /** Outgoing webhooks (task 8.4): counts only, never an address. */
   webhooks: { pending: number; sending: number; oldestPendingSeconds: number | null; failedLast24h: number; autoDisabledSubscriptions: number };
+  /** Task 8.5: browser requests since start-up whose client address came out private (the real one was lost). Counts only. */
+  clientIp: { proxiedRequests: number; privateAddressRequests: number; lastPrivateAt: string | null };
 }
 
 const seconds = (from: Date | null, now: Date): number | null => (from ? Math.max(0, Math.round((now.getTime() - from.getTime()) / 1000)) : null);
@@ -95,6 +99,9 @@ export class SystemMonitorService {
     if (backup.state === 'stale') reasons.push('backup_stale');
     // Outside production nobody runs the backup script, so "unknown" is only a problem there.
     if (backup.state === 'unknown' && this.config.APP_ENV === 'production') reasons.push('backup_unknown');
+    // Task 8.5 (S-04): in production a browser is never on a private address; locally everyone is on localhost.
+    const lastPrivate = clientIpWatch.lastPrivateAt;
+    if (this.config.APP_ENV === 'production' && lastPrivate && now.getTime() - lastPrivate.getTime() < MONITOR_LIMITS.clientIpPrivateHours * 3600_000) reasons.push('client_ip_private');
 
     return {
       status: reasons.length === 0 ? 'ok' : 'attention',
@@ -108,6 +115,7 @@ export class SystemMonitorService {
       mail,
       backup,
       webhooks,
+      clientIp: { proxiedRequests: clientIpWatch.proxied, privateAddressRequests: clientIpWatch.privateAddress, lastPrivateAt: lastPrivate?.toISOString() ?? null },
     };
   }
 

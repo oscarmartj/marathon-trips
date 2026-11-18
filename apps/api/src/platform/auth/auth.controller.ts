@@ -10,6 +10,7 @@ import { PrismaService } from '../database/prisma.service';
 import { RequiresFlag } from '../flags/requires-flag.guard';
 import { FLAGS } from '../flags/flag-registry';
 import { unauthorised } from '../http/api-error';
+import { rateLimitKey } from '../http/client-ip-watch';
 import { AuthRateLimit } from '../http/rate-limit.guard';
 import type { ApiRequest } from '../http/request-context';
 import { ZodPipe } from '../http/zod.pipe';
@@ -44,7 +45,7 @@ export class AuthController {
   @Public('password check; on success only a short-lived second-factor step cookie, never a session')
   @AuthRateLimit()
   async staffSignIn(@Body(new ZodPipe(staffSignInSchema)) body: { email: string; password: string }, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
-    const step = await this.staff.signIn(body.email, body.password, req.requestId);
+    const step = await this.staff.signIn(body.email, body.password, req.requestId, rateLimitKey(req.ip));
     setCookie(res, 'staff_mfa', this.secure, step.mfaToken, step.maxAgeSeconds);
     return { next: 'second_factor' };
   }
@@ -67,7 +68,10 @@ export class AuthController {
   async stepUp(@Body(new ZodPipe(stepUpSchema)) body: { code: string }, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
     const auth = sessionOf(req);
     const r = await this.staff.stepUp(auth.userId, auth.sessionId, body.code, req.requestId);
-    if (r.ok) return { stepUpValidUntil: new Date(Date.now() + STEP_UP_WINDOW_MS).toISOString() };
+    if (r.ok) {
+      setCookie(res, 'staff', this.secure, r.session!.token, r.session!.maxAgeSeconds);
+      return { stepUpValidUntil: new Date(Date.now() + STEP_UP_WINDOW_MS).toISOString() };
+    }
     if (r.revoked) clearCookie(res, 'staff', this.secure);
     throw unauthorised(r.revoked ? 'session_revoked' : 'invalid_code', r.revoked ? 'Too many wrong codes. Sign in again.' : 'That code is not right');
   }

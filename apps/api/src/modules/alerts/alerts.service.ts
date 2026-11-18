@@ -2,9 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { brand } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { AppConfig } from '../../platform/config/config';
-import { WindowLimiter } from '../../platform/auth/attempt-limiter';
 import { newToken, tokenHash, looksLikeToken } from '../../platform/auth/tokens';
-import { emailHash, safeEqualHex } from '../../platform/crypto/hmac';
+import { safeEqualHex } from '../../platform/crypto/hmac';
 import { APP_CONFIG, PrismaService } from '../../platform/database/prisma.service';
 import { AppError } from '../../platform/errors/safe-error';
 import type { DeliveredEvent } from '../../platform/events/consumers';
@@ -21,14 +20,13 @@ const PUBLIC_RACE = { status: 'published', isDemo: false, deletedAt: null } sati
 const OPEN_EDITION = { status: { in: ['announced', 'active'] } } satisfies Prisma.RaceEditionWhereInput;
 
 const linkInvalid = () => new ApiError(400, 'link_invalid', 'This link has expired or has already been used. Subscribe again to get a new one.');
+/** Confirmation emails per address and 15 minutes; past it the request is accepted and nothing is sent. */
+export const CONFIRMATIONS_PER_ADDRESS = 5;
 const hourBucket = (now: number) => Math.floor(now / 3_600_000);
 
 /** Opening alerts: double opt-in subscriptions, one-click unsubscribe and the notice sent when a package opens. */
 @Injectable()
 export class AlertsService {
-  /** Confirmation emails per address and 15 minutes; past it the request is accepted and nothing is sent. */
-  private readonly perAddress = new WindowLimiter(5, 15 * 60_000);
-
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -59,9 +57,10 @@ export class AlertsService {
       if (!edition) throw notFound('edition_not_found', 'We could not find that edition');
       editionId = edition.id;
     }
-    if (!this.perAddress.allow(emailHash(this.config.EMAIL_HASH_KEY, input.email))) return;
     const scope = editionId ? `edition:${editionId}` : 'race';
     await this.prisma.$transaction(async (tx) => {
+      // Task 8.5 (S-07): the cap is counted in the database (a restart or a flood of other addresses cannot reset it).
+      if (!(await this.mail.withinAddressCap(tx, { to: input.email, templateKey: 'alerts.confirm', max: CONFIRMATIONS_PER_ADDRESS, windowMs: 15 * 60_000 }))) return;
       // The unique key makes two simultaneous requests land on one row.
       const row = (await tx.$queryRaw<Array<{ id: string; status: string }>>`
         INSERT INTO alert_subscriptions (id, email, "raceId", "editionId", scope, "updatedAt")

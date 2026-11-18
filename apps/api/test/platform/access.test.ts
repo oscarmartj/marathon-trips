@@ -12,7 +12,7 @@ import { PERMISSIONS, PermissionRegistry } from '../../src/platform/access/permi
 import { SessionService } from '../../src/platform/auth/session.service';
 import { APP_CONFIG, PrismaService } from '../../src/platform/database/prisma.service';
 import { configureApp } from '../../src/platform/http/configure-app';
-import { STATE_HEADERS, TestApp, createStaff, makeApp, signInCustomer, signInStaff, freshCode, uniqueEmail } from '../support/auth';
+import { STATE_HEADERS, TestApp, cookieFrom, createStaff, makeApp, signInCustomer, signInStaff, freshCode, uniqueEmail } from '../support/auth';
 import { OWNED_ROUTE_FIXTURES } from '../support/owned-route-fixtures';
 import { checkOwnedRoutes } from '../support/owned-routes';
 import { allRoutes } from '../support/routes';
@@ -150,12 +150,15 @@ describe('permissions (plan 4.3)', () => {
 
   it('step_up_without_recent_totp_403, then allowed after stepping up', async () => {
     const owner = await createStaff(t, { owner: true });
-    const cookie = await signInStaff(t, owner);
+    let cookie = await signInStaff(t, owner);
     const create = () => t.http().post('/admin/roles').set(STATE_HEADERS).set('Cookie', cookie).send({ key: `r${Date.now().toString(36)}`, name: 'Guides' });
     await stepUpOld(owner.id);
     expect((await create()).body.code).toBe('step_up_required');
     const up = await t.http().post('/auth/staff/step-up').set(STATE_HEADERS).set('Cookie', cookie).send({ code: await freshCode(t, owner) });
     expect(up.status).toBe(200);
+    // Task 8.5: stepping up renews the session token; the old cookie no longer works (test/security/auth-hardening.test.ts).
+    expect((await create()).status).toBe(401);
+    cookie = `mt_staff_session=${cookieFrom(up, 'mt_staff_session')}`;
     expect((await create()).status).toBe(201);
   });
 

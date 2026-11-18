@@ -10,6 +10,7 @@ import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import { TEMPLATES_PERMISSIONS as P } from './manifest';
 import { TemplatesService } from './templates.service';
+import { contentDisposition } from '../../platform/http/content-disposition';
 
 const uuid = () => new ParseUUIDPipe();
 type In<T extends z.ZodType> = z.infer<T>;
@@ -51,7 +52,7 @@ export class TemplatesAdminController {
   async pdf(@Param('channel') channel: string, @Param('id', uuid()) id: string, @Res({ passthrough: true }) res: Response) {
     if (channelOf(channel) !== 'document') throw notFound('not_found', 'Not found');
     const pdf = await this.templates.previewPdf(id);
-    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="preview.pdf"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': contentDisposition('inline', 'preview.pdf'), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     return new StreamableFile(pdf);
   }
 

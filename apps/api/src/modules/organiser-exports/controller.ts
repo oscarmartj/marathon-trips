@@ -9,6 +9,7 @@ import { ZodPipe } from '../../platform/http/zod.pipe';
 import { ORGANISER_EXPORT_PERMISSIONS as P } from './manifest';
 import { ExportCheckRateLimitGuard, ExportFileRateLimitGuard } from './rate-limit.guard';
 import { OrganiserExportService } from './service';
+import { contentDisposition } from '../../platform/http/content-disposition';
 
 /**
  * Organiser exports (task 7.2). Staff only, two permissions, never an API key. The file is a POST: it needs a body, it
@@ -41,7 +42,7 @@ export class OrganiserExportController {
     }
     res.status(200).set({
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${r.filename}"`,
+      'Content-Disposition': contentDisposition('attachment', r.filename),
       'X-Content-Type-Options': 'nosniff',
       'X-Row-Count': String(r.rowCount),
       'X-Excluded-Count': String(r.excluded),

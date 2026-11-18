@@ -267,7 +267,7 @@ describe('the page itself (plan 3.6, 10.1)', () => {
   }
   const webProxy = (): Promise<ApiProxy> => import(resolve(__dirname, '../../../../web/src/lib/api-proxy.ts')) as Promise<ApiProxy>;
 
-  it('checkout_page_safe_through_web_proxy: its policy travels in the HTML, not in headers the proxy drops', async () => {
+  it('checkout_page_safe_through_web_proxy: its policy travels in the HTML, and the API headers the proxy now forwards only add to it', async () => {
     const { responseHeaders } = await webProxy();
     const s = await started();
     const res = await t.http().get(apiPath(s.url));
@@ -277,8 +277,11 @@ describe('the page itself (plan 3.6, 10.1)', () => {
     // What the browser gets from the web origin: the API's response through the proxy's own header filter.
     const browser = responseHeaders(new Response(res.text, { status: res.status, headers: apiHeaders }));
     expect(browser.get('content-type')).toMatch(/^text\/html/);
-    expect(browser.get('content-security-policy')).toBeNull();
-    expect(browser.get('referrer-policy')).toBeNull();
+    // Task 8.5 (S-08): the proxy forwards the API's own security headers. Both policies then apply (the stricter wins):
+    // no script, style, frame or framing from the header, form-action and base-uri from the page's <meta>.
+    expect(browser.get('content-security-policy')).toBe("default-src 'none'; frame-ancestors 'none'");
+    expect(browser.get('referrer-policy')).toBe('no-referrer');
+    expect(browser.get('x-content-type-options')).toBe('nosniff');
     const page = html(res);
     expect(page).toContain(`<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CHECKOUT_PAGE_CSP)}">`);
     expect(CHECKOUT_PAGE_CSP).toBe("default-src 'none'; form-action 'self'; base-uri 'none'");

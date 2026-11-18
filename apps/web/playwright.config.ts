@@ -11,6 +11,8 @@ const API_ENV = {
   // All specs share one IP, and the sign-in limit is per minute and IP: the suite signs in more often than a person would.
   // The limit itself is covered by the API's own tests.
   AUTH_RATE_LIMIT_PER_MINUTE: '120',
+  // Task 8.5: the suite signs in many staff accounts from one address; the limit has its own API tests.
+  AUTH_SIGN_IN_ATTEMPTS_PER_HOUR_PER_CLIENT: '10000',
 };
 
 export default defineConfig({

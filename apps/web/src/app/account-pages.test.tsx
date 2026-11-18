@@ -1,11 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { configHeadersFor } from '@/test/next-headers';
 import { describe, expect, it } from 'vitest';
 import type { AccountBookingItem, PaymentPlanView } from '@mt/shared';
 import { AccountBookings } from '@/components/account/account-bookings';
 import { BookingOverview, type AccountBookingDetail } from '@/components/account/booking-overview';
 import { PayByLink } from '@/components/pay/pay-by-link';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 const en = (s: string) => ({ 'en-AU': s });
@@ -77,8 +76,12 @@ describe('customer area pages', () => {
     expect(t).not.toMatch(/\$\d/);
   });
 
-  it('the pay pages are not framed and send no Referer (next.config)', () => {
-    const cfg = readFileSync(join(__dirname, '..', '..', 'next.config.mjs'), 'utf8');
-    for (const path of ["'/pay'", "'/pay/return'"]) expect(cfg).toMatch(new RegExp(`source: ${path}, headers: \\[\\.\\.\\.noReferrer, \\{ key: 'X-Frame-Options', value: 'DENY' \\}\\]`));
+  it('the pay pages are not framed and send no Referer (next.config)', async () => {
+    // Task 8.5: evaluated as Next.js applies the rules, instead of matching the file's text (src/lib/security-headers.test.ts).
+    for (const path of ['/pay', '/pay/return']) {
+      const h = await configHeadersFor(path);
+      expect(h['referrer-policy']).toBe('no-referrer');
+      expect(h['x-frame-options']).toBe('DENY');
+    }
   });
 });

@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { AppConfig } from '../config/config';
 import { ApiErrorFilter } from './error.filter';
+import { clientIpMiddleware } from './client-ip-watch';
 import { RawBodyRoutes } from './raw-body';
 import { requestContext } from './request-context';
 
@@ -12,6 +13,8 @@ export function configureApp(app: INestApplication, config: AppConfig): void {
   express.set('trust proxy', config.TRUST_PROXY);
   express.disable('x-powered-by');
   app.use(requestContext);
+  // Task 8.5 (S-04): notices when browser requests arrive with a private client address (the real one was lost).
+  app.use(clientIpMiddleware(config.APP_ENV === 'production'));
   // Before the body parsers and every guard: the exact bytes, rate and size limits of the raw-body routes (task 3.1).
   // A test app without PlatformModule has none; then raw-body routes get no Buffer and refuse every request (400).
   const raw = rawBodyRoutesOf(app);

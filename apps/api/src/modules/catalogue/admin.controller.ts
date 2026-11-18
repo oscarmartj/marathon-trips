@@ -18,6 +18,7 @@ import { CATALOGUE_PERMISSIONS as P } from './manifest';
 import { CataloguePanelService } from './panel.service';
 import { PackageService } from './package.service';
 import { RaceService } from './race.service';
+import { contentDisposition } from '../../platform/http/content-disposition';
 
 const uuid = () => new ParseUUIDPipe();
 const claimKind = (k: string): ClaimKind => {
@@ -185,7 +186,7 @@ export class CatalogueAdminController {
 
   private sendCsv(res: Response, what: string, csv: string): string {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="catalogue-${what}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.setHeader('Content-Disposition', contentDisposition('attachment', `catalogue-${what}-${new Date().toISOString().slice(0, 10)}.csv`));
     res.setHeader('Cache-Control', 'no-store');
     return csv;
   }

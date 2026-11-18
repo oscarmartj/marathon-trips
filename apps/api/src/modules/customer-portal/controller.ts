@@ -13,6 +13,7 @@ import { isDocumentKind } from './documents';
 import { CustomerAmendmentsService } from './amendments';
 import { AmendmentRateLimitGuard, DocumentRateLimitGuard } from './rate-limit.guard';
 import { TravellerDetailsService } from './traveller.service';
+import { contentDisposition } from '../../platform/http/content-disposition';
 
 /**
  * The customer area (task 5.1). The list takes nothing but the session; a booking and its documents are found by
@@ -45,7 +46,7 @@ export class CustomerAccountController {
   async document(@Param('reference') reference: string, @Param('kind') kind: string, @Res() res: Response) {
     if (!isDocumentKind(kind)) throw notFound();
     const { pdf, filename } = await this.account.document(reference, kind);
-    res.status(200).set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'no-store' }).send(pdf);
+    res.status(200).set({ 'Content-Type': 'application/pdf', 'Content-Disposition': contentDisposition('attachment', filename), 'Cache-Control': 'no-store' }).send(pdf);
   }
 
   // Traveller details (task 5.2). The slot is a place number of the booking; anything that is not one is the same 404.

@@ -40,6 +40,7 @@ export function EnrolForm() {
       method: 'POST', body: { token, password: form.get('password'), code: String(form.get('code') ?? '').replace(/\s/g, '') },
     });
     if (r.status === 200) setCodes(r.body.recoveryCodes);
+    else if (r.body.code === 'password_too_common') setError(t('auth.enrol.passwordTooCommon'));
     else setError(r.body.code === 'invalid_code' ? t('auth.enrol.invalidCode') : t('auth.enrol.missingLink'));
   }
 

@@ -19,6 +19,7 @@ import { snake } from './table-def';
 import { TablesService } from './tables.service';
 import { TagsService } from './tags.service';
 import { ViewsService } from './views.service';
+import { contentDisposition } from '../http/content-disposition';
 
 type Body_<T extends { parse: (v: unknown) => unknown }> = ReturnType<T['parse']>;
 
@@ -90,7 +91,7 @@ export class CommonController {
     const def = this.access.def(t);
     const out = await this.csv.export(callerOf(req), def, (b as { query: never }).query);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${snake(def.entityType)}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.setHeader('Content-Disposition', contentDisposition('attachment', `${snake(def.entityType)}-${new Date().toISOString().slice(0, 10)}.csv`));
     res.setHeader('Cache-Control', 'no-store');
     return out.csv;
   }

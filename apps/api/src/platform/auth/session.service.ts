@@ -4,6 +4,7 @@ import type { SessionAuth, UserKind } from '../access/auth-context';
 import type { AppConfig } from '../config/config';
 import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 import type { RequestMeta } from './request-meta';
+import { AppError } from '../errors/safe-error';
 import { looksLikeToken, newToken, tokenHash } from './tokens';
 
 const HOUR = 3600_000;
@@ -59,6 +60,19 @@ export class SessionService {
       await this.prisma.session.updateMany({ where: { id: s.id, revokedAt: null }, data: { lastSeenAt: now, idleExpiresAt: idle } });
     }
     return { via: 'session', kind, userId: s.userId, sessionId: s.id, mfaVerifiedAt: s.mfaVerifiedAt };
+  }
+
+  /**
+   * Task 8.5 (ASVS 5.0 7.2.4): a new token for the same session after a re-authentication (step-up), so a token copied
+   * before the check is worth nothing after it. The row, its id (audit, step-up state) and its absolute expiry stay.
+   */
+  async rotate(tx: Prisma.TransactionClient, sessionId: string, now: Date = new Date()): Promise<{ token: string; maxAgeSeconds: number }> {
+    const token = newToken();
+    const [row] = await tx.$queryRaw<Array<{ expiresAt: Date }>>`
+      UPDATE sessions SET "tokenHash" = ${tokenHash(token)} WHERE id = ${sessionId}::uuid AND "revokedAt" IS NULL AND "expiresAt" > ${now}::timestamptz
+      RETURNING "expiresAt"`;
+    if (!row) throw new AppError('session_not_live', 'The session ended while it was being renewed');
+    return { token, maxAgeSeconds: Math.max(1, Math.floor((row.expiresAt.getTime() - now.getTime()) / 1000)) };
   }
 
   async revoke(db: Prisma.TransactionClient | PrismaService, sessionId: string, reason: RevokeReason): Promise<void> {

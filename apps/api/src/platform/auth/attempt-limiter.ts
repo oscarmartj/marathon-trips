@@ -39,6 +39,37 @@ export class Lru<V> {
     while (this.map.size > this.max) this.map.delete(this.map.keys().next().value as string);
   }
 
+  /**
+   * Task 8.5 (S-06): stores without evicting a live entry. When the table is full of live entries, expired ones are swept
+   * (at most once a second, so a full table costs no more than that) and, if there is still no room, nothing is stored
+   * and false is returned, so the caller can refuse instead of forgetting someone's count.
+   */
+  trySet(key: string, value: V, now = Date.now()): boolean {
+    if (this.map.has(key) || this.map.size < this.max) {
+      this.set(key, value, now);
+      return true;
+    }
+    if (now - this.lastSweep >= 1000) {
+      this.lastSweep = now;
+      for (const [k, e] of this.map) if (e.expiresAt <= now) this.map.delete(k);
+    }
+    if (this.map.size >= this.max) return false;
+    this.set(key, value, now);
+    return true;
+  }
+
+  private lastSweep = 0;
+
+  /** Whether `trySet` of this key would succeed now, without storing anything (round 4: no empty entries left behind). */
+  canStore(key: string, now = Date.now()): boolean {
+    if (this.get(key, now) !== undefined || this.map.size < this.max) return true;
+    if (now - this.lastSweep >= 1000) {
+      this.lastSweep = now;
+      for (const [k, e] of this.map) if (e.expiresAt <= now) this.map.delete(k);
+    }
+    return this.map.size < this.max;
+  }
+
   get size(): number {
     return this.map.size;
   }
@@ -80,15 +111,109 @@ export async function refundAccountAttempt(db: Db, userId: string): Promise<void
     WHERE id = ${userId}::uuid`;
 }
 
-/** The same schedule for addresses with no account, kept in memory so the two cases look alike (T2). */
-export class UnknownAccountDelay {
-  private readonly entries = new Lru<{ failures: number; nextAllowedAt: number }>(100_000, COUNT_WINDOW_SECONDS * 1000);
+/** Retry-After for an address refused because the table is full or its client added too many new addresses (S-06). */
+export const SATURATION_SECONDS = 60;
+/** Sign-in attempts one client (an IPv4 address or an IPv6 /64) may make per hour, new addresses and renewals (S-06). */
+export const NEW_ADDRESSES_PER_HOUR_PER_CLIENT = 30;
+/** Sign-in attempts one IPv6 /48 (a site's allocation, 65,536 /64s) may make per hour, all its /64s together (round 3). */
+export const NEW_ADDRESSES_PER_HOUR_PER_SITE = 300;
 
+/** The /48 an IPv6 client key (`a:b:c:d::/64`, from rateLimitKey) belongs to; null for IPv4. */
+export function siteOf(client: string): string | null {
+  const m = /^([0-9a-f]+):([0-9a-f]+):([0-9a-f]+):[0-9a-f]+::\/64$/.exec(client);
+  return m ? `${m[1]}:${m[2]}:${m[3]}::/48` : null;
+}
+
+/**
+ * Times of recent events per key, in a bounded table that fails closed: when it is full of live counters, a new key
+ * cannot be counted and the caller refuses instead (round 3: an evicted counter would stop counting).
+ */
+class ClosedWindowCounter {
+  private readonly entries: Lru<number[]>;
+
+  constructor(
+    private readonly windowMs: number,
+    max: number,
+  ) {
+    this.entries = new Lru<number[]>(max, windowMs);
+  }
+
+  count(key: string, now: number): number {
+    return (this.entries.get(key, now) ?? []).filter((t) => t > now - this.windowMs).length;
+  }
+
+  hasRoom(key: string, now: number): boolean {
+    return this.entries.canStore(key, now);
+  }
+
+  record(key: string, now: number): void {
+    const recent = (this.entries.get(key, now) ?? []).filter((t) => t > now - this.windowMs);
+    this.entries.set(key, [...recent, now], now);
+  }
+}
+
+type Slot = { failures: number; nextAllowedAt: number; lastFailedAt: number };
+
+/**
+ * The same schedule for addresses with no account, kept in memory so the two cases look alike (T2), in a bounded table
+ * that never evicts a live count (task 8.5, S-06).
+ *
+ * Every address takes a place in the table *before* anything is looked up, known accounts too (their place holds no
+ * count: the database counts them), and every attempt renews the place, for both kinds alike (round 3), so a place is
+ * kept exactly as long as the address keeps being tried. When the table is full, every address without a place is
+ * refused the same way, staff or not, for as long as it stays full; a burst of parallel attempts is decided address by
+ * address in memory, before the first await. New addresses are capped per client (IPv4 address or IPv6 /64) and per
+ * IPv6 /48, and the quota is spent only when a place is granted; the counters themselves fail closed.
+ */
+export class UnknownAccountDelay {
+  private readonly entries: Lru<Slot>;
+  private readonly perClient: ClosedWindowCounter;
+  private readonly perSite: ClosedWindowCounter;
+
+  constructor(
+    max = 100_000,
+    private readonly perClientPerHour = NEW_ADDRESSES_PER_HOUR_PER_CLIENT,
+    private readonly perSitePerHour = NEW_ADDRESSES_PER_HOUR_PER_SITE,
+  ) {
+    this.entries = new Lru(max, COUNT_WINDOW_SECONDS * 1000);
+    this.perClient = new ClosedWindowCounter(COUNT_WINDOW_SECONDS * 1000, max);
+    this.perSite = new ClosedWindowCounter(COUNT_WINDOW_SECONDS * 1000, max);
+  }
+
+  /**
+   * Gives this address a place in the table (or renews it), or refuses it (429) when the table is full or its client or
+   * site has brought too many new addresses this hour. Synchronous on purpose: called before any database lookup, for
+   * every address.
+   */
+  reserve(key: string, client: string, now: number = Date.now()): void {
+    const site = siteOf(client);
+    const refuse = (): never => {
+      throw tooManyRequests(SATURATION_SECONDS);
+    };
+    // Every attempt that gets or keeps a place is charged, a renewal as much as a new address, known and unknown alike
+    // (round 4): otherwise a table filled once could be kept full with one cheap retry per address and hour.
+    if (this.perClient.count(client, now) >= this.perClientPerHour) refuse();
+    if (site && this.perSite.count(site, now) >= this.perSitePerHour) refuse();
+    if (!this.perClient.hasRoom(client, now) || (site && !this.perSite.hasRoom(site, now))) refuse();
+    const held = this.entries.get(key, now);
+    if (held !== undefined) this.entries.set(key, held, now); // renewed on every attempt (round 3)
+    else if (!this.entries.trySet(key, { failures: 0, nextAllowedAt: 0, lastFailedAt: 0 }, now)) refuse();
+    // Charged only now that the place is granted or kept (round 3); the counters are created only here (round 4).
+    this.perClient.record(client, now);
+    if (site) this.perSite.record(site, now);
+  }
+
+  /**
+   * Counts a failure for an address with no account (its place is normally reserved just before). Like the database
+   * count of known accounts, it starts again after an hour without a failure. If the place has gone and the table has
+   * no room, the failure is refused (429), never stored by evicting someone else's count.
+   */
   claim(key: string, now: number = Date.now()): void {
-    const e = this.entries.get(key, now) ?? { failures: 0, nextAllowedAt: 0 };
+    const held = this.entries.get(key, now);
+    const e = held && now - held.lastFailedAt < COUNT_WINDOW_SECONDS * 1000 ? held : { failures: 0, nextAllowedAt: 0, lastFailedAt: 0 };
     if (e.nextAllowedAt > now) throw tooManyRequests((e.nextAllowedAt - now) / 1000);
     const failures = e.failures + 1;
-    this.entries.set(key, { failures, nextAllowedAt: now + delaySeconds(failures) * 1000 }, now);
+    if (!this.entries.trySet(key, { failures, nextAllowedAt: now + delaySeconds(failures) * 1000, lastFailedAt: now }, now)) throw tooManyRequests(SATURATION_SECONDS);
   }
 }
 
