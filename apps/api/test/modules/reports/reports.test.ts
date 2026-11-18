@@ -1,6 +1,9 @@
+import { Logger } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { REPORT_ENTITY_CATALOGUE } from '@mt/shared';
 import { REPORTS_PERMISSIONS as P, reportsManifest } from '../../../src/modules/reports';
+import { ReportRunRateLimitGuard, REPORT_RUNS_PER_MINUTE } from '../../../src/modules/reports/rate-limit.guard';
+import { AccessService } from '../../../src/platform/access/access.service';
 import { ReportScheduler } from '../../../src/modules/reports/scheduler';
 import { ReportsService } from '../../../src/modules/reports/reports.service';
 import { VISIT_DEDUPE_MS, VISITS_PER_MINUTE, VisitDeduper } from '../../../src/modules/reports/rate-limit.guard';
@@ -77,11 +80,11 @@ async function booking(w: World, versionId: string, state: 'requested' | (typeof
 async function demoWorld(): Promise<{ race: { id: string; slug: string }; edition: { id: string }; pkg: { id: string } }> {
   const base = await buildWorld(admin);
   const { id: _r, createdAt: _c, updatedAt: _u, ...race } = await t.prisma.race.findUniqueOrThrow({ where: { id: base.race.id } });
-  const demo = await t.prisma.race.create({ data: { ...race, slug: `demo-${base.race.slug}`, isDemo: true, status: 'draft', publishedAt: null } });
+  const demo = await t.prisma.race.create({ data: { ...race, slug: `demo-${base.race.slug}`, isDemo: true, status: 'draft', publishedAt: null } as never });
   const { id: _e, raceId: _er, createdAt: _ec, updatedAt: _eu, ...edition } = await t.prisma.raceEdition.findUniqueOrThrow({ where: { id: base.edition.id } });
-  const ed = await t.prisma.raceEdition.create({ data: { ...edition, raceId: demo.id } });
+  const ed = await t.prisma.raceEdition.create({ data: { ...edition, raceId: demo.id } as never });
   const { id: _p, editionId: _pe, createdAt: _pc, updatedAt: _pu, ...pkg } = await t.prisma.package.findUniqueOrThrow({ where: { id: base.pkg.id } });
-  const pk = await t.prisma.package.create({ data: { ...pkg, editionId: ed.id, saleStatus: 'draft' } });
+  const pk = await t.prisma.package.create({ data: { ...pkg, editionId: ed.id, saleStatus: 'draft' } as never });
   return { race: { id: demo.id, slug: demo.slug }, edition: { id: ed.id }, pkg: { id: pk.id } };
 }
 const versionOf = async (w: World): Promise<string> => (await t.prisma.priceVersion.findFirstOrThrow({ where: { packageId: w.pkg.id } })).id;
@@ -190,6 +193,30 @@ describe('access', () => {
     expect((await noBookings.patch(`/admin/reports/${saved.id}`, { name: 'y', version: 0 })).status).toBe(403);
     const funnelSaved = must(await admin.post('/admin/reports', { name: 'Funnel', definition: funnelDef([]) }), 'create').body;
     expect((await noBookings.post(`/admin/reports/${funnelSaved.id}/run`)).status).toBe(200);
+  });
+
+  it('effectiveMany answers like effective for each user, in one read', async () => {
+    const reader = await staffClient(t, [P.read]);
+    const none = await staffClient(t, []);
+    const off = await staffClient(t, [P.read]);
+    await t.prisma.user.update({ where: { id: off.staff.id }, data: { status: 'disabled' } });
+    const access = t.app.get(AccessService);
+    const ids = [reader.staff.id, none.staff.id, off.staff.id, admin.staff.id, '0192f0a0-0000-7000-8000-0000000000cc'];
+    const many = await access.effectiveMany(t.prisma, ids);
+    for (const id of ids) {
+      const one = await access.effective(t.prisma, id);
+      expect([id, many.get(id)!.isOwner, [...many.get(id)!.keys].sort()]).toEqual([id, one.isOwner, [...one.keys].sort()]);
+    }
+    expect(many.get(reader.staff.id)!.keys.has(P.read)).toBe(true);
+    expect(many.get(off.staff.id)!.keys.size).toBe(0);
+  });
+
+  it('previews and runs are limited per staff user, and one user does not use another one\'s allowance', () => {
+    const guard = new ReportRunRateLimitGuard();
+    const ctx = (userId: string) => ({ switchToHttp: () => ({ getRequest: () => ({ auth: { userId }, ip: '203.0.113.1' }) }) }) as never;
+    for (let i = 0; i < REPORT_RUNS_PER_MINUTE; i++) expect(guard.canActivate(ctx('u1'))).toBe(true);
+    expect(() => guard.canActivate(ctx('u1'))).toThrow();
+    expect(guard.canActivate(ctx('u2'))).toBe(true);
   });
 
   it('no permission can be given to an API key', async () => {
@@ -531,6 +558,69 @@ describe('scheduled sending', () => {
     await tick();
     const run = (await runsOf(id))[0]!;
     await expect(t.prisma.$executeRawUnsafe(`UPDATE report_runs SET "emailsQueued" = 9 WHERE id = '${run.id}'::uuid`)).rejects.toThrow();
+  });
+
+  it('a scheduled report covers whole days that ended before it was due, so the next one starts where it ended', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const r = must(await admin.post('/admin/reports', { name: `Range ${Date.now()}`, definition: funnelDef([], { range: { kind: 'last_days', days: 7 } }), schedule: WED, recipientUserIds: [a.staff.id] }), 'create').body as { id: string };
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "scheduleStartedAt" = '2027-01-01T00:00:00Z' WHERE id = '${r.id}'::uuid`);
+    await tick();
+    const run = (await runsOf(r.id))[0]!;
+    t.mail.sent.length = 0;
+    expect(await t.app.get(MailService).processSend((await emailsOf(run.id))[0]!.id)).toBe('sent');
+    // Due Wednesday 3 March 08:00 Brisbane: Wednesday 24 February to Tuesday 2 March, not up to the morning of the 3rd.
+    expect(t.mail.sent.find((m) => m.to === a.staff.email)!.text).toContain('From 2027-02-24 to 2027-03-02');
+    // The on-screen preview of the same definition still ends today.
+    const screen = await preview(admin, funnelDef([], { range: { kind: 'last_days', days: 7 } }));
+    expect(screen.to).toBe(new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane' }).format(new Date()));
+  });
+
+  it('with the module switched off after the email was queued, nothing is sent and it is marked skipped', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await tick();
+    const mail = (await emailsOf((await runsOf(id))[0]!.id))[0]!;
+    t.mail.sent.length = 0;
+    await setFlag(false);
+    try {
+      expect(await t.app.get(MailService).processSend(mail.id)).toBe('suppressed');
+    } finally {
+      await setFlag(true);
+    }
+    expect(t.mail.sent.filter((m) => m.to === a.staff.email)).toHaveLength(0);
+    expect(await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: mail.id }, select: { status: true, error: true } })).toEqual({ status: 'suppressed', error: 'module_disabled' });
+    // It is not retried when the module comes back.
+    expect(await t.app.get(MailService).processSend(mail.id)).toBe('noop');
+  });
+
+  it('a report that cannot be made does not stop the others, is logged by id only, and is tried again', async () => {
+    const bad = await staffClient(t, [P.read, P.funnelRead]);
+    const good = await staffClient(t, [P.read, P.funnelRead]);
+    const badId = await scheduled([bad]);
+    const goodId = await scheduled([good]);
+    const mail = t.app.get(MailService);
+    const real = mail.enqueue.bind(mail);
+    const spy = vi.spyOn(mail, 'enqueue').mockImplementation((async (input: { to: string }, ...rest: unknown[]) => {
+      if (input.to === bad.staff.email) throw new Error(`boom for ${input.to}`);
+      return (real as (...a: unknown[]) => unknown)(input, ...rest);
+    }) as never);
+    const logged: string[] = [];
+    const log = vi.spyOn(Logger.prototype, 'error').mockImplementation((m: unknown) => void logged.push(String(m)));
+    try {
+      await tick();
+    } finally {
+      spy.mockRestore();
+      log.mockRestore();
+    }
+    expect(await runsOf(badId)).toHaveLength(0);
+    expect(await runsOf(goodId)).toHaveLength(1); // the report after the failing one was still made
+    expect(logged.some((m) => m.includes(badId))).toBe(true);
+    expect(logged.join('\n')).not.toContain(bad.staff.email);
+    expect(await t.prisma.task.count({ where: { sourceRef: `reports:run_failed:${badId}`, status: 'open' } })).toBe(1);
+    await tick(); // the failure is gone: the report is made at the next tick, inside its window
+    expect(await runsOf(badId)).toHaveLength(1);
+    await tick();
+    expect(await t.prisma.task.count({ where: { sourceRef: `reports:run_failed:${badId}`, status: 'open' } })).toBe(1);
   });
 
   it('with the module off nothing is made', async () => {

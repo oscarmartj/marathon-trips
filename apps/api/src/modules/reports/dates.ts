@@ -38,9 +38,19 @@ export function latestOccurrence(schedule: ReportSchedule, now: Date): Date {
   return candidate;
 }
 
-/** The first and last Brisbane day of a report range. */
-export function resolveRange(range: { kind: 'last_days'; days: number } | { kind: 'dates'; from: string; to: string }, now: Date): { from: string; to: string } {
+/** The first instant of a Brisbane calendar day (Brisbane has no daylight saving, so this is exact). */
+export const startOfBusinessDay = (date: string): Date => instant(date, '00:00');
+
+export type ReportRange = { kind: 'last_days'; days: number } | { kind: 'dates'; from: string; to: string };
+
+/**
+ * The first and last Brisbane day of a report range. With `completeDaysOnly` (a scheduled send) a `last_days` range ends
+ * on the day before the day of `now`, so the report covers whole days only and the next one starts where this one ended:
+ * no request falls between two reports. A `dates` range is always as given.
+ */
+export function resolveRange(range: ReportRange, now: Date, opts: { completeDaysOnly?: boolean } = {}): { from: string; to: string } {
   if (range.kind === 'dates') return { from: range.from, to: range.to };
-  const to = todayInBusinessZone(now);
+  const today = todayInBusinessZone(now);
+  const to = opts.completeDaysOnly ? addDays(today, -1) : today;
   return { from: addDays(to, -(range.days - 1)), to };
 }

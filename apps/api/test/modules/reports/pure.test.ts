@@ -96,6 +96,38 @@ describe('ranges and rates', () => {
     expect(addDays('2027-03-01', -1)).toBe('2027-02-28');
   });
 
+  // Scheduled sends cover whole days that ended before the scheduled time, and the next one starts where this one ended.
+  it.each([
+    ['weekly Monday 08:00, 7 days: Monday to Sunday', '2027-02-28T22:00:00Z', 7, '2027-02-22', '2027-02-28'], // Monday 1 March 08:00 Brisbane
+    ['the next week starts the day after', '2027-03-07T22:00:00Z', 7, '2027-03-01', '2027-03-07'],
+    ['one day: yesterday only', '2027-03-01T22:00:00Z', 1, '2027-03-01', '2027-03-01'],
+    ['sent at 00:00 Brisbane: the day that just ended', '2027-02-28T14:00:00Z', 7, '2027-02-22', '2027-02-28'], // Monday 1 March 00:00
+    ['sent at 23:59 Brisbane: still before that day', '2027-03-01T13:59:00Z', 7, '2027-02-22', '2027-02-28'],
+    ['sent one minute before midnight on the Sunday: the day before', '2027-02-28T13:59:00Z', 7, '2027-02-21', '2027-02-27'],
+    ['monthly on the 1st over a month end, 30 days', '2027-02-28T22:00:00Z', 30, '2027-01-30', '2027-02-28'],
+    ['across the new year', '2026-12-31T22:00:00Z', 7, '2026-12-25', '2026-12-31'], // 1 January 2027 08:00
+    ['leap day', '2028-02-29T22:00:00Z', 2, '2028-02-28', '2028-02-29'], // 1 March 2028 08:00
+  ])('a scheduled range: %s', (_n, scheduledFor, days, from, to) => {
+    expect(resolveRange({ kind: 'last_days', days }, new Date(scheduledFor), { completeDaysOnly: true })).toEqual({ from, to });
+  });
+
+  it('consecutive weekly sends leave no day out and count none twice', () => {
+    const range = { kind: 'last_days', days: 7 } as const;
+    let previousTo = '';
+    for (let week = 0; week < 60; week++) {
+      const at = new Date(Date.parse('2027-01-03T22:00:00Z') + week * 7 * 86_400_000); // Mondays 08:00 in Brisbane
+      const { from, to } = resolveRange(range, at, { completeDaysOnly: true });
+      if (previousTo) expect(from).toBe(addDays(previousTo, 1));
+      previousTo = to;
+    }
+  });
+
+  it('a dates range and an on-screen range are not changed by the option', () => {
+    const at = new Date('2027-03-01T22:00:00Z');
+    expect(resolveRange({ kind: 'dates', from: '2027-01-01', to: '2027-01-31' }, at, { completeDaysOnly: true })).toEqual({ from: '2027-01-01', to: '2027-01-31' });
+    expect(resolveRange({ kind: 'last_days', days: 7 }, at)).toEqual({ from: '2027-02-24', to: '2027-03-02' });
+  });
+
   it.each([
     [1, 3, 33.3], [2, 3, 66.7], [3, 3, 100], [0, 5, 0], [5, 0, null], [0, 0, null], [1, 8, 12.5], [1, 6, 16.7],
   ])('ratePct(%i, %i) = %s', (part, whole, expected) => expect(ratePct(part, whole)).toBe(expected));
