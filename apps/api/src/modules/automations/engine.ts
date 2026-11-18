@@ -270,24 +270,6 @@ export class AutomationEngine {
       if (!testMode) await this.notify(tx, rule, 'permission_lost', 'An automation cannot run because its owner lost a permission it needs');
       return stop('failed', 'automation_cannot_exceed_author_permissions', rule.version, testMode);
     }
-    if (!testMode) {
-      // Serialises the count with other runs of the same rule, so the cap holds under concurrency.
-      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`automation_run:${rule.id}`}))`;
-      const recent = await tx.automationRun.count({ where: { ruleId: rule.id, testMode: false, source: { not: 'manual' }, status: { in: ['succeeded', 'failed'] }, startedAt: { gt: new Date(now.getTime() - 3_600_000) } } });
-      // Oldest first (task 7.fix-2): a backlog (events held while the module was off) can exceed the cap. A run never
-      // takes a place an older pending real run of the same rule could take, so whatever order the jobs run in, the
-      // oldest events act and the newest are held back. Order: when the event happened (or the schedule time), then id.
-      const orderKey = run.eventOccurredAt ?? run.scheduledFor ?? run.startedAt;
-      const [older] = await tx.$queryRaw<Array<{ n: number }>>`
-        SELECT count(*)::int AS n FROM automation_runs o
-        WHERE o."ruleId" = ${rule.id}::uuid AND o.status = 'pending' AND NOT o."testMode" AND o.source <> 'manual' AND o.id <> ${run.id}::uuid
-          AND (COALESCE(o."eventOccurredAt", o."scheduledFor", o."startedAt"), o.id) < (${orderKey}::timestamptz, ${run.id}::uuid)`;
-      if (recent + (older?.n ?? 0) >= MAX_REAL_RUNS_PER_HOUR) {
-        await this.notify(tx, rule, 'rate_limited', 'An automation ran too often in the last hour and was held back');
-        return stop('skipped', 'rate_limited', rule.version, testMode);
-      }
-    }
-
     // The record and the facts. Facts are the snapshot taken at dispatch (all rules of one event see the same ones).
     let entity: LoadedEntity | null = null;
     let facts: AutomationFacts = {};
@@ -300,6 +282,31 @@ export class AutomationEngine {
     }
     const conditions = evaluateConditions(def.conditions, facts);
     if (conditions.some((c) => !c)) return { ...stop('skipped', 'conditions_not_met', rule.version, testMode), conditions };
+
+    if (!testMode) {
+      // Serialises the count with other runs of the same rule, so the cap holds under concurrency.
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`automation_run:${rule.id}`}))`;
+      const recent = await tx.automationRun.count({ where: { ruleId: rule.id, testMode: false, source: { not: 'manual' }, status: { in: ['succeeded', 'failed'] }, startedAt: { gt: new Date(now.getTime() - 3_600_000) } } });
+      // Oldest first (task 7.fix-2). A backlog (events held while the module was off) can exceed the cap. A run never
+      // takes a place an older pending real run of the same rule could take, so whatever order the jobs run in, the
+      // oldest events that act do so and the newest are held back. Order: when the event happened (or the schedule
+      // time), then id. Checked after the conditions, so a run that would not act is never held back.
+      const orderKey = run.eventOccurredAt ?? run.scheduledFor ?? run.startedAt;
+      const olderRuns = await tx.$queryRaw<Array<{ facts: unknown }>>`
+        SELECT o.facts FROM automation_runs o
+        WHERE o."ruleId" = ${rule.id}::uuid AND o.status = 'pending' AND NOT o."testMode" AND o.source <> 'manual' AND o.id <> ${run.id}::uuid
+          AND (COALESCE(o."eventOccurredAt", o."scheduledFor", o."startedAt"), o.id) < (${orderKey}::timestamptz, ${run.id}::uuid)`;
+      // Only older runs that will act reserve a place: their facts were snapshotted at dispatch, so whether they meet
+      // the conditions is already known (review round 1). One whose record is gone still reserves one (conservative).
+      const older = olderRuns.filter((o) => {
+        const f = automationFactsSchema.safeParse(o.facts ?? {});
+        return !f.success || evaluateConditions(def.conditions, f.data).every(Boolean);
+      }).length;
+      if (recent + older >= MAX_REAL_RUNS_PER_HOUR) {
+        await this.notify(tx, rule, 'rate_limited', 'An automation ran too often in the last hour and was held back');
+        return stop('skipped', 'rate_limited', rule.version, testMode);
+      }
+    }
 
     const actor = { type: 'automation' as const, id: rule.id };
     for (const [index, action] of def.actions.entries()) {

@@ -2882,7 +2882,7 @@
         "customer_notice_3": "Customer notice 3",
         "staff_notice": "Notice to you (the automation's owner)"
       },
-      "templateHint": "Write the wording under Templates and put it into use. Customer notices are service messages about their own booking or quote, never promotions, and are not sent to anyone who unsubscribed or bounced.",
+      "templateHint": "Write the wording under Templates and put it into use. Customer notices are about the customer's own booking or quote, never promotions. Unless the automation was switched on with the confirmation that they are service messages (and nothing changed since), they go only to customers who agreed to marketing emails, carry an unsubscribe link and stop when someone unsubscribes. Nothing is sent to an address that bounced or complained.",
       "webhook": "Webhook (one that subscribes to automation notices)",
       "removeAction": "Remove action {n}",
       "addAction": "Add an action",
@@ -2943,7 +2943,8 @@
         "nothing_to_close": "nothing to close",
         "action_failed": "it failed",
         "transient_error": "a temporary problem",
-        "customer_rate_limited": "the customer already had the most automation emails allowed in 24 hours"
+        "customer_rate_limited": "the customer already had the most automation emails allowed in 24 hours",
+        "marketing_consent_missing": "not confirmed as a service message, and the customer has not agreed to marketing emails"
       },
       "errors": {
         "validation_failed": "Some fields are not valid. Check the highlighted values and try again.",
@@ -3553,7 +3554,7 @@
       "closed": "This account is closed.",
       "marketing": {
         "heading": "Marketing emails",
-        "wording": "Email me about new race trips, offers and travel tips. You can unsubscribe at any time with the link in each email. This is separate from emails about your bookings, which we always send.",
+        "wording": "Email me about new race trips, offers and travel tips. You can unsubscribe at any time with the link in each marketing email. This is separate from service emails about your bookings and quotes.",
         "label": "Yes, email me about new trips and offers",
         "save": "Save my choice",
         "saved": "Your choice is saved.",

@@ -16,7 +16,7 @@ import { checkConditions, referencedIds } from './conditions';
 import { AUTOMATIONS_PERMISSIONS as P, ENTITY_READ_PERMISSION } from './manifest';
 
 type Tx = Prisma.TransactionClient;
-const CUSTOMER_CODES: ReadonlySet<string> = new Set(['recipient_unavailable', 'recipient_suppressed']);
+const CUSTOMER_CODES: ReadonlySet<string> = new Set(['recipient_unavailable', 'recipient_suppressed', 'customer_rate_limited', 'marketing_consent_missing']);
 type Scope = AutomationEntityType | 'schedule';
 export interface Caller {
   auth: AuthContext;
@@ -170,9 +170,11 @@ export class AutomationRulesService {
         where: { id },
         data: {
           enabled: true, testMode: input.testMode, enabledAt: rule.enabled ? rule.enabledAt : now, ownerUserId: caller.actor.id, version: { increment: 1 },
-          // Task 7.fix-2: recorded (and audited) only for a rule that emails customers, and only when given again on every
-          // switch-on; leaving it out removes an earlier one.
-          serviceNoticeAckAt: input.serviceMessageAck === true && this.emailsCustomers(def.data) ? now : null,
+          // Task 7.fix-2: recorded (and audited) only for a rule that emails customers. `false` removes it. Left out, a
+          // rule that was off gets none (switching on needs it again), while one already on keeps it unchanged, so
+          // changing only its test mode from the panel never drops it silently (review round 1).
+          serviceNoticeAckAt: !this.emailsCustomers(def.data) || input.serviceMessageAck === false ? null
+            : input.serviceMessageAck === true ? now : rule.enabled ? rule.serviceNoticeAckAt : null,
         },
       });
       await this.audit.record(tx, { actor: caller.actor, action: 'automations.rule.enabled', entityType: 'AutomationRule', entityId: id, model: 'AutomationRule', before: audited(rule), after: audited(after) });

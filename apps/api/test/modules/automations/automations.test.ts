@@ -413,7 +413,7 @@ describe('review round 1 of the code', () => {
 
 describe('automation_test_mode_sends_and_changes_nothing', () => {
   it('a rule in test mode, fired by a real event, only records what it would do', async () => {
-    const r = await ruleOn({ actions: [...everyAction(), { type: 'remove_tag', tagId }] }, true);
+    const r = await ruleOn({ actions: [...everyAction(), { type: 'remove_tag', tagId }] }, true, owner, true); // 7.fix-2: notice acknowledged as a service message
     const { bookingId } = await newBooking();
     // An open automation task, so close_tasks would have something to close.
     await t.prisma.task.create({ data: { title: 'Earlier', entityType: 'Booking', entityId: bookingId, source: 'automation', sourceRef: 'automation:earlier' } });
@@ -429,7 +429,7 @@ describe('automation_test_mode_sends_and_changes_nothing', () => {
   });
 
   it('the panel test changes nothing, and a manual run can never be real (database check)', async () => {
-    const r = await ruleOn({ actions: everyAction() }, false);
+    const r = await ruleOn({ actions: everyAction() }, false, owner, true); // 7.fix-2: notice acknowledged as a service message
     const { bookingId } = await newBooking();
     const before = await counts(bookingId);
     const res = await owner.post(`/admin/automations/${r.id}/test`, { entityId: bookingId });
@@ -769,14 +769,14 @@ async function lockWaiter(timeoutMs = 5_000): Promise<void> {
   throw new Error('no transaction waited on a lock: the interleaving did not happen');
 }
 
-/** Holds a run inside its transaction, after every lock is taken, before its first action. */
-function holdRun(): { entered: Promise<void>; release: () => void } {
+/** Holds a run inside its transaction, after every lock is taken, before its action `at` (the first by default). */
+function holdRun(at = 0): { entered: Promise<void>; release: () => void } {
   let enter!: () => void;
   let release!: () => void;
   const entered = new Promise<void>((r) => (enter = r));
   const released = new Promise<void>((r) => (release = r));
   engine.beforeAction = async (index) => {
-    if (index !== 0) return;
+    if (index !== at) return;
     enter();
     await released;
   };
@@ -785,6 +785,10 @@ function holdRun(): { entered: Promise<void>; release: () => void } {
 
 const notice = (template = 'customer_notice_1') => ({ type: 'send_email', template });
 const customerOfBooking = async (customerId: string) => t.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+/** Records the customer's marketing consent, as the consent page does. */
+const consentTo = (customerId: string, email: string) => t.prisma.consentRecord.create({
+  data: { customerId, emailHash: emailHash(t.config.EMAIL_HASH_KEY, email), purpose: 'marketing_email', granted: true, source: 'account', wordingKey: 'privacy.marketing.wording' },
+});
 const stepCodes = async (ruleId: string) => (await runsOf(ruleId)).map((x) => (x.steps as Array<{ status: string; code?: string }>).map((s) => s.code ?? s.status));
 
 describe('7.fix-2: per-customer cap across rules', () => {
@@ -802,8 +806,8 @@ describe('7.fix-2: per-customer cap across rules', () => {
     expect(await tasksOn(bookingId)).toHaveLength(MAX_CUSTOMER_NOTICES_PER_WINDOW + 2);
   });
 
-  it('two runs at once for the same customer with one place left: exactly one email', async () => {
-    const a = await ruleOn({ name: 'A', actions: [notice()] }, false, owner, true);
+  it('two runs at once for the same customer with one place left: the second waits for the first, then is held back', async () => {
+    const a = await ruleOn({ name: 'A', actions: [notice(), taskAction('After the notice')] }, false, owner, true);
     const b = await ruleOn({ name: 'B', actions: [notice('customer_notice_2')] }, false, owner, true);
     const { bookingId, customerId } = await newBooking();
     const customer = await customerOfBooking(customerId);
@@ -812,22 +816,38 @@ describe('7.fix-2: per-customer cap across rules', () => {
       await mail.enqueue({ to: customer.email, templateKey: 'automations.customer_notice_3', templateVersion: 1, locale: 'en-AU', dedupeKey: `earlier:${randomUUID()}`, customerId });
     }
     await fire('bookings.booking.requested', bookingId);
-    const pending = await t.prisma.automationRun.findMany({ where: { ruleId: { in: [a.id, b.id] }, status: 'pending' } });
-    expect(pending).toHaveLength(2);
-    await Promise.all(pending.map((r) => engine.processRun(r.id)));
+    const [runA] = await t.prisma.automationRun.findMany({ where: { ruleId: a.id, status: 'pending' } });
+    const [runB] = await t.prisma.automationRun.findMany({ where: { ruleId: b.id, status: 'pending' } });
+    // A is held after queueing its notice and before committing (its second action); B has one action, never held.
+    const gate = holdRun(1);
+    const first = engine.processRun(runA!.id);
+    let second: Promise<unknown> | undefined;
+    try {
+      await gate.entered;
+      second = engine.processRun(runB!.id);
+      await lockWaiter(); // B waits on the customer's lock until A commits
+      gate.release();
+      expect(await Promise.all([first, second])).toEqual(['succeeded', 'succeeded']);
+    } finally {
+      gate.release();
+      await first.catch(() => undefined);
+      await second?.catch(() => undefined);
+    }
     expect(await t.prisma.outboundEmail.count({ where: { customerId } })).toBe(MAX_CUSTOMER_NOTICES_PER_WINDOW);
-    expect([...(await stepCodes(a.id)), ...(await stepCodes(b.id))].map((c) => c[0]).sort()).toEqual(['customer_rate_limited', 'done']);
+    expect([(await stepCodes(a.id))[0]![0], (await stepCodes(b.id))[0]![0]]).toEqual(['done', 'customer_rate_limited']);
   });
 });
 
 describe('7.fix-2: customer notices honour unsubscribes unless acknowledged as service messages', () => {
-  it('without the acknowledgement: a marketing unsubscribe stops the notice, and others go out as marketing with List-Unsubscribe', async () => {
+  it('without the acknowledgement: a marketing unsubscribe stops the notice; with consent it goes out as marketing with an unsubscribe link', async () => {
     const r = await ruleOn({ actions: [notice()] }, false);
     const { bookingId, customerId } = await newBooking();
     const customer = await customerOfBooking(customerId);
     await t.prisma.emailSuppression.create({ data: { emailHash: emailHash(t.config.EMAIL_HASH_KEY, customer.email), reason: 'unsubscribed', scope: 'marketing' } });
     await fire('bookings.booking.requested', bookingId);
+    await consentTo(customerId, customer.email); // consent does not override an unsubscribe recorded later
     const { bookingId: b2, customerId: c2 } = await newBooking();
+    await consentTo(c2, (await customerOfBooking(c2)).email);
     await fire('bookings.booking.requested', b2);
     await runPending();
     expect(await stepCodes(r.id)).toEqual([['recipient_suppressed'], ['done']]);
@@ -836,7 +856,44 @@ describe('7.fix-2: customer notices honour unsubscribes unless acknowledged as s
     expect(sent.category).toBe('marketing');
     const before = t.mail.sent.length;
     expect(await t.app.get(MailService).processSend(sent.id)).toBe('sent');
-    expect(t.mail.sent.slice(before)[0]?.headers?.['List-Unsubscribe']).toMatch(/\/unsubscribe\//);
+    const out = t.mail.sent.slice(before)[0]!;
+    expect(out.headers?.['List-Unsubscribe']).toMatch(/\/unsubscribe\//);
+    // The body carries the link too (review round 1), to the web page with the same one-click reference.
+    expect(out.text).toContain(`/unsubscribe#ref=${sent.id}.`);
+  });
+
+  it('without the acknowledgement and without marketing consent: skipped with marketing_consent_missing', async () => {
+    const r = await ruleOn({ actions: [notice()] }, false);
+    const { bookingId, customerId } = await newBooking();
+    await fire('bookings.booking.requested', bookingId);
+    await runPending();
+    expect(await stepCodes(r.id)).toEqual([['marketing_consent_missing']]);
+    expect(await t.prisma.outboundEmail.count({ where: { customerId } })).toBe(0);
+  });
+
+  it('a service notice is not sent with wording put into use after it was queued', async () => {
+    await ruleOn({ actions: [notice('customer_notice_2')] }, false, owner, true);
+    const { bookingId, customerId } = await newBooking();
+    await fire('bookings.booking.requested', bookingId);
+    await runPending();
+    const email = await t.prisma.outboundEmail.findFirstOrThrow({ where: { customerId } });
+    expect(email.category).toBe('transactional');
+    await sleep(5);
+    await t.prisma.messageTemplate.updateMany({ where: { key: 'automations.customer_notice_2', status: 'active' }, data: { body: 'Hi {{givenName}}, a new text about {{trip}}: {{link}}' } });
+    const before = t.mail.sent.length;
+    expect(await t.app.get(MailService).processSend(email.id)).toBe('failed');
+    expect(t.mail.sent.length).toBe(before);
+    expect((await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: email.id } })).status).toBe('failed');
+  });
+
+  it('changing only the test mode of a rule that is on keeps its acknowledgement; false removes it', async () => {
+    const r = await ruleOn({ actions: [notice()] }, false, owner, true);
+    const ack = (await owner.get(`/admin/automations/${r.id}`)).body.serviceNoticeAckAt;
+    expect(ack).not.toBeNull();
+    await enable(owner, r.id, true);
+    expect((await owner.get(`/admin/automations/${r.id}`)).body.serviceNoticeAckAt).toBe(ack);
+    await enable(owner, r.id, false, false);
+    expect((await owner.get(`/admin/automations/${r.id}`)).body.serviceNoticeAckAt).toBeNull();
   });
 
   it('an acknowledgement is void once the wording changes, and once the rule is changed', async () => {
@@ -962,9 +1019,24 @@ describe('7.fix-2: a backlog over the hourly cap acts oldest first', () => {
     expect(runs).toHaveLength(MAX_REAL_RUNS_PER_HOUR + extra);
     for (const run of runs) await engine.processRun(run.id); // newest first
     const after = await t.prisma.automationRun.findMany({ where: { ruleId: r.id }, orderBy: { eventOccurredAt: 'asc' } });
-    expect(after.slice(0, MAX_REAL_RUNS_PER_HOUR).every((x) => x.reasonCode !== 'rate_limited')).toBe(true);
+    expect(after.slice(0, MAX_REAL_RUNS_PER_HOUR).map((x) => x.status)).toEqual(Array(MAX_REAL_RUNS_PER_HOUR).fill('succeeded'));
     expect(after.slice(MAX_REAL_RUNS_PER_HOUR).map((x) => x.reasonCode)).toEqual(Array(extra).fill('rate_limited'));
   }, 120_000); // over a hundred events and runs
+
+  it('older runs that do not meet the conditions never take a place (review round 1)', async () => {
+    const r = await ruleOn({ conditions: [{ fact: 'fromQuote', op: 'is', value: false }], actions: [{ type: 'close_tasks' }] }, false);
+    const { bookingId } = await newBooking();
+    const base = Date.now() + 60_000;
+    const misses = 5;
+    for (let i = 0; i < MAX_REAL_RUNS_PER_HOUR + misses; i += 1) await fire('bookings.booking.requested', bookingId, { occurredAt: new Date(base + i * 1000) });
+    const runs = await t.prisma.automationRun.findMany({ where: { ruleId: r.id }, orderBy: { eventOccurredAt: 'asc' } });
+    // The oldest five were snapshotted from a quote: they will not act.
+    await t.prisma.$executeRawUnsafe(`UPDATE automation_runs SET facts = jsonb_set(facts, '{fromQuote}', 'true') WHERE id = ANY($1::uuid[])`, runs.slice(0, misses).map((x) => x.id));
+    for (const run of [...runs].reverse()) await engine.processRun(run.id); // newest first
+    const after = await t.prisma.automationRun.findMany({ where: { ruleId: r.id }, orderBy: { eventOccurredAt: 'asc' } });
+    expect(after.slice(0, misses).map((x) => x.reasonCode)).toEqual(Array(misses).fill('conditions_not_met'));
+    expect(after.slice(misses).map((x) => x.status)).toEqual(Array(MAX_REAL_RUNS_PER_HOUR).fill('succeeded'));
+  }, 120_000);
 });
 
 describe('7.fix-2: time zone and the manual test run', () => {

@@ -207,6 +207,8 @@ model OutboundEmail {
 
   @@index([status, createdAt])
   @@index([relatedEntityType, relatedEntityId])
+  // task 7.fix-2: the per-customer cap of automation notices counts a customer's recent emails
+  @@index([customerId, createdAt])
   @@map("outbound_emails")
 }
 

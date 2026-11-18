@@ -101,7 +101,10 @@ export class MailService {
         const token = unsubscribeToken(this.config.EMAIL_HASH_KEY, email.id);
         const rendered = await template.render({
           tx, unsubscribeToken: token,
-          email: { id: email.id, to: email.to, locale: email.locale, customerId: email.customerId, relatedEntityType: email.relatedEntityType, relatedEntityId: email.relatedEntityId },
+          email: {
+            id: email.id, to: email.to, locale: email.locale, customerId: email.customerId, relatedEntityType: email.relatedEntityType, relatedEntityId: email.relatedEntityId,
+            category: email.category, queuedAt: email.createdAt,
+          },
         });
         const { providerMessageId } = await this.sender.send({
           from: this.config.MAIL_FROM, to: email.to, subject: rendered.subject, text: rendered.text, html: rendered.html,

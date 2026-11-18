@@ -199,6 +199,7 @@ export type AutomationStepStatus = (typeof AUTOMATION_STEP_STATUSES)[number];
 export const AUTOMATION_STEP_CODES = [
   'assignee_unavailable', 'recipient_unavailable', 'recipient_suppressed', 'webhook_unavailable', 'tag_unavailable', 'entity_gone',
   'already_tagged', 'not_tagged', 'nothing_to_close', 'action_failed', 'transient_error', 'customer_rate_limited',
+  'marketing_consent_missing',
 ] as const;
 export type AutomationStepCode = (typeof AUTOMATION_STEP_CODES)[number];
 

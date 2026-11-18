@@ -5,7 +5,11 @@ import { AppError } from '../errors/safe-error';
 export interface RenderContext {
   /** The send step's transaction. Mint one-time tokens here: the token and its hash commit (or roll back) with the send. */
   tx: Prisma.TransactionClient;
-  email: { id: string; to: string; locale: string; customerId: string | null; relatedEntityType: string | null; relatedEntityId: string | null };
+  email: {
+    id: string; to: string; locale: string; customerId: string | null; relatedEntityType: string | null; relatedEntityId: string | null;
+    /** Task 7.fix-2: how the email was queued, and when (a template may refuse wording put into use after that). */
+    category?: 'transactional' | 'marketing'; queuedAt?: Date;
+  };
   /** HMAC of the email id for unsubscribe links. */
   unsubscribeToken: string;
 }

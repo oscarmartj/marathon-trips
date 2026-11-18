@@ -233,6 +233,9 @@ export class AutomationActions {
           const service = await this.isServiceNotice(ctx.tx, ctx.rule.serviceNoticeAckAt, key);
           const hit = await ctx.tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, customer.email) }, select: { scope: true } });
           if (hit && (hit.scope === 'all' || !service)) return skipped('recipient_suppressed');
+          // A notice that is not a service message may be promotional: only with marketing consent (task 5.5: none by
+          // default), checked like the consent page does (the latest record for the customer or the address).
+          if (!service && !(await this.hasMarketingConsent(ctx.tx, customer.id, customer.email))) return skipped('marketing_consent_missing');
           // At most MAX_CUSTOMER_NOTICES_PER_WINDOW notices per customer across every rule. The lock serialises runs that
           // could email the same customer until this run commits, so the count holds under concurrency. Lock order is
           // always the rule's lock, then the customer's (a rule sends one customer email at most): no deadlock cycle.
@@ -296,6 +299,14 @@ export class AutomationActions {
     if (!ackAt) return false;
     const changed = await tx.messageTemplate.count({ where: { channel: 'email', key: templateKey, status: 'active', updatedAt: { gt: ackAt } } });
     return changed === 0;
+  }
+
+  private async hasMarketingConsent(tx: Tx, customerId: string, email: string): Promise<boolean> {
+    const row = await tx.consentRecord.findFirst({
+      where: { purpose: 'marketing_email', OR: [{ customerId }, { emailHash: emailHash(this.config.EMAIL_HASH_KEY, email) }] },
+      orderBy: { recordedAt: 'desc' }, select: { granted: true },
+    });
+    return row?.granted === true;
   }
 
   /** Emails and webhook calls are audited like the other actions, with the automation as the actor (ids and codes only). */
