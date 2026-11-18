@@ -1,0 +1,2 @@
+// Trip lists (task 7.1): the rooming list, the transfers list and the day-by-day itinerary are read from the bookings,
+// customer portal and catalogue tables. This module owns no table of its own.

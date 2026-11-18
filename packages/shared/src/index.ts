@@ -23,3 +23,4 @@ export * from './schemas/complaints';
 export * from './schemas/reports';
 export * from './schemas/dashboard';
 export * from './schemas/travellers';
+export * from './schemas/trip-ops';
