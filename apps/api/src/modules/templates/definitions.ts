@@ -106,6 +106,23 @@ export const TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [
       body: ['Hi {{givenName}},', '', 'Here is a link to make the next payment for your booking {{reference}}: {{trip}}.', '', 'It works once, until {{expiresAt}} (Brisbane time). The page shows the amount due.', '', '{{link}}', '', 'Please do not forward this email: anyone with the link can make this payment.', '', '{{brandName}}'].join('\n'),
     },
   },
+  // Task 5.6: the automatic balance reminder. The amount is the one the payment page will show (the plan's own figure, as
+  // text); the link is the same single-use link as staff send, minted when the email is sent, body only.
+  {
+    channel: 'email', key: 'payments.balance_reminder', label: 'Balance reminder (automatic, before a payment falls due)',
+    variables: [
+      GIVEN, REFERENCE, TRIP,
+      v('amountDue', 'The amount to pay now, as the payment plan states it', 'A$1,225.00'),
+      v('dueDate', 'The date the payment falls due', '10 June 2027'),
+      v('expiresAt', 'When the link stops working (Brisbane time)', '1 December 2026, 5:00 pm'),
+      { ...v('link', 'The single-use payment link (body only, required: it carries a secret token)', 'https://example.test/pay#token=sample'), bodyOnly: true, requiredInBody: true },
+      BRAND,
+    ],
+    starter: {
+      subject: 'A payment for booking {{reference}} is due on {{dueDate}}',
+      body: ['Hi {{givenName}},', '', 'A friendly reminder that the next payment for your booking {{reference}} ({{trip}}) of {{amountDue}} is due on {{dueDate}}.', '', 'You can pay with this link, which works once and until {{expiresAt}} (Brisbane time). The page shows the amount due.', '', '{{link}}', '', 'If you have already paid, thank you, and you can ignore this email. Please do not forward it: anyone with the link can make this payment.', '', '{{brandName}}'].join('\n'),
+    },
+  },
   { channel: 'document', key: 'confirmation', label: 'Booking confirmation', variables: documentVars, starter: documentStarter('Booking confirmation', 'This confirms the booking below.') },
   { channel: 'document', key: 'itinerary', label: 'Itinerary', variables: documentVars, starter: { subject: 'Your itinerary', body: ['Your itinerary for {{trip}}.', '', '{{itinerary}}', '', 'Booking reference: {{reference}}', '', '{{brandName}}'].join('\n') } },
   { channel: 'document', key: 'voucher', label: 'Voucher', variables: documentVars, starter: documentStarter('Voucher', 'Show this voucher at check-in.') },

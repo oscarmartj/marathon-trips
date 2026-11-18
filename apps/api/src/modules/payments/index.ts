@@ -5,3 +5,5 @@ export { ProviderAccountsService } from './core/accounts.service';
 export { PaymentAttemptsService, PAYABLE_STATES } from './core/attempts.service';
 export { PAYMENT_EVENTS, PAYMENT_STATUS_PAIRS } from './core/attempt-state';
 export type { PaymentProvider, AdapterManifest, AdapterStatus } from './core/provider';
+export { PaymentPendingService, PENDING_HORIZON_DAYS } from './core/pending.service';
+export type { PendingCollection, PendingCollections } from './core/pending.service';

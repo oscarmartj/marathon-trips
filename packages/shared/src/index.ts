@@ -21,4 +21,5 @@ export * from './schemas/templates';
 export * from './iso-countries';
 export * from './schemas/complaints';
 export * from './schemas/reports';
+export * from './schemas/dashboard';
 export * from './schemas/travellers';
