@@ -84,9 +84,14 @@ export class ConsentService {
    * RFC 8058 one-click unsubscribe from a marketing email (`<outboundEmailId>.<hmac>`). A wrong HMAC and an unknown id
    * are the same 404. An email whose address was erased is a no-op. Idempotent: the second click writes nothing.
    */
+  isValidRef(ref: string): boolean {
+    const m = REF.exec(ref);
+    return !!m && safeEqualHex(m[2]!, unsubscribeToken(this.config.EMAIL_HASH_KEY, m[1]!));
+  }
+
   async unsubscribe(ref: string): Promise<void> {
     const m = REF.exec(ref);
-    if (!m || !safeEqualHex(m[2]!, unsubscribeToken(this.config.EMAIL_HASH_KEY, m[1]!))) throw notFound('unsubscribe_link_invalid', 'This link is not valid');
+    if (!m || !this.isValidRef(ref)) throw notFound('unsubscribe_link_invalid', 'This link is not valid');
     await runTransaction(this.prisma, async (tx) => {
       const email = await tx.outboundEmail.findUnique({ where: { id: m[1]! }, select: { to: true, customerId: true } });
       if (!email) throw notFound('unsubscribe_link_invalid', 'This link is not valid');

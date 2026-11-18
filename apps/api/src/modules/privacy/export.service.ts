@@ -5,7 +5,7 @@ import type { AuditActor } from '../../platform/audit/audit.service';
 import { AuditService } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { EntityRegistry } from '../../platform/entities/entity-registry';
-import { customerRecordIds, platformExport, staffNotesOf } from '../../platform/privacy/records';
+import { ADDRESS_LINKED_ENTITIES, NO_CUSTOMER, customerRecordIds, platformExport, staffNotesOf } from '../../platform/privacy/records';
 import { ConsentService } from './consent.service';
 
 
@@ -80,9 +80,9 @@ export class ExportService {
           });
         }
       } else {
-        // An account with no customer record: what is linked to its address only (alerts).
-        for (const def of this.registry.withCustomerLink().filter((d) => d.entityType === 'AlertSubscription')) {
-          const rows = (await def.handlers!.export(tx, '00000000-0000-0000-0000-000000000000', { audience, emails: who.emails })).map((r) => sanitiseRow(r, references)).filter((r) => r !== null);
+        // An account with no customer record: what is linked to its address only (alerts, complaints).
+        for (const def of this.registry.withCustomerLink().filter((d) => ADDRESS_LINKED_ENTITIES.includes(d.entityType))) {
+          const rows = (await def.handlers!.export(tx, NO_CUSTOMER, { audience, emails: who.emails })).map((r) => sanitiseRow(r, references)).filter((r) => r !== null);
           if (rows.length > 0) sections[def.entityType] = rows;
         }
       }

@@ -163,15 +163,23 @@ AS $$
     WHEN EXISTS (SELECT 1 FROM public.payments p
                   WHERE (p."payerCustomerId" = p_customer OR p."bookingId" IN (SELECT b.id FROM public.bookings b WHERE b."customerId" = p_customer))
                     AND p.status IN ('created', 'pending', 'requires_action')) THEN 'live_payment'
+    -- Money collected on a closed booking may be owed back (refunds are parked): the customer's own bookings, and any
+    -- booking where the customer is the payer (review m5).
     WHEN EXISTS (SELECT 1 FROM public.bookings b JOIN public.payments p ON p."bookingId" = b.id
-                  WHERE b."customerId" = p_customer AND b.status IN ('cancelled', 'declined', 'expired') AND p.status = 'succeeded') THEN 'refund_may_be_due'
+                  WHERE (b."customerId" = p_customer OR p."payerCustomerId" = p_customer)
+                    AND b.status IN ('cancelled', 'declined', 'expired') AND p.status = 'succeeded') THEN 'refund_may_be_due'
   END
 $$;
 REVOKE ALL ON FUNCTION public.privacy_active_trip_reason(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.privacy_active_trip_reason(uuid) TO mt_app, mt_privacy;
 
 -- ---- Erasure functions, owned by mt_privacy (plan 0.1, 4.9) ----
-GRANT SELECT ON "customers", "bookings", "payments", "quotes", "complaints", "waitlist_entries", "tasks" TO mt_privacy;
+-- Column grants only (review m3): the ids, links, statuses and dates the two functions read, never a personal column.
+GRANT SELECT (id, "userId", "anonymisedAt") ON "customers" TO mt_privacy;
+GRANT SELECT (id, "customerId", status, "returnDate") ON "bookings" TO mt_privacy;
+GRANT SELECT (id, "bookingId", "payerCustomerId", status) ON "payments" TO mt_privacy;
+GRANT SELECT (id, "customerId") ON "quotes", "complaints", "waitlist_entries" TO mt_privacy;
+GRANT SELECT (id, "entityType", "entityId") ON "tasks" TO mt_privacy;
 
 -- mt_privacy never reads users (0.3: it reaches nothing it does not need). The one fact privacy_erase_account needs, "this
 -- is a customer sign-in account that is already anonymised", comes from this owner function, callable by mt_privacy only.
@@ -185,7 +193,7 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.privacy_account_is_anonymised_customer(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.privacy_account_is_anonymised_customer(uuid) TO mt_privacy;
-GRANT SELECT ON "consent_records" TO mt_privacy;
+GRANT SELECT (id, "customerId") ON "consent_records" TO mt_privacy;
 GRANT UPDATE ("customerId") ON "consent_records" TO mt_privacy;
 
 -- The last step of erasing a customer, inside the API's transaction after every handler has run. Refuses a customer that

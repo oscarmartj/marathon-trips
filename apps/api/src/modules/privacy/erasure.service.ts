@@ -10,7 +10,7 @@ import type { ErasureContext } from '../../platform/entities/entity-registry';
 import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { OutboxService } from '../../platform/events/outbox.service';
 import { conflict, forbidden, notFound } from '../../platform/http/api-error';
-import { customerRecordIds, erasePlatformRows, erasePolymorphic } from '../../platform/privacy/records';
+import { ADDRESS_LINKED_ENTITIES, NO_CUSTOMER, customerRecordIds, erasePlatformRows, erasePolymorphic } from '../../platform/privacy/records';
 import { TasksService } from '../../platform/common/tasks/tasks.service';
 import { ConsentService } from './consent.service';
 import { PRIVACY_EVENTS } from './manifest';
@@ -139,7 +139,7 @@ export class ErasureService {
         throw conflict('customer_record_exists', 'Ask us to erase your data instead');
       }
       const emails = lower([u.email]);
-      for (const def of this.registry.withCustomerLink().filter((d) => d.entityType === 'AlertSubscription')) await def.handlers!.anonymise(tx, '00000000-0000-0000-0000-000000000000', { emails, userId });
+      for (const def of this.registry.withCustomerLink().filter((d) => ADDRESS_LINKED_ENTITIES.includes(d.entityType))) await def.handlers!.anonymise(tx, NO_CUSTOMER, { emails, userId });
       const hash = this.consent.hashOf(u.email);
       if (await tx.consentRecord.findFirst({ where: { emailHash: hash }, select: { id: true } })) {
         await tx.consentRecord.create({ data: { emailHash: hash, purpose: 'marketing_email', granted: false, source: 'erasure', wordingKey: 'marketing_email.v1' } });

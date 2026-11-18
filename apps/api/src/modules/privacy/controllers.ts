@@ -4,6 +4,10 @@ import { erasureRequestSchema, exportAudienceSchema, marketingConsentSchema } fr
 import type { z } from 'zod';
 import { OwnedBy, Public, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
+import { clearCookie } from '../../platform/auth/cookies';
+import { SessionService } from '../../platform/auth/session.service';
+import { WindowLimiter } from '../../platform/auth/attempt-limiter';
+import { tooManyRequests } from '../../platform/http/api-error';
 import { CsrfExempt } from '../../platform/http/csrf.guard';
 import { AuthRateLimit } from '../../platform/http/rate-limit.guard';
 import type { ApiRequest } from '../../platform/http/request-context';
@@ -37,6 +41,7 @@ export class AccountPrivacyController {
   constructor(
     @Inject(AccountPrivacyService) private readonly account: AccountPrivacyService,
     @Inject(ExportService) private readonly exports: ExportService,
+    @Inject(SessionService) private readonly sessions: SessionService,
   ) {}
 
   @Get()
@@ -59,7 +64,7 @@ export class AccountPrivacyController {
     const actor = actorOf(req);
     return this.account.requestErasure(actor.id, b.confirm === true, actor).then((r) => {
       // The account is gone: its session cookie goes with it.
-      if (r.status === 'completed') res.clearCookie('mt_customer_session', { path: '/' });
+      if (r.status === 'completed') clearCookie(res, 'customer', this.sessions.secureCookies);
       return r;
     });
   }
@@ -117,15 +122,25 @@ export class PrivacyAdminController {
  */
 @Controller('unsubscribe')
 export class UnsubscribeController {
+  /**
+   * Review M1: RFC 8058 one-click POSTs come from a few mail-provider addresses, so a per-IP limit on valid links would
+   * lose unsubscribes after a marketing send. Only links whose HMAC is wrong count (guessing), 30 a minute per address;
+   * a valid link is never refused (it is idempotent and only ever withdraws consent).
+   */
+  private readonly badLinks = new WindowLimiter(30, 60_000);
+
   constructor(
     @Inject(ConsentService) private readonly consent: ConsentService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  @Post(':ref') @HttpCode(200) @AuthRateLimit()
+  @Post(':ref') @HttpCode(200)
   @CsrfExempt('one-click unsubscribe (RFC 8058): mail clients POST without a browser origin; protected by the HMAC in the address')
-  @Public('the email id with the HMAC from a marketing email; unsubscribes that address from marketing')
-  async unsubscribe(@Param('ref') ref: string) {
+  @Public('the email id with the HMAC from a marketing email; unsubscribes that address from marketing; wrong HMACs are rate limited')
+  async unsubscribe(@Param('ref') ref: string, @Req() req: ApiRequest) {
+    if (!this.consent.isValidRef(ref)) {
+      if (!this.badLinks.allow(`unsubscribe:${req.ip ?? 'unknown'}`)) throw tooManyRequests(60);
+    }
     await this.consent.unsubscribe(ref);
     return { unsubscribed: true };
   }

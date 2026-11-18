@@ -34,6 +34,13 @@ export const EXECUTOR_TABLES = {
   ConsentRecord: 'kept: proof of consent, address hash only; customerId cleared by privacy_erase_customer',
 } as const;
 
+/**
+ * Registered entities whose rows can belong to someone by address alone (no customer id): a sign-in account with no
+ * customer record (plan 5.5, section 2.1; review m6) is exported and erased through these, with a nil customer id.
+ */
+export const ADDRESS_LINKED_ENTITIES: readonly string[] = ['AlertSubscription', 'Complaint'];
+export const NO_CUSTOMER = '00000000-0000-0000-0000-000000000000';
+
 const delegateOf = (tx: Tx, model: string) =>
   (tx as unknown as Record<string, { findMany: (a: unknown) => Promise<Array<{ id: string }>> }>)[model.charAt(0).toLowerCase() + model.slice(1)];
 

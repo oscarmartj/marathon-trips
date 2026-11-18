@@ -14,12 +14,16 @@ import { FIELD_CLASSES } from '../../../src/platform/audit/field-classes.generat
 import { EntityRegistry } from '../../../src/platform/entities/entity-registry';
 import { EXECUTOR_TABLES, POLYMORPHIC_TABLES, customerRecordIds } from '../../../src/platform/privacy/records';
 import { STATE_HEADERS, TestApp, makeApp, signInCustomer } from '../../support/auth';
-import { cleanBookingEvents, contact, requestBody } from '../../support/bookings';
+import { cleanBookingEvents, contact, customerClient, requestBody } from '../../support/bookings';
 import { closeCatalogue } from '../../support/catalogue';
 import { walkTo } from '../../support/customer-portal';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
-import { cleanPayments, paymentsStaff } from '../../support/payments';
+import { SimAccount, acceptCurrentTerms, cleanPayments, deliver, ensureTerms, eventFor, onlyAccount, paymentsStaff, sim, simulatorAccount } from '../../support/payments';
+import { createCode, freshCode } from '../../support/adjustments';
+import { crmStaff, makeQuote } from '../../support/crm';
+import { joinList, soldOutWorld } from '../../support/waitlist';
+import { bookingStaff } from '../../support/bookings';
 import { privacyStaff } from '../../support/privacy';
 import type { StaffHttp } from '../../support/privacy';
 import { parseSchema } from '../../conventions/schema-conventions';
@@ -35,10 +39,16 @@ let t: TestApp;
 let owner: StaffHttp;
 let w: PricedWorld;
 let db: pg.Client;
+let admin: Awaited<ReturnType<typeof paymentsStaff>>;
+let acc: SimAccount;
 beforeAll(async () => {
   t = await makeApp();
   owner = await privacyStaff(t, { owner: true });
-  w = await pricedWorld(await paymentsStaff(t));
+  admin = await paymentsStaff(t);
+  acc = await simulatorAccount(t);
+  await onlyAccount(t, acc.id);
+  await ensureTerms(t);
+  w = await pricedWorld(admin);
   db = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
   await db.connect();
 });
@@ -54,8 +64,18 @@ const TEXT_TYPES = new Set(['String', 'Json', 'Bytes']);
 const SENTINEL_DATE = '1901-02-03';
 const SENTINEL_INT = 98765;
 const SENTINEL_CHAR = 'NR';
+// Phone columns only take digits (CHECK): they get a sentinel number instead of the marker.
+const SENTINEL_PHONE = '+61 498 765 432';
 
-type Planted = { table: string; column: string; ids: string[]; kind: 'marker' | 'date' | 'int' | 'char' };
+/**
+ * Personal columns whose own constraints refuse arbitrary text or a sentinel (review M2: listed, so a new one cannot go
+ * untested silently). Each is still erased by its handler; the marker test simply cannot write into it.
+ */
+const EXPECTED_REFUSED: string[] = [];
+// The webhook's raw body is never edited, only cleared (trigger, 3.3): the G1 test checks it is cleared.
+const EXPECTED_REFUSED_PAID: string[] = ['webhook_events.rawBody'];
+
+type Planted = { table: string; column: string; ids: string[]; kind: 'marker' | 'date' | 'int' | 'char' | 'phone' };
 
 /** A customer that has been through every flow that keeps personal data, with `marker` in all of it. */
 async function richCustomer(marker: string) {
@@ -138,9 +158,9 @@ async function plantEverywhere(marker: string, who: { customerId: string; userId
         // address that erasure follows for rows like alerts and unlinked complaints.
         if (f.relation || (classes[f.name] ?? 'pii') !== 'pii' || /@id\b/.test(f.attrs) || /@db\.Uuid/.test(f.attrs) || /email/i.test(f.name)) continue;
         const isChar = /@db\.Char\(2\)/.test(f.attrs);
-        const kind: Planted['kind'] | null = isChar ? 'char' : TEXT_TYPES.has(f.type) ? 'marker' : f.type === 'DateTime' ? 'date' : f.type === 'Int' ? 'int' : null;
+        const kind: Planted['kind'] | null = isChar ? 'char' : /phone/i.test(f.name) && f.type === 'String' ? 'phone' : TEXT_TYPES.has(f.type) ? 'marker' : f.type === 'DateTime' ? 'date' : f.type === 'Int' ? 'int' : null;
         if (!kind) continue;
-        const value = kind === 'char' ? `'${SENTINEL_CHAR}'` : kind === 'date' ? `'${SENTINEL_DATE}'` : kind === 'int' ? String(SENTINEL_INT)
+        const value = kind === 'phone' ? `'${SENTINEL_PHONE}'` : kind === 'char' ? `'${SENTINEL_CHAR}'` : kind === 'date' ? `'${SENTINEL_DATE}'` : kind === 'int' ? String(SENTINEL_INT)
           : f.type === 'Json' ? `jsonb_build_object('m', '${marker} ${m.table}.${f.name}')`
           : f.type === 'Bytes' ? `convert_to('${marker} ${m.table}.${f.name}', 'UTF8')`
           : f.list ? `ARRAY['${marker} ${m.table}.${f.name}']` : `'${marker}-' || id::text || '-${f.name}@example.test'`;
@@ -160,6 +180,17 @@ async function plantEverywhere(marker: string, who: { customerId: string; userId
     await client.end();
   }
   return { planted, refused };
+}
+
+/** Planted date, number, phone and country columns that still hold their sentinel. */
+async function sentinelsLeft(planted: Planted[]): Promise<string[]> {
+  const kept: string[] = [];
+  for (const p of planted.filter((x) => x.kind !== 'marker')) {
+    const sentinel = p.kind === 'date' ? SENTINEL_DATE : p.kind === 'int' ? SENTINEL_INT : p.kind === 'phone' ? SENTINEL_PHONE : SENTINEL_CHAR;
+    const q = await db.query(`SELECT count(*)::int AS n FROM "${p.table}" WHERE id = ANY($1::uuid[]) AND "${p.column}"::text LIKE $2`, [p.ids, `${sentinel}%`]);
+    if (q.rows[0].n > 0) kept.push(`${p.table}.${p.column}`);
+  }
+  return kept;
 }
 
 /** Tables of public and pgboss in which `marker` appears anywhere in a row. */
@@ -183,6 +214,7 @@ describe('erasure_sweep_leaves_no_marker', () => {
     const a = await richCustomer(marker);
     const b = await richCustomer(otherMarker);
     const { planted, refused } = await plantEverywhere(marker, a);
+    expect(refused.sort()).toEqual(EXPECTED_REFUSED);
     // Something must have been planted in every registered table that has a personal text column and rows of A's.
     expect(planted.length).toBeGreaterThan(10);
     // 5.2's travellers come in through the registry contract: their dates and numbers get sentinels too.
@@ -202,13 +234,7 @@ describe('erasure_sweep_leaves_no_marker', () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
 
     expect(await tablesWith(marker), `refused to hold a marker: ${refused.join(', ')}`).toEqual([]);
-    const kept: string[] = [];
-    for (const p of planted.filter((x) => x.kind !== 'marker')) {
-      const sentinel = p.kind === 'date' ? SENTINEL_DATE : p.kind === 'int' ? SENTINEL_INT : SENTINEL_CHAR;
-      const q = await db.query(`SELECT count(*)::int AS n FROM "${p.table}" WHERE id = ANY($1::uuid[]) AND "${p.column}"::text LIKE $2`, [p.ids, `${sentinel}%`]);
-      if (q.rows[0].n > 0) kept.push(`${p.table}.${p.column}`);
-    }
-    expect(kept, 'personal date, number or country columns still holding their sentinel').toEqual([]);
+    expect(await sentinelsLeft(planted), 'personal date, number, phone or country columns still holding their sentinel').toEqual([]);
     const after = await money();
     expect(after).toEqual({ ...before, audit: after.audit });
     expect(after.audit).toBeGreaterThan(before.audit);
@@ -233,6 +259,79 @@ describe('erasure_sweep_leaves_no_marker', () => {
     expect(tasks.every((k) => k.title === '[redacted]' && (k.description === null || k.description === '[redacted]'))).toBe(true);
     expect(await t.prisma.complaint.findUniqueOrThrow({ where: { id: a.complaintId } })).toMatchObject({ customerId: a.customerId, complainantEmail: null, complainantName: '[redacted]' });
     expect(await tablesWith(marker)).toEqual([]);
+  });
+});
+
+/**
+ * Review G1/M2: a customer whose trip is paid and finished, with every kind of money and booking row the erasure must
+ * keep: a succeeded payment, the plan, the accepted terms, a webhook with its raw body, a used payment link, a promo
+ * redemption, inventory claims and movements; plus a quote and a waiting list entry.
+ */
+async function paidCustomer(marker: string) {
+  // The address carries the marker too, so rows linked by address (the waiting list entry's) are swept.
+  const base = await customerClient(t, `${marker}-${letters(4)}@example.test`);
+  const c = { ...base, pay: (ref: string, body: object) => t.http().post(`/booking-requests/${ref}/payments`).set(STATE_HEADERS).set('Cookie', base.cookie).set('Idempotency-Key', randomUUID()).send(body) };
+  const code = (await createCode(admin, freshCode('PRIV'))).code;
+  const res = await c.request(requestBody(w, { promoCode: code, contact: contact({ givenName: `${marker}given`, familyName: `${marker}family` }) }));
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  const b = await t.prisma.booking.findUniqueOrThrow({ where: { reference: res.body.reference as string } });
+  expect((await admin.post(`/admin/bookings/${b.id}/approve`, { version: b.version })).status).toBe(200);
+  await acceptCurrentTerms(t, c, b.reference);
+  expect((await c.pay(b.reference, { method: 'card' })).status).toBe(201);
+  const p = (await t.prisma.payment.findMany({ where: { bookingId: b.id } })).at(-1)!;
+  sim.settle(acc.id, p.providerPaymentRef!, 'succeeded');
+  expect((await t.http().post(`/booking-requests/${b.reference}/payments/refresh`).set(STATE_HEADERS).set('Cookie', c.cookie).send({})).status).toBe(200);
+  expect((await deliver(t, acc, await eventFor(t, acc, p.id, { status: 'succeeded' }))).status).toBe(200);
+  // A link that was sent and used (its token hash is kept until erasure).
+  const item = await t.prisma.paymentScheduleItem.findFirstOrThrow({ where: { bookingId: b.id, state: 'active' }, orderBy: { sequence: 'asc' } });
+  const link = await t.prisma.paymentLink.create({ data: { bookingId: b.id, targetScheduleItemId: item.id, expiresAt: new Date(Date.now() + 86_400_000), createdById: owner.staff.id } });
+  await t.prisma.paymentLink.update({ where: { id: link.id }, data: { tokenHash: randomBytes(32).toString('hex') } });
+  await t.prisma.paymentLink.update({ where: { id: link.id }, data: { status: 'used', usedAt: new Date() } });
+  // The trip has finished.
+  const now = await t.prisma.booking.findUniqueOrThrow({ where: { id: b.id } });
+  await walkTo(t, b.id, 'completed', now.status as 'deposit_paid' | 'confirmed');
+  const customerId = b.customerId;
+  // A quote and a waiting list entry of the same customer.
+  await makeQuote(await crmStaff(t), customerId, w);
+  const s = await soldOutWorld(t, await bookingStaff(t));
+  await joinList(t, c, s.w);
+  return { customerId, userId: c.userId, bookingId: b.id, linkId: link.id };
+}
+
+describe('erasure keeps the money (phase criterion; review G1)', () => {
+  it('a customer with a paid, finished trip is erased: every financial row stays, with the same amounts, and no personal data', async () => {
+    const marker = `zq${letters(8)}`;
+    const a = await paidCustomer(marker);
+    expect(await t.prisma.webhookEvent.count({ where: { bookingId: a.bookingId, rawBody: { not: null } } })).toBeGreaterThan(0);
+    const { planted, refused } = await plantEverywhere(marker, a);
+    expect(refused.sort()).toEqual(EXPECTED_REFUSED_PAID);
+    if (process.env.SWEEP_DEBUG) console.log('PLANTED', planted.map((p) => `${p.table}.${p.column}`).join(' '));
+    // Quotes, payments, plans, claims and links have no personal column to plant (their export and erasure tests are in
+    // their modules); the waiting list entry and the customer do.
+    expect(planted.map((p) => `${p.table}.${p.column}`)).toEqual(expect.arrayContaining(['waitlist_entries.countryOfResidence', 'customers.phone', 'bookings.residenceCountry']));
+    const ledger = async () => ({
+      payments: await t.prisma.payment.findMany({ where: { booking: { customerId: a.customerId } }, select: { id: true, amountMinor: true, currency: true, status: true }, orderBy: { id: 'asc' } }),
+      items: await t.prisma.paymentScheduleItem.findMany({ where: { schedule: { booking: { customerId: a.customerId } } }, select: { id: true, amountMinor: true, currency: true, state: true }, orderBy: { id: 'asc' } }),
+      snapshots: await t.prisma.bookingSnapshot.findMany({ where: { booking: { customerId: a.customerId } }, select: { id: true, totalMinor: true, currency: true }, orderBy: { id: 'asc' } }),
+      bookings: await t.prisma.booking.findMany({ where: { customerId: a.customerId }, select: { id: true, totalMinor: true, currency: true, status: true }, orderBy: { id: 'asc' } }),
+      terms: await t.prisma.termsAcceptance.count({ where: { customerId: a.customerId } }),
+      claims: await t.prisma.inventoryClaim.count({ where: { booking: { customerId: a.customerId } } }),
+      movements: await t.prisma.inventoryMovement.count({ where: { booking: { customerId: a.customerId } } }),
+      redemptions: await t.prisma.promoRedemption.count({ where: { customerId: a.customerId } }),
+      webhooks: await t.prisma.webhookEvent.count({ where: { booking: { customerId: a.customerId } } }),
+      links: await t.prisma.paymentLink.count({ where: { booking: { customerId: a.customerId } } }),
+    });
+    const before = await ledger();
+    expect(before.payments.some((p) => p.status === 'succeeded')).toBe(true);
+    for (const k of ['terms', 'claims', 'movements', 'redemptions', 'webhooks', 'links'] as const) expect(before[k], k).toBeGreaterThan(0);
+
+    const r = await owner.post(`/admin/privacy/customers/${a.customerId}/erasure`);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await ledger()).toEqual(before);
+    expect(await t.prisma.webhookEvent.count({ where: { booking: { customerId: a.customerId }, rawBody: { not: null } } })).toBe(0);
+    expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: a.linkId } })).tokenHash).toBeNull();
+    expect(await tablesWith(marker)).toEqual([]);
+    expect(await sentinelsLeft(planted)).toEqual([]);
   });
 });
 

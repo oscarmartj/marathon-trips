@@ -40,12 +40,15 @@ export const COMPLAINT_ENTITY: EntityDef = {
       });
     },
     anonymise: async (tx: Tx, customerId, ctx) => {
-      if (ctx && ctx.emails.length > 0) {
+      // A sign-in account with no customer record (task 5.5, review m6) has no customer to link to: its complaints by
+      // address are redacted as they are.
+      const isCustomer = (await tx.customer.count({ where: { id: customerId } })) > 0;
+      if (isCustomer && ctx && ctx.emails.length > 0) {
         await tx.$executeRaw`
           UPDATE complaints SET "customerId" = ${customerId}::uuid, "updatedAt" = clock_timestamp()
            WHERE "customerId" IS NULL AND lower("complainantEmail") = ANY(${[...ctx.emails]}::text[])`;
       }
-      const ids = await complaintIdsOf(tx, customerId);
+      const ids = await complaintIdsOf(tx, customerId, isCustomer ? [] : ctx?.emails);
       if (ids.length === 0) return;
       await tx.note.updateMany({ where: { entityType: 'Complaint', entityId: { in: ids } }, data: { body: ERASED } });
       await tx.complaint.updateMany({ where: { id: { in: ids } }, data: { complainantName: ERASED, complainantEmail: null, summary: ERASED, description: ERASED } });

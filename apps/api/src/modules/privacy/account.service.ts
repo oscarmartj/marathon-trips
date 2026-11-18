@@ -36,7 +36,9 @@ export class AccountPrivacyService {
     const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true, email: true, kind: true, anonymisedAt: true } });
     if (!user || user.kind !== 'customer' || user.anonymisedAt) throw notFound();
     const c = await this.customers.lockForUser(tx, user, actor);
-    return { user: { id: user.id, email: user.email }, customer: c ? { id: c.id, closed: !!(c.anonymisedAt || c.deletedAt) } : null };
+    // Only erasure closes the account here (review m7): a customer that staff archived (deletedAt) can still download its
+    // data, change its consent and ask for erasure.
+    return { user: { id: user.id, email: user.email }, customer: c ? { id: c.id, closed: !!c.anonymisedAt } : null };
   }
 
   private open(me: Me): string | null {
