@@ -1,20 +1,45 @@
-// CSV for the table capabilities (task 0.5): RFC 4180 quoting, formula guard on text cells, and a small parser.
+// CSV for the table capabilities (task 0.5): RFC 4180 quoting, formula guard on text cells (on every comma and semicolon
+// fragment since 7.fix-5), and a small parser.
 
 // Text that starts with a formula character, or with quotes and then one (so a guarded cell and a value that already looks
 // guarded both survive an export and an import).
 const FORMULA = /^'*[=+\-@\t\r]/;
+const GUARDED = /^'+[=+\-@\t\r]/;
+// Leading whitespace of a fragment, except tab and CR: those are formula characters themselves, so the guard sees them.
+const LEADING_SPACE = /^[^\S\t\r]*/;
 
-/** A text cell that a spreadsheet could run as a formula gets a leading quote; the import takes it off again. */
+/**
+ * Runs `each` on every fragment of the text split on a comma or a semicolon, after the fragment's leading whitespace.
+ * A spreadsheet may open a comma file with semicolons (European Excel, LibreOffice) or the reverse, and then each fragment
+ * becomes a cell of its own, often trimmed. The first fragment is the start of the cell. The guard only ever inserts a
+ * quote, never a separator or whitespace, so the export and the import split a cell in the same places (7.fix-5).
+ */
+function eachFragment(text: string, each: (fragment: string) => string): string {
+  return text
+    .split(/([,;])/)
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      const space = LEADING_SPACE.exec(part)![0];
+      return space + each(part.slice(space.length));
+    })
+    .join('');
+}
+
+/**
+ * A text cell that a spreadsheet could run as a formula gets a leading quote, on every comma or semicolon fragment (a
+ * fragment starting with =, +, -, @, tab or CR, after its leading spaces and any quotes); the import takes it off again.
+ */
 export function guardCell(text: string): string {
-  return FORMULA.test(text) ? `'${text}` : text;
+  return eachFragment(text, (f) => (FORMULA.test(f) ? `'${f}` : f));
 }
 
 export function unguardCell(text: string): string {
-  return /^'+[=+\-@\t\r]/.test(text) ? text.slice(1) : text;
+  return eachFragment(text, (f) => (GUARDED.test(f) ? f.slice(1) : f));
 }
 
+/** Quoted when it holds a quote, a comma, a semicolon, CR or LF, so a reader splitting on either separator keeps it whole. */
 function quote(s: string): string {
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  return /[",;\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export type CsvValue = string | number | boolean | Date | null | undefined;
