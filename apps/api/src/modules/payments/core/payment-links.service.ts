@@ -3,6 +3,7 @@ import { brand } from '@mt/shared';
 import type { PaymentAttemptView, PaymentLinkRefreshView, PaymentLinkView, PaymentMethod, StartPayment } from '@mt/shared';
 import type { Prisma } from '../../../generated/prisma/client';
 import { AuditService } from '../../../platform/audit/audit.service';
+import { NIL_UUID, SYSTEM_ACTOR } from '../../../platform/audit/audit.service';
 import type { AuditActor } from '../../../platform/audit/audit.service';
 import { newToken, tokenHash } from '../../../platform/auth/tokens';
 import type { AppConfig } from '../../../platform/config/config';
@@ -14,7 +15,7 @@ import { conflict, notFound } from '../../../platform/http/api-error';
 import { MAIL_NOT_SENDABLE, MailService } from '../../../platform/mail/mail.service';
 import type { RenderContext, RenderedMail } from '../../../platform/mail/templates';
 import { readBookingForPayments } from '../../bookings';
-import type { BookingForPayments } from '../../bookings';
+import type { BookingForPayments, LockedBooking } from '../../bookings';
 import { TemplatesService } from '../../templates';
 import { PaymentAttemptSyncService } from './attempt-sync.service';
 import { PaymentAttemptsService } from './attempts.service';
@@ -137,19 +138,7 @@ export class PaymentLinksService {
       const customer = await tx.customer.findUniqueOrThrow({ where: { id: b.customerId }, select: { id: true, email: true, preferredLocale: true, anonymisedAt: true, deletedAt: true } });
       if (customer.anonymisedAt || customer.deletedAt) throw conflict('customer_closed', 'This customer account is closed');
 
-      const revoked = await tx.$queryRaw<Array<{ id: string }>>`
-        UPDATE payment_links SET status = 'revoked', "revokedAt" = clock_timestamp()
-        WHERE "bookingId" = ${b.id}::uuid AND status = 'active' RETURNING id::text AS id`;
-      for (const r of revoked) {
-        await this.audit.record(tx, { actor, action: 'payments.paymentLink.revoked', entityType: 'PaymentLink', entityId: r.id, before: { status: 'active' }, after: { status: 'revoked' }, context: { bookingId: b.id, reason: 'replaced' } });
-      }
-      let expiresAt = new Date(at.getTime() + days * 86_400_000);
-      if (b.status === 'approved' && b.approvalExpiresAt && b.approvalExpiresAt < expiresAt) expiresAt = b.approvalExpiresAt;
-      const link = await tx.paymentLink.create({ data: { bookingId: b.id, targetScheduleItemId: target.id, expiresAt, createdById: actor.id! }, select: { id: true } });
-      await this.audit.record(tx, {
-        actor, action: 'payments.paymentLink.sent', entityType: 'PaymentLink', entityId: link.id,
-        after: { status: 'active', expiresAt: expiresAt.toISOString(), targetSequence: target.sequence }, context: { bookingId: b.id },
-      });
+      const link = await this.openLink(tx, b, target, { actor, createdById: actor.id!, at, days });
       await this.mail.enqueue({
         to: customer.email, templateKey: PAYMENT_LINK_TEMPLATE.key, templateVersion: PAYMENT_LINK_TEMPLATE.version, locale: customer.preferredLocale,
         dedupeKey: `payment-link:${link.id}`, customerId: customer.id, relatedEntityType: 'PaymentLink', relatedEntityId: link.id,
@@ -157,6 +146,52 @@ export class PaymentLinksService {
       return link.id;
     }, PAYMENT_TX_OPTIONS);
     return (await this.adminLinks(bookingId)).find((l) => l.id === id)!;
+  }
+
+  /**
+   * Opens a link for a plan item inside the caller's transaction, with the booking already locked: any active link of the
+   * booking is revoked first (one active link per booking), the new one is capped at the deposit deadline of an approved
+   * booking, and both steps are audited. Staff sends and automatic reminders (task 5.6) share it.
+   */
+  private async openLink(
+    tx: Tx, b: BookingForPayments, target: { id: string; sequence: number },
+    o: { actor: AuditActor; createdById: string; at: Date; days: number; reason?: string },
+  ): Promise<{ id: string }> {
+    const revoked = await tx.$queryRaw<Array<{ id: string }>>`
+      UPDATE payment_links SET status = 'revoked', "revokedAt" = clock_timestamp()
+      WHERE "bookingId" = ${b.id}::uuid AND status = 'active' RETURNING id::text AS id`;
+    for (const r of revoked) {
+      await this.audit.record(tx, { actor: o.actor, action: 'payments.paymentLink.revoked', entityType: 'PaymentLink', entityId: r.id, before: { status: 'active' }, after: { status: 'revoked' }, context: { bookingId: b.id, reason: 'replaced' } });
+    }
+    let expiresAt = new Date(o.at.getTime() + o.days * 86_400_000);
+    if (b.status === 'approved' && b.approvalExpiresAt && b.approvalExpiresAt < expiresAt) expiresAt = b.approvalExpiresAt;
+    const link = await tx.paymentLink.create({ data: { bookingId: b.id, targetScheduleItemId: target.id, expiresAt, createdById: o.createdById }, select: { id: true } });
+    await this.audit.record(tx, {
+      actor: o.actor, action: 'payments.paymentLink.sent', entityType: 'PaymentLink', entityId: link.id,
+      after: { status: 'active', expiresAt: expiresAt.toISOString(), targetSequence: target.sequence }, context: { bookingId: b.id, ...(o.reason ? { reason: o.reason } : {}) },
+    });
+    return link;
+  }
+
+  /**
+   * An automatic balance reminder's link (task 5.6): the same single-use link as one staff send, opened by the system and
+   * queued as the reminder email. The caller holds the booking lock and has checked the item can still be paid. The
+   * email's dedupe key makes a repeat a no-op: when the email already exists nothing is opened, and the answer says so.
+   */
+  async openForReminder(
+    tx: Tx, b: LockedBooking, target: { id: string; sequence: number },
+    to: { email: string; customerId: string; locale: string }, dedupeKey: string, templateKey: string, templateVersion: number,
+  ): Promise<{ queued: boolean }> {
+    if (await tx.outboundEmail.findUnique({ where: { dedupeKey }, select: { id: true } })) return { queued: false };
+    const days = await this.settings.get(PAYMENT_SETTINGS.paymentLinkValidDays.key, PAYMENT_SETTINGS.paymentLinkValidDays.fallback);
+    const [{ at }] = (await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at`) as [{ at: Date }];
+    const link = await this.openLink(tx, b, target, { actor: SYSTEM_ACTOR, createdById: NIL_UUID, at, days, reason: 'reminder' });
+    const mail = await this.mail.enqueue({
+      to: to.email, templateKey, templateVersion, locale: to.locale, dedupeKey, customerId: to.customerId, relatedEntityType: 'PaymentLink', relatedEntityId: link.id,
+    }, tx);
+    // A concurrent tick got there first: undo this link (the transaction is not committed, so throwing rolls it back).
+    if (!mail.created) throw new AppError('reminder_already_queued', 'This reminder is already queued');
+    return { queued: true };
   }
 
   /** Revokes a link (booking locked first). A live attempt started through it is left alone: its money counts if it arrives. */
