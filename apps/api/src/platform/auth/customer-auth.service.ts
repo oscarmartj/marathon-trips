@@ -2,14 +2,12 @@ import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { brand } from '@mt/shared';
 import { AuditService } from '../audit/audit.service';
 import type { AppConfig } from '../config/config';
-import { emailHash } from '../crypto/hmac';
 import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 import { AppError } from '../errors/safe-error';
 import { OutboxService } from '../events/outbox.service';
 import { ApiError } from '../http/api-error';
 import { MailService } from '../mail/mail.service';
 import { MailTemplateRegistry, RenderContext } from '../mail/templates';
-import { WindowLimiter } from './attempt-limiter';
 import type { RequestMeta } from './request-meta';
 import { SessionService } from './session.service';
 import { looksLikeToken, newToken, tokenHash } from './tokens';
@@ -18,6 +16,7 @@ export const MAGIC_LINK_MS = 15 * 60_000;
 export const MAGIC_LINK_TEMPLATE = { key: 'auth.magic_link', version: 1 } as const;
 /** Emails per address in 15 minutes; past it the request is accepted and nothing is sent (the answer never changes). */
 export const MAGIC_LINKS_PER_ADDRESS = 3;
+export const MAGIC_LINK_CAP_WINDOW_MS = 15 * 60_000;
 
 const linkInvalid = () => new ApiError(400, 'link_invalid', 'This sign-in link has expired or has already been used. Ask for a new one.');
 
@@ -27,8 +26,6 @@ const linkInvalid = () => new ApiError(400, 'link_invalid', 'This sign-in link h
  */
 @Injectable()
 export class CustomerAuthService implements OnModuleInit {
-  private readonly perAddress = new WindowLimiter(MAGIC_LINKS_PER_ADDRESS, 15 * 60_000);
-
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -46,8 +43,9 @@ export class CustomerAuthService implements OnModuleInit {
 
   /** Same work and same answer whether or not the address has an account (T2). */
   async requestLink(email: string, requestId?: string): Promise<void> {
-    if (!this.perAddress.allow(emailHash(this.config.AUTH_HMAC_KEY, email))) return;
     await this.prisma.$transaction(async (tx) => {
+      // Task 8.5 (S-07): counted in the database, so neither a restart nor a flood of other addresses resets the cap.
+      if (!(await this.mail.withinAddressCap(tx, { to: email, templateKey: MAGIC_LINK_TEMPLATE.key, max: MAGIC_LINKS_PER_ADDRESS, windowMs: MAGIC_LINK_CAP_WINDOW_MS }))) return;
       const user = await tx.user.findUnique({ where: { kind_email: { kind: 'customer', email } }, select: { id: true } });
       const token = await tx.loginToken.create({
         data: { purpose: 'magic_link', email, userId: user?.id ?? null, tokenHash: null, expiresAt: new Date(Date.now() + MAGIC_LINK_MS) },

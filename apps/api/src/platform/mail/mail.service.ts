@@ -67,6 +67,19 @@ export class MailService {
   }
 
   /**
+   * Task 8.5 (S-07): a cap on emails of one template to one address, counted in the database so a restart, a second API
+   * instance or a flood of other addresses cannot reset it (an in-memory table could be churned). Call it in the
+   * transaction that enqueues: the advisory lock makes concurrent requests for the same address count one after another.
+   */
+  async withinAddressCap(tx: Prisma.TransactionClient, input: { to: string; templateKey: string; max: number; windowMs: number }): Promise<boolean> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`mail-cap:${input.templateKey}:${input.to.toLowerCase()}`}, 0))`;
+    const since = new Date(Date.now() - input.windowMs);
+    const [row] = await tx.$queryRaw<Array<{ n: bigint }>>`
+      SELECT count(*) AS n FROM outbound_emails WHERE "to" = ${input.to} AND "templateKey" = ${input.templateKey} AND "createdAt" > ${since}::timestamptz`;
+    return Number(row?.n ?? 0) < input.max;
+  }
+
+  /**
    * The send step. The row is locked and only a `queued` email is processed, so a repeated job never sends twice.
    * Rendering happens inside this transaction: a one-time token minted by the template commits with the send, and
    * a retry mints a fresh one (the failed attempt's token rolled back with it).

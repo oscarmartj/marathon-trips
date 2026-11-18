@@ -7,8 +7,8 @@ import { SecretBox } from '../crypto/secret-box';
 import { emailHash } from '../crypto/hmac';
 import { APP_CONFIG, PrismaService } from '../database/prisma.service';
 import { OutboxService } from '../events/outbox.service';
-import { ApiError, unauthorised, unprocessable } from '../http/api-error';
-import { UnknownAccountDelay, claimAccountAttempt, refundAccountAttempt } from './attempt-limiter';
+import { ApiError, tooManyRequests, unauthorised, unprocessable } from '../http/api-error';
+import { SATURATION_SECONDS, UnknownAccountDelay, claimAccountAttempt, refundAccountAttempt } from './attempt-limiter';
 import { guessablePassword, hashPassword, verifyPassword } from './passwords';
 import type { RequestMeta } from './request-meta';
 import { SessionService } from './session.service';
@@ -59,6 +59,8 @@ export class StaffAuthService {
 
   /** Step 1. Always one argon2 verification; unknown and incomplete accounts answer exactly like a wrong password. */
   async signIn(email: string, password: string, requestId?: string): Promise<{ mfaToken: string; maxAgeSeconds: number }> {
+    // S-06: while the unknown-address table is full, every address without a count there is refused, known ones too.
+    if (this.unknown.saturated(emailHash(this.config.AUTH_HMAC_KEY, email))) throw tooManyRequests(SATURATION_SECONDS);
     const user = await this.prisma.user.findUnique({
       where: { kind_email: { kind: 'staff', email } },
       select: { id: true, status: true, passwordHash: true, totpEnabledAt: true },

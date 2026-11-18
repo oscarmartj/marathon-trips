@@ -39,6 +39,27 @@ export class Lru<V> {
     while (this.map.size > this.max) this.map.delete(this.map.keys().next().value as string);
   }
 
+  /**
+   * Task 8.5 (S-06): stores without evicting a live entry. When the table is full of live entries, expired ones are swept
+   * (at most once a second, so a full table costs no more than that) and, if there is still no room, nothing is stored
+   * and false is returned, so the caller can refuse instead of forgetting someone's count.
+   */
+  trySet(key: string, value: V, now = Date.now()): boolean {
+    if (this.map.has(key) || this.map.size < this.max) {
+      this.set(key, value, now);
+      return true;
+    }
+    if (now - this.lastSweep >= 1000) {
+      this.lastSweep = now;
+      for (const [k, e] of this.map) if (e.expiresAt <= now) this.map.delete(k);
+    }
+    if (this.map.size >= this.max) return false;
+    this.set(key, value, now);
+    return true;
+  }
+
+  private lastSweep = 0;
+
   get size(): number {
     return this.map.size;
   }
@@ -80,15 +101,37 @@ export async function refundAccountAttempt(db: Db, userId: string): Promise<void
     WHERE id = ${userId}::uuid`;
 }
 
-/** The same schedule for addresses with no account, kept in memory so the two cases look alike (T2). */
+/** How long sign-in stays refused for every new address once the table of unknown addresses is full (S-06). */
+export const SATURATION_SECONDS = 60;
+
+/**
+ * The same schedule for addresses with no account, kept in memory so the two cases look alike (T2). The table is bounded
+ * and never evicts a live count (task 8.5, S-06): evicting would let a flood of made-up addresses wipe the delay of the
+ * addresses being guessed, and unknown addresses would then answer differently from known ones (counted in the
+ * database). When it is full, `saturated()` is true for a minute and the caller refuses every address it has no entry
+ * for, known or not, so the answer still does not tell the two apart.
+ */
 export class UnknownAccountDelay {
-  private readonly entries = new Lru<{ failures: number; nextAllowedAt: number }>(100_000, COUNT_WINDOW_SECONDS * 1000);
+  private readonly entries: Lru<{ failures: number; nextAllowedAt: number }>;
+  private saturatedUntil = 0;
+
+  constructor(max = 100_000) {
+    this.entries = new Lru(max, COUNT_WINDOW_SECONDS * 1000);
+  }
+
+  /** Whether sign-in is refusing addresses it has no count for (the table was full in the last minute). */
+  saturated(key: string, now: number = Date.now()): boolean {
+    return this.saturatedUntil > now && this.entries.get(key, now) === undefined;
+  }
 
   claim(key: string, now: number = Date.now()): void {
     const e = this.entries.get(key, now) ?? { failures: 0, nextAllowedAt: 0 };
     if (e.nextAllowedAt > now) throw tooManyRequests((e.nextAllowedAt - now) / 1000);
     const failures = e.failures + 1;
-    this.entries.set(key, { failures, nextAllowedAt: now + delaySeconds(failures) * 1000 }, now);
+    if (!this.entries.trySet(key, { failures, nextAllowedAt: now + delaySeconds(failures) * 1000 }, now)) {
+      this.saturatedUntil = now + SATURATION_SECONDS * 1000;
+      throw tooManyRequests(SATURATION_SECONDS);
+    }
   }
 }
 
