@@ -598,6 +598,58 @@ describe('scheduled sending', () => {
     expect(t.mail.sent.filter((m) => m.to === a.staff.email)).toHaveLength(0);
   });
 
+  it('a queued email is refused when its report no longer has a valid schedule', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const b = await staffClient(t, [P.read, P.funnelRead]);
+    const invalid = await scheduled([a]);
+    const cleared = await scheduled([b]);
+    await tick();
+    const mailA = (await emailsOf((await runsOf(invalid))[0]!.id))[0]!;
+    const mailB = (await emailsOf((await runsOf(cleared))[0]!.id))[0]!;
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET schedule = '{"frequency":"weekly","time":"08:00"}'::jsonb WHERE id = '${invalid}'::uuid`);
+    // Only SQL can leave the recipients on a report without a schedule: the service refuses it.
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET schedule = NULL, "scheduleStartedAt" = NULL WHERE id = '${cleared}'::uuid`);
+    t.mail.sent.length = 0;
+    for (const mail of [mailA, mailB]) {
+      expect(await t.app.get(MailService).processSend(mail.id)).toBe('failed');
+      const { error } = await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: mail.id } });
+      expect(error).toContain('mail_not_sendable');
+      expect(error).toContain('The report is no longer on a schedule');
+    }
+    expect(t.mail.sent.filter((m) => m.to === a.staff.email || m.to === b.staff.email)).toHaveLength(0);
+  });
+
+  it('a queued email is refused when the schedule changed after it was due, so its days never run backwards', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await tick();
+    const run = (await runsOf(id))[0]!;
+    const mail = (await emailsOf(run.id))[0]!;
+    // Wednesday 08:00 becomes Wednesday 07:00: the previous occurrence of the new schedule is after the run's previous
+    // day, so the range would end before it starts. Changing the schedule restarts its clock.
+    must(await admin.patch(`/admin/reports/${id}`, { schedule: { frequency: 'weekly', weekday: 3, time: '07:00' }, version: 0 }), 'reschedule');
+    const report = await t.prisma.savedReport.findUniqueOrThrow({ where: { id } });
+    expect(report.scheduleStartedAt!.toISOString()).not.toBe('2027-01-01T00:00:00.000Z'); // the change restarted the clock
+    // This test's clock is March 2027, the real one is earlier: put the restart where the edit happens in this story,
+    // 11:00 on the Wednesday, after the run was due.
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "scheduleStartedAt" = '2027-03-03T01:00:00Z' WHERE id = '${id}'::uuid`);
+    t.mail.sent.length = 0;
+    expect(await t.app.get(MailService).processSend(mail.id)).toBe('failed');
+    expect((await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: mail.id } })).error).toContain('The schedule of the report changed after this email was due');
+    expect(t.mail.sent.filter((m) => m.to === a.staff.email)).toHaveLength(0);
+  });
+
+  it('a queued email still goes when only the name changed', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await tick();
+    const mail = (await emailsOf((await runsOf(id))[0]!.id))[0]!;
+    must(await admin.patch(`/admin/reports/${id}`, { name: `Renamed ${Date.now()}`, version: 0 }), 'rename');
+    t.mail.sent.length = 0;
+    expect(await t.app.get(MailService).processSend(mail.id)).toBe('sent');
+    expect(t.mail.sent.find((m) => m.to === a.staff.email)!.text).toContain('From 2027-02-24 to 2027-03-02');
+  });
+
   it('a monthly report is sent once a month and each email covers the days since the previous one', async () => {
     const w = await publishedWorld();
     const v = await versionOf(w);
