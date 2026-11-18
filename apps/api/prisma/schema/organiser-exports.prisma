@@ -1,0 +1,2 @@
+// Organiser exports (task 7.2, plan docs/plans/7.2-organiser-exports.md). No tables: formats are code and the audit log
+// holds the only record of a file. This file exists because every module folder has one schema file.
