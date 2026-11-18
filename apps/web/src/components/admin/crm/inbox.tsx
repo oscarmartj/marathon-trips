@@ -11,6 +11,8 @@ import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
 import { RecordNotes, crmError, formatMoment, fullName, statusLabel } from './crm-kit';
 import { PaymentLinksPanel } from './payment-links';
+import { AmendmentPanel, type AmendmentRow } from './amendments';
+import type { ConfigurationView } from '@/lib/amendments';
 
 interface Row {
   id: string;
@@ -118,6 +120,10 @@ interface BookingView {
   customer: { id: string; email: string; givenName: string; familyName: string; phone: string | null; countryOfResidence: string };
   travellers: Array<{ id: string; slot: number; participationType: string; isLead: boolean; removedInVersion: number | null }>;
   rooms: Array<{ id: string; occupancy: number }>;
+  packageId: string;
+  currentSnapshotVersion: number;
+  snapshots: Array<{ version: number; configuration: ConfigurationView }>;
+  amendments: AmendmentRow[];
 }
 
 /** One booking: what was asked and priced, the actions the state machine allows, and the team's notes. */
@@ -156,8 +162,13 @@ export function BookingDetail({ id }: { id: string }) {
           <dd>{t('admin.crm.booking.dateRange', { from: formatDay(b.departureDate), to: formatDay(b.returnDate) })}</dd>
           <dt>{t('admin.crm.columns.total')}</dt>
           <dd>{formatMoney(b.totalMinor, b.currency)}</dd>
-          <dt>{t('admin.crm.booking.deposit')}</dt>
-          <dd>{t('admin.crm.booking.depositLine', { amount: formatMoney(b.depositMinor, b.currency), date: formatDay(b.balanceDueDate) })}</dd>
+          {/* After a change the deposit asked is the payment plan's, not the new snapshot's (task 6.3, review m4). */}
+          {(b.amendments ?? []).length === 0 ? (
+            <>
+              <dt>{t('admin.crm.booking.deposit')}</dt>
+              <dd>{t('admin.crm.booking.depositLine', { amount: formatMoney(b.depositMinor, b.currency), date: formatDay(b.balanceDueDate) })}</dd>
+            </>
+          ) : null}
           <dt>{t('admin.crm.columns.requested')}</dt>
           <dd>{formatMoment(b.requestedAt)}</dd>
           {b.requestExpiresAt ? (
@@ -187,6 +198,12 @@ export function BookingDetail({ id }: { id: string }) {
       ) : null}
       <Status message={message?.text ?? null} tone={message?.tone ?? 'error'} />
       <PaymentLinksPanel bookingId={id} status={b.status} />
+      {b.snapshots ? (
+        <AmendmentPanel
+          bookingId={id} packageId={b.packageId} status={b.status} version={b.currentSnapshotVersion} currency={b.currency} rows={b.amendments ?? []}
+          configuration={b.snapshots.find((s) => s.version === b.currentSnapshotVersion)!.configuration} onChanged={reload}
+        />
+      ) : null}
       <Section id="booking-notes" title={t('admin.crm.notes.title')}>
         <RecordNotes entityType="Booking" id={id} />
       </Section>

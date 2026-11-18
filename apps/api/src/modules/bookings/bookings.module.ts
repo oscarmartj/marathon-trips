@@ -3,10 +3,13 @@ import { PermissionRegistry } from '../../platform/access/permissions';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { SettingsService } from '../../platform/flags/flags.service';
+import { CommonModule } from '../../platform/common/common.module';
 import { CatalogueModule } from '../catalogue';
 import { PricingModule } from '../pricing';
 import { WaitlistModule } from '../waitlist';
 import { BookingAdminService } from './admin.service';
+import { BookingAmendmentHooks } from './amendment-hooks';
+import { BookingAmendmentService } from './amendment.service';
 import { BookingCoverage } from './coverage';
 import { BookingRequestsController, BookingsAdminController, CustomersAdminController, WaitlistEntriesController } from './controllers';
 import { CustomerAdminService } from './customer-admin.service';
@@ -25,13 +28,14 @@ import { WaitlistOffersService } from './waitlist-offers.service';
 import { ReferenceGenerator } from './support';
 
 @Module({
-  imports: [CatalogueModule, PricingModule, WaitlistModule],
+  imports: [CatalogueModule, PricingModule, WaitlistModule, CommonModule],
   controllers: [BookingRequestsController, BookingsAdminController, CustomersAdminController, WaitlistEntriesController],
   providers: [
     BookingRequestService, BookingStateMachine, BookingAdminService, BookingExpiryService, BookingTransitionHooks, CustomerService,
     ReferenceGenerator, BookingRequestRateLimitGuard, CustomerAdminService, QuotedBookingService, BookingCoverage, WaitlistOffersService,
+    BookingAmendmentHooks, BookingAmendmentService,
   ],
-  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage, CustomerService],
+  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage, CustomerService, BookingAmendmentHooks, BookingAmendmentService],
 })
 export class BookingsModule implements OnModuleInit {
   constructor(

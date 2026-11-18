@@ -23,21 +23,21 @@ export async function makeCustomer(t: TestApp, over: Record<string, unknown> = {
  * transaction: the snapshot is required at commit by the "totals mirror the snapshot" trigger. For tests of other
  * modules that need a booking to point at (plan 2.4, section 13: the promo redemption tests of 2.2).
  */
-export async function makeBookingFor(t: TestApp, w: { pkg: { id: string }; edition: { id: string }; versionId: string }, customerId?: string, requestedAt?: Date): Promise<{ customerId: string; bookingId: string }> {
+export async function makeBookingFor(t: TestApp, w: { pkg: { id: string }; edition: { id: string }; versionId: string }, customerId?: string, requestedAt?: Date, amounts: { totalMinor: bigint; depositMinor: bigint } = { totalMinor: 10000n, depositMinor: 0n }): Promise<{ customerId: string; bookingId: string }> {
   const cid = customerId ?? (await makeCustomer(t));
   const now = requestedAt ?? new Date();
   const bookingId = await t.prisma.$transaction(async (tx) => {
     const b = await tx.booking.create({
       data: {
         reference: reference(), customerId: cid, kind: 'catalogue', packageId: w.pkg.id, editionId: w.edition.id, status: 'requested', currentSnapshotVersion: 1,
-        departureDate: new Date('2027-06-18'), returnDate: new Date('2027-06-21'), currency: 'AUD', totalMinor: 10000n, depositMinor: 0n, balanceDueDate: new Date('2027-04-18'),
+        departureDate: new Date('2027-06-18'), returnDate: new Date('2027-06-21'), currency: 'AUD', totalMinor: amounts.totalMinor, depositMinor: amounts.depositMinor, balanceDueDate: new Date('2027-04-18'),
         residenceCountry: 'AU', requestedAt: now, requestExpiresAt: new Date(now.getTime() + 86_400_000), sourceChannel: 'panel',
         requestKeyHash: hex64(), requestConfigHash: hex64(), requestContactHmac: hex64(),
       },
       select: { id: true },
     });
     await tx.bookingSnapshot.create({
-      data: { bookingId: b.id, version: 1, kind: 'original', configuration: {}, priceBreakdown: {}, totalMinor: 10000n, depositMinor: 0n, currency: 'AUD', priceVersionId: w.versionId, engineVersion: 'pricing-0.0.0' },
+      data: { bookingId: b.id, version: 1, kind: 'original', configuration: {}, priceBreakdown: {}, totalMinor: amounts.totalMinor, depositMinor: amounts.depositMinor, currency: 'AUD', priceVersionId: w.versionId, engineVersion: 'pricing-0.0.0' },
     });
     return b.id;
   });

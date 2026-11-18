@@ -36,14 +36,17 @@ export async function readBookingForPayments(tx: Tx, where: { id: string } | { r
 export async function readBookingForPayments(tx: Tx, where: { id: string } | { reference: string }, lock = false): Promise<BookingForPayments | null> {
   const byId = 'id' in where;
   const value = byId ? where.id : where.reference;
+  // Task 6.3: the booking row is locked on its own first. Locking it in the join below would, after waiting for a change
+  // that moved `currentSnapshotVersion`, re-check the old snapshot row against the new version and find nothing (READ
+  // COMMITTED re-evaluates only the locked row): a 404 for a booking that exists.
+  if (lock) await tx.$queryRawUnsafe(`SELECT b.id FROM bookings b WHERE ${byId ? 'b.id = $1::uuid' : 'b.reference = $1'} FOR UPDATE OF b`, value);
   const rows = await tx.$queryRawUnsafe<BookingForPayments[]>(
     `SELECT b.id::text AS id, b.reference, b."customerId"::text AS "customerId", b.status::text AS status, b.currency,
             s."totalMinor", s."depositMinor", b."balanceDueDate", b."departureDate", b."residenceCountry", b."approvalExpiresAt",
             p."autoConfirmOnDeposit"
        FROM bookings b JOIN booking_snapshots s ON s."bookingId" = b.id AND s.version = b."currentSnapshotVersion"
        JOIN packages p ON p.id = b."packageId"
-      WHERE ${byId ? 'b.id = $1::uuid' : 'b.reference = $1'}
-      ${lock ? 'FOR UPDATE OF b' : ''}`,
+      WHERE ${byId ? 'b.id = $1::uuid' : 'b.reference = $1'}`,
     value,
   );
   return rows[0] ?? null;

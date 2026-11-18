@@ -103,6 +103,28 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
     },
   },
+  // Task 6.3: a customer's change of their booking (preview and apply): customer A adds the tour for place 1; B tries.
+  'account-booking-amendment-preview': {
+    async create(t, a, b) {
+      const { amendableBookingOf } = await import('./amendments');
+      const { reference, body } = await amendableBookingOf(t, a);
+      const path = `/account/bookings/${reference}/amendments/preview`;
+      const send = (s: CustomerSession) => t.http().post(path).set(STATE_HEADERS).set('Cookie', s.cookie).send(body);
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
+  'account-booking-amendment': {
+    async create(t, a, b) {
+      const { amendableBookingOf } = await import('./amendments');
+      const { reference, body } = await amendableBookingOf(t, a);
+      const preview = await t.http().post(`/account/bookings/${reference}/amendments/preview`).set(STATE_HEADERS).set('Cookie', a.cookie).send(body);
+      if (preview.status !== 200) throw new Error(`amendment preview failed: ${preview.status} ${JSON.stringify(preview.body)}`);
+      const path = `/account/bookings/${reference}/amendments`;
+      const full = { ...body, previewDigest: preview.body.previewDigest, acceptNewPrice: true };
+      const send = (s: CustomerSession) => t.http().post(path).set(STATE_HEADERS).set('Cookie', s.cookie).set('Idempotency-Key', randomUUID()).send(full);
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
   'account-booking-traveller-save': {
     async create(t, a, b) {
       const { customerBookingIn } = await import('./customer-portal');

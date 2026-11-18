@@ -52,7 +52,10 @@ const emailOf = (linkId: string) => t.prisma.outboundEmail.findUniqueOrThrow({ w
 const view = (token: string) => t.http().post('/payment-links/view').set(STATE_HEADERS).send({ token });
 const payVia = (token: string) => t.http().post('/payment-links/payments').set(STATE_HEADERS).set('Idempotency-Key', randomUUID()).send({ token, method: 'card' });
 const refresh = (token: string) => t.http().post('/payment-links/refresh').set(STATE_HEADERS).send({ token });
-const remindersOf = (itemId: string) => t.prisma.outboundEmail.findMany({ where: { dedupeKey: { startsWith: `balance-reminder:${itemId}:` } }, orderBy: { createdAt: 'asc' } });
+// Task 6.3: a reminder is keyed by the booking, the kind and the due date of its item (not the item id), so a restated plan
+// does not send it again.
+const remindersOf = (item: { bookingId: string; kind: string; dueDate: Date }) =>
+  t.prisma.outboundEmail.findMany({ where: { dedupeKey: { startsWith: `balance-reminder:${item.bookingId}:${item.kind}:${item.dueDate.toISOString().slice(0, 10)}:` } }, orderBy: { createdAt: 'asc' } });
 const sentNow = async (emailId: string) => {
   const before = t.mail.sent.length;
   const outcome = await t.app.get(MailService).processSend(emailId);
@@ -90,8 +93,9 @@ describe('when a reminder is due (pure)', () => {
     expect(reminderOffset(offsets, daysUntil)).toBe(expected);
   });
 
-  it('the dedupe key names the item and the offset', () => {
-    expect(reminderDedupeKey('abc', 3)).toBe('balance-reminder:abc:3');
+  it('the dedupe key names the booking, the kind and due date of the item, and the offset (task 6.3: never the item id)', () => {
+    expect(reminderDedupeKey({ bookingId: 'abc', kind: 'balance', dueDate: '2027-04-18' }, 3)).toBe('balance-reminder:abc:balance:2027-04-18:3');
+    expect(reminderDedupeKey({ bookingId: 'abc', kind: 'adjustment', dueDate: new Date('2026-11-25T00:00:00Z') }, 0)).toBe('balance-reminder:abc:adjustment:2026-11-25:0');
   });
 
   it('the offsets setting is a short list of distinct whole days', () => {
@@ -108,11 +112,11 @@ describe('queueing', () => {
     const first = await runFor(w, at(w.due, 14));
     expect(first).toMatchObject({ idle: null, errors: 0 });
     expect([first.examined, first.queued]).toEqual([1, 1]);
-    expect(await remindersOf(w.balance.id)).toHaveLength(1);
+    expect(await remindersOf(w.balance)).toHaveLength(1);
     for (const days of [14, 14, 12, 5]) await runFor(w, at(w.due, days));
-    expect(await remindersOf(w.balance.id)).toHaveLength(1);
+    expect(await remindersOf(w.balance)).toHaveLength(1);
     // The first reminder is delivered; the next offset replaces its link (it is ours, not staff's) and goes out once.
-    const [firstRow] = await remindersOf(w.balance.id);
+    const [firstRow] = await remindersOf(w.balance);
     expect((await sentNow(firstRow!.id)).outcome).toBe('sent');
     const second = await runFor(w, at(w.due, 3));
     expect([second.examined, second.queued, second.errors]).toEqual([1, 1, 0]);
@@ -120,8 +124,8 @@ describe('queueing', () => {
     await runFor(w, at(w.due, 3));
     await runFor(w, at(w.due, 3, 16));
     await runFor(w, at(w.due, 0));
-    const rows = await remindersOf(w.balance.id);
-    expect(rows.map((r) => r.dedupeKey).sort()).toEqual([reminderDedupeKey(w.balance.id, 14), reminderDedupeKey(w.balance.id, 3)].sort());
+    const rows = await remindersOf(w.balance);
+    expect(rows.map((r) => r.dedupeKey).sort()).toEqual([reminderDedupeKey(w.balance, 14), reminderDedupeKey(w.balance, 3)].sort());
     expect(rows.every((r) => r.category === 'transactional' && r.relatedEntityType === 'PaymentLink' && r.templateKey === 'payments.balance_reminder')).toBe(true);
     // One active link at most, and every reminder link was opened by the system.
     expect(await t.prisma.paymentLink.count({ where: { bookingId: w.bookingId, status: 'active' } })).toBeLessThanOrEqual(1);
@@ -134,7 +138,7 @@ describe('queueing', () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await runFor(w, at(w.due, 2));
-    expect((await remindersOf(w.balance.id)).map((r) => r.dedupeKey)).toEqual([reminderDedupeKey(w.balance.id, 3)]);
+    expect((await remindersOf(w.balance)).map((r) => r.dedupeKey)).toEqual([reminderDedupeKey(w.balance, 3)]);
   });
 
   it('reminder_not_before_the_window and not after the due date', async () => {
@@ -143,14 +147,14 @@ describe('queueing', () => {
     const early = await runFor(w, at(w.due, 15));
     const late = await runFor(w, at(w.due, -1));
     expect([early.errors, late.errors]).toEqual([0, 0]);
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
   });
 
   it('reminder_concurrent_sweeps: five at once queue it once and leave one active link', async () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await Promise.all(Array.from({ length: 5 }, () => runFor(w, at(w.due, 3))));
-    expect(await remindersOf(w.balance.id)).toHaveLength(1);
+    expect(await remindersOf(w.balance)).toHaveLength(1);
     expect(await t.prisma.paymentLink.count({ where: { bookingId: w.bookingId, status: 'active' } })).toBe(1);
     expect(await t.prisma.paymentLink.count({ where: { bookingId: w.bookingId, createdById: '00000000-0000-0000-0000-000000000000' } })).toBe(1);
   });
@@ -160,13 +164,13 @@ describe('queueing', () => {
     const w = await depositPaid();
     expect(await runFor(w, at(w.due, 3, REMINDER_HOURS.from - 1))).toEqual({ idle: 'outside_hours', examined: 0, queued: 0, errors: 0, skipped: {} });
     expect(await runFor(w, at(w.due, 3, REMINDER_HOURS.to))).toEqual({ idle: 'outside_hours', examined: 0, queued: 0, errors: 0, skipped: {} });
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
     await setOffsets([]);
     expect(await runFor(w, at(w.due, 3))).toEqual({ idle: 'turned_off', examined: 0, queued: 0, errors: 0, skipped: {} });
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
     await setOffsets([14, 3]);
     expect(await runFor(w, at(w.due, 3, REMINDER_HOURS.from))).toMatchObject({ examined: 1, queued: 1, errors: 0 });
-    expect(await remindersOf(w.balance.id)).toHaveLength(1);
+    expect(await remindersOf(w.balance)).toHaveLength(1);
   });
 
   it('reminder_skips: approved (deposit unpaid), a payment on its way, a suppressed or closed customer', async () => {
@@ -176,7 +180,7 @@ describe('queueing', () => {
     const bal = await t.prisma.paymentScheduleItem.findFirstOrThrow({ where: { bookingId: approved.bookingId, kind: 'balance' } });
     const early = await reminders().run(at(day(bal.dueDate), 3), { bookingId: approved.bookingId });
     expect(early.errors).toBe(0);
-    expect(await remindersOf(bal.id)).toHaveLength(0);
+    expect(await remindersOf(bal)).toHaveLength(0);
     // The line is not even looked at: the SQL leaves out bookings that are still waiting for the deposit.
     expect((await t.prisma.booking.findUniqueOrThrow({ where: { id: approved.bookingId } })).status).toBe('approved');
 
@@ -188,7 +192,7 @@ describe('queueing', () => {
     expect((await payVia(TOKEN_IN_MAIL.exec(sent.mail!.text)![1]!)).status).toBe(201);
     const run = await runFor(live, at(live.due, 3));
     expect([run.examined, run.skipped]).toEqual([1, { payment_in_progress: 1 }]);
-    expect(await remindersOf(live.balance.id)).toHaveLength(0);
+    expect(await remindersOf(live.balance)).toHaveLength(0);
 
     // The address bounced or complained (scope all).
     const sup = await depositPaid();
@@ -197,7 +201,7 @@ describe('queueing', () => {
     try {
       const out = await runFor(sup, at(sup.due, 3));
       expect([out.examined, out.skipped]).toEqual([1, { recipient_suppressed: 1 }]);
-      expect(await remindersOf(sup.balance.id)).toHaveLength(0);
+      expect(await remindersOf(sup.balance)).toHaveLength(0);
     } finally {
       await t.prisma.emailSuppression.deleteMany({});
     }
@@ -209,7 +213,7 @@ describe('queueing', () => {
       const out = await runFor(closed, at(closed.due, 3));
       expect(out.errors).toBe(0);
       expect([out.examined, out.skipped]).toEqual([1, { customer_closed: 1 }]);
-      expect(await remindersOf(closed.balance.id)).toHaveLength(0);
+      expect(await remindersOf(closed.balance)).toHaveLength(0);
     } finally {
       await t.prisma.$executeRawUnsafe(`UPDATE customers SET "deletedAt" = NULL WHERE id = $1::uuid`, closed.customerId);
     }
@@ -229,7 +233,7 @@ describe('queueing', () => {
         }
       });
       const out = await runFor(w, at(w.due, 3));
-      expect([status, out.errors, (await remindersOf(w.balance.id)).length]).toEqual([status, 0, 0]);
+      expect([status, out.errors, (await remindersOf(w.balance)).length]).toEqual([status, 0, 0]);
     }
   });
 });
@@ -242,14 +246,14 @@ describe('the checks inside the lock (a line can change between the list and the
     const deposit = await t.prisma.paymentScheduleItem.findFirstOrThrow({ where: { bookingId: w.bookingId, kind: 'deposit' } });
     expect(await reminders().remind(deposit.id, w.bookingId, [14, 3], today(w))).toBe('item_changed');
     expect(await reminders().remind(randomUUID(), w.bookingId, [14, 3], today(w))).toBe('item_changed');
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
   });
 
   it('booking_not_payable: the state is checked again under the lock, for completed and cancelled alike', async () => {
     const w = await depositPaid();
     await t.prisma.$executeRawUnsafe(`UPDATE bookings SET status = 'completed', version = version + 1 WHERE id = $1::uuid`, w.bookingId);
     expect(await reminders().remind(w.balance.id, w.bookingId, [14, 3], today(w))).toBe('booking_not_payable');
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
     expect(await t.prisma.paymentLink.count({ where: { bookingId: w.bookingId, createdById: '00000000-0000-0000-0000-000000000000' } })).toBe(0);
   });
 
@@ -258,7 +262,7 @@ describe('the checks inside the lock (a line can change between the list and the
     await walkTo(t, b.bookingId, 'deposit_paid', 'approved');
     const bal = await t.prisma.paymentScheduleItem.findFirstOrThrow({ where: { bookingId: b.bookingId, kind: 'balance' } });
     expect(await reminders().remind(bal.id, b.bookingId, [14, 3], day(at(day(bal.dueDate), 3)))).toBe('not_next_item');
-    expect(await remindersOf(bal.id)).toHaveLength(0);
+    expect(await remindersOf(bal)).toHaveLength(0);
   });
 
   it('not_next_item: a line already paid in full is not reminded', async () => {
@@ -268,7 +272,7 @@ describe('the checks inside the lock (a line can change between the list and the
     // A booking can only be in a remindable state with a covered line by SQL; that is exactly the plan check on its own.
     await t.prisma.$executeRawUnsafe(`UPDATE bookings SET status = 'confirmed', version = version + 1 WHERE id = $1::uuid`, w.bookingId);
     expect(await reminders().remind(w.balance.id, w.bookingId, [14, 3], today(w))).toBe('not_next_item');
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
   });
 
   it('queued lines are left out of the next list in SQL, so they never use up the limit', async () => {
@@ -279,7 +283,7 @@ describe('the checks inside the lock (a line can change between the list and the
     const again = await runFor(w, at(w.due, 3));
     expect(again.errors).toBe(0);
     expect(again.skipped.already_queued ?? 0).toBe(0);
-    expect(await remindersOf(w.balance.id)).toHaveLength(1);
+    expect(await remindersOf(w.balance)).toHaveLength(1);
   });
 });
 
@@ -297,7 +301,7 @@ describe('the email', () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await runFor(w, at(w.due, 3));
-    const [row] = await remindersOf(w.balance.id);
+    const [row] = await remindersOf(w.balance);
     expect(row).toBeDefined();
     // Queued with no token anywhere: it is minted when the email is sent.
     const link = await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: row!.relatedEntityId! } });
@@ -322,28 +326,28 @@ describe('the email', () => {
     // A second send step does nothing and the sweep does not queue another.
     expect(await t.app.get(MailService).processSend(row!.id)).toBe('noop');
     await runFor(w, at(w.due, 3));
-    expect(await remindersOf(w.balance.id)).toHaveLength(1);
+    expect(await remindersOf(w.balance)).toHaveLength(1);
   });
 
   it('reminder_retry_after_a_failed_send: the next attempt mints a fresh token, still one email', async () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await runFor(w, at(w.due, 3));
-    const [row] = await remindersOf(w.balance.id);
+    const [row] = await remindersOf(w.balance);
     const spy = vi.spyOn(t.mail, 'send').mockRejectedValueOnce(new Error('smtp down'));
     await expect(t.app.get(MailService).processSend(row!.id)).rejects.toThrow();
     spy.mockRestore();
     expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: row!.relatedEntityId! } })).tokenHash).toBeNull();
     expect((await sentNow(row!.id)).outcome).toBe('sent');
     await runFor(w, at(w.due, 3));
-    expect(await remindersOf(w.balance.id)).toHaveLength(1);
+    expect(await remindersOf(w.balance)).toHaveLength(1);
   });
 
   it('reminder_not_sent_once_paid: the send step fails the email, mints no token and sends nothing', async () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await runFor(w, at(w.due, 3));
-    const [row] = await remindersOf(w.balance.id);
+    const [row] = await remindersOf(w.balance);
     await payNext(w.bookingId);
     const before = t.mail.sent.length;
     expect(await t.app.get(MailService).processSend(row!.id)).toBe('failed');
@@ -358,7 +362,7 @@ describe('the email', () => {
     await t.app.get(MailService).addSuppression(customer.email, 'unsubscribed', 'marketing');
     try {
       await runFor(w, at(w.due, 3));
-      const [row] = await remindersOf(w.balance.id);
+      const [row] = await remindersOf(w.balance);
       expect(row).toBeDefined();
       expect((await sentNow(row!.id)).outcome).toBe('sent');
     } finally {
@@ -370,7 +374,7 @@ describe('the email', () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await runFor(w, at(w.due, 3));
-    const [row] = await remindersOf(w.balance.id);
+    const [row] = await remindersOf(w.balance);
     const customer = await t.prisma.customer.findUniqueOrThrow({ where: { id: w.customerId }, select: { email: true } });
     await t.app.get(MailService).addSuppression(customer.email, 'bounced', 'all');
     try {
@@ -390,12 +394,12 @@ describe('the email', () => {
     const run = await runFor(w, at(w.due, 3));
     expect(run.errors).toBe(0);
     expect([run.examined, run.skipped]).toEqual([1, { link_active: 1 }]);
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
     expect((await view(staffToken)).status).toBe(200);
     // Once that link is used up or revoked, the next sweep sends the reminder.
     await admin.post(`/admin/payments/payment-links/${staff.body.id}/revoke`, {});
     await runFor(w, at(w.due, 3));
-    const [row] = await remindersOf(w.balance.id);
+    const [row] = await remindersOf(w.balance);
     const reminderToken = TOKEN_IN_MAIL.exec((await sentNow(row!.id)).mail!.text)![1]!;
     expect((await view(reminderToken)).status).toBe(200);
   });
@@ -407,7 +411,7 @@ describe('the email', () => {
     const run = await runFor(w, at(w.due, 3));
     expect(run.errors).toBe(0);
     expect([run.examined, run.skipped]).toEqual([1, { link_active: 1 }]);
-    expect(await remindersOf(w.balance.id)).toHaveLength(0);
+    expect(await remindersOf(w.balance)).toHaveLength(0);
     const sent = await sentNow((await emailOf(staff.body.id)).id);
     expect(sent.outcome).toBe('sent');
     expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: staff.body.id } })).status).toBe('active');
@@ -417,12 +421,12 @@ describe('the email', () => {
     await setOffsets([3, 1]);
     const w = await depositPaid();
     expect(await runFor(w, at(w.due, 3))).toMatchObject({ examined: 1, queued: 1 });
-    const [first] = await remindersOf(w.balance.id);
+    const [first] = await remindersOf(w.balance);
     expect((await sentNow(first!.id)).outcome).toBe('sent');
     const link = await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: first!.relatedEntityId! } });
     expect(link.status).toBe('active');
     expect(await runFor(w, at(w.due, 1))).toMatchObject({ examined: 1, queued: 1, skipped: {} });
-    expect((await remindersOf(w.balance.id)).map((r) => r.dedupeKey).sort()).toEqual([reminderDedupeKey(w.balance.id, 3), reminderDedupeKey(w.balance.id, 1)].sort());
+    expect((await remindersOf(w.balance)).map((r) => r.dedupeKey).sort()).toEqual([reminderDedupeKey(w.balance, 3), reminderDedupeKey(w.balance, 1)].sort());
     expect((await t.prisma.paymentLink.findUniqueOrThrow({ where: { id: first!.relatedEntityId! } })).status).toBe('revoked');
     await setOffsets([14, 3]);
   });
@@ -432,7 +436,7 @@ describe('the email', () => {
     try {
       const w = await depositPaid();
       await runFor(w, at(w.due, 3));
-      const [first] = await remindersOf(w.balance.id);
+      const [first] = await remindersOf(w.balance);
       // The address bounces, so the send step fails the email for good and leaves an active link with no token.
       const customer = await t.prisma.customer.findUniqueOrThrow({ where: { id: w.customerId }, select: { email: true } });
       await t.app.get(MailService).addSuppression(customer.email, 'bounced', 'all');
@@ -466,7 +470,7 @@ describe('the email', () => {
     await setOffsets([14, 3]);
     const w = await depositPaid();
     await runFor(w, at(w.due, 3));
-    const [row] = await remindersOf(w.balance.id);
+    const [row] = await remindersOf(w.balance);
     const started = await c.pay(w.reference, { method: 'card' });
     expect(started.status, JSON.stringify(started.body)).toBe(201);
     const before = t.mail.sent.length;
@@ -493,7 +497,7 @@ describe('the email', () => {
     try {
       const w = await depositPaid();
       await runFor(w, at(w.due, 3));
-      const [row] = await remindersOf(w.balance.id);
+      const [row] = await remindersOf(w.balance);
       const { mail } = await sentNow(row!.id);
       const money = formatMinor(w.balance.amountMinor, w.balance.currency);
       expect(mail!.subject).toMatch(new RegExp(`^Balance for MT-?[A-Z0-9]+: ${money.replace('$', '\\$')} by `));

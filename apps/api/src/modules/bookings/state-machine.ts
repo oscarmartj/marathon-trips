@@ -33,7 +33,7 @@ export const BOOKING_STATUS_PAIRS: ReadonlyArray<readonly [BookingStatus, Bookin
  * expiry and the coverage events, which only `applyCoverage` uses (no route takes them: plan 3.2, section 1.3).
  */
 export type BookingEvent = 'approve' | 'decline' | 'cancel' | 'expire_request' | 'confirm' | 'expire_approval' | CoverageEvent;
-export type CoverageEvent = 'deposit_covered' | 'auto_confirm' | 'total_covered';
+export type CoverageEvent = 'deposit_covered' | 'auto_confirm' | 'total_covered' | 'total_uncovered';
 /** The events the panel's routes may ask for. */
 export type StaffBookingEvent = 'approve' | 'decline' | 'cancel' | 'confirm';
 
@@ -48,6 +48,8 @@ export const BOOKING_EVENT_TABLE: Readonly<Record<BookingEvent, Partial<Record<B
   deposit_covered: { approved: 'deposit_paid' },
   auto_confirm: { deposit_paid: 'confirmed' },
   total_covered: { confirmed: 'balance_paid' },
+  // Task 6.3: a change raised the total of a booking paid in full (plan 0.1, 6.2, rule C).
+  total_uncovered: { balance_paid: 'confirmed' },
 };
 
 /** Events that are "no change" instead of a 409 when they do not apply (the expiry sweeps). */
@@ -65,6 +67,12 @@ const STATUS_EVENT: Partial<Record<BookingStatus, string>> = {
   approved: BOOKING_EVENTS.approved, declined: BOOKING_EVENTS.declined, cancelled: BOOKING_EVENTS.cancelled, expired: BOOKING_EVENTS.expired,
   deposit_paid: BOOKING_EVENTS.depositPaid, confirmed: BOOKING_EVENTS.confirmed, balance_paid: BOOKING_EVENTS.balancePaid,
 };
+
+/**
+ * Events whose transition publishes its own event instead of the status's (task 6.3, plan review m3): a change that
+ * reopens the balance of a paid booking is not a second confirmation for automations or outbound webhooks.
+ */
+const EVENT_TYPE: Partial<Record<BookingEvent, string>> = { total_uncovered: BOOKING_EVENTS.balanceReopened };
 
 const RELEASING: ReadonlySet<BookingStatus> = new Set(['declined', 'cancelled', 'expired']);
 const TIME_COLUMN: Partial<Record<BookingStatus, string>> = { approved: 'approvedAt', declined: 'declinedAt', cancelled: 'cancelledAt', expired: 'expiredAt' };
@@ -161,7 +169,7 @@ export class BookingStateMachine {
       before: { status: b.status, customerId: b.customerId }, after: { status: to, customerId: b.customerId },
       reason, context: { event, from: b.status, to, releasedPlaces: released.places, promoReleased: released.promo },
     });
-    const type = STATUS_EVENT[to];
+    const type = EVENT_TYPE[event] ?? STATUS_EVENT[to];
     if (!type) throw new AppError('booking_event_missing', `No event for booking status ${to}`);
     await this.outbox.publish(tx, {
       type, aggregateType: 'Booking', aggregateId: b.id, aggregateVersion: b.version + 1,
@@ -170,6 +178,18 @@ export class BookingStateMachine {
     // After the new status is written, in the same transaction (task 3.2: the coverage rule after approval and confirmation).
     if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, { actor: input.actor, at, approvalExpiresAt }, 'after');
     return { changed: true, from: b.status, to, at };
+  }
+
+  /**
+   * Moves a booking to its next snapshot (task 6.3), compare-and-set on the version read under the caller's lock: the
+   * totals and dates mirror the new snapshot (checked at commit by 0014's trigger). It never touches the status, which
+   * only `transition` changes; returns the rows moved (0 means someone else moved it first).
+   */
+  async moveToSnapshot(tx: Tx, bookingId: string, fromVersion: number, to: { totalMinor: bigint; depositMinor: bigint; departureDate: Date; returnDate: Date; balanceDueDate: Date; at: Date }): Promise<number> {
+    return tx.$executeRaw`
+      UPDATE bookings SET "currentSnapshotVersion" = ${fromVersion + 1}, "totalMinor" = ${to.totalMinor}, "depositMinor" = ${to.depositMinor},
+        "departureDate" = ${to.departureDate}, "returnDate" = ${to.returnDate}, "balanceDueDate" = ${to.balanceDueDate}, version = version + 1, "updatedAt" = ${to.at}
+      WHERE id = ${bookingId}::uuid AND "currentSnapshotVersion" = ${fromVersion}`;
   }
 
   /**
