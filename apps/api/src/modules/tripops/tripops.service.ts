@@ -48,7 +48,7 @@ export class TripOpsService {
       const packages = await tx.package.findMany({
         where: { deletedAt: null, edition: { race: { deletedAt: null } } },
         select: { id: true, name: true, checkInDate: true, checkOutDate: true, edition: { select: { year: true, race: { select: { name: true } } } } },
-        orderBy: [{ checkInDate: 'desc' }, { id: 'asc' }],
+        orderBy: [{ checkInDate: 'desc' }, { id: 'desc' }],
         take: 500,
       });
       const counts = await tx.booking.groupBy({ by: ['packageId'], where: { packageId: { in: packages.map((p) => p.id) }, status: { in: STATUSES } }, _count: { _all: true } });
