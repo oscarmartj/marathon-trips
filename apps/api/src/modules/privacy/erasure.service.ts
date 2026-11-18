@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { MARKETING_WORDING_KEY } from '@mt/shared';
 import type { ErasureBlockReason } from '@mt/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { AccessService } from '../../platform/access/access.service';
@@ -146,7 +147,7 @@ export class ErasureService {
       for (const def of this.registry.withCustomerLink().filter((d) => ADDRESS_LINKED_ENTITIES.includes(d.entityType))) await def.handlers!.anonymise(tx, NO_CUSTOMER, { emails, userId });
       const hash = this.consent.hashOf(u.email);
       if (await tx.consentRecord.findFirst({ where: { emailHash: hash }, select: { id: true } })) {
-        await tx.consentRecord.create({ data: { emailHash: hash, purpose: 'marketing_email', granted: false, source: 'erasure', wordingKey: 'marketing_email.v1' } });
+        await tx.consentRecord.create({ data: { emailHash: hash, purpose: 'marketing_email', granted: false, source: 'erasure', wordingKey: MARKETING_WORDING_KEY } });
       }
       await erasePlatformRows(tx, { customerId: null, userId, emails });
       await erasePolymorphic(tx, new Map([['Complaint', complaints]]));

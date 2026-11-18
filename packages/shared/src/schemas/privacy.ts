@@ -6,7 +6,9 @@ import { z } from 'zod';
  * The code of the marketing consent wording the account page shows (copy `account.privacy.marketing.wording` in
  * en-AU.json). A change of wording is a new key: records keep the key of the text the person saw.
  */
-export const MARKETING_WORDING_KEY = 'marketing_email.v1';
+// v2 (task 7.fix-2): the wording says the unsubscribe link is in each marketing email and that service emails about
+// bookings and quotes are separate; what the person agrees to receive is unchanged. v1 records stay as history.
+export const MARKETING_WORDING_KEY = 'marketing_email.v2';
 
 export const marketingConsentSchema = z.strictObject({ granted: z.boolean(), wordingKey: z.string().min(1).max(64) });
 export type MarketingConsentInput = z.infer<typeof marketingConsentSchema>;

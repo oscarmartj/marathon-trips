@@ -109,17 +109,20 @@ export class MailService {
         }
         const guard = evaluateMailGuard(this.config, email.to);
         if (!guard.allowed) return this.suppress(tx, email.id, guard.reason ?? 'suppressed');
-        if (email.category === 'marketing') {
-          const hit = await tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, email.to) } });
-          if (hit) return this.suppress(tx, email.id, 'recipient_suppressed');
-        }
-
         const template = this.templates.get(email.templateKey, email.templateVersion);
+        if (email.category === 'marketing' || template?.suppressedBy === 'all') {
+          const hit = await tx.emailSuppression.findUnique({ where: { emailHash: emailHash(this.config.EMAIL_HASH_KEY, email.to) }, select: { scope: true } });
+          // Marketing stops on any suppression; a transactional email of a template that asks for it, only on `all` (task 5.5).
+          if (hit && (email.category === 'marketing' || hit.scope === 'all')) return this.suppress(tx, email.id, 'recipient_suppressed');
+        }
         if (!template) throw new AppError('mail_template_not_registered', 'No template is registered for this email');
         const token = unsubscribeToken(this.config.EMAIL_HASH_KEY, email.id);
         const rendered = await template.render({
           tx, unsubscribeToken: token,
-          email: { id: email.id, to: email.to, locale: email.locale, customerId: email.customerId, relatedEntityType: email.relatedEntityType, relatedEntityId: email.relatedEntityId },
+          email: {
+            id: email.id, to: email.to, locale: email.locale, customerId: email.customerId, relatedEntityType: email.relatedEntityType, relatedEntityId: email.relatedEntityId,
+            category: email.category, queuedAt: email.createdAt,
+          },
         });
         const { providerMessageId } = await this.sender.send({
           from: this.config.MAIL_FROM, to: email.to, subject: rendered.subject, text: rendered.text, html: rendered.html,

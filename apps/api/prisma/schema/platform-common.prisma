@@ -209,6 +209,8 @@ model OutboundEmail {
   // Task 8.5: the per-address cap on sign-in and confirmation emails counts here.
   @@index([to, templateKey, createdAt])
   @@index([relatedEntityType, relatedEntityId])
+  // task 7.fix-2: the per-customer cap of automation notices counts a customer's recent emails
+  @@index([customerId, createdAt])
   @@map("outbound_emails")
 }
 

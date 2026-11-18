@@ -40,6 +40,8 @@ model AutomationRule {
   testMode    Boolean               @default(true)
   /// @nopii when the rule was last switched on; events before it never start a run
   enabledAt   DateTime?             @db.Timestamptz(3)
+  /// @nopii task 7.fix-2: when whoever switched the rule on confirmed its customer notices are service messages; void after any later change of the rule or of the notice's wording
+  serviceNoticeAckAt DateTime?      @db.Timestamptz(3)
   ownerUserId String                @db.Uuid
   /// @nopii always staff (CHECK)
   ownerKind   UserKind              @default(staff)
@@ -74,6 +76,8 @@ model AutomationRun {
   triggerEventType String?
   /// @nopii scheduled time of a schedule run
   scheduledFor     DateTime?           @db.Timestamptz(3)
+  /// @nopii task 7.fix-2: when the trigger event happened; orders a backlog oldest first
+  eventOccurredAt  DateTime?           @db.Timestamptz(3)
   /// @nopii entity type the run is about, from the trigger catalogue
   entityType       String?
   entityId         String?             @db.Uuid
