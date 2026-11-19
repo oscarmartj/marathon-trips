@@ -17,9 +17,10 @@ import { ALL, SP, adminWith, buildWorld, must, setSuppliersFlag, supplierBody } 
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
+type Staff = Awaited<ReturnType<typeof adminWith>>;
 let t: TestApp;
-let admin: Client;
-let other: Client;
+let admin: Staff;
+let other: Staff;
 let packageId: string;
 beforeAll(async () => {
   t = await makeApp();
