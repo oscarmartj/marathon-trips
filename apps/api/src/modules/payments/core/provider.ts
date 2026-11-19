@@ -129,6 +129,11 @@ export interface NormalisedEvent {
   kind: 'payment' | 'refund' | 'unsupported';
   payment?: ProviderPayment;
   refund?: ProviderRefund;
+  /**
+   * Task 4.3: an `unsupported` event in which money moved without us (a capture reversal, a dispute opened): the core
+   * opens a task for staff to review instead of only ignoring it.
+   */
+  review?: 'reversal' | 'dispute';
 }
 
 /** `cancelled`: the gateway dropped it before any money moved. */

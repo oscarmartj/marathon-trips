@@ -61,7 +61,8 @@ function sum(list: Obj[], currency: string): bigint | null {
 
 /**
  * An order as our ProviderPayment (plan 5.6), or null if it is not one we can read. `origin` is the manifest's checkout
- * origin: an approval link is kept only under it, else the documented `checkoutnow?token=` URL is used.
+ * origin: an approval link outside it makes the order unreadable; without any link the documented `checkoutnow?token=`
+ * URL is used.
  */
 export function orderToPayment(o: unknown, origin: string): ProviderPayment | null {
   if (!isObj(o)) return null;
@@ -90,7 +91,10 @@ export function orderToPayment(o: unknown, origin: string): ProviderPayment | nu
   }
   if (status === 'VOIDED' || marker?.kind === 'c') return { ref: id, status: 'cancelled', amount: base, ...ours };
   if (status === 'CREATED' || status === 'SAVED' || status === 'APPROVED' || status === 'PAYER_ACTION_REQUIRED') {
-    const link = arr(o.links).filter(isObj).find((l) => (l.rel === 'approve' || l.rel === 'payer-action') && typeof l.href === 'string' && (l.href as string).startsWith(`${origin}/`));
+    const link = arr(o.links).filter(isObj).find((l) => l.rel === 'approve' || l.rel === 'payer-action');
+    // An approval link outside the checkout origin is refused (plan 5.2, review L3); an order PayPal lists without one
+    // (an approved order's read) gets the documented approval URL of its token.
+    if (link && !(typeof link.href === 'string' && link.href.startsWith(`${origin}/`))) return null;
     const url = link ? (link.href as string) : `${origin}/checkoutnow?token=${id}`;
     return { ref: id, status: 'requires_action', amount: base, ...ours, nextAction: { type: 'redirect', url } };
   }
@@ -174,6 +178,9 @@ export function parsePayPalEvent(e: unknown, origin: string): NormalisedEvent | 
     const refund = refundToProvider(e.resource);
     return refund ? { ...base, kind: 'refund', refund } : null;
   }
+  // Money moved without us (review M2): the core opens a task. Other events are only stored.
+  if (type === 'PAYMENT.CAPTURE.REVERSED') return { ...base, kind: 'unsupported', review: 'reversal' };
+  if (type === 'CUSTOMER.DISPUTE.CREATED') return { ...base, kind: 'unsupported', review: 'dispute' };
   return { ...base, kind: 'unsupported' };
 }
 

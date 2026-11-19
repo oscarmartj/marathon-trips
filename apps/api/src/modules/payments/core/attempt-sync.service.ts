@@ -93,7 +93,7 @@ export class PaymentAttemptSyncService {
     if (action === 'sync') {
       const read = await this.retrieve(p);
       // Task 4.3: an approved payment is finished (captured) only on sync, drive and expire.
-      const remote = read ? await this.attempts.completeIfDue(p.id, read) : null;
+      const remote = read ? await this.attempts.completeIfDue(p.id, read, 'sweep') : null;
       if (remote) await this.attempts.record(p.id, remote, 'sweep');
       return remote ? 'applied' : 'unresolved';
     }
@@ -145,7 +145,7 @@ export class PaymentAttemptSyncService {
     const read = await this.gw(() => this.retrieve(p));
     if (!read) return this.unresolved(p.id, p.pendingExpiresAt, now);
     // Task 4.3: at expiry an approved payment is finished first (never when the booking is cancelled or replaced).
-    const remote = action === 'expire' ? await this.gw(() => this.attempts.completeIfDue(p.id, read)) : read;
+    const remote = action === 'expire' ? await this.gw(() => this.attempts.completeIfDue(p.id, read, 'sweep')) : read;
     if (remote.status === 'requires_action') {
       const after = await this.gw(() => this.gateway.call(p.providerAccountId, 'cancel', (provider, ctx) => provider.cancelPayment(ctx, remote.ref, `${p.idempotencyKey}:cancel`)));
       return this.finish(p.id, after, action, p.pendingExpiresAt, now);

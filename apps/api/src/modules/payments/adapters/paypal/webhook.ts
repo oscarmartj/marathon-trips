@@ -198,6 +198,8 @@ export function signingKeyOf(pem: string, roots: readonly X509Certificate[], lea
 const CACHE_MAX = 16;
 const NEGATIVE_TTL_MS = 60_000;
 const MAX_CONCURRENT_DOWNLOADS = 2;
+/** New downloads allowed per minute in all (review L4): forged certificate URLs cannot keep the downloads busy. */
+const MAX_DOWNLOADS_PER_MINUTE = 10;
 
 /** Signing certificates by URL (plan 7.3): bounded, least recently used out, failures remembered for 60 s, one download per URL. */
 export class CertificateStore {
@@ -205,6 +207,7 @@ export class CertificateStore {
   private readonly failed = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<void>>();
   private active = 0;
+  private recent: number[] = [];
   private parsedRoots?: X509Certificate[];
 
   constructor(private readonly trust: CertificateTrust, private readonly now: () => Date) {}
@@ -253,6 +256,9 @@ export class CertificateStore {
     const running = this.inflight.get(url);
     if (running) return running;
     if (this.active >= MAX_CONCURRENT_DOWNLOADS) return;
+    this.recent = this.recent.filter((t) => now - t < 60_000);
+    if (this.recent.length >= MAX_DOWNLOADS_PER_MINUTE) return;
+    this.recent.push(now);
     const job = this.download(url, mode).finally(() => {
       this.inflight.delete(url);
       this.active--;
@@ -282,6 +288,22 @@ export class CertificateStore {
 export const defaultTrust = (): CertificateTrust => ({ roots: rootCertificates, fetch: defaultCertificateFetch, leafNames: PAYPAL_LEAF_NAMES });
 
 // ---- Verification ----
+
+/**
+ * The cheap checks of a delivery, before any certificate is downloaded for it (review L4): every header present and
+ * well-formed, the algorithm, the certificate URL of this mode, and a transmission time within the window.
+ */
+export function worthPreparing(mode: PaymentModeName, headers: Readonly<Record<string, string>>, now: Date): boolean {
+  for (const name of Object.values(PAYPAL_HEADERS)) {
+    const v = headers[name];
+    if (typeof v !== 'string' || v.length === 0 || v.length > HEADER_MAX[name]! || !PRINTABLE.test(v)) return false;
+  }
+  if (headers[PAYPAL_HEADERS.authAlgo] !== PAYPAL_AUTH_ALGO || !BASE64.test(headers[PAYPAL_HEADERS.transmissionSig]!)) return false;
+  if (!certUrlAllowed(headers[PAYPAL_HEADERS.certUrl], mode)) return false;
+  const time = headers[PAYPAL_HEADERS.transmissionTime]!;
+  const sentAt = TIME.test(time) ? Date.parse(time) : NaN;
+  return !Number.isNaN(sentAt) && Math.abs(now.getTime() - sentAt) <= PAYPAL_TOLERANCE_SECONDS * 1000;
+}
 
 export type SignatureCheck = { ok: true } | { ok: false; code: 'bad_signature' | 'stale_timestamp' };
 

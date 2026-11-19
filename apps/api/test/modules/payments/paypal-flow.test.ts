@@ -28,7 +28,10 @@ let admin: Awaited<ReturnType<typeof paymentsStaff>>;
 let c: PayingCustomer;
 const fake = new FakePayPal();
 let loseNextCreateAnswer = false;
+/** A test sets this: every read of an order fails with a 500 (review L2). */
+let failOrderReads = false;
 const transport: PayPalTransport = async (req) => {
+  if (failOrderReads && req.method === 'GET' && /\/v2\/checkout\/orders\//.test(req.url)) return { status: 500, body: '{}' };
   const res = await fake.transport(req);
   if (loseNextCreateAnswer && req.method === 'POST' && req.url.endsWith('/v2/checkout/orders') && !req.body?.includes('"purchase_units":[]')) {
     loseNextCreateAnswer = false;
@@ -85,6 +88,8 @@ beforeEach(async () => {
   await activate(acc.id);
   await onlyAccount(t, acc.id);
   fake.certDown = false;
+  fake.captureIssue = undefined;
+  failOrderReads = false;
 });
 afterAll(async () => {
   if (registered) (t.app.get(PaymentAdapterRegistry) as unknown as { byKey: Map<string, PaymentProvider> }).byKey.set('paypal', registered);
@@ -247,6 +252,52 @@ describe('PayPal checkout through the API (plan 4.3)', () => {
       expect((await t.prisma.webhookRejection.findFirstOrThrow({ where: { claimedEventId: w.eventId } })).reason).toBe('bad_signature');
     } finally {
       byKey.set('paypal', current);
+    }
+  });
+
+  it('review M1: a capture refused with an unknown 422: sync records the read, expiry cancels, the booking can pay again', async () => {
+    const sync = t.app.get(PaymentAttemptSyncService);
+    const a = await checkout();
+    fake.approve(acc.clientId, a.p.providerPaymentRef!, 'good');
+    fake.captureIssue = 'PAYEE_ACCOUNT_RESTRICTED';
+    expect(await sync.run(a.p.id, 'sync')).toBe('applied');
+    expect((await refresh(a.reference)).status).toBe(200);
+    expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } })).status).toBe('requires_action');
+    await expireNow(a.p.id);
+    await sync.run(a.p.id, 'expire');
+    const ended = await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } });
+    expect([ended.status, ended.liveBookingId]).toEqual(['expired', null]);
+    fake.captureIssue = undefined;
+    expect((await c.pay(a.reference, { method: 'card' })).status).toBe(201);
+  });
+
+  it('review L1: an order of another amount is never captured; record opens the mismatch task', async () => {
+    const a = await checkout();
+    fake.approve(acc.clientId, a.p.providerPaymentRef!, 'good');
+    fake.order(acc.clientId, a.p.providerPaymentRef!)!.amount += 100n;
+    const before = captures();
+    await t.app.get(PaymentAttemptSyncService).run(a.p.id, 'sync');
+    expect(captures() - before).toBe(0);
+    expect(await t.prisma.task.count({ where: { entityId: a.p.id, status: 'open' } })).toBeGreaterThan(0);
+  });
+
+  it('review L2: right after the create no read is made, so a failing read cannot fail the checkout', async () => {
+    const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+    failOrderReads = true;
+    const res = await c.pay(reference, { method: 'card' });
+    expect(res.status).toBe(201);
+    expect((await t.prisma.payment.findFirstOrThrow({ where: { bookingId } })).providerPaymentRef).not.toBeNull();
+  });
+
+  it('review M2: a capture reversal and an opened dispute open a review task', async () => {
+    const { p, reference } = await checkout();
+    fake.approve(acc.clientId, p.providerPaymentRef!, 'good');
+    await refresh(reference);
+    for (const type of ['PAYMENT.CAPTURE.REVERSED', 'CUSTOMER.DISPUTE.CREATED']) {
+      const w = fake.event(acc.clientId, acc.secret, p.providerPaymentRef!, new Date(), { type });
+      expect(await deliverTo(acc, w)).toBe('ignored');
+      const ev = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: acc.id, providerEventId: w.eventId } } });
+      expect(await t.prisma.task.count({ where: { sourceRef: `payments:gateway_review:${ev.id}`, status: 'open' } })).toBe(1);
     }
   });
 

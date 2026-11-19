@@ -135,7 +135,7 @@ export class PaymentWebhooksService {
     const parsed = ev.rawBody && provider ? provider.parseEvent(Buffer.from(ev.rawBody)) : null;
     if (!parsed) return this.ignore(ev.id, ev.rawBody ? 'malformed' : 'body_purged');
     if (parsed.kind === 'refund' && parsed.refund) return this.processRefund(ev, parsed.refund);
-    if (parsed.kind !== 'payment' || !parsed.payment) return this.ignore(ev.id, 'unsupported');
+    if (parsed.kind !== 'payment' || !parsed.payment) return parsed.review ? this.reviewTask(ev.id, parsed.review) : this.ignore(ev.id, 'unsupported');
     const remote = parsed.payment;
 
     // Match first by our id, only among this account's payments; then by the gateway reference (plan 0.1, P5).
@@ -180,6 +180,21 @@ export class PaymentWebhooksService {
       await this.tasks.closeSystemIn(tx, `payments:webhook_failed:${ev.id}`);
       return 'processed' as const;
     }, PAYMENT_TX_OPTIONS);
+  }
+
+  /**
+   * Task 4.3 (review M2): money moved at the gateway without us (a capture reversal or a dispute) in an event the core
+   * does not process yet. Stored as ignored, with a task for staff to check the booking and the gateway.
+   */
+  private reviewTask(webhookEventId: string, review: 'reversal' | 'dispute'): Promise<ProcessOutcome> {
+    return runTransaction(this.prisma, async (tx) => {
+      await this.tasks.createSystemIn(tx, {
+        title: review === 'reversal' ? 'Payment reversed by the gateway' : 'Payment disputed at the gateway',
+        description: 'A payment gateway reported money taken back or disputed. Check the booking and the gateway: the booking may still show as paid.',
+        entityType: 'WebhookEvent', entityId: webhookEventId, sourceRef: `payments:gateway_review:${webhookEventId}`,
+      });
+      return this.ignoreIn(tx, webhookEventId, `review_${review}`);
+    });
   }
 
   /**

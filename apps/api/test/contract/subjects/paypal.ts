@@ -132,9 +132,10 @@ export function paypalSandboxSubject(): ContractSubject {
   async function checkRecorded(ctx: ProviderContext): Promise<void> {
     // Real PayPal signatures, with the registered class's default trust (Node's root store): A2, A3 and A4.
     const recorded = JSON.parse(readFileSync(env.PAYPAL_SANDBOX_RECORDED_DELIVERY!, 'utf8')) as RecordedDelivery[];
-    const real = new PayPalProvider();
     const kinds = new Set<string>();
     for (const d of recorded) {
+      // The default trust (Node's root store), with the clock at the delivery's own transmission time.
+      const real = new PayPalProvider({ now: () => new Date(d.headers[PAYPAL_HEADERS.transmissionTime]!) });
       const body = Buffer.from(d.bodyBase64, 'base64');
       await real.prepareWebhook(ctx, d.headers);
       const v = real.verifyWebhook(ctx, body, d.headers, new Date(d.headers[PAYPAL_HEADERS.transmissionTime]!));

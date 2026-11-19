@@ -53,6 +53,8 @@ export class FakePayPal {
   certDownloads = 0;
   /** A test sets this to make the certificate download fail. */
   certDown = false;
+  /** A test sets this: every capture is refused with this 422 issue (an issue the adapter does not know, review M1). */
+  captureIssue: string | undefined;
 
   constructor(private readonly opts: FakePayPalOptions = {}) {}
 
@@ -336,6 +338,7 @@ export class FakePayPal {
     if (o.status === 'COMPLETED') return issue(422, 'UNPROCESSABLE_ENTITY', 'ORDER_ALREADY_CAPTURED');
     if (o.status !== 'APPROVED') return issue(422, 'UNPROCESSABLE_ENTITY', 'ORDER_NOT_APPROVED');
     this.captureExecutions++;
+    if (this.captureIssue) return issue(422, 'UNPROCESSABLE_ENTITY', this.captureIssue);
     // A7: a declined instrument leaves the order approved and update_time unchanged; the payer must approve again.
     if (o.instrument === 'decline') return issue(422, 'UNPROCESSABLE_ENTITY', 'INSTRUMENT_DECLINED');
     const status = o.instrument === 'risk' ? 'DECLINED' : o.instrument === 'pending' ? 'PENDING' : 'COMPLETED';

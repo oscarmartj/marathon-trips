@@ -14,7 +14,7 @@ import {
 } from './mapping';
 import type { PayPalIssue } from './mapping';
 import { TWO_DECIMAL_CURRENCIES, fromPayPalValue, toPayPalValue } from './money';
-import { CertificateStore, PAYPAL_HEADERS, defaultTrust, verifyPayPalSignature } from './webhook';
+import { CertificateStore, PAYPAL_HEADERS, defaultTrust, verifyPayPalSignature, worthPreparing } from './webhook';
 import type { CertificateTrust } from './webhook';
 
 export const PAYPAL_KEY = 'paypal';
@@ -394,6 +394,7 @@ export class PayPalProvider implements PaymentProvider {
   /** Plan 7.3: fetches PayPal's signing certificate for this delivery before verifyWebhook. Never throws. */
   async prepareWebhook(ctx: ProviderContext, headers: Readonly<Record<string, string>>): Promise<void> {
     try {
+      if (!worthPreparing(ctx.mode, headers, this.now())) return;
       await this.certificates.prepare(headers[PAYPAL_HEADERS.certUrl], ctx.mode);
     } catch {
       // Verification then fails closed.

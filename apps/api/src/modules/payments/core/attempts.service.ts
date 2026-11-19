@@ -376,10 +376,13 @@ export class PaymentAttemptsService {
       }
     }
     if (!remote) return undefined;
-    try {
-      remote = await this.completeIfDue(p.id, remote);
-    } catch (err) {
-      throw this.forCustomer(err);
+    // Right after the create the object is new: nothing to finish, and no extra call may fail the checkout (review L2).
+    if (p.providerPaymentRef) {
+      try {
+        remote = await this.completeIfDue(p.id, remote, 'api');
+      } catch (err) {
+        throw this.forCustomer(err);
+      }
     }
     const ok = await this.record(p.id, remote, 'api');
     const url = remote.nextAction?.url;
@@ -394,12 +397,14 @@ export class PaymentAttemptsService {
    * Called from sync, drive and expire; never from cancel, replace, orphan or refund paths. Returns the gateway's answer
    * after it, or `remote` unchanged when nothing is due.
    */
-  async completeIfDue(paymentId: string, remote: ProviderPayment): Promise<ProviderPayment> {
+  async completeIfDue(paymentId: string, remote: ProviderPayment, source: 'api' | 'sweep'): Promise<ProviderPayment> {
     if (remote.status !== 'requires_action') return remote;
-    const p = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { status: true, bookingId: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true } });
+    const p = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { status: true, bookingId: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true } });
     if (!p || !LIVE_STATUSES.includes(p.status)) return remote;
     // Only an object whose reference we hold (or that the gateway just named for this attempt) is ever finished.
     if (p.providerPaymentRef !== null && p.providerPaymentRef !== remote.ref) return remote;
+    // Never finish an object of another amount or currency (review L1): `record` then opens the mismatch task.
+    if (remote.amount.amountMinor !== p.amountMinor || remote.amount.currency !== p.currency) return remote;
     const b = await readBookingForPayments(this.prisma, { id: p.bookingId });
     if (!b) return remote;
     try {
@@ -407,9 +412,17 @@ export class PaymentAttemptsService {
     } catch {
       return remote;
     }
-    const done = await this.gateway.complete(p.providerAccountId, remote.ref, p.idempotencyKey);
-    return done ?? remote;
+    try {
+      return (await this.gateway.complete(p.providerAccountId, remote.ref, p.idempotencyKey)) ?? remote;
+    } catch (err) {
+      // A definitive refusal to finish it (an unknown 422 at PayPal, review M1) leaves what was read: the attempt still
+      // waits for the customer, and expiry cancels it. A retryable failure records the read first, then goes up.
+      if (err instanceof ProviderError && !err.retryable) return remote;
+      await this.record(paymentId, remote, source);
+      throw err;
+    }
   }
+
 
   /**
    * After a definitive refusal of createPayment (credentials, a concurrent request with the same key…), asks the

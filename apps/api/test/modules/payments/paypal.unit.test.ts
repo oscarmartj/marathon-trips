@@ -492,3 +492,117 @@ describe('events (plan 7.1, review point 3)', () => {
     expect(parsePayPalEvent({ id: 'not-wh', event_type: 'PAYMENT.CAPTURE.COMPLETED', create_time: at, resource: capture('COMPLETED') }, origin)).toBeNull();
   });
 });
+
+describe('review round on PR #76', () => {
+  it('M1: an unknown 422 on capture is a definitive refusal of the adapter (the core then leaves the read)', async () => {
+    const { provider, ctx, input, fake } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.approve(ctx.credentials.clientId!, p.ref, 'good');
+    fake.captureIssue = 'PAYEE_ACCOUNT_RESTRICTED';
+    expect(await code(provider.completePayment(ctx, p.ref, 'k'))).toEqual(['provider_rejected', false]);
+    expect((await provider.retrievePayment(ctx, { ref: p.ref }))?.status).toBe('requires_action');
+  });
+
+  it('L3: an approval link outside the checkout origin is refused', async () => {
+    const { fake, ctx, input } = world();
+    const provider = new PayPalProvider({
+      transport: async (req) => {
+        const res = await fake.transport(req);
+        return req.url.endsWith('/v2/checkout/orders') ? { ...res, body: res.body.replace('https://www.sandbox.paypal.com/checkoutnow', 'https://evil.example.com/checkoutnow') } : res;
+      },
+    });
+    expect(await code(provider.createPayment(ctx, input()))).toEqual(['provider_unavailable', true]);
+  });
+
+  it('L4: no download for a delivery that fails the cheap checks; at most ten new downloads a minute', async () => {
+    const w = world();
+    const p = await w.provider.createPayment(w.ctx, w.input());
+    const old = w.fake.event(w.ctx.credentials.clientId!, w.ctx.webhookSecret, p.ref, new Date(w.fake.now().getTime() - 301_000));
+    await w.provider.prepareWebhook(w.ctx, old.headers);
+    await w.provider.prepareWebhook(w.ctx, { ...old.headers, [PAYPAL_HEADERS.transmissionTime]: w.fake.now().toISOString(), [PAYPAL_HEADERS.authAlgo]: 'SHA1withRSA' });
+    expect(w.fake.certDownloads).toBe(0);
+    let downloads = 0;
+    const store = new CertificateStore({ roots: [], leafNames: PAYPAL_LEAF_NAMES, fetch: async () => (downloads++, 'not a pem') }, () => new Date());
+    for (let i = 0; i < 15; i++) await store.prepare(`https://api.sandbox.paypal.com/v1/notifications/certs/CERT-l4-${i}`, 'test');
+    expect(downloads).toBe(10);
+  });
+
+  it('L6: the seventeenth certificate evicts the least recently used', async () => {
+    const c = paypalTestChain();
+    let now = new Date();
+    const store = new CertificateStore({ roots: [c.root.pem], leafNames: PAYPAL_LEAF_NAMES, fetch: async () => c.chainPem }, () => now);
+    const url = (n: number) => `https://api.sandbox.paypal.com/v1/notifications/certs/CERT-lru-${n}`;
+    for (let i = 1; i <= 17; i++) {
+      await store.prepare(url(i), 'test');
+      now = new Date(now.getTime() + 7_000);
+    }
+    expect(store.key(url(1), now)).toBeNull();
+    expect(store.key(url(2), now)).not.toBeNull();
+    expect(store.key(url(17), now)).not.toBeNull();
+  });
+
+  it('L6: the default download refuses redirects and oversized bodies', async () => {
+    const { createServer } = await import('node:http');
+    const { defaultCertificateFetch } = await import('../../../src/modules/payments/adapters/paypal/webhook');
+    const server = createServer((req, res) => {
+      if (req.url === '/redirect') {
+        res.writeHead(302, { location: '/pem' });
+        res.end();
+      } else if (req.url === '/big') {
+        res.writeHead(200);
+        res.end('x'.repeat(70 * 1024));
+      } else {
+        res.writeHead(200);
+        res.end('hello');
+      }
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    try {
+      await expect(defaultCertificateFetch(`http://127.0.0.1:${port}/redirect`)).rejects.toThrow();
+      await expect(defaultCertificateFetch(`http://127.0.0.1:${port}/big`)).rejects.toThrow();
+      // Not a PEM: downloaded, then refused by the chain check.
+      const text = await defaultCertificateFetch(`http://127.0.0.1:${port}/pem`);
+      expect(signingKeyOf(text, [], PAYPAL_LEAF_NAMES.test, Date.now())).toBeNull();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('L6: a retry under the same key for more than is left returns the refund already made', async () => {
+    const { provider, ctx, input, fake } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.approve(ctx.credentials.clientId!, p.ref, 'good');
+    await provider.completePayment(ctx, p.ref, 'k');
+    const r = { paymentRef: p.ref, amount: { amountMinor: 1000n, currency: 'AUD' }, idempotencyKey: `r:${randomUUID()}`, metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() };
+    const first = await provider.createRefund(ctx, r);
+    const again = await provider.createRefund(ctx, r);
+    expect(again.ref).toBe(first.ref);
+    expect(fake.requests.filter((x) => x.url.endsWith('/refund'))).toHaveLength(1);
+  });
+
+  it('L6: more than twenty refunds make a lookup by key "unknown"', async () => {
+    const { provider, ctx, input, fake } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.approve(ctx.credentials.clientId!, p.ref, 'good');
+    await provider.completePayment(ctx, p.ref, 'k');
+    for (let i = 0; i < 21; i++) fake.dashboardRefund(ctx.credentials.clientId!, p.ref, 1n);
+    expect(await code(provider.retrieveRefund(ctx, { idempotencyKey: 'r:x', paymentRef: p.ref, createdAt: new Date() }))).toEqual(['provider_unavailable', true]);
+  });
+
+  it('L6: two concurrent completePayment capture once', async () => {
+    const { provider, ctx, input, fake } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.approve(ctx.credentials.clientId!, p.ref, 'good');
+    const [a, b] = await Promise.all([provider.completePayment(ctx, p.ref, 'k'), provider.completePayment(ctx, p.ref, 'k')]);
+    expect([a.status, b.status]).toEqual(['succeeded', 'succeeded']);
+    expect(fake.captureExecutions).toBe(1);
+  });
+
+  it('M2: reversals and opened disputes are flagged for review', () => {
+    const at = new Date().toISOString();
+    expect(parsePayPalEvent({ id: 'WH-1', event_type: 'PAYMENT.CAPTURE.REVERSED', create_time: at, resource: {} }, 'https://www.sandbox.paypal.com')).toMatchObject({ kind: 'unsupported', review: 'reversal' });
+    expect(parsePayPalEvent({ id: 'WH-1', event_type: 'CUSTOMER.DISPUTE.CREATED', create_time: at, resource: {} }, 'https://www.sandbox.paypal.com')).toMatchObject({ kind: 'unsupported', review: 'dispute' });
+    expect(parsePayPalEvent({ id: 'WH-1', event_type: 'CUSTOMER.DISPUTE.UPDATED', create_time: at, resource: {} }, 'https://www.sandbox.paypal.com')?.review).toBeUndefined();
+  });
+});
