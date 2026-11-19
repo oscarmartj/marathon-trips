@@ -7,6 +7,7 @@ import type { z } from 'zod';
 import { RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
 import { unprocessable } from '../../platform/http/api-error';
+import { contentDisposition } from '../../platform/http/content-disposition';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import { NoStoreGuard } from './controllers';
@@ -92,7 +93,7 @@ export class PaymentRefundsAdminController {
   async evidence(@Param('id', uuid()) id: string, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
     const pack = await this.disputes.evidence(id, actorOf(req));
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${pack.filename}"`);
+    res.setHeader('Content-Disposition', contentDisposition('attachment', pack.filename));
     return pack.body;
   }
 }
