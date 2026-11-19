@@ -159,6 +159,8 @@ model ProviderAccount {
   payments                 Payment[]
   webhookEvents            WebhookEvent[]
   webhookRejections        WebhookRejection[]
+  routingRules             RoutingRule[]
+  health                   ProviderAccountHealth?
 
   @@unique([id, mode])
   @@map("provider_accounts")
@@ -590,4 +592,72 @@ model PaymentMethodConfig {
   updatedAt     DateTime      @updatedAt @db.Timestamptz(3)
 
   @@map("payment_method_configs")
+}
+
+/// Which account takes a new payment (task 4.2, plan docs/plans/4.2-routing-rules.md): method, customer's country,
+/// booking currency, inclusive limits in that currency, priority (lower first) and an optional primary rule this one
+/// backs up (one level, same method and currency, another account; trigger in 0036). Rules only filter where a
+/// server-computed amount may be charged: they never change it. Editing needs step-up and is audited.
+model RoutingRule {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  providerAccountId String          @db.Uuid
+  providerAccount   ProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii
+  method            PaymentMethod
+  /// @nopii ISO 3166 alpha-2 codes of the customers' countries of residence; null means any country (never empty)
+  countries         String[]
+  /// @nopii true when the rule serves every country (countries is then empty)
+  anyCountry        Boolean         @default(true)
+  /// @nopii ISO 4217: the booking currency it serves; its limits are in it
+  currency          String          @db.Char(3)
+  /// @nopii inclusive lower limit, minor units of currency
+  minAmountMinor    BigInt?
+  /// @nopii inclusive upper limit, minor units of currency
+  maxAmountMinor    BigInt?
+  /// @nopii 0..1000, lower first
+  priority          Int             @default(100)
+  /// @nopii
+  enabled           Boolean         @default(true)
+  /// the primary rule this one backs up (null: a primary rule)
+  fallbackForRuleId String?         @db.Uuid
+  fallbackFor       RoutingRule?    @relation("RoutingRuleFallback", fields: [fallbackForRuleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  fallbacks         RoutingRule[]   @relation("RoutingRuleFallback")
+  /// @nopii optimistic lock for the admin panel
+  version           Int             @default(0)
+  createdById       String?         @db.Uuid
+  updatedById       String?         @db.Uuid
+  /// @nopii timestamp; default rules take their account's, so ties keep the account order of task 3.1
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt         DateTime        @updatedAt @db.Timestamptz(3)
+
+  @@index([currency, method, enabled])
+  @@index([providerAccountId])
+  @@index([fallbackForRuleId])
+  @@map("payment_routing_rules")
+}
+
+/// Whether a gateway account answers (task 4.2, plan section 3 and 15.2): a circuit breaker fed only by the gateway
+/// wrapper. It decides which account takes a new attempt; it never changes an account's status or an attempt.
+model ProviderAccountHealth {
+  providerAccountId   String          @id @db.Uuid
+  providerAccount     ProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii failures in a row since the last success
+  consecutiveFailures Int             @default(0)
+  /// @nopii timestamp
+  lastFailureAt       DateTime?       @db.Timestamptz(3)
+  /// @nopii provider_unavailable, provider_timeout or provider_auth_failed (CHECK)
+  lastFailureCode     String?
+  /// @nopii when the breaker opened, cleared by a success
+  openedAt            DateTime?       @db.Timestamptz(3)
+  /// @nopii skipped for new attempts until then; 9999-12-31 after provider_auth_failed (no automatic half-open)
+  openUntil           DateTime?       @db.Timestamptz(3)
+  /// @nopii while half-open: the one probe attempt holds it until then
+  probeUntil          DateTime?       @db.Timestamptz(3)
+  /// @nopii timestamp
+  lastSuccessAt       DateTime?       @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt           DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@map("provider_account_health")
 }
