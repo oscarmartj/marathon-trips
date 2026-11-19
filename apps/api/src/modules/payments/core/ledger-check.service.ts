@@ -63,7 +63,6 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
     const narrowed = !!opts.bookingIds;
     const after = narrowed ? '' : await this.settings.get<string>(LEDGER_CHECK_CURSOR.key, LEDGER_CHECK_CURSOR.fallback);
     const { findings, next } = await this.checkPage({ ...opts, after: after || null });
-    if (!narrowed) await this.settings.set(LEDGER_CHECK_CURSOR.key, next ?? '');
     for (const f of findings) {
       await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
         title: `Payment ledger check: ${f.kind.replace(/_/g, ' ')}`,
@@ -71,6 +70,8 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
         entityType: f.entityType, entityId: f.entityId, sourceRef: `payments:ledger_check:${f.kind}:${f.entityId}`,
       }));
     }
+    // Only once every task exists (task 4.1, from 3.3's review): a run that fails half-way checks the same page again.
+    if (!narrowed) await this.settings.set(LEDGER_CHECK_CURSOR.key, next ?? '');
     if (findings.length > 0) this.logger.warn(`ledger check: ${findings.length} finding(s)`);
     return findings;
   }

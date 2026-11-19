@@ -1,5 +1,9 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from '@nestjs/common';
-import { acceptTermsSchema, confirmTransferSchema, manualMethodConfigSchema, voidTransferSchema, paymentLinkPaySchema, paymentLinkTokenSchema, sendPaymentLinkSchema, startPaymentSchema } from '@mt/shared';
+import { Body, CanActivate, Controller, ExecutionContext, Get, Headers, HttpCode, Inject, Injectable, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
+import {
+  acceptTermsSchema, confirmTransferSchema, createProviderAccountSchema, manualMethodConfigSchema, paymentLinkPaySchema, paymentLinkTokenSchema, providerAccountCredentialsSchema,
+  providerAccountStatusSchema, providerAccountVersionSchema, providerAccountWebhookSecretSchema, renameProviderAccountSchema, sendPaymentLinkSchema, startPaymentSchema, voidTransferSchema,
+} from '@mt/shared';
+import type { Response } from 'express';
 import type { z } from 'zod';
 import { Public, OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
@@ -13,11 +17,14 @@ import { PaymentAttemptsService } from './core/attempts.service';
 import { TermsService } from './core/terms.service';
 import { PaymentWebhooksService } from './core/webhooks.service';
 import { PAYMENTS_PERMISSIONS as P } from './manifest';
-import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
+import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, ProviderAccountRateLimitGuard } from './rate-limit.guard';
 import { PaymentLinksService } from './core/payment-links.service';
 import { ManualMethodsService } from './core/manual-methods.service';
 import { ManualTransfersService } from './core/manual-transfers.service';
 import { PaymentAdminService } from './admin.service';
+import { ProviderAccountsAdminService } from './core/account-admin.service';
+import { ProviderAccountsService } from './core/accounts.service';
+import { CollectionCoverageGuard } from './core/coverage-guard';
 
 const uuid = () => new ParseUUIDPipe();
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9-]{16,64}$/;
@@ -124,6 +131,7 @@ export class PaymentsAdminController {
     @Inject(PaymentLinksService) private readonly links: PaymentLinksService,
     @Inject(ManualMethodsService) private readonly methods: ManualMethodsService,
     @Inject(ManualTransfersService) private readonly transfers: ManualTransfersService,
+    @Inject(CollectionCoverageGuard) private readonly coverage: CollectionCoverageGuard,
   ) {}
 
   @Get('payments/bookings/:id') @RequirePermission(P.paymentRead)
@@ -148,9 +156,13 @@ export class PaymentsAdminController {
     return { items: await this.methods.list() };
   }
 
+  /** Switching a method off where it is the last way to pay needs `confirmCoverageLoss` (task 4.1, plan 15.5). */
   @Put('payments/methods/:method') @RequirePermission(P.methodManage)
   putManualMethod(@Param('method') method: string, @Body(new ZodPipe(manualMethodConfigSchema)) b: In<typeof manualMethodConfigSchema>, @Req() req: ApiRequest) {
-    return this.methods.put(method, b, actorOf(req));
+    return this.methods.put(method, b, actorOf(req), async (tx, change) => {
+      await this.coverage.lock(tx);
+      return this.coverage.guard(tx, b.confirmCoverageLoss === true, change);
+    });
   }
 
   @Get('payments/methods/:method/test') @RequirePermission(P.methodRead)
@@ -168,8 +180,76 @@ export class PaymentsAdminController {
     return this.transfers.void(id, b, actorOf(req));
   }
 
-  @Get('payments/provider-accounts') @RequirePermission(P.accountRead)
+}
+
+/** Responses about gateway accounts are never cached, errors included (task 4.1, plan 15.7): one carries a webhook URL once. */
+@Injectable()
+export class NoStoreGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    context.switchToHttp().getResponse<Response>().setHeader('Cache-Control', 'no-store');
+    return true;
+  }
+}
+
+/**
+ * Gateway accounts in the panel (task 4.1, plan docs/plans/4.1-provider-accounts-panel.md, section 3). Test mode only;
+ * no route deletes an account; no response holds a credential, and the webhook URL is returned only when it is made.
+ */
+@Controller('admin/payments')
+@UseGuards(NoStoreGuard)
+export class ProviderAccountsAdminController {
+  constructor(
+    @Inject(ProviderAccountsAdminService) private readonly admin: ProviderAccountsAdminService,
+    @Inject(ProviderAccountsService) private readonly accounts: ProviderAccountsService,
+  ) {}
+
+  @Get('adapters') @RequirePermission(P.accountRead)
+  adapters() {
+    return { items: this.admin.adapters() };
+  }
+
+  @Get('provider-accounts') @RequirePermission(P.accountRead)
   async providerAccounts() {
     return { items: await this.admin.accounts() };
+  }
+
+  @Get('provider-accounts/warnings') @RequirePermission(P.accountRead)
+  async warnings() {
+    return { items: await this.admin.warnings() };
+  }
+
+  @Post('provider-accounts') @RequirePermission(P.accountManageCredentials) @UseGuards(ProviderAccountRateLimitGuard)
+  create(@Body(new ZodPipe(createProviderAccountSchema)) b: In<typeof createProviderAccountSchema>, @Req() req: ApiRequest) {
+    return this.accounts.createFromPanel({ adapterKey: b.adapterKey, displayName: b.displayName, mode: b.mode, credentials: b.credentials ?? {} }, actorOf(req));
+  }
+
+  @Patch('provider-accounts/:id') @RequirePermission(P.accountManage)
+  rename(@Param('id', uuid()) id: string, @Body(new ZodPipe(renameProviderAccountSchema)) b: In<typeof renameProviderAccountSchema>, @Req() req: ApiRequest) {
+    return this.admin.rename(id, b, actorOf(req));
+  }
+
+  @Post('provider-accounts/:id/status') @HttpCode(200) @RequirePermission(P.accountManage)
+  setStatus(@Param('id', uuid()) id: string, @Body(new ZodPipe(providerAccountStatusSchema)) b: In<typeof providerAccountStatusSchema>, @Req() req: ApiRequest) {
+    return this.admin.setStatus(id, b, actorOf(req));
+  }
+
+  @Post('provider-accounts/:id/connection-test') @HttpCode(200) @RequirePermission(P.accountManage) @UseGuards(ProviderAccountRateLimitGuard)
+  connectionTest(@Param('id', uuid()) id: string, @Req() req: ApiRequest) {
+    return this.admin.connectionTest(id, actorOf(req));
+  }
+
+  @Put('provider-accounts/:id/credentials') @RequirePermission(P.accountManageCredentials) @UseGuards(ProviderAccountRateLimitGuard)
+  credentials(@Param('id', uuid()) id: string, @Body(new ZodPipe(providerAccountCredentialsSchema)) b: In<typeof providerAccountCredentialsSchema>, @Req() req: ApiRequest) {
+    return this.accounts.changeCredentials(id, b, actorOf(req));
+  }
+
+  @Put('provider-accounts/:id/webhook-secret') @RequirePermission(P.accountManageCredentials) @UseGuards(ProviderAccountRateLimitGuard)
+  webhookSecret(@Param('id', uuid()) id: string, @Body(new ZodPipe(providerAccountWebhookSecretSchema)) b: In<typeof providerAccountWebhookSecretSchema>, @Req() req: ApiRequest) {
+    return this.accounts.setWebhookSecret(id, b, actorOf(req));
+  }
+
+  @Post('provider-accounts/:id/webhook-url') @HttpCode(200) @RequirePermission(P.accountManageCredentials) @UseGuards(ProviderAccountRateLimitGuard)
+  webhookUrl(@Param('id', uuid()) id: string, @Body(new ZodPipe(providerAccountVersionSchema)) b: In<typeof providerAccountVersionSchema>, @Req() req: ApiRequest) {
+    return this.admin.regenerateWebhookUrl(id, b, actorOf(req));
   }
 }

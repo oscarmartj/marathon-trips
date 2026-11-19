@@ -75,6 +75,12 @@ export function stripeManifest(): AdapterManifest {
     currencies: ['AUD'],
     countries: 'any',
     checkoutOrigin: 'https://checkout.stripe.com',
+    // Task 4.1: the secret key is typed in the panel; the webhook signing secret is issued by Stripe once the account's
+    // webhook URL is registered, so it is entered afterwards. Test-mode patterns only.
+    account: {
+      fields: [{ key: 'secretKey', label: 'Secret key (test mode, sk_test_… or rk_test_…)', pattern: '^(sk|rk)_test_[A-Za-z0-9]{10,250}$' }],
+      webhookSecret: { source: 'entered', label: 'Webhook signing secret (whsec_…)', pattern: '^whsec_[A-Za-z0-9]{10,250}$' },
+    },
     capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'stays_payable' },
   };
 }

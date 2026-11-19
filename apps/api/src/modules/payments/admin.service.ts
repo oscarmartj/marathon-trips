@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { notFound } from '../../platform/http/api-error';
-import { ACCOUNT_VIEW_SELECT } from './core/accounts.service';
 import { allocateByPayment } from './core/allocation';
 import { PaymentCoverageService } from './core/coverage.service';
 import { ProviderGateway } from './core/gateway';
@@ -53,13 +52,5 @@ export class PaymentAdminService {
       refunds: refunds.map((r) => ({ ...r, amountMinor: str(r.amountMinor) })),
       ledger: ledger.map((t) => ({ ...t, entries: t.entries.map((e) => ({ ...e, amountMinor: str(e.amountMinor) })) })),
     };
-  }
-
-  async accounts() {
-    const rows = await this.prisma.providerAccount.findMany({ select: ACCOUNT_VIEW_SELECT, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
-    return rows.map((r) => {
-      const m = this.gateway.registry.get(r.adapterKey)?.manifest;
-      return { ...r, adapterStatus: m?.status ?? 'unknown', adapterTestOnly: m?.testOnly ?? true };
-    });
   }
 }

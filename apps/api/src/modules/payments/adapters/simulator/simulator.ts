@@ -36,6 +36,8 @@ export function simulatorManifest(webOrigin: string): AdapterManifest {
     currencies: ['AUD'],
     countries: 'any',
     checkoutOrigin: new URL(webOrigin).origin,
+    // Task 4.1: nothing typed; the API key and the webhook secret are made by the server.
+    account: { fields: [], generated: [{ key: 'apiKey', prefix: 'sim_test_' }], webhookSecret: { source: 'generated' } },
     capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed' },
   };
 }

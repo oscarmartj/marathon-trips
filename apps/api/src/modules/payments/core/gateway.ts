@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AppEnv } from '@mt/shared';
 import { AuditService, SYSTEM_ACTOR } from '../../../platform/audit/audit.service';
@@ -7,7 +8,7 @@ import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.ser
 import { ApiError } from '../../../platform/http/api-error';
 import { SECRET_BOX } from '../../../platform/auth/staff-auth.service';
 import type { AdapterManifest, PaymentModeName, PaymentProvider, ProviderContext, WebhookVerification } from './provider';
-import { ProviderError } from './provider';
+import { PROVIDER_ERROR_CODES, ProviderError } from './provider';
 import { PaymentAdapterRegistry } from './registry';
 
 /** The environments where a test-only adapter (the simulator) may run: a closed list (plan 3.1, section 14, point 14). */
@@ -53,6 +54,21 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * What a connection test can report (plan 4.1, 4.2 and 15.8): `ok` or a code from this closed list. A code an adapter
+ * returns that is not in it becomes `provider_rejected`; the gateway's own words never reach us.
+ */
+export const CONNECTION_TEST_CODES = ['ok', ...PROVIDER_ERROR_CODES, 'webhook_secret_missing', 'manual_instructions_invalid', 'credentials_unreadable'] as const;
+export type ConnectionTestCode = (typeof CONNECTION_TEST_CODES)[number];
+export const normaliseTestCode = (code: string): ConnectionTestCode => ((CONNECTION_TEST_CODES as readonly string[]).includes(code) ? (code as ConnectionTestCode) : 'provider_rejected');
+
+/** Credentials being set up or changed, not stored yet (plan 4.1, section 4.1, step 3). Test mode only. */
+export interface CandidateSecrets {
+  credentials: Readonly<Record<string, string>>;
+  /** Null while an entered webhook secret has not been set. */
+  webhookSecret: string | null;
+}
+
 /** AAD of each secret: bound to the account and to its purpose, so a ciphertext copied elsewhere does not decrypt. */
 export const credentialsAad = (accountId: string) => `provider_account:${accountId}:credentials`;
 export const webhookSecretAad = (accountId: string) => `provider_account:${accountId}:webhook_secret`;
@@ -84,7 +100,7 @@ export class ProviderGateway {
     const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
     if (!account) throw new ApiError(409, 'provider_account_missing', 'The payment account no longer exists');
     const provider = await this.allow(account, op);
-    const ctx = await this.context(account);
+    const { ctx } = await this.context(account);
     try {
       return await withTimeout(fn(provider, ctx), CALL_TIMEOUT_MS);
     } catch (err) {
@@ -97,11 +113,86 @@ export class ProviderGateway {
   /** Verifies a webhook with the secret of the account that received it (no network). */
   async verifyWebhook(account: AccountForCall, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): Promise<WebhookVerification> {
     const provider = await this.allow(account, 'webhook');
-    const ctx = await this.context(account);
+    const { ctx } = await this.context(account);
+    // No secret entered yet (task 4.1): nothing can be verified, so nothing is accepted; the adapter is not asked.
+    if (ctx.webhookSecret === '') return { ok: false, code: 'bad_signature' };
     try {
       return provider.verifyWebhook(ctx, rawBody, headers, now);
     } catch {
       return { ok: false, code: 'malformed' };
+    }
+  }
+
+  /**
+   * The connection test of a stored account (plan 4.1, sections 4.2 and 15.4): allowed on every status under the same
+   * rules as any call. Returns the code and the `credentialsChangedAt` read in the same SELECT as the ciphertexts, so the
+   * caller records the result only for the credentials that were tested.
+   */
+  async testConnection(accountId: string): Promise<{ result: ConnectionTestCode; credentialsChangedAt: Date }> {
+    const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
+    if (!account) throw new ApiError(404, 'provider_account_not_found', 'Payment account not found');
+    const provider = await this.allow(account, 'test_connection');
+    let read: { ctx: ProviderContext; credentialsChangedAt: Date };
+    try {
+      read = await this.context(account);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      const at = await this.prisma.providerAccount.findUniqueOrThrow({ where: { id: accountId }, select: { credentialsChangedAt: true } });
+      return { result: 'credentials_unreadable', credentialsChangedAt: at.credentialsChangedAt };
+    }
+    return { result: await this.runTest(provider, read.ctx), credentialsChangedAt: read.credentialsChangedAt };
+  }
+
+  /**
+   * The connection test of credentials that are not stored yet (plan 4.1, sections 4.1 and 4.4): the same rules as a call
+   * on a paused test-mode account of that adapter, applied before the provider is touched; the context is built from the
+   * candidate values, never from the database. Only `mode: 'test'` exists (plan 4.1, 15.8).
+   */
+  async testCandidate(adapterKey: string, mode: 'test', candidate: CandidateSecrets): Promise<ConnectionTestCode> {
+    const account: AccountForCall = { id: randomUUID(), adapterKey, mode, status: 'paused' };
+    const provider = await this.allow(account, 'test_connection');
+    const ctx: ProviderContext = { accountId: account.id, mode, credentials: Object.freeze({ ...candidate.credentials }), webhookSecret: candidate.webhookSecret ?? '' };
+    return this.runTest(provider, ctx);
+  }
+
+  /**
+   * A change of a stored account's secrets (plan 4.1, 4.4 and 15.2): the current values are decrypted here, the fields
+   * sent replace theirs, the result is tested as a candidate and handed back already encrypted, with the
+   * `credentialsChangedAt` it was based on. Plaintext never leaves this class. Nothing is written: the caller stores it,
+   * comparing `basedOn`, only if the test allows.
+   */
+  async prepareSecretsChange(accountId: string, patch: { credentials?: Readonly<Record<string, string>>; webhookSecret?: string }): Promise<{
+    result: ConnectionTestCode; basedOn: Date; hadWebhookSecret: boolean;
+    sealed: { credentialsCiphertext: string; credentialsKeyVersion: number; webhookSecretCiphertext: string | null; webhookKeyVersion: number | null };
+  }> {
+    const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
+    if (!account) throw new ApiError(404, 'provider_account_not_found', 'Payment account not found');
+    const provider = await this.allow(account, 'test_connection');
+    let read: { ctx: ProviderContext; credentialsChangedAt: Date };
+    try {
+      read = await this.context(account);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(409, 'credentials_unreadable', 'The stored credentials cannot be read with the configured key');
+    }
+    const credentials = { ...read.ctx.credentials, ...(patch.credentials ?? {}) };
+    const webhookSecret = patch.webhookSecret ?? read.ctx.webhookSecret;
+    const ctx: ProviderContext = { accountId, mode: account.mode, credentials: Object.freeze(credentials), webhookSecret };
+    const result = await this.runTest(provider, ctx);
+    const creds = this.box.encrypt(JSON.stringify(credentials), credentialsAad(accountId));
+    const secret = webhookSecret === '' ? null : this.box.encrypt(webhookSecret, webhookSecretAad(accountId));
+    return {
+      result, basedOn: read.credentialsChangedAt, hadWebhookSecret: read.ctx.webhookSecret !== '',
+      sealed: { credentialsCiphertext: creds.ciphertext, credentialsKeyVersion: creds.keyVersion, webhookSecretCiphertext: secret?.ciphertext ?? null, webhookKeyVersion: secret?.keyVersion ?? null },
+    };
+  }
+
+  private async runTest(provider: PaymentProvider, ctx: ProviderContext): Promise<ConnectionTestCode> {
+    try {
+      const r = await withTimeout(provider.testConnection(ctx), CALL_TIMEOUT_MS);
+      return r.ok ? 'ok' : normaliseTestCode(r.code);
+    } catch (err) {
+      return err instanceof ProviderError ? err.code : 'provider_unavailable';
     }
   }
 
@@ -122,13 +213,16 @@ export class ProviderGateway {
     return provider!;
   }
 
-  private async context(account: AccountForCall): Promise<ProviderContext> {
+  /** Decrypts the account's secrets for one call; `credentialsChangedAt` comes from the same row read (plan 4.1, 15.4). */
+  private async context(account: AccountForCall): Promise<{ ctx: ProviderContext; credentialsChangedAt: Date }> {
     const secrets = await this.prisma.providerAccount.findUniqueOrThrow({
       where: { id: account.id },
-      select: { credentialsCiphertext: true, credentialsKeyVersion: true, webhookSecretCiphertext: true, webhookKeyVersion: true },
+      select: { credentialsCiphertext: true, credentialsKeyVersion: true, webhookSecretCiphertext: true, webhookKeyVersion: true, credentialsChangedAt: true },
     });
     const credentials = JSON.parse(this.box.decrypt(secrets.credentialsCiphertext, secrets.credentialsKeyVersion, credentialsAad(account.id))) as Record<string, string>;
-    const webhookSecret = this.box.decrypt(secrets.webhookSecretCiphertext, secrets.webhookKeyVersion, webhookSecretAad(account.id));
-    return { accountId: account.id, mode: account.mode, credentials: Object.freeze(credentials), webhookSecret };
+    const webhookSecret = secrets.webhookSecretCiphertext === null || secrets.webhookKeyVersion === null
+      ? ''
+      : this.box.decrypt(secrets.webhookSecretCiphertext, secrets.webhookKeyVersion, webhookSecretAad(account.id));
+    return { ctx: { accountId: account.id, mode: account.mode, credentials: Object.freeze(credentials), webhookSecret }, credentialsChangedAt: secrets.credentialsChangedAt };
   }
 }

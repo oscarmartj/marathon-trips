@@ -11,6 +11,8 @@ export class ManualProvider implements PaymentProvider {
   readonly manifest: AdapterManifest = {
     key: MANUAL_KEY, displayName: 'Bank transfer (manual)', status: 'experimental', testOnly: false, cardDataHandling: 'hosted_only',
     methods: ['payid_transfer', 'manual_other'], currencies: ['AUD'], countries: 'any', checkoutOrigin: 'https://manual.invalid',
+    // Task 4.1: no credentials (the payee details live with the manual methods); the webhook secret is never used.
+    account: { fields: [], webhookSecret: { source: 'generated' } },
     capabilities: { refunds: 'none', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed' },
   };
   readonly signatureHeaders: readonly string[] = [];

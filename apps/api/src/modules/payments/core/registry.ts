@@ -40,6 +40,7 @@ export function manifestProblems(manifests: readonly AdapterManifest[], repoRoot
     seen.add(m.key);
     if (m.cardDataHandling !== 'hosted_only') problems.push(`${m.key}: card data must stay on the gateway's hosted page`);
     if (!(m.testOnly ? TEST_ONLY_ORIGIN : HTTPS_ORIGIN).test(m.checkoutOrigin)) problems.push(`${m.key}: checkout origin must be an https origin`);
+    problems.push(...accountSetupProblems(m));
     if (m.status === 'verified') {
       if (m.testOnly) problems.push(`${m.key}: a test-only adapter cannot be verified`);
       if (!m.evidence || !/^docs\/done\/[\w.-]+\.md$/.test(m.evidence)) problems.push(`${m.key}: verified without sandbox evidence (docs/done/…)`);
@@ -50,6 +51,36 @@ export function manifestProblems(manifests: readonly AdapterManifest[], repoRoot
       }
     }
   }
+  return problems;
+}
+
+const FIELD_KEY = /^[a-z][A-Za-z0-9]{1,40}$/;
+
+/** Whether `source` compiles and is anchored at both ends. */
+function anchoredPattern(source: string): boolean {
+  if (!source.startsWith('^') || !source.endsWith('$')) return false;
+  try {
+    new RegExp(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The account descriptor of a manifest (plan 4.1, section 2): unique field keys, anchored patterns, a secret source. */
+export function accountSetupProblems(m: AdapterManifest): string[] {
+  const problems: string[] = [];
+  const keys = new Set<string>();
+  const setup = m.account;
+  if (!setup) return [`${m.key}: no account descriptor`];
+  for (const f of [...setup.fields, ...(setup.generated ?? [])]) {
+    if (!FIELD_KEY.test(f.key)) problems.push(`${m.key}: credential key ${f.key} is not a plain name`);
+    if (keys.has(f.key)) problems.push(`${m.key}: duplicate credential key ${f.key}`);
+    keys.add(f.key);
+  }
+  for (const f of setup.fields) if (!anchoredPattern(f.pattern)) problems.push(`${m.key}: pattern of ${f.key} must compile and be anchored`);
+  for (const g of setup.generated ?? []) if (!/^[a-z0-9_]{1,20}$/.test(g.prefix)) problems.push(`${m.key}: prefix of ${g.key} is not plain`);
+  if (setup.webhookSecret.source === 'entered' && !anchoredPattern(setup.webhookSecret.pattern)) problems.push(`${m.key}: webhook secret pattern must compile and be anchored`);
   return problems;
 }
 

@@ -2,11 +2,13 @@ import type { PermissionDef } from '../../platform/access/permissions';
 import { PAYMENT_EVENTS } from './core/attempt-state';
 
 // Permissions follow <module>.<resource>.<action> (plan 0.1, 1.5). Neither is an API key scope: they expose customers'
-// payments and gateway accounts (plan 3.1, section 7). No 3.1 route changes credentials or confirms money, so none needs
-// step-up; payments.providerAccount.manageCredentials (with step-up) arrives with its route in 4.1.
+// payments and gateway accounts (plan 3.1, section 7). Managing gateway accounts and their credentials needs step-up
+// (task 4.1; plan 0.1, 4.2 lists "cuentas y credenciales de pasarela").
 export const PAYMENTS_PERMISSIONS = {
   paymentRead: 'payments.payment.read',
   accountRead: 'payments.providerAccount.read',
+  accountManage: 'payments.providerAccount.manage',
+  accountManageCredentials: 'payments.providerAccount.manageCredentials',
   paymentLinkSend: 'payments.paymentLink.send',
   methodRead: 'payments.method.read',
   methodManage: 'payments.method.manage',
@@ -23,6 +25,9 @@ export const paymentsManifest = {
   permissions: [
     def(PAYMENTS_PERMISSIONS.paymentRead, "See a booking's payment plan, payment attempts and gateway events (never card data or raw bodies)"),
     def(PAYMENTS_PERMISSIONS.accountRead, 'See payment gateway accounts and their adapter status (never credentials)'),
+    // Task 4.1: what an account offers and to whom, and its secrets; step-up on both.
+    def(PAYMENTS_PERMISSIONS.accountManage, 'Rename a payment gateway account, pause, activate, retire or archive it, and run its connection test', true),
+    def(PAYMENTS_PERMISSIONS.accountManageCredentials, "Create a payment gateway account and change its credentials, webhook secret or webhook address (never shown again once saved)", true),
     def(PAYMENTS_PERMISSIONS.paymentLinkSend, "Email a customer a single-use link to pay the next item of their booking's plan, and revoke such links"),
     def(PAYMENTS_PERMISSIONS.methodRead, 'See how the manual payment methods (bank transfer, PayID) are set up, including the business payee details'),
     // Money moves (or is taken back) on these, and the payee details tell customers where to send it: step-up (task 3.4).

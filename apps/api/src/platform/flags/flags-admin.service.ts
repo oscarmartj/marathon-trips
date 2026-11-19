@@ -45,7 +45,7 @@ export class FlagsAdminService {
 
   async listSettings() {
     const rows = await this.prisma.setting.findMany({ select: { key: true, value: true, version: true } });
-    return this.settings.definitions().map((d) => {
+    return this.settings.definitions().filter((d) => !d.internal).map((d) => {
       const row = rows.find((r) => r.key === d.key);
       return { key: d.key, description: d.description, financial: d.financial, value: row?.value ?? null, version: row?.version ?? 0 };
     });
@@ -54,7 +54,7 @@ export class FlagsAdminService {
   /** Optimistic lock on `version`; a financial setting also needs platform.setting.manageFinancial with step-up (M12). */
   async setSetting(actor: AuditActor, auth: AuthContext, key: string, input: { value: unknown; version: number; reason?: string }): Promise<{ version: number }> {
     const def = this.settings.definition(key);
-    if (!def) throw notFound('setting_unknown', 'Setting not found');
+    if (!def || def.internal) throw notFound('setting_unknown', 'Setting not found');
     if (def.financial) await this.access.assertPermission(this.prisma, auth, PERMISSIONS.settingManageFinancial);
     const value = def.schema.parse(input.value) as Prisma.InputJsonValue;
     return this.prisma.$transaction(async (tx) => {

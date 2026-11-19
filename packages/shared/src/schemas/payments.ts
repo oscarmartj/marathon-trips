@@ -194,5 +194,35 @@ export const manualMethodConfigSchema = z.strictObject({
   payeeName: z.string().trim().min(1).max(140).nullable().default(null),
   payId: z.object({ type: z.enum(PAY_ID_TYPES), value: z.string().trim().min(1).max(80) }).nullable().default(null),
   bank: z.object({ bsb: z.string().trim(), accountNumber: z.string().trim() }).nullable().default(null),
+  /** Task 4.1: go ahead even though customers in some country would lose their last way to pay. */
+  confirmCoverageLoss: z.boolean().optional(),
 });
 export type ManualMethodConfigInput = z.infer<typeof manualMethodConfigSchema>;
+
+// ---- Gateway accounts in the panel (task 4.1) ----
+
+export const PROVIDER_ACCOUNT_STATUSES = ['active', 'paused', 'retired', 'archived'] as const;
+export type ProviderAccountStatus = (typeof PROVIDER_ACCOUNT_STATUSES)[number];
+
+const accountName = z.string().trim().min(1).max(100);
+
+/**
+ * `credentials` is checked by the API against the adapter's own fields, never by this schema: a validation error here
+ * would repeat a key the client chose, which could be a secret (plan 4.1, 15.6). Mode is always sent; only `test` exists.
+ */
+export const createProviderAccountSchema = z.strictObject({
+  adapterKey: z.string().regex(/^[a-z][a-z0-9_]{0,40}$/),
+  displayName: accountName,
+  mode: z.enum(['test', 'live']),
+  credentials: z.unknown().optional(),
+});
+export const renameProviderAccountSchema = z.strictObject({ version: z.number().int().min(0), displayName: accountName });
+export const providerAccountStatusSchema = z.strictObject({
+  version: z.number().int().min(0),
+  status: z.enum(PROVIDER_ACCOUNT_STATUSES),
+  confirmCoverageLoss: z.boolean().optional(),
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+export const providerAccountCredentialsSchema = z.strictObject({ version: z.number().int().min(0), credentials: z.unknown() });
+export const providerAccountWebhookSecretSchema = z.strictObject({ version: z.number().int().min(0), webhookSecret: z.unknown() });
+export const providerAccountVersionSchema = z.strictObject({ version: z.number().int().min(0) });

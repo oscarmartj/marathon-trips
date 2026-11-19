@@ -29,6 +29,8 @@ export interface AdapterManifest {
   countries: readonly string[] | 'any';
   /** Where its redirect URLs may point; anything else is never handed to a customer. */
   checkoutOrigin: string;
+  /** How an account of this adapter is set up from the panel (task 4.1). Test mode only: no live pattern exists. */
+  account: AccountSetup;
   capabilities: {
     refunds: 'none' | 'full' | 'partial';
     deferredCapture: boolean;
@@ -41,11 +43,31 @@ export interface AdapterManifest {
   };
 }
 
+/** A credential staff type in the panel: its value is validated against `pattern` (anchored), encrypted and never shown. */
+export interface CredentialField {
+  key: string;
+  label: string;
+  /** Anchored regular expression source for a test-mode value. */
+  pattern: string;
+}
+
+/**
+ * The credentials of an account (plan 4.1, section 2). `generated` values (the simulator's API key) and a `generated`
+ * webhook secret are made by the server; an `entered` webhook secret is issued by the gateway once the account's webhook
+ * URL is registered there (Stripe), so it is set after creation (plan 4.1, 15.2).
+ */
+export interface AccountSetup {
+  fields: readonly CredentialField[];
+  generated?: readonly { key: string; prefix: string }[];
+  webhookSecret: { source: 'entered'; label: string; pattern: string } | { source: 'generated' };
+}
+
 /** What the gateway wrapper hands an adapter for one call. Credentials are decrypted only for that call. */
 export interface ProviderContext {
   accountId: string;
   mode: PaymentModeName;
   credentials: Readonly<Record<string, string>>;
+  /** Empty while an entered webhook secret has not been set yet (task 4.1). */
   webhookSecret: string;
 }
 

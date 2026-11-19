@@ -37,21 +37,22 @@ export class FeatureFlagService {
 /** A setting's value is validated by a schema registered in code; unknown keys are rejected. */
 @Injectable()
 export class SettingsService {
-  private readonly schemas = new Map<string, { schema: z.ZodType; version: number; financial: boolean; description: string }>();
+  private readonly schemas = new Map<string, { schema: z.ZodType; version: number; financial: boolean; internal: boolean; description: string }>();
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /**
    * `financial` settings (currency, GST) can only be changed with platform.setting.manageFinancial, which requires
-   * step-up (task 0.3, M12).
+   * step-up (task 0.3, M12). `internal` settings are kept by the code itself (a job's cursor) and are neither listed
+   * nor changed in the panel (task 4.1).
    */
-  define(key: string, schema: z.ZodType, version = 1, opts: { financial?: boolean; description?: string } = {}): void {
+  define(key: string, schema: z.ZodType, version = 1, opts: { financial?: boolean; internal?: boolean; description?: string } = {}): void {
     if (this.schemas.has(key)) throw new AppError('setting_already_defined', `Setting ${key} is already defined`);
-    this.schemas.set(key, { schema, version, financial: opts.financial ?? false, description: opts.description ?? '' });
+    this.schemas.set(key, { schema, version, financial: opts.financial ?? false, internal: opts.internal ?? false, description: opts.description ?? '' });
   }
 
   /** Definitions in code, for the admin API. */
-  definitions(): Array<{ key: string; schema: z.ZodType; version: number; financial: boolean; description: string }> {
+  definitions(): Array<{ key: string; schema: z.ZodType; version: number; financial: boolean; internal: boolean; description: string }> {
     return [...this.schemas.entries()].map(([key, d]) => ({ key, ...d }));
   }
 

@@ -83,3 +83,18 @@ export class PaymentLinkStartRateLimitGuard implements CanActivate {
     return true;
   }
 }
+
+/**
+ * Gateway account changes and connection tests per staff user (task 4.1, plan 15.9): each one may call a gateway, so a
+ * stuck button or a script cannot hammer it. In memory, like the other limits.
+ */
+@Injectable()
+export class ProviderAccountRateLimitGuard implements CanActivate {
+  private readonly perUser = new WindowLimiter(60, 3_600_000);
+
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<ApiRequest>();
+    if (!this.perUser.allow(`provider-account:user:${req.auth?.userId ?? 'none'}`)) throw tooManyRequests(3600);
+    return true;
+  }
+}

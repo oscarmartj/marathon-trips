@@ -42,8 +42,8 @@ export class PaymentRouting {
     return out;
   }
 
-  async methods(db: Prisma.TransactionClient, q: Omit<RouteQuery, 'method'>): Promise<PaymentMethod[]> {
-    const accounts = await this.candidatesAnyMethod(db, q);
+  async methods(db: Prisma.TransactionClient, q: Omit<RouteQuery, 'method'>, excludeAccountIds: readonly string[] = []): Promise<PaymentMethod[]> {
+    const accounts = (await this.candidatesAnyMethod(db, q)).filter((a) => !excludeAccountIds.includes(a.id));
     const set = new Set<PaymentMethod>();
     for (const a of accounts) {
       const manifest = this.gateway.registry.get(a.adapterKey)!.manifest;
@@ -53,6 +53,17 @@ export class PaymentRouting {
       }
     }
     return [...set].sort();
+  }
+
+  /**
+   * Every (method, country) a customer can pay with today, for the sales countries and a currency (task 4.1, plan section
+   * 5), optionally as if some accounts were not active. Built on the same routing as a charge, so 4.2's rules change it in
+   * one place. Read with the caller's transaction: a change made in it is seen.
+   */
+  async coverage(db: Prisma.TransactionClient, q: { countries: readonly string[]; currency: string }, excludeAccountIds: readonly string[] = []): Promise<Array<{ method: PaymentMethod; country: string }>> {
+    const out: Array<{ method: PaymentMethod; country: string }> = [];
+    for (const country of [...q.countries].sort()) for (const method of await this.methods(db, { currency: q.currency, country }, excludeAccountIds)) out.push({ method, country });
+    return out;
   }
 
   /** Accounts that could take this currency and country, whatever the method (manual accounts are filtered per method later). */
