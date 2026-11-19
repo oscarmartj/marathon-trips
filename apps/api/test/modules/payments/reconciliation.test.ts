@@ -506,6 +506,41 @@ describe('code review of 4.6 (M1-M4 and failure paths)', () => {
     const d = sim.openDispute(a.id, payment.providerPaymentRef!);
     expect((await deliver(t, a, sim.disputeEvent(a.secret, a.id, d.ref))).outcome).toBe('processed');
     sim.failNextDisputeRetrieve(a.id);
-    expect((await run(a)).status).not.toBe('failed');
+    // Round 2 review: the dispute was not checked, so the run is partial, not matched.
+    expect([(await run(a)).status, (await t.prisma.reconciliationRun.findFirstOrThrow({ where: { providerAccountId: a.id }, orderBy: { attempt: 'desc' } })).errorCode]).toEqual(['partial', 'gateway_errors']);
+  });
+
+  it('an activity item whose reference cannot be stored is reported under a stand-in id (minor 6)', async () => {
+    const a = await fresh();
+    await paid(a);
+    sim.foreignPayment(a.id, 1234n, 'bad ref with spaces & symbols');
+    const r = await run(a);
+    const d = r.differences.find((x) => x.code === 'unknown_gateway_payment');
+    expect(d?.entityId).toMatch(/^invalid_ref:[0-9a-f]{32}$/);
+  });
+
+  it('invalid_differences closes the run as failed, never left running (minor 7)', async () => {
+    const a = await fresh();
+    const { differencesSchema } = await import('../../../src/modules/payments/core/reconciliation-types');
+    const spy = vi.spyOn(differencesSchema, 'safeParse').mockReturnValueOnce({ success: false, error: new Error('bad') } as never);
+    try {
+      const r = await run(a);
+      expect([r.status, r.errorCode, r.differences]).toEqual(['failed', 'invalid_differences', []]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await t.prisma.reconciliationRun.count({ where: { providerAccountId: a.id, status: 'running' } })).toBe(0);
+    expect((await run(a)).status).toBe('matched');
+  });
+
+  it('an archived account is reconciled inside its dispute window, not after it (minor 8)', async () => {
+    const a = await fresh();
+    await t.prisma.providerAccount.update({ where: { id: a.id }, data: { status: 'retired' } });
+    await t.prisma.providerAccount.update({ where: { id: a.id }, data: { status: 'archived' } });
+    const ids = async (at: Date) => (await recon().accountsToReconcile(at)).map((x) => x.id);
+    expect(await ids(new Date())).toContain(a.id);
+    expect(await ids(new Date(Date.now() + 181 * 86_400_000))).not.toContain(a.id);
+    const b = await fresh();
+    expect(await ids(new Date(Date.now() + 181 * 86_400_000))).toContain(b.id);
   });
 });

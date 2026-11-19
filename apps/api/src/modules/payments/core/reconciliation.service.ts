@@ -105,12 +105,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
   /** Every account of the environment's mode, one after another; a failing account never stops the others. */
   async runAll(opts: RunOptions = {}): Promise<RunView[]> {
     const now = opts.now ?? (await this.dbNow());
-    const windowDays = await this.settings.get<number>(PAYMENT_SETTINGS.disputeWindowDays.key, PAYMENT_SETTINGS.disputeWindowDays.fallback);
-    // An archived account is reconciled while a dispute can still reach it (its window), not for ever (code review, minor 8).
-    const accounts = await this.prisma.providerAccount.findMany({
-      where: { mode: this.gateway.mode, OR: [{ status: { not: 'archived' } }, { updatedAt: { gt: new Date(now.getTime() - windowDays * DAY) } }] },
-      select: { id: true, createdAt: true }, orderBy: { id: 'asc' },
-    });
+    const accounts = await this.accountsToReconcile(now);
     const out: RunView[] = [];
     for (const a of accounts) {
       try {
@@ -122,6 +117,18 @@ export class ReconciliationService implements OnApplicationBootstrap {
     }
     await this.overdue(now, accounts);
     return out;
+  }
+
+  /**
+   * The accounts of the environment's mode a scheduled run covers. An archived account is reconciled while a dispute can
+   * still reach it (its dispute window after archiving), not for ever (code review, minor 8).
+   */
+  async accountsToReconcile(now: Date): Promise<Array<{ id: string; createdAt: Date }>> {
+    const windowDays = await this.settings.get<number>(PAYMENT_SETTINGS.disputeWindowDays.key, PAYMENT_SETTINGS.disputeWindowDays.fallback);
+    return this.prisma.providerAccount.findMany({
+      where: { mode: this.gateway.mode, OR: [{ status: { not: 'archived' } }, { updatedAt: { gt: new Date(now.getTime() - windowDays * DAY) } }] },
+      select: { id: true, createdAt: true }, orderBy: { id: 'asc' },
+    });
   }
 
   /**
@@ -161,6 +168,8 @@ export class ReconciliationService implements OnApplicationBootstrap {
         const swept = await this.disputes.sweep(accountId, mode, `${forDate}:${runId}`, call, { now, settleMs: SETTLE_MS });
         differences.push(...swept.differences);
         checked += swept.checked;
+        // Round 2 review: a dispute the gateway answered badly was not checked, so the run cannot be `matched`.
+        if (swept.errors > 0) incomplete = incomplete ?? 'gateway_errors';
       }
       // 2. Settlements and their fees (review R4: matching and posting resume from what is stored).
       if (caps?.settlements && provider.listSettlements) {
@@ -259,16 +268,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
                differences = ${JSON.stringify(list)}::jsonb, "finishedAt" = now()
         WHERE id = ${runId}::uuid AND status = 'running'`;
       if (n === 0) return;
-      for (const d of list) {
-        const entityType = TASK_ENTITY[d.entityType];
-        const isUuid = /^[0-9a-f-]{36}$/.test(d.entityId);
-        await this.tasks.createSystemIn(tx, {
-          title: `Reconciliation: ${d.code.replace(/_/g, ' ')}`,
-          description: `The daily reconciliation with the payment gateway found a difference (${d.code}) for ${d.entityType} ${d.entityId}. Nothing was changed: compare the app with the gateway's dashboard.`,
-          entityType: entityType && isUuid ? entityType : 'ProviderAccount', entityId: entityType && isUuid ? d.entityId : accountId,
-          sourceRef: reconciliationTaskRef(d.code, d.entityId),
-        });
-      }
+      for (const d of list) await this.tasks.createSystemIn(tx, this.differenceTask(accountId, d));
       if (status === 'failed') {
         await this.tasks.createSystemIn(tx, {
           title: 'Reconciliation could not run for a payment gateway account',
@@ -281,6 +281,17 @@ export class ReconciliationService implements OnApplicationBootstrap {
       }
     });
     return (await this.view(runId))!;
+  }
+
+  private differenceTask(accountId: string, d: Difference) {
+    const entityType = TASK_ENTITY[d.entityType];
+    const isUuid = /^[0-9a-f-]{36}$/.test(d.entityId);
+    return {
+      title: `Reconciliation: ${d.code.replace(/_/g, ' ')}`,
+      description: `The daily reconciliation with the payment gateway found a difference (${d.code}) for ${d.entityType} ${d.entityId}. Nothing was changed: compare the app with the gateway's dashboard.`,
+      entityType: entityType && isUuid ? entityType : 'ProviderAccount', entityId: entityType && isUuid ? d.entityId : accountId,
+      sourceRef: reconciliationTaskRef(d.code, d.entityId),
+    };
   }
 
   /** Gateway calls of one run: `retrieve` (allowed on paused, retired and archived accounts; never health), with a cut-off. */
@@ -429,7 +440,8 @@ export class ReconciliationService implements OnApplicationBootstrap {
       if (ours) {
         if (ours.amountMinor !== item.amount.amountMinor || ours.currency !== item.amount.currency) return { code: 'gateway_amount_differs', entityType: 'Refund', entityId: ours.id, ours: moneySide(ours.amountMinor, ours.currency, ours.status), gateway };
         // Code review M2: money went out at the gateway for a refund we hold as not done (failed, requested…).
-        if (item.status === 'succeeded' && ours.status !== 'succeeded' && ours.status !== 'pending' && ours.status !== 'reversed') return { code: 'refund_status_differs', entityType: 'Refund', entityId: ours.id, ours: moneySide(ours.amountMinor, ours.currency, ours.status), gateway };
+        if ((item.status === 'succeeded' && ours.status !== 'succeeded' && ours.status !== 'pending' && ours.status !== 'reversed')
+          || (item.status === 'pending' && ours.status === 'failed')) return { code: 'refund_status_differs', entityType: 'Refund', entityId: ours.id, ours: moneySide(ours.amountMinor, ours.currency, ours.status), gateway };
         return null;
       }
       // Review R9 and code review M3: money went out of one of our payments without us. The first time this refund is
@@ -440,7 +452,11 @@ export class ReconciliationService implements OnApplicationBootstrap {
       if (payment && !seenBefore) {
         await runTransaction(this.prisma, async (tx) => {
           const b = await readBookingForPayments(tx, { id: payment.bookingId }, true);
-          if (b) await this.refunds.afterMoneyOut(tx, b, {}, undefined, { forceReview: true });
+          if (!b) return;
+          await this.refunds.afterMoneyOut(tx, b, {}, undefined, { forceReview: true });
+          // Round 2 review: the difference's task is the record that this refund was handled; written with the review,
+          // so a run that fails before closing never puts a booking Oscar already cleared under review again.
+          await this.tasks.createSystemIn(tx, this.differenceTask(accountId, { code: 'unknown_gateway_refund', entityType: 'GatewayObject', entityId: item.ref }));
         }, PAYMENT_TX_OPTIONS);
       }
       return { code: 'unknown_gateway_refund', entityType: 'GatewayObject', entityId: item.ref, gateway };

@@ -669,9 +669,9 @@ export class SimulatorControl {
   }
 
   /** Task 4.6: a payment taken at the gateway that we never started (no id of ours). */
-  foreignPayment(accountId: string, amountMinor: bigint): ProviderPayment {
+  foreignPayment(accountId: string, amountMinor: bigint, ref = `sim_pay_${randomBytes(12).toString('hex')}`): ProviderPayment {
     const acc = this.world.account(accountId);
-    const p: SimPayment = { ref: `sim_pay_${randomBytes(12).toString('hex')}`, idempotencyKey: `foreign:${randomBytes(6).toString('hex')}`, status: 'succeeded', amount: { amountMinor, currency: 'AUD' }, method: 'card', paymentId: '', returnUrl: 'https://invalid.example/' };
+    const p: SimPayment = { ref, idempotencyKey: `foreign:${randomBytes(6).toString('hex')}`, status: 'succeeded', amount: { amountMinor, currency: 'AUD' }, method: 'card', paymentId: '', returnUrl: 'https://invalid.example/' };
     acc.payments.set(p.ref, p);
     acc.createdAt.set(p.ref, new Date());
     return view(p);
