@@ -1,6 +1,6 @@
 import { STATE_HEADERS } from './auth';
 import type { TestApp } from './auth';
-import { bookingStaff, contact, customerClient, requestBody } from './bookings';
+import { bookingStaff, contact, customerClient, requestBody, staffCancel } from './bookings';
 import type { CustomerClient } from './bookings';
 import { setSale } from './catalogue';
 import { pricedWorld } from './pricing';
@@ -44,7 +44,7 @@ export async function soldOutWorld(t: TestApp, admin: Admin, w?: PricedWorld, ho
 /** Staff cancel the holder's request; the places come back and the waiting list is offered them. */
 export async function cancelHolder(t: TestApp, s: SoldOutWorld, id = s.holderBookingId): Promise<void> {
   const b = await t.prisma.booking.findUniqueOrThrow({ where: { id } });
-  const r = await s.admin.post(`/admin/bookings/${b.id}/cancel`, { version: b.version, reason: 'Test' });
+  const r = await staffCancel(s.admin, b.id, { version: b.version, reason: 'Test' });
   if (r.status !== 200) throw new Error(`cancel failed: ${r.status} ${JSON.stringify(r.body)}`);
 }
 

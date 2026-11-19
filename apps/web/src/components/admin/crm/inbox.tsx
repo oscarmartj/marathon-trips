@@ -16,6 +16,8 @@ import { RefundsPanel } from './refunds';
 import { ReceiptsPanel } from './receipts';
 import { AmendmentPanel, type AmendmentRow } from './amendments';
 import type { ConfigurationView } from '@/lib/amendments';
+import type { CancellationView } from '@mt/shared';
+import { CancellationPanel } from './cancellation';
 
 interface Row {
   id: string;
@@ -127,6 +129,8 @@ interface BookingView {
   currentSnapshotVersion: number;
   snapshots: Array<{ version: number; configuration: ConfigurationView }>;
   amendments: AmendmentRow[];
+  /** Task 6.4: the cancellation record, when there is one. */
+  cancellation?: CancellationView | null;
 }
 
 /** One booking: what was asked and priced, the actions the state machine allows, and the team's notes. */
@@ -137,7 +141,7 @@ export function BookingDetail({ id }: { id: string }) {
   const stepUp = useStepUp();
   if (!b) return error ? <Status message={error} /> : <p role="status">{t('admin.common.loading')}</p>;
 
-  async function act(event: 'approve' | 'decline' | 'cancel') {
+  async function act(event: 'approve' | 'decline') {
     if (!b) return;
     if (event !== 'approve' && !reason.trim()) {
       setMessage({ text: t('admin.crm.booking.reasonRequired'), tone: 'error' });
@@ -152,7 +156,6 @@ export function BookingDetail({ id }: { id: string }) {
   }
 
   const open = b.status === 'requested';
-  const approved = b.status === 'approved';
   return (
     <div className="stack">
       <Section id="booking-summary" title={t('admin.crm.booking.summary', { reference: b.reference })}>
@@ -184,7 +187,7 @@ export function BookingDetail({ id }: { id: string }) {
           <dd>{t('admin.crm.booking.travellerCount', { count: String(b.travellers.filter((x) => x.removedInVersion === null).length), rooms: String(b.rooms.length) })}</dd>
         </dl>
       </Section>
-      {open || approved ? (
+      {open ? (
         <Section id="booking-actions" title={t('admin.crm.booking.actions')}>
           <div className="field">
             <label htmlFor="booking-reason">{t('admin.crm.booking.reason')}</label>
@@ -194,12 +197,13 @@ export function BookingDetail({ id }: { id: string }) {
           <div className="actions">
             {open ? <button className="btn" type="button" onClick={() => void act('approve')}>{t('admin.crm.booking.approve')}</button> : null}
             {open ? <button className="link-button" type="button" onClick={() => void act('decline')}>{t('admin.crm.booking.decline')}</button> : null}
-            {open || approved ? <button className="link-button" type="button" onClick={() => void act('cancel')}>{t('admin.crm.booking.cancel')}</button> : null}
           </div>
           {stepUp.prompt}
         </Section>
       ) : null}
       <Status message={message?.text ?? null} tone={message?.tone ?? 'error'} />
+      {/* Task 6.4: cancelling, with the penalty and refund the API works out, or the cancellation record. */}
+      <CancellationPanel bookingId={id} status={b.status} version={b.version} cancellation={b.cancellation ?? null} onChanged={reload} />
       <PaymentLinksPanel bookingId={id} status={b.status} />
       <TransfersPanel bookingId={id} onChanged={reload} />
       <RefundsPanel bookingId={id} onChanged={reload} />

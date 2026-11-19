@@ -152,6 +152,28 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => send(a), asOther: () => send(b) };
     },
   },
+  // Task 6.4: the cancellation quote and the customer's cancellation (customers' cancellations switched on by the fixture).
+  'account-booking-cancellation-quote': {
+    async create(t, a, b) {
+      const { policyBookingOf } = await import('./cancellations');
+      const { reference } = await policyBookingOf(t, a);
+      const path = `/account/bookings/${reference}/cancellation-quote`;
+      const send = (s: CustomerSession) => t.http().get(path).set('Cookie', s.cookie);
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
+  'account-booking-cancel': {
+    async create(t, a, b) {
+      const { policyBookingOf, setCustomerCancellations } = await import('./cancellations');
+      const { reference } = await policyBookingOf(t, a);
+      await setCustomerCancellations(t, true);
+      const quote = await t.http().get(`/account/bookings/${reference}/cancellation-quote`).set('Cookie', a.cookie);
+      if (quote.status !== 200) throw new Error(`cancellation quote failed: ${quote.status} ${JSON.stringify(quote.body)}`);
+      const path = `/account/bookings/${reference}/cancel`;
+      const send = (s: CustomerSession) => t.http().post(path).set(STATE_HEADERS).set('Cookie', s.cookie).set('Idempotency-Key', randomUUID()).send({ quoteDigest: quote.body.quoteDigest });
+      return { asOwner: () => send(a), asOther: () => send(b) };
+    },
+  },
   'account-booking-traveller-save': {
     async create(t, a, b) {
       const { customerBookingIn } = await import('./customer-portal');

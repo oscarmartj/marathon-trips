@@ -11,7 +11,7 @@ import { OutboxService } from '../../platform/events/outbox.service';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { ApiError, conflict, notFound, unprocessable } from '../../platform/http/api-error';
 import { InventoryService } from '../catalogue';
-import { PromoRedemptionService, QuoteService, REDEEM_TX_OPTIONS, publicRedemptionError } from '../pricing';
+import { CancellationPolicyService, PromoRedemptionService, QuoteService, REDEEM_TX_OPTIONS, publicRedemptionError } from '../pricing';
 import { WaitlistService } from '../waitlist';
 import type { PriceBreakdown } from '../pricing';
 import { CustomerService } from './customer.service';
@@ -66,11 +66,12 @@ export class BookingRequestService {
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(ReferenceGenerator) private readonly references: ReferenceGenerator,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(CancellationPolicyService) private readonly policies: CancellationPolicyService,
   ) {}
 
   async create(user: { id: string; email: string }, body: BookingRequest, idempotencyKey: string, actor: AuditActor): Promise<CreatedRequest> {
     const limits = await readBookingLimits(this.settings);
-    const { contact, ...configuration } = body;
+    const { contact, cancellationPolicy: _shownPolicy, ...configuration } = body;
     const hashes = {
       key: sha256Hex(`booking-request:${user.id}:${idempotencyKey}`),
       config: sha256Hex(canonicalJson(configuration)),
@@ -84,7 +85,7 @@ export class BookingRequestService {
   }
 
   private async createIn(tx: Tx, user: { id: string; email: string }, body: BookingRequest, hashes: { key: string; config: string; contact: string }, limits: BookingLimits, actor: AuditActor): Promise<CreatedRequest> {
-    const { contact, ...configuration } = body;
+    const { contact, cancellationPolicy: _shownPolicy, ...configuration } = body;
     // 1. The customer, locked: everything this customer does from here on runs one request at a time.
     const { customer, created } = await this.customers.lockOrCreate(tx, user, contact, actor);
 
@@ -116,6 +117,8 @@ export class BookingRequestService {
     // 5. The package, shared: its sale status and price versions cannot change until this commits.
     const pkg = await tx.$queryRaw<Array<{ editionId: string }>>`SELECT "editionId" FROM packages WHERE id = ${configuration.packageId}::uuid AND "deletedAt" IS NULL FOR SHARE`;
     if (pkg.length === 0) throw notFound('package_not_found', 'Package not found');
+    // 5b. Task 6.4 (plan section 13, M2): the cancellation policy the customer was shown is the one the package sells under.
+    const policy = await this.policies.assertShown(tx, configuration.packageId, body.cancellationPolicy ?? null);
 
     // 6. The database clock, after the locks: the engine's `now`, the code's, and the request's time.
     const at = await dbNow(tx);
@@ -145,7 +148,7 @@ export class BookingRequestService {
       residenceCountry: contact.countryOfResidence, requestedAt: at, requestExpiresAt, sourceChannel: 'web',
       requestKeyHash: hashes.key, requestConfigHash: hashes.config, requestContactHmac: hashes.contact,
     });
-    await this.insertSnapshot(tx, bookingId, breakdown);
+    await this.insertSnapshot(tx, bookingId, breakdown, policy?.id ?? null);
     await this.insertParts(tx, bookingId, customer.id, breakdown);
 
     // 9. The code, counted in the same transaction: a failure aborts everything, and reads the same to the public.
@@ -207,7 +210,7 @@ export class BookingRequestService {
     throw busy();
   }
 
-  async insertSnapshot(tx: Tx, bookingId: string, b: PriceBreakdown): Promise<void> {
+  async insertSnapshot(tx: Tx, bookingId: string, b: PriceBreakdown, cancellationPolicyId: string | null): Promise<void> {
     // Ids, slots, codes, dates and amounts only: checked before it reaches an immutable row.
     const configuration = snapshotConfigurationSchema.parse(jsonOf(b.configuration));
     const priceBreakdown = snapshotBreakdownSchema.parse(jsonOf(b));
@@ -215,6 +218,7 @@ export class BookingRequestService {
       data: {
         bookingId, version: 1, kind: 'original', configuration, priceBreakdown: priceBreakdown as unknown as Prisma.InputJsonObject,
         totalMinor: b.totalMinor, depositMinor: b.depositMinor!, currency: b.currency, priceVersionId: b.priceVersionId, engineVersion: b.engineVersion,
+        cancellationPolicyId,
       },
     });
   }

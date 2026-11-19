@@ -124,7 +124,9 @@ test('waitlist_offer_promoted_on_cancellation_and_accepted', async ({ page, brow
 
   // The holder's request is cancelled in the panel: the places come back and are offered to the person waiting.
   const holderBooking = (await call('get', `/admin/bookings?q=${holderReference}`)).body.items[0] as { id: string; version: number };
-  await call('post', `/admin/bookings/${holderBooking.id}/cancel`, { version: holderBooking.version, reason: 'Customer asked to cancel' });
+  // Task 6.4: the panel cancels with the digest of the quote it showed.
+  const cancelQuote = (await call('get', `/admin/bookings/${holderBooking.id}/cancellation-quote`)).body as { quoteDigest: string };
+  await call('post', `/admin/bookings/${holderBooking.id}/cancel`, { version: holderBooking.version, reason: 'Customer asked to cancel', quoteDigest: cancelQuote.quoteDigest });
   await page.getByRole('button', { name: 'Apply filters' }).click();
   await expect(page.getByRole('row').filter({ hasText: waiter.email })).toContainText('Offered');
 

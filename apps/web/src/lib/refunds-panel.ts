@@ -9,6 +9,8 @@ export interface RefundableRow {
   refundableMinor: string;
   currency: string;
   blockedReason: string | null;
+  /** Task 6.4: what a cancellation refund would give back on this payment now (the API's cap); null without a cancellation. */
+  cancellationRefundableMinor?: string | null;
 }
 
 export interface RefundRow {
@@ -42,8 +44,17 @@ export interface DisputeRow {
 }
 
 /** The body of a refund request: never an amount. */
-export function refundBody(row: Pick<RefundableRow, 'paymentVersion'>, reason: string): { paymentVersion: number; purpose: 'overpayment_return'; reason: string } {
-  return { paymentVersion: row.paymentVersion, purpose: 'overpayment_return', reason: reason.trim() };
+/**
+ * Task 6.4: on a cancelled booking, what its cancellation left refundable goes back as a cancellation refund; anything
+ * beyond (money paid after it) as an overpayment return. Which one, and the amount, come from the API's row.
+ */
+export const refundPurpose = (row: Pick<RefundableRow, 'cancellationRefundableMinor'>): 'cancellation' | 'overpayment_return' =>
+  /^[1-9]\d*$/.test(row.cancellationRefundableMinor ?? '') ? 'cancellation' : 'overpayment_return';
+export const refundAmount = (row: Pick<RefundableRow, 'cancellationRefundableMinor' | 'refundableMinor'>): string =>
+  refundPurpose(row) === 'cancellation' ? row.cancellationRefundableMinor! : row.refundableMinor;
+
+export function refundBody(row: Pick<RefundableRow, 'paymentVersion' | 'cancellationRefundableMinor'>, reason: string): { paymentVersion: number; purpose: 'overpayment_return' | 'cancellation'; reason: string } {
+  return { paymentVersion: row.paymentVersion, purpose: refundPurpose(row), reason: reason.trim() };
 }
 
 export const canRequest = (row: RefundableRow): boolean => row.blockedReason === null && /^[1-9]\d*$/.test(row.refundableMinor);

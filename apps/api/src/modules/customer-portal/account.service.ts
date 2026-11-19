@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { AccountBookingItem, BookingStatus, CustomerDocumentKind } from '@mt/shared';
 import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound } from '../../platform/http/api-error';
-import { AMENDABLE_STATES, AMENDMENT_SETTINGS, customerView } from '../bookings';
+import { AMENDABLE_STATES, AMENDMENT_SETTINGS, BookingCancellationService, CANCELLATION_SETTINGS, customerView } from '../bookings';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { PaymentAttemptsService, ReceiptsService } from '../payments';
 import { TemplatesService } from '../templates';
@@ -27,6 +27,7 @@ export class CustomerAccountService {
     @Inject(PaymentAttemptsService) private readonly payments: PaymentAttemptsService,
     @Inject(TemplatesService) private readonly templates: TemplatesService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(BookingCancellationService) private readonly cancellations: BookingCancellationService,
     @Inject(ReceiptsService) private readonly receipts: ReceiptsService,
   ) {}
 
@@ -74,7 +75,18 @@ export class CustomerAccountService {
     if (!booking) throw notFound();
     const plan = await this.payments.planView(reference);
     const payments = await this.payments.paymentRecords(reference);
-    return { booking, plan, payments, documents: documentsFor((booking as { status: BookingStatus }).status), changes: await this.changes(reference) };
+    return { booking, plan, payments, documents: documentsFor((booking as { status: BookingStatus }).status), changes: await this.changes(reference), cancellation: await this.cancellation(reference) };
+  }
+
+  /**
+   * Task 6.4: the booking's cancellation record (what it kept and what may go back), and whether the customer may cancel
+   * it online now (the quote route says what it would cost; the API decides again at the cancellation).
+   */
+  private async cancellation(reference: string) {
+    const b = await this.prisma.booking.findUnique({ where: { reference }, select: { id: true, status: true } });
+    if (!b) return { record: null, customerCancellationsEnabled: false };
+    const enabled = await this.settings.get(CANCELLATION_SETTINGS.customerEnabled.key, CANCELLATION_SETTINGS.customerEnabled.fallback);
+    return { record: await this.cancellations.forBooking(b.id), customerCancellationsEnabled: enabled && ['deposit_paid', 'confirmed', 'balance_paid'].includes(b.status) };
   }
 
   /**

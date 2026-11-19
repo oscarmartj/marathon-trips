@@ -17,7 +17,7 @@ import { runTransaction, TRANSACTION_RETRIES } from '../../../src/platform/datab
 import { AppError } from '../../../src/platform/errors/safe-error';
 import { TestApp, makeApp } from '../../support/auth';
 import { CATALOGUE_AND_PRICING, closeCatalogue, staffClient } from '../../support/catalogue';
-import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, makeBookingFor } from '../../support/bookings';
+import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, makeBookingFor, staffCancel, insertBareCancellation } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import {
   PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, expireNow, insertValidSchedule, onlyAccount, payingCustomer, paymentsStaff, sendWebhook, sim, simulatorAccount,
@@ -168,7 +168,7 @@ describe('the coverage rule with the simulator (sections 1.2 and 1.4)', () => {
     // The attempt ends at the gateway, the booking is cancelled, then the money arrives late.
     sim.settle(acc.id, p!.providerPaymentRef!, 'failed');
     await deliver(t, acc, await eventFor(t, acc, p!.id, { status: 'failed' }));
-    const cancel = await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: (await bookingRow(bookingId)).version, reason: 'Gone' });
+    const cancel = await staffCancel(admin, bookingId, { version: (await bookingRow(bookingId)).version, reason: 'Gone' });
     expect(cancel.status).toBe(200);
     sim.settle(acc.id, p!.providerPaymentRef!, 'succeeded');
     await deliver(t, acc, await eventFor(t, acc, p!.id));
@@ -284,6 +284,8 @@ describe("Oscar's confirmation (section 1.5)", () => {
     const walk = async (id: string, to: BookingStatus) => {
       for (const s of PATH[to]) {
         await t.prisma.$transaction(async (tx) => {
+          // Task 6.4: a cancellation has its record (deferred trigger of 0038).
+          if (s === 'cancelled') await insertBareCancellation(tx, id);
           await tx.$executeRawUnsafe(STEP, id, s);
           if (s === 'approved') await insertValidSchedule(tx, id);
           if (s === 'expired') await tx.$executeRawUnsafe(`UPDATE payment_schedule_items SET state = 'superseded', "supersededInVersion" = 2 WHERE "bookingId" = $1::uuid`, id).then(() => tx.$executeRawUnsafe(`UPDATE payment_schedules SET version = 2 WHERE "bookingId" = $1::uuid`, id));

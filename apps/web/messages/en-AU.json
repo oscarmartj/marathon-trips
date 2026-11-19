@@ -70,7 +70,8 @@
     "payCard": "Pay by card",
     "accountPrivacy": "Privacy and marketing",
     "mailUnsubscribe": "Unsubscribe from marketing emails",
-    "accountChange": "Change your booking"
+    "accountChange": "Change your booking",
+    "accountCancel": "Cancel booking"
   },
   "footer": {
     "rights": "{brand}. All rights reserved.",
@@ -196,7 +197,8 @@
       "deposit": "Deposit",
       "balance": "Balance",
       "instalment": "Instalment",
-      "adjustment": "Adjustment"
+      "adjustment": "Adjustment",
+      "penalty": "Cancellation charge"
     },
     "itemLine": "{amount}, due {date}",
     "itemPaid": "{amount} paid",
@@ -352,6 +354,8 @@
       "reports": "Reports",
       "waitlist": "Waiting list",
       "gateways": "Payment gateways",
+      "cancellationPolicies": "Cancellation policies",
+      "cancellationPolicy": "Cancellation policy",
       "reconciliation": "Reconciliation",
       "customerMoney": "Customer money"
     },
@@ -384,7 +388,8 @@
           "deposit": "Deposit",
           "balance": "Balance",
           "instalment": "Instalment",
-          "adjustment": "Adjustment"
+          "adjustment": "Adjustment",
+          "penalty": "Cancellation charge"
         }
       },
       "tasks": {
@@ -2427,7 +2432,80 @@
         "extra_audience_mismatch": "That extra is not available to the travellers chosen.",
         "edition_not_found": "That edition does not exist.",
         "deposit_not_configured": "Set the deposit on the package before it can open for booking.",
-        "amendment_price_basis_unavailable": "The prices a booking was sold at are no longer available."
+        "amendment_price_basis_unavailable": "The prices a booking was sold at are no longer available.",
+        "cancellation_policy_not_draft": "Only a draft policy can be changed. Duplicate it into a new draft.",
+        "cancellation_policy_not_active": "Only an active policy can be used.",
+        "cancellation_policy_in_use": "A package still sells under this policy. Give it another one first.",
+        "cancellation_policy_currency_mismatch": "This policy's fixed amounts are in another currency than the package.",
+        "cancellation_policy_invalid": "This policy cannot be activated yet: fix the problems listed.",
+        "cancellation_tiers_invalid": "Some tiers are not valid.",
+        "cancellation_policy_not_found": "That cancellation policy no longer exists.",
+        "cancellation_policy_changed": "The cancellation policy shown is no longer the package's. Reload and check it."
+      },
+      "cancellation": {
+        "title": "Cancellation policies",
+        "editTitle": "Cancellation policy",
+        "intro": "Tiers by days before departure. A draft can be changed; activating freezes it, and bookings sold under it keep it even if the package changes policy later.",
+        "listTitle": "Policies",
+        "listCaption": "Cancellation policies, drafts first",
+        "none": "No cancellation policies yet.",
+        "name": "Name",
+        "status": "Status",
+        "statuses": {
+          "draft": "Draft",
+          "active": "Active",
+          "archived": "Archived"
+        },
+        "tiersCount": "Tiers",
+        "packagesCount": "Packages using it",
+        "newTitle": "New policy",
+        "description": "What customers read (en-AU)",
+        "descriptionHint": "Shown next to the tiers before people book, and with the terms at checkout.",
+        "create": "Create draft",
+        "created": "Draft created.",
+        "usedBy": "{count} package(s) sell under this policy.",
+        "tiersTitle": "Tiers",
+        "tiersHint": "Each tier applies from its number of days before departure; the tier at 0 days also covers cancellations after departure. Penalties are worked out by the system on the booking total and never go above it or above what was paid.",
+        "tierLegend": "Tier {n}",
+        "days": "From days before departure",
+        "mode": "Penalty",
+        "modes": {
+          "percent": "Percentage of the total",
+          "fixed_per_person": "Fixed amount per traveller",
+          "fixed_per_booking": "Fixed amount per booking"
+        },
+        "percent": "Percentage (0 to 100)",
+        "amount": "Amount in A$",
+        "rowInvalid": "Check the days and the value of this tier.",
+        "removeTier": "Remove tier",
+        "addTier": "Add tier",
+        "saveTiers": "Save tiers",
+        "saved": "Tiers saved.",
+        "problems": {
+          "no_tiers": "Add at least one tier.",
+          "too_many_tiers": "Ten tiers at most.",
+          "days_out_of_range": "Days go from 0 to 3650.",
+          "duplicate_days": "Two tiers start on the same day.",
+          "percent_out_of_range": "A percentage goes from 0 to 100.",
+          "percent_with_amount": "A percentage tier has no amount.",
+          "amount_out_of_range": "That amount is too large.",
+          "fixed_without_currency": "A fixed amount needs a currency.",
+          "fixed_with_percent": "A fixed tier has no percentage.",
+          "no_zero_tier": "Add a tier at 0 days: it covers the last days and after departure.",
+          "mixed_currencies": "All fixed amounts must be in one currency."
+        },
+        "activate": "Activate",
+        "activated": "Policy activated. It can no longer be changed; duplicate it to make a new version.",
+        "archive": "Archive",
+        "archivedDone": "Policy archived. Bookings sold under it keep it.",
+        "duplicate": "Duplicate into a new draft",
+        "packageTitle": "Cancellation policy",
+        "packageNone": "This package has no cancellation policy: customers cannot cancel online, and a cancellation refunds everything paid.",
+        "packagePolicy": "Policy new bookings are sold under",
+        "packageNoneOption": "None",
+        "packageHint": "Bookings already made keep the policy they were sold under. The public page shows the change within a minute.",
+        "assign": "Save policy",
+        "assigned": "Policy saved for new bookings."
       }
     },
     "crm": {
@@ -2445,7 +2523,19 @@
         "nothing_to_pay": "There is nothing to pay on this booking right now.",
         "approval_expired": "The time to pay the deposit for this booking has run out.",
         "booking_not_payable": "This booking cannot take a payment in its current state.",
-        "payment_link_not_found": "That payment link no longer exists."
+        "payment_link_not_found": "That payment link no longer exists.",
+        "cancellation_quote_changed": "What cancelling this booking means has changed. Look at the new amounts and try again.",
+        "cancellation_blocked_by_pending_payment": "A payment is still being processed at the bank. The request is noted with its date.",
+        "cancellation_blocked_by_refund_in_progress": "A refund is still in progress. The request is noted with its date.",
+        "cancellation_blocked_by_dispute": "A payment is disputed.",
+        "already_cancelled": "This booking already has its cancellation.",
+        "cancellation_policy_not_draft": "Only a draft policy can be changed. Duplicate it into a new draft.",
+        "cancellation_policy_not_active": "Only an active policy can be used.",
+        "cancellation_policy_in_use": "A package still sells under this policy. Give it another one first.",
+        "cancellation_policy_currency_mismatch": "This policy's fixed amounts are in another currency than the package.",
+        "cancellation_policy_invalid": "This policy cannot be activated yet: it needs a tier at 0 days and valid tiers.",
+        "cancellation_tiers_invalid": "Some tiers are not valid.",
+        "cancellation_currency_mismatch": "The policy's fixed amounts are in another currency than the booking."
       },
       "bookingStatus": {
         "requested": "Requested",
@@ -2509,15 +2599,15 @@
         "travellerCount": "{count} in {rooms} room(s)",
         "actions": "Decide",
         "reason": "Reason",
-        "reasonHint": "Required when declining or closing. The customer may see it in the email.",
+        "reasonHint": "Required when declining or cancelling. The customer may see it in the email.",
         "reasonRequired": "Add a reason first.",
         "approve": "Approve request",
         "decline": "Decline request",
-        "cancel": "Close booking",
+        "cancel": "Cancel booking",
         "done": {
           "approve": "Request approved. The customer has been emailed.",
           "decline": "Request declined. The customer has been emailed.",
-          "cancel": "Booking closed. The customer has been emailed."
+          "cancel": "Cancellation recorded. What was kept and what may go back are shown below."
         }
       },
       "customers": {
@@ -2712,7 +2802,7 @@
       },
       "refunds": {
         "title": "Refunds and disputes",
-        "intro": "A refund gives back what a payment holds beyond what this booking owes. The amount is worked out by the system; refunds for a cancellation or a lower price are not available yet.",
+        "intro": "A refund gives back what a payment holds beyond what this booking owes. The amount is worked out by the system. After a cancellation, what it left refundable goes back as a cancellation refund; money paid after it as an overpayment.",
         "depositReversed": "Money for the deposit went back to the customer (a refund or a chargeback). The booking keeps its status, but it cannot be confirmed and no reminders or payments go out until the review task is closed.",
         "paymentsHeading": "What each payment can give back",
         "noPayments": "No payment has gone through on this booking.",
@@ -2815,7 +2905,7 @@
           "refunds_not_supported": "This gateway cannot refund from here.",
           "partial_refund_not_supported": "This gateway only refunds a payment in full.",
           "refund_refused_by_gateway": "The payment gateway refused this refund. Nothing was refunded.",
-          "cancellation_refund_rejected_until_cancellations_exist": "Refunds for a cancellation are not available yet.",
+          "cancellation_refund_rejected_until_cancellations_exist": "This booking has no cancellation to refund.",
           "price_reduction_refund_rejected_until_amendments_exist": "Lower the price with a change to the booking first.",
           "destination_invalid": "These bank details are not valid.",
           "destination_already_set": "This refund already has where it goes.",
@@ -2828,9 +2918,43 @@
           "external_refund_in_progress": "A refund made at the gateway is still in progress on this booking. Wait for it to settle.",
           "refund_send_in_progress": "This refund is being sent to the gateway right now. Try again in a few minutes.",
           "booking_dispute_open": "A payment of this booking is disputed. Nothing is refunded from here until the dispute ends.",
-          "late_refund_in_progress": "One of our refunds on this booking is still being processed by the gateway. Check it with the gateway first."
+          "late_refund_in_progress": "One of our refunds on this booking is still being processed by the gateway. Check it with the gateway first.",
+          "cancellation_refund_cap_reached": "Everything this cancellation left refundable has been refunded or is on its way."
         },
-        "latePending": "This is our refund: it was marked as not made, but the payment gateway is still processing it. No other refund can be made on this booking until it settles. Check with the gateway to settle it."
+        "latePending": "This is our refund: it was marked as not made, but the payment gateway is still processing it. No other refund can be made on this booking until it settles. Check with the gateway to settle it.",
+        "forCancellation": "(cancellation refund)"
+      },
+      "cancellation": {
+        "title": "Cancel",
+        "recordTitle": "Cancellation",
+        "operator": "We called it off (the race, a supplier or we let the customer down): keep nothing",
+        "operatorHint": "Without this, the booking's cancellation policy applies. Either way the amounts come from the system.",
+        "basis": "Rule applied",
+        "bases": {
+          "policy": "The booking's cancellation policy",
+          "not_contracted": "Not confirmed yet: nothing kept",
+          "no_policy": "Sold without a cancellation policy: nothing kept",
+          "operator_cancelled": "Called off by us: nothing kept"
+        },
+        "by": "Requested by",
+        "requestedBy": {
+          "customer": "The customer, online",
+          "staff": "Staff"
+        },
+        "days": "Days before departure",
+        "daysLine": "{days}, counted from {date}",
+        "tier": "Tier",
+        "held": "Held now",
+        "policyPenalty": "Policy penalty",
+        "kept": "Kept",
+        "waived": "Never charged",
+        "refundable": "May be refunded",
+        "blocked": {
+          "transition_not_allowed": "Cancelling is not possible in this booking's state.",
+          "cancellation_blocked_by_pending_payment": "A payment is still being processed at the bank. Wait for it; the request is noted with its date.",
+          "cancellation_blocked_by_refund_in_progress": "A refund is still in progress. Wait for it; the request is noted with its date.",
+          "cancellation_blocked_by_dispute": "A payment is disputed: what is disputed is not counted as held."
+        }
       },
       "receipts": {
         "heading": "Receipts",
@@ -3839,7 +3963,8 @@
         "changed": "This trip changed since the offer was made. Leave the list and join again.",
         "notOpen": "This trip is no longer open for booking.",
         "busy": "Many people are booking right now. Try again in a moment.",
-        "generic": "Something went wrong. Try again shortly."
+        "generic": "Something went wrong. Try again shortly.",
+        "policyChanged": "The cancellation policy of this trip has changed. Reload the page and read it again."
       }
     }
   },
@@ -3876,7 +4001,8 @@
       "changed": "This trip changed while you were booking. Check the price and try again.",
       "busy": "Many people are booking right now. Try again in a moment.",
       "notReady": "We could not send your request. Try again shortly.",
-      "generic": "Something went wrong. Try again shortly."
+      "generic": "Something went wrong. Try again shortly.",
+      "policyChanged": "The cancellation policy of this trip has changed while you were booking. Reload the page and read it again."
     },
     "confirmation": {
       "title": "Your booking request",
@@ -3942,7 +4068,8 @@
       "quote_expired": "This quote has expired. Ask us for a new one.",
       "quote_not_available": "This quote can no longer be accepted.",
       "busy": "We are busy. Please try again in a moment.",
-      "network": "We could not reach the server. Please try again."
+      "network": "We could not reach the server. Please try again.",
+      "policyChanged": "The cancellation policy of this trip has changed. Reload the page and read it again."
     }
   },
   "paymentReturn": {
@@ -4253,6 +4380,67 @@
       "amendment_limit_reached": "This booking cannot take more changes of travellers.",
       "terms_not_accepted": "Accept the current booking terms first, from the payment page.",
       "generic": "The change could not be made. Try again."
+    }
+  },
+  "cancellation": {
+    "policyHeading": "Cancellation policy",
+    "policyNote": "Days are counted to your departure date, in Brisbane time. If you cancel, we keep what the tier says, never more than you have paid, and refund the rest.",
+    "noPolicy": "This trip has no cancellation policy online yet. Contact us before you book to ask what applies.",
+    "tier": {
+      "atLeast": {
+        "percent": "{days} days or more before departure: {amount} of the total",
+        "perPerson": "{days} days or more before departure: {amount} per traveller",
+        "perBooking": "{days} days or more before departure: {amount} per booking"
+      },
+      "lessThan": {
+        "percent": "Less than {days} days before departure, or after it: {amount} of the total",
+        "perPerson": "Less than {days} days before departure, or after it: {amount} per traveller",
+        "perBooking": "Less than {days} days before departure, or after it: {amount} per booking"
+      },
+      "any": {
+        "percent": "At any time: {amount} of the total",
+        "perPerson": "At any time: {amount} per traveller",
+        "perBooking": "At any time: {amount} per booking"
+      },
+      "between": {
+        "percent": "{days} to {until} days before departure: {amount} of the total",
+        "perPerson": "{days} to {until} days before departure: {amount} per traveller",
+        "perBooking": "{days} to {until} days before departure: {amount} per booking"
+      }
+    },
+    "page": {
+      "title": "Cancel your booking",
+      "intro": "Check what cancelling means before you confirm. The amounts come from our system and your cancellation policy.",
+      "reference": "Booking {reference}",
+      "days": "Days before departure",
+      "daysLine": "{days}, counted from {date}",
+      "tier": "Tier that applies",
+      "paid": "Paid so far",
+      "kept": "We keep",
+      "notCharged": "Not charged",
+      "refund": "Refunded to you",
+      "refundNote": "The refund goes back the way you paid. Our team arranges it once your cancellation is recorded; it may take a few business days to reach you.",
+      "confirm": "Cancel my booking",
+      "working": "Cancelling…",
+      "done": "Your cancellation is recorded. We have noted what we keep and what goes back to you.",
+      "back": "Back to my booking",
+      "cancelled": "Cancellation",
+      "link": "Cancel this booking",
+      "blocked": {
+        "transition_not_allowed": "Cancelling online is not possible in this booking's current state.",
+        "customer_cancellation_disabled": "Cancelling online is not available. Contact us and we will help.",
+        "customer_cancellation_needs_staff": "This booking is not confirmed yet. Contact us to cancel it.",
+        "customer_cancellation_rejected_until_policies_exist": "This booking has no cancellation policy to apply online. Contact us to cancel it.",
+        "customer_cannot_cancel_after_departure": "Your trip has already started. Contact us.",
+        "cancellation_blocked_by_pending_payment": "A payment is still being processed. We have noted your request and its date; try again once it has gone through.",
+        "cancellation_blocked_by_refund_in_progress": "A refund is still being processed. We have noted your request and its date.",
+        "cancellation_blocked_by_dispute": "A payment of this booking is disputed. We have noted your request and its date and will be in touch."
+      },
+      "errors": {
+        "cancellation_quote_changed": "What cancelling means has changed since you opened this page. Check the new amounts and confirm again.",
+        "generic": "We could not cancel your booking. Try again shortly, or contact us.",
+        "network": "We could not reach our server. Check your connection and try again."
+      }
     }
   },
   "cardPage": {

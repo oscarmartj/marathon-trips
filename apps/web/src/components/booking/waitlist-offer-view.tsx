@@ -9,6 +9,9 @@ import { formatMoney } from '@/lib/builder';
 import { localisedText } from '@/lib/catalogue';
 import { formatDate } from '@/lib/catalogue-format';
 import { t } from '@/lib/i18n';
+import type { CancellationPolicyPublicView } from '@mt/shared';
+import { CancellationPolicyTerms } from '@/components/cancellation/policy-terms';
+import { policyRef } from '@/lib/cancellation';
 import { formatStands } from './quote-view';
 
 export interface WaitlistEntryView {
@@ -20,6 +23,8 @@ export interface WaitlistEntryView {
   package: { name: Record<string, string> };
   /** The engine's price for the offer today; null when it cannot be priced. */
   price: { currency: string; totalMinor: string; depositMinor: string | null; balanceDueDate: string } | null;
+  /** Task 6.4: the cancellation policy accepting binds to. */
+  cancellationPolicy?: CancellationPolicyPublicView | null;
 }
 
 const errorKey = (status: number, code?: string): string => {
@@ -28,6 +33,7 @@ const errorKey = (status: number, code?: string): string => {
   if (code === 'catalogue_changed') return 'waitlist.offer.errors.changed';
   if (code === 'package_not_open' || code === 'package_departed') return 'waitlist.offer.errors.notOpen';
   if (code === 'busy_try_again') return 'waitlist.offer.errors.busy';
+  if (code === 'cancellation_policy_changed') return 'waitlist.offer.errors.policyChanged';
   return 'waitlist.offer.errors.generic';
 };
 
@@ -46,7 +52,7 @@ export function WaitlistOfferView({ view }: { view: WaitlistEntryView }) {
     setBusy(what);
     setError(null);
     try {
-      const r = await api<{ bookingReference?: string }>(`/waitlist/entries/${encodeURIComponent(view.id)}/${what}`, { method: 'POST', body: {} });
+      const r = await api<{ bookingReference?: string }>(`/waitlist/entries/${encodeURIComponent(view.id)}/${what}`, { method: 'POST', body: what === 'accept' ? { cancellationPolicy: policyRef(view.cancellationPolicy) } : {} });
       if (r.status === 200 && what === 'accept' && typeof r.body.bookingReference === 'string') {
         window.location.assign(`/trips/requests/${encodeURIComponent(r.body.bookingReference)}`);
         return;
@@ -90,6 +96,7 @@ export function WaitlistOfferView({ view }: { view: WaitlistEntryView }) {
                 </dl>
               </section>
             ) : null}
+            <CancellationPolicyTerms policy={view.cancellationPolicy ?? null} />
             <Status message={error} />
             <p className="actions">
               <button className="btn" type="button" onClick={() => run('accept')} disabled={busy !== null} aria-disabled={busy !== null}>

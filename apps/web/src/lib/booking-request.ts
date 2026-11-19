@@ -5,13 +5,15 @@ import { ISO_COUNTRY_CODES } from '@mt/shared/iso-countries';
 // Booking requests from the web (task 2.4, plan docs/plans/2.4-booking-requests.md, section 9). The body is the
 // configuration and the lead contact: never an amount, a currency, a date or a status. The API prices it.
 
-export type BookingRequestBody = QuoteRequest & { contact: BookingContact };
+export type BookingRequestBody = QuoteRequest & { contact: BookingContact; cancellationPolicy: { id: string; digest: string } | null };
 
 /** The body the API receives: the quote request the builder made, and the contact. Nothing else. */
-export function toBookingRequest(quote: QuoteRequest, contact: { givenName: string; familyName: string; phone?: string; countryOfResidence: string }): BookingRequestBody {
+export function toBookingRequest(quote: QuoteRequest, contact: { givenName: string; familyName: string; phone?: string; countryOfResidence: string }, cancellationPolicy: { id: string; digest: string } | null = null): BookingRequestBody {
   const phone = contact.phone?.trim();
   return {
     ...quote,
+    // Task 6.4: the cancellation policy the customer was shown, sent back as it came (the API refuses a stale one).
+    cancellationPolicy,
     contact: { givenName: contact.givenName.trim(), familyName: contact.familyName.trim(), ...(phone ? { phone } : {}), countryOfResidence: contact.countryOfResidence.trim().toUpperCase() },
   };
 }
@@ -117,6 +119,8 @@ export function requestErrorKey(status: number, code: string | undefined): strin
       catalogue_changed: 'bookingRequest.errors.changed',
       busy_try_again: 'bookingRequest.errors.busy',
       idempotency_in_progress: 'bookingRequest.errors.busy',
+      // Task 6.4: the cancellation policy changed while the page was open.
+      cancellation_policy_changed: 'bookingRequest.errors.policyChanged',
     };
     return known[code ?? ''] ?? 'bookingRequest.errors.notReady';
   }

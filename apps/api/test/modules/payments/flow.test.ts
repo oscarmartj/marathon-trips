@@ -16,7 +16,7 @@ import { ApiError, conflict } from '../../../src/platform/http/api-error';
 import { AppError } from '../../../src/platform/errors/safe-error';
 import { closeCatalogue } from '../../support/catalogue';
 import { acceptQuote, crmStaff, linkedCustomer, makeQuote, sendQuote } from '../../support/crm';
-import { cleanBookingEvents, makeBookingFor } from '../../support/bookings';
+import { cleanBookingEvents, makeBookingFor, staffCancel } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 import {
@@ -133,13 +133,13 @@ describe('the payment plan (plan 3.1, section 4)', () => {
   it('cancellation_supersedes_schedule (and a request without a plan cancels as before)', async () => {
     const { bookingId } = await fresh();
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-    expect((await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'Customer asked' })).status).toBe(200);
+    expect((await staffCancel(admin, bookingId, { version: b.version, reason: 'Customer asked' })).status).toBe(200);
     const plan = await t.prisma.paymentSchedule.findUniqueOrThrow({ where: { bookingId }, include: { items: true } });
     expect(plan.version).toBe(2);
     expect(plan.items.every((i) => i.state === 'superseded' && i.supersededInVersion === 2)).toBe(true);
     const req = await c.request((await import('../../support/bookings')).requestBody(w));
     const rb = await booking(req.body.reference as string);
-    expect((await admin.post(`/admin/bookings/${rb.id}/cancel`, { version: rb.version, reason: 'x' })).status).toBe(200);
+    expect((await staffCancel(admin, rb.id, { version: rb.version, reason: 'x' })).status).toBe(200);
   });
 
   it('the customer sees the plan, the amounts as strings, the methods and no internal ids', async () => {
@@ -254,7 +254,7 @@ describe('payment attempts (plan 3.1, section 5)', () => {
     expect((await c.pay(req.body.reference as string, { method: 'card' })).body.code).toBe('booking_not_payable');
     const { reference, bookingId } = await fresh();
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-    await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'x' });
+    await staffCancel(admin, bookingId, { version: b.version, reason: 'x' });
     const res = await c.pay(reference, { method: 'card' });
     expect([res.status, res.body.code]).toEqual([409, 'booking_not_payable']);
   });
@@ -395,7 +395,7 @@ describe('expiry and cancellation of attempts (plan 3.1, 5.3 and 14.3)', () => {
       await locker.query(`SELECT id FROM payments WHERE id = $1::uuid FOR UPDATE`, [p!.id]);
       const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
       const started = Date.now();
-      const res = await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'Changed plans' });
+      const res = await staffCancel(admin, bookingId, { version: b.version, reason: 'Changed plans' });
       expect(res.status).toBe(200);
       expect(Date.now() - started).toBeLessThan(5_000);
     } finally {
@@ -414,25 +414,27 @@ describe('expiry and cancellation of attempts (plan 3.1, 5.3 and 14.3)', () => {
     const first = await c.pay(reference, { method: 'card' }, key);
     expect(first.body.nextAction).toBeDefined();
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-    await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'x' });
+    await staffCancel(admin, bookingId, { version: b.version, reason: 'x' });
     const again = await c.pay(reference, { method: 'card' }, key);
     expect(again.status).toBe(201);
     expect(again.body.nextAction).toBeUndefined();
   });
 
-  it('cancel_with_collected_money_rejected: a booking with money in cannot be cancelled until refunds exist', async () => {
+  // Task 6.4 (plan docs/plans/6.4-cancellation-policies.md, section 10): this was `cancel_with_collected_money_rejected`
+  // (a 409 until cancellation policies existed). A paid booking sold without a policy now cancels with penalty 0: the
+  // plan owes nothing and everything collected is an overpayment to give back.
+  it('cancellation_without_policy_makes_everything_refundable: a booking with money in cancels and owes nothing', async () => {
     const { reference, bookingId } = await fresh();
     await c.pay(reference, { method: 'card' });
     const [p] = await paymentsOf(bookingId);
     sim.settle(acc.id, p!.providerPaymentRef!, 'succeeded');
     await deliver(t, acc, await eventFor(t, acc, p!.id));
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-    const res = await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'x' });
-    expect([res.status, res.body.code]).toEqual([409, 'cancellation_needs_payments']);
-    // Task 3.2: the deposit now moves the booking on (coverage rule), and the cancellation still changes nothing.
-    expect((await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe(b.status);
     expect(b.status).toBe('confirmed');
-    expect((await t.prisma.paymentSchedule.findUniqueOrThrow({ where: { bookingId } })).version).toBe(1);
+    const res = await staffCancel(admin, bookingId, { version: b.version, reason: 'x' });
+    expect([res.status, res.body.status, res.body.cancellation.basis, res.body.cancellation.penaltyMinor, res.body.cancellation.refundableMinor]).toEqual([200, 'cancelled', 'no_policy', '0', p!.amountMinor.toString()]);
+    expect((await t.prisma.paymentSchedule.findUniqueOrThrow({ where: { bookingId } })).version).toBe(2);
+    expect(await t.prisma.paymentScheduleItem.count({ where: { bookingId, state: 'active' } })).toBe(0);
   });
 
   it('late_success_on_cancelled_booking_recorded_with_task', async () => {
@@ -440,7 +442,7 @@ describe('expiry and cancellation of attempts (plan 3.1, 5.3 and 14.3)', () => {
     await c.pay(reference, { method: 'card' });
     const [p] = await paymentsOf(bookingId);
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-    await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'x' });
+    await staffCancel(admin, bookingId, { version: b.version, reason: 'x' });
     sim.settle(acc.id, p!.providerPaymentRef!, 'succeeded');
     expect((await deliver(t, acc, await eventFor(t, acc, p!.id))).outcome).toBe('processed');
     expect((await paymentsOf(bookingId))[0]!.status).toBe('succeeded');

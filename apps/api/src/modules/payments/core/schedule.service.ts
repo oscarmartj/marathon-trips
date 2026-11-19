@@ -68,16 +68,30 @@ export class PaymentScheduleService {
   }
 
   /**
-   * Before task 6.4 there are no penalties, so a cancelled booking owes nothing: every active item is superseded. A
-   * booking with money collected cannot be cancelled yet (409, as for the paid states): refunds are parked.
+   * Task 6.4 (plan docs/plans/6.4-cancellation-policies.md, section 6 step 7 and section 13 m2/m4): the plan of a
+   * cancelled booking owes what its cancellation keeps. Every active item is superseded in one new plan version, a single
+   * `penalty` item carries the penalty (none when it is 0), and the money is reallocated once with the cancellation's
+   * key, so what was paid above the penalty becomes an overpayment to give back. Without the cancellation record (no
+   * caller should do that) a booking with money collected is refused, as before 6.4.
    */
   async onCancel(tx: Tx, hooked: HookedBooking, ctx: BookingHookContext): Promise<void> {
     const schedule = await tx.paymentSchedule.findUnique({ where: { bookingId: hooked.id }, select: { id: true, version: true, currency: true } });
-    // The cash held (task 4.5): money promised back by a refund still in flight is still ours until it leaves.
-    const collected = (await bookingCash(tx, hooked.id, this.gateway.mode)).collectedMinor;
-    if (collected > 0n) throw conflict('cancellation_needs_payments', 'This booking has payments to settle first. Cancelling it is not available yet.');
-    if (!schedule) return;
-    await this.supersede(tx, hooked.id, schedule, 'booking_cancelled', ctx);
+    if (!ctx.cancellation) {
+      const collected = (await bookingCash(tx, hooked.id, this.gateway.mode)).collectedMinor;
+      throw conflict('cancellation_needs_payments', collected > 0n ? 'This booking has payments to settle first.' : 'A booking is cancelled through its cancellation record.');
+    }
+    if (!schedule) {
+      if (ctx.cancellation.penaltyMinor > 0n) throw new AppError('penalty_without_plan', 'A booking without a payment plan cannot keep a penalty');
+      return;
+    }
+    const version = await this.supersede(tx, hooked.id, schedule, 'booking_cancelled', ctx, false);
+    if (ctx.cancellation.penaltyMinor > 0n) {
+      await tx.paymentScheduleItem.create({
+        data: { scheduleId: schedule.id, bookingId: hooked.id, currency: schedule.currency, kind: 'penalty', sequence: 1, planVersion: version, amountMinor: ctx.cancellation.penaltyMinor, dueDate: new Date(`${ctx.cancellation.dueDate}T00:00:00.000Z`) },
+      });
+    }
+    // One reallocation for the whole cancellation (P5 key `cancellation:<id>:plan`): nothing posts twice on a retry.
+    await this.ledger.reallocate(tx, { id: hooked.id, currency: schedule.currency }, this.gateway.mode, `cancellation:${ctx.cancellation.id}:plan`);
     // A live attempt is cancelled at the gateway after this commits (no Payment lock here).
     const live = await tx.payment.findUnique({ where: { liveBookingId: hooked.id }, select: { id: true } });
     if (live) await this.jobs.send(QUEUES.paymentsAttempts, { paymentId: live.id, action: 'cancel' }, { db: bossDb(tx), singletonKey: `cancel:${live.id}` });
@@ -111,7 +125,7 @@ export class PaymentScheduleService {
   }
 
   /** Supersedes every active item in a new plan version (the plan then owes 0), with its audit entry and event. */
-  private async supersede(tx: Tx, bookingId: string, schedule: { id: string; version: number; currency: string }, cause: 'booking_cancelled' | 'approval_expired', ctx: BookingHookContext): Promise<void> {
+  private async supersede(tx: Tx, bookingId: string, schedule: { id: string; version: number; currency: string }, cause: 'booking_cancelled' | 'approval_expired', ctx: BookingHookContext, reallocate = true): Promise<number> {
     const version = schedule.version + 1;
     const bumped = await tx.paymentSchedule.updateMany({ where: { id: schedule.id, version: schedule.version }, data: { version } });
     if (bumped.count !== 1) throw conflict('payment_plan_changed', 'The payment plan changed. Try again.');
@@ -121,7 +135,9 @@ export class PaymentScheduleService {
       before: { version: schedule.version }, after: { version }, context: { bookingId, supersededItems: superseded.count, cause },
     });
     await this.outbox.publish(tx, { type: PAYMENT_EVENTS.scheduleSuperseded, aggregateType: 'PaymentSchedule', aggregateId: schedule.id, aggregateVersion: version, payload: { scheduleId: schedule.id, bookingId }, actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined });
-    // The plan owes 0: money already in moves to overpayments (plan 3.3, 1.5), one key per plan version.
-    await this.ledger.reallocate(tx, { id: bookingId, currency: schedule.currency }, this.gateway.mode, scheduleReallocationKey(bookingId, version));
+    // The plan owes 0: money already in moves to overpayments (plan 3.3, 1.5), one key per plan version. A cancellation
+    // adds its penalty item first and reallocates with its own key (task 6.4).
+    if (reallocate) await this.ledger.reallocate(tx, { id: bookingId, currency: schedule.currency }, this.gateway.mode, scheduleReallocationKey(bookingId, version));
+    return version;
   }
 }

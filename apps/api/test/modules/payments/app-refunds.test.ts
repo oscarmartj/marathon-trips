@@ -7,7 +7,7 @@ import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { coverageLostTaskRef } from '../../../src/modules/payments/core/refunds.service';
 import { TestApp, makeApp } from '../../support/auth';
-import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
+import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, staffCancel } from '../../support/bookings';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
 import { balancesOf, connect, ledgerOf, txError } from '../../support/ledger';
 import { pricedWorld } from '../../support/pricing';
@@ -375,7 +375,7 @@ describe('money out on a cancelled booking (plan 0.1, 6.2; plan 4.5, section 7)'
     const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
     const p = await payNow(reference, bookingId);
     const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-    expect((await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'Customer asked' })).status).toBe(200);
+    expect((await staffCancel(admin, bookingId, { version: b.version, reason: 'Customer asked' })).status).toBe(200);
     // The attempt went through after all: money on a cancelled booking is an overpayment.
     sim.settle(acc.id, p.providerPaymentRef!, 'succeeded');
     expect((await deliver(t, acc, await eventFor(t, acc, p.id))).outcome).toBe('processed');

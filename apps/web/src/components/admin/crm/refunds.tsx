@@ -5,7 +5,7 @@ import { Field, Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
 import { t } from '@/lib/i18n';
-import { canMarkEvidence, canRequest, canResolve, destinationBody, isLatePending, manualStep, newIdempotencyKey, refundBody } from '@/lib/refunds-panel';
+import { canMarkEvidence, canRequest, canResolve, destinationBody, isLatePending, manualStep, newIdempotencyKey, refundAmount, refundBody, refundPurpose } from '@/lib/refunds-panel';
 import type { DisputeRow, RefundRow, RefundableRow } from '@/lib/refunds-panel';
 import { Section, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
@@ -134,14 +134,15 @@ export function RefundsPanel({ bookingId, onChanged }: { bookingId: string; onCh
         <ul>
           {data.refundable.map((row) => (
             <li key={row.paymentId}>
-              {t('admin.crm.refunds.refundableRow', { method: t(`checkout.methods.${row.method}`), amount: amountOf(row.refundableMinor, row.currency) })}
+              {t('admin.crm.refunds.refundableRow', { method: t(`checkout.methods.${row.method}`), amount: amountOf(refundAmount(row), row.currency) })}
+              {refundPurpose(row) === 'cancellation' ? <> {t('admin.crm.refunds.forCancellation')}</> : null}
               {row.blockedReason ? <> {t(`admin.crm.refunds.blocked.${row.blockedReason}`)}</> : null}
               {canRequest(row) && asking !== row.paymentId ? (
                 <> <button className="link-button" type="button" disabled={busy} onClick={() => setAsking(row.paymentId)}>{t('admin.crm.refunds.request')}</button></>
               ) : null}
               {asking === row.paymentId ? (
                 <form className="stack" onSubmit={(e) => void request(e, row)}>
-                  <p>{t(row.manual ? 'admin.crm.refunds.manualWarning' : 'admin.crm.refunds.gatewayWarning', { amount: amountOf(row.refundableMinor, row.currency) })}</p>
+                  <p>{t(row.manual ? 'admin.crm.refunds.manualWarning' : 'admin.crm.refunds.gatewayWarning', { amount: amountOf(refundAmount(row), row.currency) })}</p>
                   <Field label={t('admin.crm.refunds.reason')} id={`refund-reason-${row.paymentId}`} {...{ name: 'reason' }} minLength={3} maxLength={500} required />
                   <div className="actions">
                     <button className="btn" type="submit" disabled={busy}>{t('admin.crm.refunds.requestConfirm')}</button>

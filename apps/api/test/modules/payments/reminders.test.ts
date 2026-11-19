@@ -10,7 +10,7 @@ import { MailService } from '../../../src/platform/mail/mail.service';
 import { SettingsService } from '../../../src/platform/flags/flags.service';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
 import { walkTo } from '../../support/customer-portal';
-import { cleanBookingEvents } from '../../support/bookings';
+import { cleanBookingEvents, insertBareCancellation } from '../../support/bookings';
 import { closeCatalogue, staffClient } from '../../support/catalogue';
 import { pricedWorld } from '../../support/pricing';
 import { PayingCustomer, SimAccount, approvedBooking, cleanPayments, ensureTerms, onlyAccount, payingCustomer, paymentsStaff, sim, simulatorAccount } from '../../support/payments';
@@ -225,6 +225,8 @@ describe('queueing', () => {
       const w = await depositPaid();
       // Cancelling supersedes the plan (the booking and its plan are checked together at commit); completing does not.
       await t.prisma.$transaction(async (tx) => {
+        // Task 6.4: a cancellation has its record (deferred trigger of 0038).
+        if (status === 'cancelled') await insertBareCancellation(tx, w.bookingId);
         await tx.$executeRawUnsafe(
           `UPDATE bookings SET status = $2::"BookingStatus", version = version + 1, "cancelledAt" = CASE WHEN $2 = 'cancelled' THEN clock_timestamp() ELSE "cancelledAt" END WHERE id = $1::uuid`, w.bookingId, status);
         if (status === 'cancelled') {

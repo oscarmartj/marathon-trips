@@ -11,6 +11,9 @@ import { IdempotencyKeys, countryProblem, parseWaitlistJoined, rememberReturnTo,
 import type { PackageDetail } from '@/lib/catalogue';
 import { t } from '@/lib/i18n';
 import { isBreakdown } from '@/lib/quote-loader';
+import type { CancellationPolicyPublicView } from '@mt/shared';
+import { CancellationPolicyTerms } from '@/components/cancellation/policy-terms';
+import { policyRef } from '@/lib/cancellation';
 
 type Session = 'checking' | 'signed-out' | 'signed-in';
 
@@ -29,6 +32,13 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
   const [countryError, setCountryError] = useState<string | null>(null);
   const [joined, setJoined] = useState<WaitlistJoined | null>(null);
   const keys = useRef(new IdempotencyKeys());
+  // Task 6.4: the cancellation policy the request will be sold under, as the API says it is now.
+  const [policy, setPolicy] = useState<CancellationPolicyPublicView | null | undefined>(undefined);
+  useEffect(() => {
+    api<{ policy: CancellationPolicyPublicView | null }>(`/pricing/packages/${encodeURIComponent(pkg.id)}/cancellation-policy`)
+      .then((r) => setPolicy(r.status === 200 ? r.body.policy : undefined))
+      .catch(() => setPolicy(undefined));
+  }, [pkg.id]);
   const quote = useMemo(() => toQuoteRequest(pkg, state), [pkg, state]);
 
   useEffect(() => {
@@ -44,7 +54,7 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
     const f = new FormData(e.currentTarget);
     const body = toBookingRequest(quote, {
       givenName: String(f.get('givenName') ?? ''), familyName: String(f.get('familyName') ?? ''), phone: String(f.get('phone') ?? ''), countryOfResidence: String(f.get('countryOfResidence') ?? ''),
-    });
+    }, policyRef(policy));
     const problem = countryProblem(body.contact.countryOfResidence);
     if (problem) {
       setCountryError(t(problem.key, problem.params));
@@ -80,6 +90,7 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
     <div className="stack">
       <p className="notice">{t(waitlist ? 'bookingRequest.waitlistNotice' : 'bookingRequest.notABooking')}</p>
       {breakdown ? <QuoteSummary pkg={pkg} breakdown={breakdown} /> : null}
+      {waitlist || policy === undefined ? null : <CancellationPolicyTerms policy={policy} />}
       <Status message={error} />
       {session === 'checking' ? <p role="status">{t('bookingRequest.checking')}</p> : null}
       {session === 'signed-out' ? (
@@ -103,7 +114,7 @@ export function BookingRequestForm({ pkg, state, here }: { pkg: PackageDetail; s
           {countryError ? <p id="countryError" className="form-error" role="alert">{countryError}</p> : null}
           <p id="countryHint">{t('bookingRequest.countryHint')}</p>
           {waitlist ? null : <p>{t('bookingRequest.whatHappensNext')}</p>}
-          <button className="btn" type="submit" disabled={sending || !breakdown} aria-disabled={sending || !breakdown}>
+          <button className="btn" type="submit" disabled={sending || !breakdown || (!waitlist && policy === undefined)} aria-disabled={sending || !breakdown || (!waitlist && policy === undefined)}>
             {sending ? t('bookingRequest.sending') : t(waitlist ? 'bookingRequest.joinWaitlist' : 'bookingRequest.send')}
           </button>
         </form>

@@ -14,7 +14,7 @@ import { TRANSACTION_RETRIES } from '../../../src/platform/database/transaction'
 import { RawBodyRoutes } from '../../../src/platform/http/raw-body';
 import { TestApp, makeApp } from '../../support/auth';
 import { closeCatalogue } from '../../support/catalogue';
-import { cleanBookingEvents } from '../../support/bookings';
+import { cleanBookingEvents, staffCancel } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import {
   PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, onlyAccount, payingCustomer, paymentsStaff, sendWebhook, sim, simulatorAccount,
@@ -414,7 +414,7 @@ describe('SQL nets (plan 3.1, section 3)', () => {
       await sendWebhook(t, acc, w);
       const ev = await eventRow(w.eventId);
       const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
-      const [r1, r2] = await Promise.allSettled([svc().process(ev.id), admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'x' })]);
+      const [r1, r2] = await Promise.allSettled([svc().process(ev.id), staffCancel(admin, bookingId, { version: b.version, reason: 'x' })]);
       expect(r1.status).toBe('fulfilled');
       expect(r2.status === 'fulfilled' && [200, 409].includes(r2.value.status)).toBe(true);
     }

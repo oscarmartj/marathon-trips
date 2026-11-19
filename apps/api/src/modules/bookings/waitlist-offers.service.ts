@@ -10,7 +10,7 @@ import { OutboxService } from '../../platform/events/outbox.service';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { ApiError, conflict, notFound } from '../../platform/http/api-error';
 import { InventoryService, PackagePricingReader, lockPackage } from '../catalogue';
-import { QuoteService, publicPromoStatus } from '../pricing';
+import { CancellationPolicyService, QuoteService, publicPromoStatus } from '../pricing';
 import { WaitlistService } from '../waitlist';
 import { BOOKING_EVENTS } from './manifest';
 import { BookingRequestService, REQUEST_TX_OPTIONS, mapLoadError, startOfDayInBrisbane, todayInBrisbane } from './request.service';
@@ -58,6 +58,7 @@ export class WaitlistOffersService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(CancellationPolicyService) private readonly policies: CancellationPolicyService,
   ) {
     this.waitlist.registerOfferCloser((tx, entryId, to, actor) => this.closeOffer(tx, entryId, to, actor));
   }
@@ -160,31 +161,34 @@ export class WaitlistOffersService {
     const v = await this.waitlist.entryView(entryId);
     if (!v) throw notFound('not_found', 'Not found');
     const { configuration, ...rest } = v;
-    if (v.status !== 'offered') return { ...rest, price: null };
+    if (v.status !== 'offered') return { ...rest, price: null, cancellationPolicy: null };
+    // Task 6.4 (plan section 13, M2): the cancellation policy accepting the offer binds to; sent back on accept.
+    const packageId = (configuration as unknown as { packageId: string }).packageId;
+    const { policy: cancellationPolicy } = await this.policies.publicForPackage(packageId);
     try {
       const breakdown = await this.prisma.$transaction(
         async (tx) => (await this.quotes.priceIn(tx, configuration as unknown as QuoteRequest, { audience: 'staff', now: new Date() })),
         { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
       );
       const { trace: _trace, ...b } = breakdown;
-      return { ...rest, price: jsonOf({ ...b, promo: { status: publicPromoStatus(b.promo.status) } }) };
+      return { ...rest, price: jsonOf({ ...b, promo: { status: publicPromoStatus(b.promo.status) } }), cancellationPolicy };
     } catch (err) {
-      if (err instanceof ApiError) return { ...rest, price: null };
+      if (err instanceof ApiError) return { ...rest, price: null, cancellationPolicy };
       throw err;
     }
   }
 
   /** The customer takes the offer: it becomes a booking request, priced again by the engine, holding the same places. */
-  async accept(userId: string, entryId: string, actor: AuditActor): Promise<{ bookingReference: string; created: boolean }> {
+  async accept(userId: string, entryId: string, actor: AuditActor, shown: { id: string; digest: string } | null = null): Promise<{ bookingReference: string; created: boolean }> {
     const limits = await readBookingLimits(this.settings);
     try {
-      return await runTransaction(this.prisma, (tx) => this.acceptIn(tx, userId, entryId, actor, limits.requestExpiryHours), REQUEST_TX_OPTIONS);
+      return await runTransaction(this.prisma, (tx) => this.acceptIn(tx, userId, entryId, actor, limits.requestExpiryHours, shown), REQUEST_TX_OPTIONS);
     } catch (err) {
       throw mapLoadError(err);
     }
   }
 
-  private async acceptIn(tx: Tx, userId: string, entryId: string, actor: AuditActor, requestExpiryHours: number) {
+  private async acceptIn(tx: Tx, userId: string, entryId: string, actor: AuditActor, requestExpiryHours: number, shown: { id: string; digest: string } | null) {
     const owner = await tx.$queryRaw<Array<{ customerId: string }>>`
       SELECT w."customerId" FROM waitlist_entries w JOIN customers c ON c.id = w."customerId" WHERE w.id = ${entryId}::uuid AND c."userId" = ${userId}::uuid`;
     if (owner.length === 0) throw notFound('not_found', 'Not found');
@@ -203,6 +207,8 @@ export class WaitlistOffersService {
     await lockPackage(tx, entry.packageId, 'share');
     const view = await this.catalogue.load(tx, entry.packageId);
     if (!view || !view.publiclyVisible || !OFFERABLE.has(view.saleStatus)) throw conflict('package_not_open', 'This trip is no longer open for booking');
+    // Task 6.4 (plan section 13, M2): the cancellation policy shown with the offer is the one the package sells under.
+    const policy = await this.policies.assertShown(tx, entry.packageId, shown);
     let priced;
     try {
       priced = await this.quotes.priceIn(tx, entry.configuration as unknown as QuoteRequest, { audience: 'staff', now: at });
@@ -224,7 +230,7 @@ export class WaitlistOffersService {
       residenceCountry: customer.residenceCountry, requestedAt: at, requestExpiresAt, sourceChannel: 'web',
       requestKeyHash: sha256Hex(`waitlist-acceptance:${entry.id}`), requestConfigHash: sha256Hex(canonicalJson(entry.configuration)), requestContactHmac: null,
     });
-    await this.requests.insertSnapshot(tx, bookingId, priced);
+    await this.requests.insertSnapshot(tx, bookingId, priced, policy?.id ?? null);
     await this.requests.insertParts(tx, bookingId, customer.id, { configuration });
     const demand = await this.inventory.demandFor(tx, configuration);
     for (const d of demand) {

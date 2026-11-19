@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { CancellationPolicyTerms } from '@/components/cancellation/policy-terms';
 import { useRef, useState } from 'react';
 import type { CheckoutTermsView, ManualInstructionsView, PaymentMethod, PaymentPlanView } from '@mt/shared';
 import { Status } from '@/components/auth/field';
@@ -50,7 +51,7 @@ export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; in
       if (terms.acceptedAt === null) {
         const a = await api<{ acceptedAt: string }>(`/booking-requests/${encodeURIComponent(plan.reference)}/terms-acceptance`, { method: 'POST', body: acceptTermsBody(terms) });
         if (a.status !== 200) {
-          if (a.body.code === 'terms_changed') await reloadTerms().then(() => setAccepted(false));
+          if (a.body.code === 'terms_changed' || a.body.code === 'cancellation_policy_changed') await reloadTerms().then(() => setAccepted(false));
           fail(checkoutErrorKey(a.status, a.body.code));
           return;
         }
@@ -144,6 +145,8 @@ export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; in
           {paragraphs(terms.body).map((p, i) => <p key={i}>{p}</p>)}
         </div>
         <p><Link href="/legal/terms" target="_blank" rel="noopener">{t('checkout.termsFull')}</Link></p>
+        {/* Task 6.4: the booking's own cancellation policy is part of what is accepted. */}
+        <CancellationPolicyTerms policy={terms.cancellationPolicy ?? null} headingLevel={3} />
         <label className="choice">
           <input type="checkbox" name="terms" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} aria-describedby={error ? 'checkout-status' : undefined} />
           <span>{t('checkout.termsAccept', { version: terms.version })}</span>

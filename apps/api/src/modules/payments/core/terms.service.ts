@@ -7,6 +7,8 @@ import { PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
 import { conflict, notFound } from '../../../platform/http/api-error';
 import { readBookingForPayments } from '../../bookings';
+import { CancellationPolicyService, publicPolicyView } from '../../pricing';
+import type { FrozenCancellationPolicy } from '../../pricing';
 import { PAYABLE_STATES, PAYMENT_TX_OPTIONS } from './payable-states';
 
 /** The published content page that holds the booking terms, and the only language today. */
@@ -38,7 +40,15 @@ export class TermsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(CancellationPolicyService) private readonly policies: CancellationPolicyService,
   ) {}
+
+  /** Task 6.4 (plan section 13, M2): the policy the booking was sold under, shown and accepted with the terms. */
+  private async bookingPolicy(db: Pick<PrismaService, '$queryRaw' | 'cancellationPolicy' | 'cancellationTier' | 'packageCancellationPolicy'>, bookingId: string): Promise<FrozenCancellationPolicy | null> {
+    const rows = await db.$queryRaw<Array<{ policyId: string | null }>>`
+      SELECT s."cancellationPolicyId"::text AS "policyId" FROM bookings b JOIN booking_snapshots s ON s."bookingId" = b.id AND s.version = b."currentSnapshotVersion" WHERE b.id = ${bookingId}::uuid`;
+    return this.policies.frozen(db, rows[0]?.policyId ?? null);
+  }
 
   /** The published terms, or null when there is none. */
   async current(db: Pick<PrismaService, 'contentPage'> = this.prisma): Promise<CurrentTerms | null> {
@@ -56,7 +66,8 @@ export class TermsService {
       where: { bookingId_documentSlug_locale_textDigest: { bookingId: b.id, documentSlug: terms.slug, locale: terms.locale, textDigest: terms.digest } },
       select: { acceptedAt: true },
     });
-    return { slug: terms.slug, version: terms.version, digest: terms.digest, title: terms.title, intro: terms.intro, body: terms.body, acceptedAt: accepted ? accepted.acceptedAt.toISOString() : null };
+    const policy = await this.bookingPolicy(this.prisma, b.id);
+    return { slug: terms.slug, version: terms.version, digest: terms.digest, title: terms.title, intro: terms.intro, body: terms.body, acceptedAt: accepted ? accepted.acceptedAt.toISOString() : null, cancellationPolicy: policy ? publicPolicyView(policy) : null };
   }
 
   /** Records the acceptance of the current text for this booking; accepting the same text again changes nothing. */
@@ -69,15 +80,17 @@ export class TermsService {
       const terms = await this.current(tx as unknown as Pick<PrismaService, 'contentPage'>);
       if (!terms) throw unavailable();
       if (terms.version !== body.version || terms.digest !== body.digest) throw conflict('terms_changed', 'The booking terms have changed since you opened this page. Read them again.');
+      const policy = await this.bookingPolicy(tx as unknown as PrismaService, b.id);
+      if ((policy?.digest ?? null) !== (body.cancellationPolicyDigest ?? null)) throw conflict('cancellation_policy_changed', 'The cancellation policy shown is not the one of this booking. Read it again.');
       const inserted = await tx.termsAcceptance.createManyAndReturn({
-        data: [{ bookingId: b.id, customerId: b.customerId, documentSlug: terms.slug, locale: terms.locale, contentVersion: terms.version, textDigest: terms.digest, title: terms.title, intro: terms.intro, body: terms.body }],
+        data: [{ bookingId: b.id, customerId: b.customerId, documentSlug: terms.slug, locale: terms.locale, contentVersion: terms.version, textDigest: terms.digest, title: terms.title, intro: terms.intro, body: terms.body, cancellationPolicyDigest: policy?.digest ?? null }],
         skipDuplicates: true,
         select: { id: true, acceptedAt: true },
       });
       if (inserted[0]) {
         await this.audit.record(tx, {
           actor, action: 'payments.termsAcceptance.created', entityType: 'TermsAcceptance', entityId: inserted[0].id, model: 'TermsAcceptance',
-          after: { documentSlug: terms.slug, locale: terms.locale, contentVersion: terms.version, textDigest: terms.digest },
+          after: { documentSlug: terms.slug, locale: terms.locale, contentVersion: terms.version, textDigest: terms.digest, cancellationPolicyDigest: policy?.digest ?? null },
           context: { bookingId: b.id },
         });
         return { version: terms.version, acceptedAt: inserted[0].acceptedAt.toISOString() };

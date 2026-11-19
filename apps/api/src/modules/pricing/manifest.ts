@@ -11,6 +11,10 @@ export const PRICING_PERMISSIONS = {
   ruleManage: 'pricing.rule.manage',
   promoCodeRead: 'pricing.promoCode.read',
   promoCodeManage: 'pricing.promoCode.manage',
+  /** Task 6.4: cancellation policies and which one each package sells under. */
+  cancellationPolicyRead: 'pricing.cancellationPolicy.read',
+  cancellationPolicyManage: 'pricing.cancellationPolicy.manage',
+  cancellationPolicyPublish: 'pricing.cancellationPolicy.publish',
 } as const;
 
 const def = (key: string, description: string, requiresStepUp = false): PermissionDef => ({ key, module: 'pricing', description, requiresStepUp });
@@ -28,6 +32,10 @@ export const pricingManifest = {
     def(PRICING_PERMISSIONS.ruleManage, 'Create, change and archive price rules, which change totals at once', true),
     def(PRICING_PERMISSIONS.promoCodeRead, 'See promo codes and how often they have been used'),
     def(PRICING_PERMISSIONS.promoCodeManage, 'Create, change and archive promo codes', true),
+    def(PRICING_PERMISSIONS.cancellationPolicyRead, 'See cancellation policies and their tiers, drafts included'),
+    def(PRICING_PERMISSIONS.cancellationPolicyManage, 'Create, edit, duplicate and delete draft cancellation policies'),
+    // Activating freezes terms customers are bound by; assigning decides what new bookings are sold under (task 6.4).
+    def(PRICING_PERMISSIONS.cancellationPolicyPublish, 'Activate or archive a cancellation policy, or change the one a package sells under', true),
   ] satisfies PermissionDef[],
   publishes: ['pricing.price_version.published', 'pricing.price_version.withdrawn'],
   subscribes: [] as string[],

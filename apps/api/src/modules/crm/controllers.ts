@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
-import { createQuoteSchema, listQuotesQuerySchema, quoteVersionSchema } from '@mt/shared';
+import { acceptQuoteSchema, createQuoteSchema, listQuotesQuerySchema, quoteVersionSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
@@ -48,9 +48,9 @@ export class CustomerQuotesController {
 
   @Post(':reference/accept') @HttpCode(200)
   @OwnedBy({ kind: 'customer', resource: 'quote', fixture: 'quote-accept', owns: (ctx) => ownsQuoteReference(ctx) })
-  async accept(@Param('reference') reference: string, @Req() req: ApiRequest) {
+  async accept(@Param('reference') reference: string, @Body(new ZodPipe(acceptQuoteSchema)) b: z.infer<typeof acceptQuoteSchema>, @Req() req: ApiRequest) {
     const actor = actorOf(req);
-    const r = await this.acceptance.accept(actor.id!, reference, actor);
+    const r = await this.acceptance.accept(actor.id!, reference, actor, b.cancellationPolicy);
     return { bookingReference: r.bookingReference, created: r.created };
   }
 }

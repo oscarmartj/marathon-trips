@@ -24,6 +24,8 @@ export interface AcceptedQuote {
   depositMinor: bigint;
   priceVersionId: string;
   engineVersion: string;
+  /** Task 6.4: the cancellation policy the package sells under at acceptance (the one the customer was shown). */
+  cancellationPolicyId: string | null;
   departureDate: string;
   returnDate: string;
   balanceDueDate: string;
@@ -77,6 +79,7 @@ export class QuotedBookingService {
       data: {
         bookingId, version: 1, kind: 'original', configuration, priceBreakdown: priceBreakdown as unknown as Prisma.InputJsonObject,
         totalMinor: q.totalMinor, depositMinor: q.depositMinor, currency: q.currency, priceVersionId: q.priceVersionId, engineVersion: q.engineVersion,
+        cancellationPolicyId: q.cancellationPolicyId,
       },
     });
     await this.requests.insertParts(tx, bookingId, q.customerId, { configuration });
