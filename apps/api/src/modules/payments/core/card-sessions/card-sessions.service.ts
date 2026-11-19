@@ -5,6 +5,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { CardSessionFailure, CardSessionView, CardSubmitResult } from '@mt/shared';
 import { CARD_SESSION_FAILURES, CARD_SESSION_REF_PATTERN } from '@mt/shared';
 import { WindowLimiter } from '../../../../platform/auth/attempt-limiter';
+import { rateLimitKey } from '../../../../platform/http/client-ip-watch';
 import type { AppConfig } from '../../../../platform/config/config';
 import { APP_CONFIG, PrismaService } from '../../../../platform/database/prisma.service';
 import { runTransaction } from '../../../../platform/database/transaction';
@@ -88,7 +89,7 @@ export class CardSessionsService {
    */
   async submit(ref: string, cardToken: string, rawIp: string | undefined): Promise<CardSubmitResult> {
     const ipAddress = normaliseIp(rawIp);
-    if (!ipAddress || !this.submitsPerIp.allow(`card-submit:ip:${ipAddress}`)) throw tooManyRequests(600);
+    if (!ipAddress || !this.submitsPerIp.allow(`card-submit:ip:${rateLimitKey(rawIp)}`)) throw tooManyRequests(600);
     const { accountId, provider } = await this.locate(ref);
     const session = await provider.session(accountId, ref);
     if (!session) throw notFound();
@@ -119,7 +120,7 @@ export class CardSessionsService {
     } catch {
       return `${new URL(this.config.WEB_ORIGIN).origin}/`;
     }
-    const allowed = !!ipAddress && this.authenticatedPerIp.allow(`card-authenticated:ip:${ipAddress}`);
+    const allowed = !!ipAddress && this.authenticatedPerIp.allow(`card-authenticated:ip:${rateLimitKey(ipAddress)}`);
     if (allowed && typeof sessionToken === 'string' && /^se_[A-Za-z0-9_-]{10,64}$/.test(sessionToken)) {
       try {
         const s = await this.gateway.call(located.accountId, 'retrieve', (p, ctx) => (p as CardSessionProvider).finishAuthentication(ctx, ref, sessionToken));

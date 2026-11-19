@@ -22,6 +22,7 @@ import { FakePin } from '../../contract/subjects/pin-fake';
 import { expiringStore, payOnCardPage } from '../../contract/subjects/pin';
 import { CLAUSE_IMPLS, Harness, NO_GATEWAY_EVENT } from '../../contract/payment-provider.contract';
 import { simulatorLocalSubject } from '../../contract/subjects/simulator';
+import { normaliseIp } from '../../../src/modules/payments/core/card-sessions/card-sessions.service';
 
 const KEY = 'K'.repeat(22);
 const body = Buffer.from(JSON.stringify({ token: 'evt_aaaaaaaaaaaa', type: 'charge.captured', created_at: '2026-11-20T01:02:03Z', data: { token: 'ch_aaaaaaaaaaaa', success: true, captured: true, amount: 1500, currency: 'AUD', metadata: { mt_session: `cs_${'a'.repeat(32)}`, mt_payment: randomUUID() } } }));
@@ -265,13 +266,51 @@ describe('card sessions on the memory store (plan 4.4, sections 6 and 7)', () =>
     fake.switches.loseNextRefundAnswer = true;
     await expect(ask()).rejects.toMatchObject({ retryable: true });
     // The request is an hour old by now; the only refund at Pin was made just now: not its answer.
-    for (const i of mem.intents.values()) i.createdAt = new Date(Date.now() - 3_600_000);
+    for (const i of mem.intents.values()) i.updatedAt = new Date(Date.now() - 3_600_000);
     await expect(ask()).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
     const charge = (await mem.byRef(ctx.accountId, p.ref))!.chargeRef!;
     expect(fake.refundsOf(keys.secretKey, charge)).toHaveLength(1);
     // Inside the window it binds.
-    for (const i of mem.intents.values()) i.createdAt = new Date();
+    for (const i of mem.intents.values()) i.updatedAt = new Date();
     await expect(ask()).resolves.toMatchObject({ ref: fake.refundsOf(keys.secretKey, charge)[0] });
+  });
+
+  it('refund candidates are judged from the request now outstanding: 429, sent again a day later, answer lost, still linked (review round 2)', async () => {
+    const fake = new FakePin();
+    const keys = fake.newAccount();
+    const mem = new MemoryCardSessionStore();
+    const provider = new CardSessionProvider(new PinPaymentsGateway({ transport: fake.transport }), mem, { cardPageOrigin: 'http://localhost:3000', usable: true });
+    const ctx: ProviderContext = { accountId: randomUUID(), mode: 'test', credentials: { secretKey: keys.secretKey, publishableKey: keys.publishableKey }, webhookSecret: keys.webhookKey };
+    const p = await provider.createPayment(ctx, { amount: { amountMinor: 1500n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k', metadata: { paymentId: randomUUID(), bookingId: randomUUID() }, returnUrl: 'https://example.com/r', customerCountry: 'AU', createdAt: new Date() });
+    await payOnCardPage(fake, provider, ctx, p.ref, 'pay_frictionless');
+    const refundId = randomUUID();
+    const ask = () => provider.createRefund(ctx, { paymentRef: p.ref, amount: { amountMinor: 100n, currency: 'AUD' }, idempotencyKey: 'retried', metadata: { refundId, paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() });
+    fake.switches.nextRefundStatus = 429;
+    await expect(ask()).rejects.toMatchObject({ code: 'provider_busy', retryable: true });
+    // The request was first made a day ago; it is sent again now and its answer is lost.
+    const day = new Date(Date.now() - 86_400_000);
+    for (const i of mem.intents.values()) {
+      expect(i.status).toBe('new');
+      i.createdAt = day;
+      i.updatedAt = day;
+    }
+    fake.switches.loseNextRefundAnswer = true;
+    await expect(ask()).rejects.toMatchObject({ retryable: true });
+    const charge = (await mem.byRef(ctx.accountId, p.ref))!.chargeRef!;
+    const made = fake.refundsOf(keys.secretKey, charge);
+    expect(made).toHaveLength(1);
+    // Linked by the read of its event and by the retry; never posted twice.
+    expect((await provider.retrieveRefund(ctx, { ref: made[0]! }))?.ourRefundId).toBe(refundId);
+    await expect(ask()).resolves.toMatchObject({ ref: made[0] });
+    expect(fake.refundsOf(keys.secretKey, charge)).toHaveLength(1);
+  });
+
+  it('normaliseIp: IPv4-mapped addresses become plain IPv4; others are kept', () => {
+    expect(normaliseIp('::ffff:203.0.113.10')).toBe('203.0.113.10');
+    expect(normaliseIp('::FFFF:203.0.113.10')).toBe('203.0.113.10');
+    expect(normaliseIp('203.0.113.10')).toBe('203.0.113.10');
+    expect(normaliseIp('2001:db8::1')).toBe('2001:db8::1');
+    expect(normaliseIp(undefined)).toBeUndefined();
   });
 });
 
@@ -279,7 +318,7 @@ describe('contract amendment guard (review M2)', () => {
   it('no_gateway_event_only_with_capability: a provider without preCardSession answering NO_GATEWAY_EVENT fails the clauses', async () => {
     for (const clause of ['webhook_rejections', 'webhook_previous_state_and_duplicate', 'verify_and_parse_never_throw'] as const) {
       const h = new Harness({ ...simulatorLocalSubject(), webhookFor: async () => NO_GATEWAY_EVENT });
-      await expect(CLAUSE_IMPLS[clause](h), clause).rejects.toThrow();
+      await expect(CLAUSE_IMPLS[clause](h), clause).rejects.toThrow(/preCardSession/);
     }
   });
 

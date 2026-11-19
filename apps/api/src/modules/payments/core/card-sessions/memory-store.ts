@@ -87,7 +87,7 @@ export class MemoryCardSessionStore implements CardSessionStore {
   async createIntent(init: CardRefundIntentInit): Promise<CardRefundIntent> {
     const existing = await this.intentByKey(init.accountId, init.idempotencyKey);
     if (existing) return existing;
-    const i: CardRefundIntent = { ...init, id: randomUUID(), status: 'new', refundRef: null, lastAnswer: null, createdAt: this.now(), version: 1 };
+    const i: CardRefundIntent = { ...init, id: randomUUID(), status: 'new', refundRef: null, lastAnswer: null, createdAt: this.now(), updatedAt: this.now(), version: 1 };
     this.intents.set(i.id, i);
     return { ...i };
   }
@@ -98,7 +98,7 @@ export class MemoryCardSessionStore implements CardSessionStore {
     const problem = intentTransitionProblem(current, change);
     if (problem) throw new Error(problem);
     if (change.refundRef && this.findIntent((o) => o.id !== i.id && o.accountId === i.accountId && o.refundRef === change.refundRef)) return null;
-    const next: CardRefundIntent = { ...current, status: change.status, refundRef: change.refundRef ?? current.refundRef, lastAnswer: change.lastAnswer ?? null, version: current.version + 1 };
+    const next: CardRefundIntent = { ...current, status: change.status, refundRef: change.refundRef ?? current.refundRef, lastAnswer: change.lastAnswer ?? null, updatedAt: this.now(), version: current.version + 1 };
     this.intents.set(i.id, next);
     return { ...next };
   }

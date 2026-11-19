@@ -19,7 +19,7 @@ interface SessionRow {
 }
 interface IntentRow {
   id: string; providerAccountId: string; mode: PaymentModeName; idempotencyKey: string; refundId: string; chargeRef: string; amountMinor: bigint; currency: string;
-  status: string; refundRef: string | null; lastAnswer: string | null; createdAt: Date; version: number;
+  status: string; refundRef: string | null; lastAnswer: string | null; createdAt: Date; updatedAt: Date; version: number;
 }
 
 const toSession = (r: SessionRow): CardSession => ({
@@ -29,7 +29,7 @@ const toSession = (r: SessionRow): CardSession => ({
 });
 const toIntent = (r: IntentRow): CardRefundIntent => ({
   id: r.id, accountId: r.providerAccountId, mode: r.mode, idempotencyKey: r.idempotencyKey, refundId: r.refundId, chargeRef: r.chargeRef, amountMinor: r.amountMinor,
-  currency: r.currency, status: r.status as CardRefundIntentStatus, refundRef: r.refundRef, lastAnswer: r.lastAnswer as CardRefundLastAnswer | null, createdAt: r.createdAt, version: r.version,
+  currency: r.currency, status: r.status as CardRefundIntentStatus, refundRef: r.refundRef, lastAnswer: r.lastAnswer as CardRefundLastAnswer | null, createdAt: r.createdAt, updatedAt: r.updatedAt, version: r.version,
 });
 
 const TASK_TITLES: Record<CardSessionTask, string> = {

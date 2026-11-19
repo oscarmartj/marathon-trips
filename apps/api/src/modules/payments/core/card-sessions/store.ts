@@ -68,10 +68,15 @@ export interface CardRefundIntent {
   refundRef: string | null;
   lastAnswer: CardRefundLastAnswer | null;
   createdAt: Date;
+  /**
+   * When the row last changed: while `submitting`, the moment the one request now outstanding was sent (an intent goes
+   * back to `new` only when nothing was processed). Refund candidates are judged from it (review round 2).
+   */
+  updatedAt: Date;
   version: number;
 }
 
-export type CardRefundIntentInit = Omit<CardRefundIntent, 'id' | 'status' | 'refundRef' | 'lastAnswer' | 'createdAt' | 'version'>;
+export type CardRefundIntentInit = Omit<CardRefundIntent, 'id' | 'status' | 'refundRef' | 'lastAnswer' | 'createdAt' | 'updatedAt' | 'version'>;
 
 export interface CardRefundIntentChange {
   status: CardRefundIntentStatus;

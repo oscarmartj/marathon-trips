@@ -479,14 +479,16 @@ describe('failure paths of the review (M2)', () => {
     const t2 = await makeApp({ CARD_DECLINES_PER_HOUR_PER_ACCOUNT: '2' });
     try {
       (t2.app.get(PaymentAdapterRegistry) as unknown as { byKey: Map<string, PaymentProvider> }).byKey.set('pin_payments', provider);
-      const hour = new Date().toISOString().slice(0, 13).replace(/[-T]/g, '');
-      const ref = `payments:card_declines_spike:${acc.id}:${hour}`;
+      const hourOf = (d: Date) => d.toISOString().slice(0, 13).replace(/[-T]/g, '');
+      const started = new Date();
       for (let i = 0; i < 3; i++) {
         const a = await checkout();
         const r = await t2.http().post('/payments/card-sessions/submit').set(STATE_HEADERS).send({ ref: a.ref, cardToken: fake.tokenise(acc.publishableKey, 'decline') });
         expect(r.status).toBe(200);
       }
-      expect(await t.prisma.task.count({ where: { sourceRef: ref, status: 'open' } })).toBe(1);
+      // The task's key carries the hour it opened in: across an hour boundary either hour is fine.
+      const refs = [...new Set([hourOf(started), hourOf(new Date())])].map((h) => `payments:card_declines_spike:${acc.id}:${h}`);
+      expect(await t.prisma.task.count({ where: { sourceRef: { in: refs }, status: 'open' } })).toBe(1);
       // Nothing is blocked: the next card is still charged.
       const b = await checkout();
       expect((await t2.http().post('/payments/card-sessions/submit').set(STATE_HEADERS).send({ ref: b.ref, cardToken: fake.tokenise(acc.publishableKey, 'pay_frictionless') })).body.next).toBe('redirect');

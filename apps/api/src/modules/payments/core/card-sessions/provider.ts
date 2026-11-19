@@ -19,6 +19,16 @@ const MAX_AMOUNT = 999_999_999n;
 const REFUND_CANDIDATE_SKEW_MS = 120_000;
 /** ...and no later than this after it: a refund made days later on the dashboard is never taken for ours (review m1). */
 const REFUND_CANDIDATE_LATE_MS = 10 * 60_000;
+
+/**
+ * Whether a gateway refund can be the answer to the one request a submitting intent has outstanding: made around the
+ * moment that request was sent (the intent's last change to `submitting`), never around its first creation, since a
+ * request refused unprocessed (429, credentials) is sent again later (review round 2).
+ */
+function withinRequestWindow(r: GatewayRefund, i: CardRefundIntent): boolean {
+  const sent = i.updatedAt.getTime();
+  return r.createdAt.getTime() >= sent - REFUND_CANDIDATE_SKEW_MS && r.createdAt.getTime() <= sent + REFUND_CANDIDATE_LATE_MS;
+}
 export const CARD_PAGE_PATH = '/pay/card';
 export const AUTHENTICATED_PATH = '/api/payments/card-sessions';
 /** At most this many 3-D Secure verify calls per session (plan 4.4, section 10.1). */
@@ -342,7 +352,7 @@ export class CardSessionProvider implements PaymentProvider {
     const candidates: GatewayRefund[] = [];
     for (const r of refunds) {
       if (r.amount.amountMinor !== i.amountMinor || r.amount.currency !== i.currency) continue;
-      if (r.createdAt.getTime() < i.createdAt.getTime() - REFUND_CANDIDATE_SKEW_MS || r.createdAt.getTime() > i.createdAt.getTime() + REFUND_CANDIDATE_LATE_MS) continue;
+      if (!withinRequestWindow(r, i)) continue;
       if (await this.store.intentByRefundRef(ctx.accountId, r.token)) continue;
       candidates.push(r);
     }
@@ -433,7 +443,7 @@ export class CardSessionProvider implements PaymentProvider {
     let intent = await this.store.intentByRefundRef(ctx.accountId, r.token);
     if (!intent) {
       // A refund event processed before our POST's answer (plan 4.4, section 7): the one submitting intent it can be.
-      const waiting = (await this.store.submittingIntents(ctx.accountId, r.chargeToken)).filter((i) => i.amountMinor === r.amount.amountMinor && i.currency === r.amount.currency && r.createdAt.getTime() >= i.createdAt.getTime() - REFUND_CANDIDATE_SKEW_MS && r.createdAt.getTime() <= i.createdAt.getTime() + REFUND_CANDIDATE_LATE_MS);
+      const waiting = (await this.store.submittingIntents(ctx.accountId, r.chargeToken)).filter((i) => i.amountMinor === r.amount.amountMinor && i.currency === r.amount.currency && withinRequestWindow(r, i));
       if (waiting.length > 1) throw new ProviderError('provider_unavailable', true);
       if (waiting.length === 1) intent = await this.bind(ctx, waiting[0]!, r.token);
     }

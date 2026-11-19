@@ -103,6 +103,26 @@ describe('card session store on the database: concurrency and triggers (plan 4.4
     const p = await subject.provider.createPayment(ctx, input());
     await subject.provider.submitCard(ctx, p.ref, fake.tokenise(ctx.credentials.publishableKey!, 'pay_frictionless'), PAYER);
     await expect(t.prisma.cardSessionCharge.updateMany({ where: { providerAccountId: ctx.accountId }, data: { success: false } })).rejects.toThrow();
+    // Append-only by trigger, and for the owner too (DELETE and TRUNCATE), since the convention marker is not on it.
+    const pg = (await import('pg')).default;
+    const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await owner.connect();
+    try {
+      await expect(owner.query('DELETE FROM card_session_charges WHERE "providerAccountId" = $1', [ctx.accountId])).rejects.toThrow();
+      await expect(owner.query('TRUNCATE card_session_charges')).rejects.toThrow();
+      const session = (await store.byRef(ctx.accountId, p.ref))!;
+      // Foreign keys: a charge of a session that does not exist, or with another mode or account, is refused (23503).
+      const insert = (sessionId: string, accountId: string, mode: string) => owner.query(
+        `INSERT INTO card_session_charges (id, "sessionId", "providerAccountId", mode, "chargeRef", success, "amountMinor", currency) VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::"PaymentMode", 'ch_' || substr(md5(random()::text), 1, 20), true, 100, 'AUD')`,
+        [sessionId, accountId, mode]).then(() => 'ok', (e: { code?: string }) => e.code);
+      expect(await insert(randomUUID(), ctx.accountId, 'test')).toBe('23503');
+      expect(await insert(session.id, ctx.accountId, 'live')).toBe('23503');
+      const other = await subject.context();
+      expect(await insert(session.id, other.accountId, 'test')).toBe('23503');
+      expect(await insert(session.id, ctx.accountId, 'test')).toBe('ok');
+    } finally {
+      await owner.end();
+    }
     await expect(t.prisma.cardSession.create({ data: { ref: `cs_${randomBytes(16).toString('hex')}`, providerAccountId: ctx.accountId, mode: 'live', idempotencyKey: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID(), currency: 'AUD', amountMinor: 100n, returnUrl: 'https://example.com/r', expiresAt: new Date() } })).rejects.toThrow();
     const i = await store.createIntent({ accountId: ctx.accountId, mode: 'test', idempotencyKey: randomUUID(), refundId: randomUUID(), chargeRef: `ch_${'a'.repeat(20)}`, amountMinor: 100n, currency: 'AUD' });
     await expect(t.prisma.cardRefundIntent.update({ where: { id: i.id }, data: { status: 'bound', refundRef: `rf_${'a'.repeat(20)}`, version: 2 } })).rejects.toThrow();
