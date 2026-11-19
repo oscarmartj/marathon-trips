@@ -864,6 +864,8 @@ model SettlementLineMatch {
   /// @nopii the line's
   mode      PaymentMode
   line      SettlementLine @relation(fields: [lineId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the line's kind (one match per object and kind: code review M1)
+  kind      SettlementLineKind
   paymentId String?        @db.Uuid
   payment   Payment?       @relation(fields: [paymentId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   refundId  String?        @db.Uuid

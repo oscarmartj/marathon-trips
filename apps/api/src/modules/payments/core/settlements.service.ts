@@ -115,10 +115,16 @@ export class SettlementsService {
         out.push({ code: 'settlement_line_amount_differs', entityType: 'SettlementLine', entityId: l.id, ours: moneySide(target.expectedMinor, target.currency), gateway: moneySide(l.amountMinor, l.currency) });
         continue;
       }
-      await this.prisma.$executeRaw`
-        INSERT INTO settlement_line_matches (id, "lineId", mode, "paymentId", "refundId", "disputeId", "bookingId")
-        VALUES (gen_random_uuid(), ${l.id}::uuid, ${mode}::"PaymentMode", ${target.paymentId}::uuid, ${target.refundId}::uuid, ${target.disputeId}::uuid, ${target.bookingId}::uuid)
-        ON CONFLICT ("lineId") DO NOTHING`;
+      // Code review M1: an object paid out by an earlier line (another payout, another reference) is a duplicate: no match,
+      // no second fee. The partial unique indexes of 0037 hold the same rule against a concurrent run.
+      const inserted = await this.prisma.$executeRaw`
+        INSERT INTO settlement_line_matches (id, "lineId", mode, kind, "paymentId", "refundId", "disputeId", "bookingId")
+        VALUES (gen_random_uuid(), ${l.id}::uuid, ${mode}::"PaymentMode", ${l.kind}::"SettlementLineKind", ${target.paymentId}::uuid, ${target.refundId}::uuid, ${target.disputeId}::uuid, ${target.bookingId}::uuid)
+        ON CONFLICT DO NOTHING`;
+      if (inserted === 0) {
+        const mine = await this.prisma.settlementLineMatch.count({ where: { lineId: l.id } });
+        if (mine === 0) out.push({ code: 'settlement_line_duplicate', entityType: 'SettlementLine', entityId: l.id, gateway: moneySide(l.amountMinor, l.currency, l.kind) });
+      }
     }
     return out;
   }

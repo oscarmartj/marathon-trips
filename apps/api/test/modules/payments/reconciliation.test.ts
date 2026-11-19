@@ -13,6 +13,7 @@ import { SettlementsService } from '../../../src/modules/payments/core/settlemen
 import { SIMULATOR_DISPUTE_FEE, simulatorChargeFee } from '../../../src/modules/payments/adapters/simulator/simulator';
 import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
 import { ProviderAccountsService } from '../../../src/modules/payments/core/accounts.service';
+import { todayInBrisbane } from '../../../src/modules/bookings';
 import { TestApp, makeApp } from '../../support/auth';
 import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
@@ -49,7 +50,7 @@ async function fresh(): Promise<SimAccount> {
   return a;
 }
 
-async function paid(a: SimAccount): Promise<{ reference: string; bookingId: string; payment: { id: string; providerPaymentRef: string | null; amountMinor: bigint } }> {
+async function paid(a: SimAccount): Promise<{ reference: string; bookingId: string; payment: { id: string; bookingId: string; providerPaymentRef: string | null; amountMinor: bigint } }> {
   const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
   expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
   const p = (await t.prisma.payment.findMany({ where: { bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
@@ -277,7 +278,9 @@ describe('failures, concurrency and access (plan 4.6, 7 and review R10, R11)', (
     const a = await fresh();
     const db = await connect('app');
     try {
-      await db.query(`INSERT INTO reconciliation_runs (id, "providerAccountId", mode, "forDate", attempt, trigger) VALUES (gen_random_uuid(), $1::uuid, 'test', current_date, 99, 'scheduled')`, [a.id]);
+      // Code review M4: the run is for the Brisbane date of the time it runs at, not the database's current_date.
+      const forDate = todayInBrisbane(later());
+      await db.query(`INSERT INTO reconciliation_runs (id, "providerAccountId", mode, "forDate", attempt, trigger) VALUES (gen_random_uuid(), $1::uuid, 'test', $2::date, 99, 'scheduled')`, [a.id, forDate]);
       expect(await recon().runAccount(a.id, { now: later() })).toBeNull();
       const res = await admin.post(`/admin/payments/reconciliation/accounts/${a.id}/run`, {});
       expect([res.status, res.body.code]).toEqual([409, 'reconciliation_running']);
@@ -285,11 +288,12 @@ describe('failures, concurrency and access (plan 4.6, 7 and review R10, R11)', (
       expect(await txError(db, [[`DELETE FROM reconciliation_runs WHERE id = $1::uuid`, [done]]])).not.toBeNull();
       await db.query(`UPDATE reconciliation_runs SET status = 'failed', "errorCode" = 'test', "finishedAt" = now() WHERE id = $1::uuid`, [done]);
       expect(await txError(db, [[`UPDATE reconciliation_runs SET status = 'matched' WHERE id = $1::uuid`, [done]]])).not.toBeNull();
-      expect(await txError(db, [[`INSERT INTO reconciliation_runs (id, "providerAccountId", mode, "forDate", attempt, trigger, status, "finishedAt") VALUES (gen_random_uuid(), $1::uuid, 'test', current_date, 100, 'scheduled', 'matched', now())`, [a.id]]])).not.toBeNull();
+      expect(await txError(db, [[`INSERT INTO reconciliation_runs (id, "providerAccountId", mode, "forDate", attempt, trigger, status, "finishedAt") VALUES (gen_random_uuid(), $1::uuid, 'test', $2::date, 100, 'scheduled', 'matched', now())`, [a.id, forDate]]])).not.toBeNull();
     } finally {
       await db.end();
     }
-    expect((await run(a)).attempt).toBe(1);
+    // The next run of the same day comes after the attempts already taken.
+    expect((await run(a)).attempt).toBe(100);
   });
 
   it('manual_run_requires_step_up_and_permission; it is audited; the panel lists runs', async () => {
@@ -317,5 +321,191 @@ describe('failures, concurrency and access (plan 4.6, 7 and review R10, R11)', (
     await t.prisma.providerAccount.update({ where: { id }, data: { status: 'paused' } });
     const r = await recon().runAccount(id, { now: later() });
     expect([r!.status, r!.differences]).toEqual(['not_applicable', []]);
+  });
+});
+
+/** Two payments of one booking where the first succeeds late, so the first owns an overpayment (as in app-refunds). */
+async function overpaid(a: SimAccount) {
+  const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+  const attempt = async () => {
+    expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
+    return (await t.prisma.payment.findMany({ where: { bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
+  };
+  const late = await attempt();
+  await deliver(t, a, await eventFor(t, a, late.id, { status: 'failed' }));
+  const p = await attempt();
+  sim.settle(a.id, p.providerPaymentRef!, 'succeeded');
+  expect((await deliver(t, a, await eventFor(t, a, p.id))).outcome).toBe('processed');
+  sim.settle(a.id, late.providerPaymentRef!, 'succeeded');
+  expect((await deliver(t, a, await eventFor(t, a, late.id))).outcome).toBe('processed');
+  await t.app.get(ReceiptsService).sweep({ bookingIds: [bookingId] });
+  return { bookingId, late: await t.prisma.payment.findUniqueOrThrow({ where: { id: late.id } }) };
+}
+
+describe('code review of 4.6 (M1-M4 and failure paths)', () => {
+  it('settlement_line_duplicate: one charge in two payouts is matched and charged a fee once (M1)', async () => {
+    const a = await fresh();
+    const { payment } = await paid(a);
+    const po = sim.payout(a.id, today());
+    const line = po.lines[0]!;
+    sim.addPayout(a.id, { ref: `po_dup_${randomUUID()}`, payoutDate: today(), currency: 'AUD', grossMinor: line.amountMinor, feesMinor: line.feeMinor, netMinor: line.amountMinor - line.feeMinor, lines: [{ ...line, ref: `dup_${randomUUID()}` }] });
+    const r = await run(a);
+    expect(codes(r)).toEqual(['settlement_line_duplicate']);
+    const lines = await t.prisma.settlementLine.findMany({ where: { settlement: { providerAccountId: a.id } }, include: { matches: true } });
+    expect(lines).toHaveLength(2);
+    expect(lines.filter((l) => l.matches.length === 1).map((l) => l.matches[0]!.paymentId)).toEqual([payment.id]);
+    expect(await feePostings(lines.map((l) => l.id))).toHaveLength(1);
+    // The database holds the rule too: a second match of the same payment is refused.
+    const dup = lines.find((l) => l.matches.length === 0)!;
+    const db = await connect('app');
+    try {
+      expect(await txError(db, [[`INSERT INTO settlement_line_matches (id, "lineId", mode, kind, "paymentId", "bookingId") VALUES (gen_random_uuid(), $1::uuid, 'test', 'charge', $2::uuid, $3::uuid)`, [dup.id, payment.id, payment.bookingId]]])).toBe('23505');
+    } finally {
+      await db.end();
+    }
+  });
+
+  it('refund_status_differs from the activity: a refund of ours not done here, done at the gateway (M2)', async () => {
+    const a = await fresh();
+    const { late } = await overpaid(a);
+    sim.queueRefund(a.id, 'unavailable');
+    const res = await admin.post(`/admin/payments/payments/${late.id}/refunds`, { paymentVersion: late.version, purpose: 'overpayment_return', reason: 'Paid twice by mistake' }).set('Idempotency-Key', randomUUID());
+    expect(res.status).toBeLessThan(300);
+    const ours = await t.prisma.refund.findFirstOrThrow({ where: { paymentId: late.id } });
+    expect(['succeeded', 'pending']).not.toContain(ours.status);
+    sim.gatewayRefund(a.id, late.providerPaymentRef!, ours.amountMinor, 'succeeded', ours.id);
+    const r = await run(a);
+    const d = r.differences.find((x) => x.code === 'refund_status_differs');
+    expect(d?.entityId).toBe(ours.id);
+  });
+
+  it('unknown_refund_reviews_booking_once: closing the review does not block the booking again (M3)', async () => {
+    const a = await fresh();
+    const { bookingId, payment } = await paid(a);
+    sim.gatewayRefund(a.id, payment.providerPaymentRef!, 500n);
+    await run(a);
+    const review = await t.prisma.task.findFirstOrThrow({ where: { sourceRef: coverageLostTaskRef(bookingId), status: 'open' } });
+    expect(await t.prisma.auditLog.count({ where: { action: 'payments.booking.under_review', entityId: bookingId } })).toBe(1);
+    await t.prisma.task.update({ where: { id: review.id }, data: { status: 'done' } });
+    const again = await run(a);
+    expect(codes(again)).toContain('unknown_gateway_refund');
+    expect(await t.prisma.task.count({ where: { sourceRef: coverageLostTaskRef(bookingId), status: 'open' } })).toBe(0);
+    expect(await t.prisma.auditLog.count({ where: { action: 'payments.booking.under_review', entityId: bookingId } })).toBe(1);
+  });
+
+  it('in_flight_payment_not_reported: what changed in the last hour is not compared', async () => {
+    const a = await fresh();
+    const { payment } = await paid(a);
+    sim.alterPayment(a.id, payment.providerPaymentRef!, { amountMinor: payment.amountMinor + 1n });
+    const now = await recon().runAccount(a.id, { now: new Date() });
+    expect(codes(now!)).not.toContain('payment_amount_differs');
+    expect(codes(await run(a))).toContain('payment_amount_differs');
+  });
+
+  it('partial_run_when_over_object_cap', async () => {
+    const a = await fresh();
+    await paid(a);
+    await paid(a);
+    const r = (await recon().runAccount(a.id, { now: later(), maxObjects: 1 }))!;
+    expect([r.status, r.errorCode]).toEqual(['partial', 'object_cap']);
+  });
+
+  it('settlement_line_from_other_account_not_matched (finding 2)', async () => {
+    const a = await fresh();
+    const { payment } = await paid(a);
+    const b = await fresh();
+    sim.addPayout(b.id, { ref: `po_x_${randomUUID()}`, payoutDate: today(), currency: 'AUD', grossMinor: payment.amountMinor, feesMinor: 0n, netMinor: payment.amountMinor, lines: [{ ref: 'l_x', kind: 'charge', paymentRef: payment.providerPaymentRef!, amountMinor: payment.amountMinor, feeMinor: 0n }] });
+    const r = await run(b);
+    expect(codes(r)).toEqual(['settlement_line_unmatched']);
+    expect(await t.prisma.settlementLineMatch.count({ where: { paymentId: payment.id } })).toBe(0);
+  });
+
+  it('reconciliation_never_calls_live_outside_production: an account of the other mode is not reconciled', async () => {
+    const a = await fresh();
+    const gw = t.app.get(ProviderGateway);
+    const spy = vi.spyOn(gw, 'mode', 'get').mockReturnValue('live');
+    const calls = sim.listCalls(a.id);
+    try {
+      await expect(recon().runAccount(a.id, { now: later() })).rejects.toMatchObject({ code: 'provider_account_not_found' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(sim.listCalls(a.id)).toBe(calls);
+    expect(await t.prisma.reconciliationRun.count({ where: { providerAccountId: a.id } })).toBe(0);
+  });
+
+  it('reconciliation_task_deduplicated_while_open; receipt_missing', async () => {
+    const a = await fresh();
+    const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+    expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
+    const p = (await t.prisma.payment.findMany({ where: { bookingId } }))[0]!;
+    sim.settle(a.id, p.providerPaymentRef!, 'succeeded');
+    await deliver(t, a, await eventFor(t, a, p.id));
+    const r1 = await run(a);
+    const r2 = await run(a);
+    expect(codes(r1)).toEqual(['receipt_missing']);
+    expect(codes(r2)).toEqual(['receipt_missing']);
+    expect(await t.prisma.task.count({ where: { sourceRef: reconciliationTaskRef('receipt_missing', p.id), status: 'open' } })).toBe(1);
+  });
+
+  it('not_settled_in_time: a payment no payout includes after the grace days', async () => {
+    const a = await fresh();
+    const { payment } = await paid(a);
+    const r = (await recon().runAccount(a.id, { now: new Date(Date.now() + 11 * 86_400_000) }))!;
+    expect(r.differences.filter((d) => d.code === 'not_settled_in_time').map((d) => d.entityId)).toEqual([payment.id]);
+  });
+
+  it('reconciliation_overdue_task and 429 after the manual runs of an hour', async () => {
+    const a = await fresh();
+    await t.app.get(ReconciliationService).overdue(new Date(Date.now() + 3 * 86_400_000), [{ id: a.id, createdAt: new Date(Date.now() - 3 * 86_400_000) }]);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:reconciliation_overdue:${a.id}`, status: 'open' } })).toBe(1);
+    const owner = await paymentsStaff(t);
+    for (let i = 0; i < 5; i++) expect((await owner.post(`/admin/payments/reconciliation/accounts/${a.id}/run`, {})).status).toBe(200);
+    expect((await owner.post(`/admin/payments/reconciliation/accounts/${a.id}/run`, {})).status).toBe(429);
+  });
+
+  it('dispute sweep: lost with funds, closed, a retired account, and an adapter without disputes', async () => {
+    const a = await fresh();
+    const lost = await paid(a);
+    const closed = await paid(a);
+    const d1 = sim.openDispute(a.id, lost.payment.providerPaymentRef!);
+    const d2 = sim.openDispute(a.id, closed.payment.providerPaymentRef!);
+    for (const d of [d1, d2]) expect((await deliver(t, a, sim.disputeEvent(a.secret, a.id, d.ref))).outcome).toBe('processed');
+    sim.moveDispute(a.id, d1.ref, { status: 'lost', fundsWithdrawn: true });
+    sim.moveDispute(a.id, d2.ref, { status: 'closed' });
+    // Retired: no new payments, but disputes, refunds and reconciliation go on (plan 0.1, 6.4).
+    await t.prisma.providerAccount.update({ where: { id: a.id }, data: { status: 'retired' } });
+    await run(a);
+    const l = await t.prisma.dispute.findFirstOrThrow({ where: { bookingId: lost.bookingId } });
+    expect([l.status, l.fundsWithdrawnAt !== null]).toEqual(['lost', true]);
+    expect(await t.prisma.ledgerTransaction.count({ where: { idempotencyKey: `chargeback:${l.id}:withdrawn` } })).toBe(1);
+    expect((await t.prisma.dispute.findFirstOrThrow({ where: { bookingId: closed.bookingId } })).status).toBe('closed');
+
+    // An adapter that does not declare disputes is not swept.
+    const b = await fresh();
+    const x = await paid(b);
+    const d3 = sim.openDispute(b.id, x.payment.providerPaymentRef!);
+    expect((await deliver(t, b, sim.disputeEvent(b.secret, b.id, d3.ref))).outcome).toBe('processed');
+    sim.moveDispute(b.id, d3.ref, { status: 'won' });
+    const gw = t.app.get(ProviderGateway);
+    const real = gw.registry.get('simulator')!;
+    const noDisputes = Object.create(real) as typeof real;
+    Object.defineProperty(noDisputes, 'manifest', { value: { ...real.manifest, capabilities: { ...real.manifest.capabilities, disputes: undefined } } });
+    const spy = vi.spyOn(gw.registry, 'get').mockImplementation((key: string) => (key === 'simulator' ? noDisputes : real));
+    try {
+      await run(b);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await t.prisma.dispute.findFirstOrThrow({ where: { bookingId: x.bookingId } })).status).toBe('open');
+  });
+
+  it('a dispute lookup the gateway refuses is skipped, not the whole run (minor 5)', async () => {
+    const a = await fresh();
+    const { payment } = await paid(a);
+    const d = sim.openDispute(a.id, payment.providerPaymentRef!);
+    expect((await deliver(t, a, sim.disputeEvent(a.secret, a.id, d.ref))).outcome).toBe('processed');
+    sim.failNextDisputeRetrieve(a.id);
+    expect((await run(a)).status).not.toBe('failed');
   });
 });

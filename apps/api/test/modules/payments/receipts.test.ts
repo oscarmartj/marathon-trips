@@ -142,6 +142,42 @@ describe('issuing (plan 4.6, 4.1, 4.3, 4.4)', () => {
   });
 });
 
+describe('notes issued by the code (code review M4)', () => {
+  it('refund_reversal note: a gateway refund that the gateway later reverses', async () => {
+    const { bookingId, payment } = await paid();
+    const r = sim.gatewayRefund(acc.id, payment.providerPaymentRef!, 700n);
+    expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, r.ref))).outcome).toBe('processed');
+    sim.settleRefund(acc.id, r.ref, 'failed', 'bank_rejected');
+    await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, r.ref));
+    expect((await t.prisma.refund.findFirstOrThrow({ where: { bookingId } })).status).toBe('reversed');
+    await receipts().sweep({ bookingIds: [bookingId] });
+    const notes = await t.prisma.receiptNote.findMany({ where: { bookingId }, orderBy: { issuedAt: 'asc' } });
+    expect(notes.map((n) => [n.kind, n.direction, n.amountMinor])).toEqual([['refund', 'decrease', 700n], ['refund_reversal', 'increase', 700n]]);
+  });
+
+  it('void note: a bank transfer recorded by mistake and voided cancels its receipt, once', async () => {
+    const { ProviderAccountsService } = await import('../../../src/modules/payments/core/accounts.service');
+    const manual = await t.app.get(ProviderAccountsService).createManualAccount({ displayName: `Bank ${randomUUID().slice(0, 6)}` });
+    try {
+      const w = await pricedWorld(admin);
+      await t.prisma.$executeRawUnsafe(`UPDATE packages SET "autoConfirmOnDeposit" = false WHERE id = $1::uuid`, w.pkg.id);
+      const b = await approvedBooking(t, admin, w, c);
+      const row = await t.prisma.booking.findUniqueOrThrow({ where: { id: b.bookingId } });
+      const ok = await admin.post(`/admin/payments/bookings/${b.bookingId}/inbound-payments`, { amountMinor: row.depositMinor.toString(), reference: `STMT-${randomUUID().slice(0, 8)}` });
+      expect(ok.status).toBe(200);
+      const voided = await admin.post(`/admin/payments/payments/${ok.body.transfer.id}/void`, { version: ok.body.transfer.version, reason: 'Typed the wrong booking' });
+      expect(voided.status).toBe(200);
+      expect(await receipts().sweep({ bookingIds: [b.bookingId] })).toBe(2);
+      const docs = await receipts().listForBooking(b.bookingId);
+      expect(docs.map((d) => [d.kind, d.title])).toEqual([['receipt', 'Receipt'], ['void', 'Receipt voided']]);
+      expect(docs[1]!.receiptNumber).toBe(docs[0]!.number);
+      expect(await receipts().sweep({ bookingIds: [b.bookingId] })).toBe(0);
+    } finally {
+      await t.prisma.providerAccount.update({ where: { id: manual.id }, data: { status: 'paused' } });
+    }
+  });
+});
+
 describe('who sees receipts (plan 4.6, 4.7 and 6)', () => {
   it('customer_cannot_read_other_bookings_receipts; the owner lists and downloads; receipt_pdf_rebuilds_identically', async () => {
     const { reference, bookingId } = await paid();
@@ -210,6 +246,18 @@ describe('customer money report through the API (plan 4.6, 5)', () => {
       expect(live.rows.find((r) => r.packageId === w.pkg.id)).toBeUndefined();
     } finally {
       spy.mockRestore();
+    }
+    // A gateway that does not list its payouts: the report says its fees were not imported, never that they were 0.
+    const reg = gw.registry;
+    const all = reg.all();
+    const allSpy = vi.spyOn(reg, 'all').mockReturnValue(all.map((p) => (p.manifest.key === 'simulator'
+      ? Object.defineProperty(Object.create(p), 'manifest', { value: { ...p.manifest, capabilities: { ...p.manifest.capabilities, reconciliation: { activity: true, settlements: false } } } })
+      : p)));
+    try {
+      const noFees = await t.app.get((await import('../../../src/modules/payments/core/client-money.service')).ClientMoneyService).report();
+      expect(noFees.rows.find((r) => r.packageId === w.pkg.id)!.feesImported).toBe(false);
+    } finally {
+      allSpy.mockRestore();
     }
     const plain = await staffClient(t, [...CATALOGUE_AND_PRICING, ...ALL_BOOKING_PERMISSIONS, 'payments.payment.read']);
     expect((await plain.get('/admin/payments/reports/client-money')).status).toBe(403);

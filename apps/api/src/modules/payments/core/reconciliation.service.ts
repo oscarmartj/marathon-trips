@@ -21,7 +21,10 @@ import { ProviderGateway } from './gateway';
 import type { PaymentProvider, ProviderActivity, ProviderContext } from './provider';
 import { ProviderError } from './provider';
 import { CUT_OFF_AFTER, CUT_OFF_CODES, Difference, dedupe, differencesSchema, moneySide } from './reconciliation-types';
-import { coverageLostTaskRef, LATE_PENDING_CODE } from './refunds.service';
+import { LATE_PENDING_CODE, PaymentRefundStateMachine } from './refunds.service';
+import { readBookingForPayments } from '../../bookings';
+import { runTransaction } from '../../../platform/database/transaction';
+import { PAYMENT_TX_OPTIONS } from './payable-states';
 import { PAYMENT_SETTINGS } from './settings';
 import { SettlementsService } from './settlements.service';
 import type { GatewayCaller } from './settlements.service';
@@ -48,7 +51,10 @@ class CutOff extends Error {
 }
 
 export interface RunOptions {
+  /** The time the run is for; by default the database's clock (code review, minor 8). */
   now?: Date;
+  /** Tests only: a smaller object cap than the setting allows. */
+  maxObjects?: number;
   trigger?: 'scheduled' | 'manual';
   actor?: AuditActor;
 }
@@ -86,6 +92,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(PaymentRefundStateMachine) private readonly refunds: PaymentRefundStateMachine,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -97,8 +104,13 @@ export class ReconciliationService implements OnApplicationBootstrap {
 
   /** Every account of the environment's mode, one after another; a failing account never stops the others. */
   async runAll(opts: RunOptions = {}): Promise<RunView[]> {
-    const now = opts.now ?? new Date();
-    const accounts = await this.prisma.providerAccount.findMany({ where: { mode: this.gateway.mode }, select: { id: true, createdAt: true }, orderBy: { id: 'asc' } });
+    const now = opts.now ?? (await this.dbNow());
+    const windowDays = await this.settings.get<number>(PAYMENT_SETTINGS.disputeWindowDays.key, PAYMENT_SETTINGS.disputeWindowDays.fallback);
+    // An archived account is reconciled while a dispute can still reach it (its window), not for ever (code review, minor 8).
+    const accounts = await this.prisma.providerAccount.findMany({
+      where: { mode: this.gateway.mode, OR: [{ status: { not: 'archived' } }, { updatedAt: { gt: new Date(now.getTime() - windowDays * DAY) } }] },
+      select: { id: true, createdAt: true }, orderBy: { id: 'asc' },
+    });
     const out: RunView[] = [];
     for (const a of accounts) {
       try {
@@ -118,7 +130,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
    * the end with its status and differences.
    */
   async runAccount(accountId: string, opts: RunOptions = {}): Promise<RunView | null> {
-    const now = opts.now ?? new Date();
+    const now = opts.now ?? (await this.dbNow());
     const trigger = opts.trigger ?? 'scheduled';
     const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: { id: true, mode: true, adapterKey: true } });
     if (!account || account.mode !== this.gateway.mode) throw notFound('provider_account_not_found', 'Payment gateway account not found');
@@ -126,7 +138,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
     const forDate = todayInBrisbane(now);
     await this.prisma.$executeRaw`
       UPDATE reconciliation_runs SET status = 'failed', "errorCode" = 'stale_run', "finishedAt" = now()
-      WHERE "providerAccountId" = ${accountId}::uuid AND status = 'running' AND "startedAt" < ${new Date(Date.now() - STALE_RUN_MS)}`;
+      WHERE "providerAccountId" = ${accountId}::uuid AND status = 'running' AND "startedAt" < now() - make_interval(secs => ${STALE_RUN_MS / 1000})`;
     const runId = await this.start(accountId, mode, forDate, trigger, opts.actor);
     if (!runId) return null;
 
@@ -140,7 +152,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
     const caps = provider.manifest.capabilities.reconciliation;
     try {
       const lookback = await this.settings.get<number>(PAYMENT_SETTINGS.reconciliationLookbackDays.key, PAYMENT_SETTINGS.reconciliationLookbackDays.fallback);
-      const maxObjects = await this.settings.get<number>(PAYMENT_SETTINGS.reconciliationMaxObjects.key, PAYMENT_SETTINGS.reconciliationMaxObjects.fallback);
+      const maxObjects = opts.maxObjects ?? await this.settings.get<number>(PAYMENT_SETTINGS.reconciliationMaxObjects.key, PAYMENT_SETTINGS.reconciliationMaxObjects.fallback);
       const since = new Date(now.getTime() - lookback * DAY);
       const settled = new Date(now.getTime() - SETTLE_MS);
 
@@ -206,6 +218,11 @@ export class ReconciliationService implements OnApplicationBootstrap {
     return run;
   }
 
+  private async dbNow(): Promise<Date> {
+    const [row] = await this.prisma.$queryRaw<Array<{ now: Date }>>`SELECT now() AS now`;
+    return row?.now ?? new Date();
+  }
+
   private async start(accountId: string, mode: Mode, forDate: string, trigger: 'scheduled' | 'manual', actor?: AuditActor): Promise<string | null> {
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -229,7 +246,13 @@ export class ReconciliationService implements OnApplicationBootstrap {
   }
 
   private async close(runId: string, accountId: string, forDate: string, status: 'matched' | 'mismatch' | 'partial' | 'failed' | 'not_applicable', errorCode: string | null, checked: number, differences: Difference[]): Promise<RunView> {
-    const list = differencesSchema.parse(differences.slice(0, 5000));
+    // Code review, minor 7: a difference that does not pass the schema never leaves the run open; it closes as failed.
+    const parsed = differencesSchema.safeParse(differences.slice(0, 5000));
+    if (!parsed.success) {
+      status = 'failed';
+      errorCode = 'invalid_differences';
+    }
+    const list = parsed.success ? parsed.data : [];
     await this.prisma.$transaction(async (tx) => {
       const n = await tx.$executeRaw`
         UPDATE reconciliation_runs SET status = ${status}::"ReconciliationRunStatus", "errorCode" = ${errorCode}, "checkedObjects" = ${checked},
@@ -379,7 +402,11 @@ export class ReconciliationService implements OnApplicationBootstrap {
   }
 
   private async activityDifference(accountId: string, mode: Mode, item: ProviderActivity, call: GatewayCaller, w: { forDate: string; runId: string }): Promise<Difference | null> {
-    if (!/^[A-Za-z0-9_.:-]{1,255}$/.test(item.ref)) return null;
+    // Code review, minor 6: an item whose reference we cannot store is reported under a stand-in id, never ignored.
+    if (!/^[A-Za-z0-9_.:-]{1,255}$/.test(item.ref)) {
+      const code = item.kind === 'payment' ? 'unknown_gateway_payment' : item.kind === 'refund' ? 'unknown_gateway_refund' : 'unknown_gateway_dispute';
+      return { code, entityType: 'GatewayObject', entityId: `invalid_ref:${createHash('sha256').update(String(item.ref)).digest('hex').slice(0, 32)}` };
+    }
     const gateway = moneySide(item.amount.amountMinor, /^[A-Z]{3}$/.test(item.amount.currency) ? item.amount.currency : undefined, /^[a-z_]{1,40}$/.test(item.status) ? item.status : undefined);
     const ourId = item.ourId && /^[0-9a-f-]{36}$/.test(item.ourId) ? item.ourId : null;
     if (item.kind === 'payment') {
@@ -401,16 +428,20 @@ export class ReconciliationService implements OnApplicationBootstrap {
       });
       if (ours) {
         if (ours.amountMinor !== item.amount.amountMinor || ours.currency !== item.amount.currency) return { code: 'gateway_amount_differs', entityType: 'Refund', entityId: ours.id, ours: moneySide(ours.amountMinor, ours.currency, ours.status), gateway };
+        // Code review M2: money went out at the gateway for a refund we hold as not done (failed, requested…).
+        if (item.status === 'succeeded' && ours.status !== 'succeeded' && ours.status !== 'pending' && ours.status !== 'reversed') return { code: 'refund_status_differs', entityType: 'Refund', entityId: ours.id, ours: moneySide(ours.amountMinor, ours.currency, ours.status), gateway };
         return null;
       }
-      // Review R9: money went out of one of our payments without us: its booking stops collecting until Oscar looks.
-      const payment = item.paymentRef ? await this.prisma.payment.findFirst({ where: { providerAccountId: accountId, mode, providerPaymentRef: item.paymentRef }, select: { bookingId: true, booking: { select: { reference: true } } } }) : null;
-      if (payment) {
-        await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
-          title: `Booking ${payment.booking.reference} is no longer paid as its status says`,
-          description: 'The payment gateway shows a refund of this booking that the app has no record of (found by the daily reconciliation). Reminders, payment links and new payments are stopped until this task is closed: check the booking and the payment gateway first.',
-          entityType: 'Booking', entityId: payment.bookingId, sourceRef: coverageLostTaskRef(payment.bookingId),
-        }));
+      // Review R9 and code review M3: money went out of one of our payments without us. The first time this refund is
+      // seen (no task about it yet, open or closed), its booking is put under review as after any money out, with the
+      // booking locked and audited; once Oscar closes that review, a later run does not block the booking again.
+      const payment = item.paymentRef ? await this.prisma.payment.findFirst({ where: { providerAccountId: accountId, mode, providerPaymentRef: item.paymentRef }, select: { bookingId: true } }) : null;
+      const seenBefore = (await this.prisma.task.count({ where: { sourceRef: reconciliationTaskRef('unknown_gateway_refund', item.ref) } })) > 0;
+      if (payment && !seenBefore) {
+        await runTransaction(this.prisma, async (tx) => {
+          const b = await readBookingForPayments(tx, { id: payment.bookingId }, true);
+          if (b) await this.refunds.afterMoneyOut(tx, b, {}, undefined, { forceReview: true });
+        }, PAYMENT_TX_OPTIONS);
       }
       return { code: 'unknown_gateway_refund', entityType: 'GatewayObject', entityId: item.ref, gateway };
     }
@@ -451,7 +482,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
   }
 
   /** An account with no matched or partial run in the last 48 h gets a task (plan 4.6, 2.4). */
-  private async overdue(now: Date, accounts: Array<{ id: string; createdAt: Date }>): Promise<void> {
+  async overdue(now: Date, accounts: Array<{ id: string; createdAt: Date }>): Promise<void> {
     for (const a of accounts) {
       if (a.createdAt.getTime() > now.getTime() - 2 * DAY) continue;
       const adapter = await this.prisma.providerAccount.findUnique({ where: { id: a.id }, select: { adapterKey: true } });

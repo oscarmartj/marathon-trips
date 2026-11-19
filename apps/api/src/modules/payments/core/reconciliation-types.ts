@@ -11,7 +11,7 @@ export const DIFFERENCE_CODES = [
   // The gateway's activity against ours (adapters that list it).
   'unknown_gateway_payment', 'unknown_gateway_refund', 'unknown_gateway_dispute', 'gateway_amount_differs',
   // Settlements (adapters that list them).
-  'settlement_totals_inconsistent', 'settlement_line_unmatched', 'settlement_line_amount_differs', 'settlement_currency_differs', 'settlement_changed',
+  'settlement_totals_inconsistent', 'settlement_line_unmatched', 'settlement_line_amount_differs', 'settlement_currency_differs', 'settlement_changed', 'settlement_line_duplicate',
   // Internal.
   'receipt_missing', 'not_settled_in_time',
 ] as const;

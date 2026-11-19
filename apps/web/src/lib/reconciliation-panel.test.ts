@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { accountsOf, adminReceiptHref, differenceLabel, moneyOrDash, runStatusLabel, sideText } from './reconciliation-panel';
+import { accountsOf, adminReceiptHref, differenceLabel, entityLabel, moneyOrDash, receiptKindLabel, runStatusLabel, sideText } from './reconciliation-panel';
 import { receiptHref } from './account';
 
 describe('reconciliation, customer money and receipts panels (task 4.6)', () => {
@@ -13,6 +13,9 @@ describe('reconciliation, customer money and receipts panels (task 4.6)', () => 
     expect(sideText({ amountMinor: '-500', currency: 'AUD' })).toBe('-$5.00');
     expect(sideText(undefined)).toBeNull();
     expect(moneyOrDash(null, 'AUD')).toBe('not shown');
+    expect(entityLabel('SettlementLine')).toBe('Payout line');
+    expect(receiptKindLabel('void')).toBe('Receipt voided');
+    expect(differenceLabel('settlement_line_duplicate')).toBe('Payout line for something already paid out');
     expect(accountsOf([{ id: 'r1', providerAccountId: 'a', accountName: 'Sim', forDate: '2026-11-20', attempt: 2, trigger: 'manual', status: 'matched', errorCode: null, checkedObjects: 1, differenceCount: 0 },
       { id: 'r2', providerAccountId: 'a', accountName: 'Sim', forDate: '2026-11-20', attempt: 1, trigger: 'scheduled', status: 'matched', errorCode: null, checkedObjects: 1, differenceCount: 0 }])).toEqual([{ id: 'a', name: 'Sim' }]);
   });

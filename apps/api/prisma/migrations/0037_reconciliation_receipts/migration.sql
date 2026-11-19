@@ -64,6 +64,7 @@ CREATE TABLE "settlement_line_matches" (
     "id" UUID NOT NULL,
     "lineId" UUID NOT NULL,
     "mode" "PaymentMode" NOT NULL,
+    "kind" "SettlementLineKind" NOT NULL,
     "paymentId" UUID,
     "refundId" UUID,
     "disputeId" UUID,
@@ -77,11 +78,20 @@ CREATE INDEX "settlement_line_matches_paymentId_idx" ON "settlement_line_matches
 CREATE INDEX "settlement_line_matches_refundId_idx" ON "settlement_line_matches"("refundId");
 CREATE INDEX "settlement_line_matches_disputeId_idx" ON "settlement_line_matches"("disputeId");
 CREATE INDEX "settlement_line_matches_bookingId_idx" ON "settlement_line_matches"("bookingId");
+-- Code review M1: a charge, a refund, a dispute withdrawal and a reinstatement are each paid out once; a second line for
+-- the same object is a difference (settlement_line_duplicate), never a second match or a second fee.
+CREATE UNIQUE INDEX "settlement_line_matches_one_payment" ON "settlement_line_matches"("paymentId") WHERE "paymentId" IS NOT NULL;
+CREATE UNIQUE INDEX "settlement_line_matches_one_refund" ON "settlement_line_matches"("refundId") WHERE "refundId" IS NOT NULL;
+CREATE UNIQUE INDEX "settlement_line_matches_one_dispute_fact" ON "settlement_line_matches"("disputeId", "kind") WHERE "disputeId" IS NOT NULL;
 ALTER TABLE "settlement_line_matches" ADD CONSTRAINT "settlement_line_matches_lineId_mode_fkey" FOREIGN KEY ("lineId", "mode") REFERENCES "settlement_lines"("id", "mode") ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE "settlement_line_matches" ADD CONSTRAINT "settlement_line_matches_paymentId_mode_fkey" FOREIGN KEY ("paymentId", "mode") REFERENCES "payments"("id", "mode") ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE "settlement_line_matches" ADD CONSTRAINT "settlement_line_matches_refundId_mode_fkey" FOREIGN KEY ("refundId", "mode") REFERENCES "refunds"("id", "mode") ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE "settlement_line_matches" ADD CONSTRAINT "settlement_line_matches_disputeId_mode_fkey" FOREIGN KEY ("disputeId", "mode") REFERENCES "disputes"("id", "mode") ON DELETE RESTRICT ON UPDATE RESTRICT;
-ALTER TABLE "settlement_line_matches" ADD CONSTRAINT "settlement_line_matches_one_check" CHECK (num_nonnulls("paymentId", "refundId", "disputeId") = 1);
+ALTER TABLE "settlement_line_matches"
+  ADD CONSTRAINT "settlement_line_matches_one_check" CHECK (num_nonnulls("paymentId", "refundId", "disputeId") = 1),
+  ADD CONSTRAINT "settlement_line_matches_kind_check" CHECK (
+    ("kind" = 'charge' AND "paymentId" IS NOT NULL) OR ("kind" = 'refund' AND "refundId" IS NOT NULL)
+    OR ("kind" IN ('dispute_withdrawal', 'dispute_reinstatement') AND "disputeId" IS NOT NULL));
 
 CREATE FUNCTION public.mt_settlement_match_insert() RETURNS trigger
   LANGUAGE plpgsql
@@ -89,10 +99,14 @@ CREATE FUNCTION public.mt_settlement_match_insert() RETURNS trigger
 AS $$
 DECLARE
   line_currency char(3);
+  line_kind "SettlementLineKind";
   target_booking uuid;
   target_currency char(3);
 BEGIN
-  SELECT l.currency INTO line_currency FROM settlement_lines l WHERE l.id = NEW."lineId";
+  SELECT l.currency, l.kind INTO line_currency, line_kind FROM settlement_lines l WHERE l.id = NEW."lineId";
+  IF line_kind IS DISTINCT FROM NEW.kind THEN
+    RAISE EXCEPTION 'a settlement match carries the kind of its line' USING ERRCODE = 'check_violation';
+  END IF;
   IF NEW."paymentId" IS NOT NULL THEN
     SELECT p."bookingId", p.currency INTO target_booking, target_currency FROM payments p WHERE p.id = NEW."paymentId";
   ELSIF NEW."refundId" IS NOT NULL THEN

@@ -195,7 +195,9 @@ export class ReceiptsService implements OnApplicationBootstrap {
 
   /**
    * customer_funds of the booking after the posting (review R6: the base GST will use once registration exists): the
-   * postings of the booking up to this one, in the order their transactions started (they run under the booking's lock).
+   * postings of the booking up to this one, ordered by createdTxId. Known limit (code review, minor 9): a transaction id
+   * is assigned at its first write, not at commit, so this order follows the booking's lock only as long as every
+   * posting takes that lock before writing. Nothing reads this column yet; check it before GST is ever wired.
    */
   private async fundsAfter(tx: Tx, bookingId: string, currency: string, mode: Mode, createdTxId: bigint): Promise<bigint> {
     const [row] = await tx.$queryRaw<Array<{ funds: bigint }>>`

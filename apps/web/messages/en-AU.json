@@ -2836,7 +2836,15 @@
         "none": "No receipts yet. A receipt is issued for each payment received.",
         "row": "{title} {number}, {amount}, {when}",
         "about": " (about {receipt})",
-        "download": "Download {number} (PDF)"
+        "download": "Download {number} (PDF)",
+        "kinds": {
+          "receipt": "Receipt",
+          "refund": "Refund note",
+          "refund_reversal": "Refund reversal note",
+          "chargeback": "Chargeback note",
+          "chargeback_reinstatement": "Chargeback reversal note",
+          "void": "Receipt voided"
+        }
       }
     },
     "templates": {
@@ -3556,7 +3564,16 @@
         "settlement_currency_differs": "Payout line in another currency",
         "settlement_changed": "Payout changed after it was imported",
         "receipt_missing": "Payment without a receipt",
-        "not_settled_in_time": "Not paid out by the gateway in time"
+        "not_settled_in_time": "Not paid out by the gateway in time",
+        "settlement_line_duplicate": "Payout line for something already paid out"
+      },
+      "entities": {
+        "Payment": "Payment",
+        "Refund": "Refund",
+        "Dispute": "Dispute",
+        "Settlement": "Payout",
+        "SettlementLine": "Payout line",
+        "GatewayObject": "Gateway item"
       }
     },
     "customerMoney": {

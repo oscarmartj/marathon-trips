@@ -53,3 +53,10 @@ export function adminReceiptHref(number: string): string | null {
 }
 
 export const moneyOrDash = (minor: string | null | undefined, currency: string): string => (minor === null || minor === undefined ? t('admin.customerMoney.notAvailable') : formatMoney(minor, currency));
+
+const ENTITIES = ['Payment', 'Refund', 'Dispute', 'Settlement', 'SettlementLine', 'GatewayObject'] as const;
+export const entityLabel = (type: string): string => ((ENTITIES as readonly string[]).includes(type) ? t(`admin.reconciliation.entities.${type}`) : type);
+
+const RECEIPT_KINDS = ['receipt', 'refund', 'refund_reversal', 'chargeback', 'chargeback_reinstatement', 'void'] as const;
+/** The document's title in the panel's own words (not the API's), by its kind. */
+export const receiptKindLabel = (kind: string): string => ((RECEIPT_KINDS as readonly string[]).includes(kind) ? t(`admin.crm.receipts.kinds.${kind}`) : kind);

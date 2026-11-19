@@ -603,11 +603,12 @@ export class SimulatorControl {
   }
 
   /** A refund made on the gateway's own dashboard (task 3.3): no key and no id of ours. Refused beyond what is left. */
-  gatewayRefund(accountId: string, paymentRef: string, amountMinor: bigint, status: ProviderRefundStatus = 'succeeded'): ProviderRefund {
+  gatewayRefund(accountId: string, paymentRef: string, amountMinor: bigint, status: ProviderRefundStatus = 'succeeded', ourRefundId?: string): ProviderRefund {
     const acc = this.world.account(accountId);
     const p = acc.payments.get(paymentRef);
     if (!p || p.status !== 'succeeded' || amountMinor <= 0n || amountMinor > refundable(acc, p)) throw new Error('simulator: refund refused');
-    const r: SimRefund = { ref: `sim_ref_${randomBytes(12).toString('hex')}`, paymentRef, status, amount: { amountMinor, currency: p.amount.currency } };
+    // Task 4.6: with `ourRefundId`, a refund of ours the gateway made although our request seemed to fail (reconciliation tests).
+    const r: SimRefund = { ref: `sim_ref_${randomBytes(12).toString('hex')}`, paymentRef, status, amount: { amountMinor, currency: p.amount.currency }, ...(ourRefundId ? { refundId: ourRefundId } : {}) };
     acc.refunds.set(r.ref, r);
     acc.createdAt.set(r.ref, new Date());
     return refundView(r);

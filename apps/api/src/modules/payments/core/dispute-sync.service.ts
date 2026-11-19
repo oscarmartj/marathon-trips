@@ -10,6 +10,7 @@ import { lockPayment } from './attempt-state';
 import { PaymentDisputesService } from './disputes.service';
 import { PAYMENT_TX_OPTIONS } from './payable-states';
 import type { ProviderDispute } from './provider';
+import { ProviderError } from './provider';
 import type { Difference } from './reconciliation-types';
 import { moneySide } from './reconciliation-types';
 import type { GatewayCaller } from './settlements.service';
@@ -40,7 +41,15 @@ export class DisputeSyncService {
     const differences: Difference[] = [];
     let applied = 0;
     for (const d of open) {
-      const remote = await call(async (p, ctx) => (p.retrieveDispute ? p.retrieveDispute(ctx, d.providerDisputeRef) : null));
+      // Code review, minor 5: one dispute the gateway answers badly is skipped; an outage (the caller's cut-off, which is
+      // not a ProviderError) or bad credentials still stop the run.
+      let remote: ProviderDispute | null;
+      try {
+        remote = await call(async (p, ctx) => (p.retrieveDispute ? p.retrieveDispute(ctx, d.providerDisputeRef) : null));
+      } catch (err) {
+        if (err instanceof ProviderError && err.code !== 'provider_auth_failed') continue;
+        throw err;
+      }
       if (!remote) {
         differences.push({ code: 'dispute_unknown_at_gateway', entityType: 'Dispute', entityId: d.id, ours: moneySide(d.amountMinor, d.currency, d.status) });
         continue;

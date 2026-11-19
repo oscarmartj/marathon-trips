@@ -2,11 +2,11 @@
 
 import { formatMoney } from '@/lib/builder';
 import { t } from '@/lib/i18n';
-import { adminReceiptHref } from '@/lib/reconciliation-panel';
+import { adminReceiptHref, receiptKindLabel } from '@/lib/reconciliation-panel';
 import { Section, useLoad } from '../catalogue/kit';
 import { formatMoment } from './crm-kit';
 
-interface Doc { number: string; kind: string; title: string; issuedAt: string; amountMinor: string; currency: string; receiptNumber: string | null }
+interface Doc { number: string; kind: string; issuedAt: string; amountMinor: string; currency: string; receiptNumber: string | null }
 
 /** A booking's receipts and notes (task 4.6), each a PDF built by the API from what it stored when it was issued. */
 export function ReceiptsPanel({ bookingId }: { bookingId: string }) {
@@ -20,7 +20,7 @@ export function ReceiptsPanel({ bookingId }: { bookingId: string }) {
             const href = adminReceiptHref(d.number);
             return (
               <li key={d.number}>
-                {t('admin.crm.receipts.row', { title: d.title, number: d.number, amount: formatMoney(d.amountMinor, d.currency), when: formatMoment(d.issuedAt) })}
+                {t('admin.crm.receipts.row', { title: receiptKindLabel(d.kind), number: d.number, amount: formatMoney(d.amountMinor, d.currency), when: formatMoment(d.issuedAt) })}
                 {d.receiptNumber ? t('admin.crm.receipts.about', { receipt: d.receiptNumber }) : null}
                 {href ? <> <a href={href} download>{t('admin.crm.receipts.download', { number: d.number })}</a></> : null}
               </li>

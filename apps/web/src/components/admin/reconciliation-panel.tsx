@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Status } from '../auth/field';
 import { api } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
-import { accountsOf, differenceLabel, runStatusLabel, sideText } from '@/lib/reconciliation-panel';
+import { accountsOf, differenceLabel, entityLabel, runStatusLabel, sideText } from '@/lib/reconciliation-panel';
 import type { DifferenceRow, RunRow } from '@/lib/reconciliation-panel';
 import { Section, useLoad } from './catalogue/kit';
 import { useStepUp } from './step-up';
@@ -62,7 +62,7 @@ export function ReconciliationPanel() {
                       const gateway = sideText(d.gateway);
                       return (
                         <li key={`${d.code}-${d.entityId}-${i}`}>
-                          {t('admin.reconciliation.difference', { code: differenceLabel(d.code), entity: d.entityType, id: d.entityId })}
+                          {t('admin.reconciliation.difference', { code: differenceLabel(d.code), entity: entityLabel(d.entityType), id: d.entityId })}
                           {ours ? <> · {t('admin.reconciliation.ours', { value: ours })}</> : null}
                           {gateway ? <> · {t('admin.reconciliation.gateway', { value: gateway })}</> : null}
                         </li>
