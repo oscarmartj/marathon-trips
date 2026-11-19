@@ -10,6 +10,7 @@ import { runTransaction } from '../../../platform/database/transaction';
 import { SettingsService } from '../../../platform/flags/flags.service';
 import { conflict, notFound } from '../../../platform/http/api-error';
 import { MANUAL_KEY } from '../adapters/manual/manual';
+import { PLANNED_ADAPTERS } from '../adapters/planned';
 import { ACCOUNT_VIEW_SELECT } from './accounts.service';
 import type { AccountStatus, ArchiveFacts } from './account-rules';
 import { allowedTransitions, archiveBlockers, bootPauseReason, connectionTestCurrent, creationBlockReason, transitionAllowed } from './account-rules';
@@ -72,7 +73,12 @@ export class ProviderAccountsAdminService {
         webhookSecret: m.account.webhookSecret.source === 'entered' ? { source: 'entered' as const, label: m.account.webhookSecret.label } : { source: 'generated' as const },
         creatable: blocked === null, creatableReason: blocked, mode: 'test' as const,
       };
-    });
+    }).concat(PLANNED_ADAPTERS.filter((p) => !this.gateway.registry.get(p.key)).map((p) => ({
+      // Catalogue entries only (task 4.2, plan section 7): nothing can be created or routed to them.
+      key: p.key, displayName: p.displayName, status: 'planned' as const, testOnly: false, methods: [...p.methods], currencies: [...p.currencies],
+      countries: p.countries === 'any' ? 'any' : [...p.countries], refunds: 'none' as const, credentialFields: [], webhookSecret: { source: 'generated' as const },
+      creatable: false, creatableReason: 'adapter_unavailable', mode: 'test' as const,
+    })));
   }
 
   async accounts() {

@@ -3,7 +3,7 @@
 import { ManualMethodsService } from '../../../src/modules/payments/core/manual-methods.service';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaymentAttemptSyncService } from '../../../src/modules/payments/core/attempt-sync.service';
 import { PaymentAttemptsService } from '../../../src/modules/payments/core/attempts.service';
 import { ProviderGateway, modeForEnv } from '../../../src/modules/payments/core/gateway';
@@ -20,7 +20,7 @@ import { cleanBookingEvents, makeBookingFor } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 import {
-  PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, expireNow, insertValidSchedule, onlyAccount, payingCustomer, paymentsStaff, sim, simulatorAccount,
+  PayingCustomer, SimAccount, approvedBooking, cleanPayments, resetGatewayHealth, deliver, eventFor, expireNow, insertValidSchedule, onlyAccount, payingCustomer, paymentsStaff, sim, simulatorAccount,
   acceptCurrentTerms,
 } from '../../support/payments';
 
@@ -38,6 +38,10 @@ beforeAll(async () => {
   acc = await simulatorAccount(t);
   await onlyAccount(t, acc.id);
   c = await payingCustomer(t);
+});
+// The gateway breaker of task 4.2 keeps per-account state: each test starts with a healthy simulator account.
+beforeEach(async () => {
+  await resetGatewayHealth(t);
 });
 afterAll(async () => {
   await cleanPayments(t);

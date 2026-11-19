@@ -274,7 +274,7 @@ export class PaymentLinksService {
     const { link, booking: b, amountDueMinor } = await this.resolve(token);
     const pkg = await this.prisma.booking.findUniqueOrThrow({ where: { id: b.id }, select: { departureDate: true, returnDate: true, package: { select: { name: true, edition: { select: { year: true, race: { select: { name: true } } } } } } } });
     // A bank transfer needs the customer's own session, so a link never offers it.
-    const methods = (await this.routing.methods(this.prisma, { currency: b.currency, country: b.residenceCountry })).filter((m) => !isManualMethod(m));
+    const methods = (await this.routing.methods(this.prisma, { currency: b.currency, country: b.residenceCountry, amountMinor: amountDueMinor })).filter((m) => !isManualMethod(m));
     const terms = await this.terms.current();
     const accepted = terms ? await this.prisma.termsAcceptance.findUnique({
       where: { bookingId_documentSlug_locale_textDigest: { bookingId: b.id, documentSlug: terms.slug, locale: terms.locale, textDigest: terms.digest } }, select: { id: true },

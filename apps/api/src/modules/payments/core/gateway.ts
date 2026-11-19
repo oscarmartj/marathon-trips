@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { AppEnv } from '@mt/shared';
 import { AuditService, SYSTEM_ACTOR } from '../../../platform/audit/audit.service';
 import type { AppConfig } from '../../../platform/config/config';
@@ -9,7 +9,9 @@ import { ApiError } from '../../../platform/http/api-error';
 import { SECRET_BOX } from '../../../platform/auth/staff-auth.service';
 import type { AdapterManifest, PaymentModeName, PaymentProvider, ProviderContext, WebhookVerification } from './provider';
 import { PROVIDER_ERROR_CODES, ProviderError } from './provider';
+import { ProviderHealthService } from './provider-health.service';
 import { PaymentAdapterRegistry } from './registry';
+import { countsForBreaker } from './routing-rules';
 
 /** The environments where a test-only adapter (the simulator) may run: a closed list (plan 3.1, section 14, point 14). */
 export const TEST_ADAPTER_ENVS: readonly AppEnv[] = ['development', 'test', 'ci'];
@@ -45,6 +47,13 @@ export function callBlockReason(account: AccountForCall, manifest: AdapterManife
 }
 
 const CALL_TIMEOUT_MS = 10_000;
+
+/**
+ * The calls that feed gateway health (plan 4.2, 15.6; review M1, B3): the breaker answers "can this account take a new
+ * payment?", so only `create` counts, failing or succeeding (plus the stored connection test). A read, cancellation or
+ * refund says nothing about charging; `webhook` has no network; candidate tests never write health.
+ */
+const HEALTH_OPS: readonly GatewayOperation[] = ['create'];
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -86,6 +95,8 @@ export class ProviderGateway {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(PaymentAdapterRegistry) readonly registry: PaymentAdapterRegistry,
+    // Gateway health (task 4.2): fed only by calls to stored accounts, never by tests of candidate credentials.
+    @Optional() @Inject(ProviderHealthService) private readonly health?: ProviderHealthService,
   ) {}
 
   get env(): AppEnv {
@@ -101,12 +112,19 @@ export class ProviderGateway {
     if (!account) throw new ApiError(409, 'provider_account_missing', 'The payment account no longer exists');
     const provider = await this.allow(account, op);
     const { ctx } = await this.context(account);
+    // Health (plan 4.2, 15.6 and review M1, B2, B3): only creates count, on the database clock.
+    const tracked = HEALTH_OPS.includes(op);
+    // If even the clock cannot be read, the create still goes ahead and health is simply not recorded for it.
+    const startedAt = tracked ? await this.health?.dbNow().catch(() => undefined) : undefined;
     try {
-      return await withTimeout(fn(provider, ctx), CALL_TIMEOUT_MS);
+      const result = await withTimeout(fn(provider, ctx), CALL_TIMEOUT_MS);
+      if (startedAt) await this.health?.success(account.id, startedAt);
+      return result;
     } catch (err) {
-      if (err instanceof ProviderError) throw err;
       // Never the gateway's message: it can carry credentials or the payer's details.
-      throw new ProviderError('provider_unavailable', true);
+      const e = err instanceof ProviderError ? err : new ProviderError('provider_unavailable', true);
+      if (startedAt) await this.noteFailure(account.id, e.code);
+      throw e;
     }
   }
 
@@ -119,6 +137,10 @@ export class ProviderGateway {
     if (!account) throw new ApiError(409, 'provider_account_missing', 'The payment account no longer exists');
     const provider = await this.allow(account, op);
     return { account, manifest: provider.manifest };
+  }
+
+  private async noteFailure(accountId: string, code: string): Promise<void> {
+    if (countsForBreaker(code)) await this.health?.failure(accountId, code);
   }
 
   /** Verifies a webhook with the secret of the account that received it (no network). */
@@ -151,7 +173,12 @@ export class ProviderGateway {
     } catch {
       return { result: 'credentials_unreadable', credentialsChangedAt: row.credentialsChangedAt };
     }
-    return { result: await this.runTest(provider, ctx), credentialsChangedAt: row.credentialsChangedAt };
+    const startedAt = await this.health?.dbNow().catch(() => undefined);
+    const result = await this.runTest(provider, ctx);
+    // A stored account's test feeds its health (plan 4.2, 15.6); candidate tests below never do.
+    if (result === 'ok' && startedAt) await this.health?.success(account.id, startedAt);
+    else if (startedAt) await this.noteFailure(account.id, result);
+    return { result, credentialsChangedAt: row.credentialsChangedAt };
   }
 
   /**

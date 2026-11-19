@@ -224,6 +224,22 @@ describe('the customer asks to pay by transfer (section 2)', () => {
 });
 
 describe('staff confirm a transfer (section 3)', () => {
+  it('inbound_transfer_recorded_regardless_of_rules (task 4.2): no rule, a cap below it and an open breaker do not stop recording money that arrived', async () => {
+    const b = await booked();
+    const rules = await t.prisma.routingRule.findMany({ where: { providerAccountId: manualId } });
+    await t.prisma.routingRule.updateMany({ where: { providerAccountId: manualId }, data: { enabled: false, maxAmountMinor: 1n } });
+    await t.prisma.$executeRawUnsafe(`INSERT INTO provider_account_health ("providerAccountId", "openedAt", "openUntil", "consecutiveFailures") VALUES ($1::uuid, now(), now() + interval '1 hour', 5)
+      ON CONFLICT ("providerAccountId") DO UPDATE SET "openedAt" = now(), "openUntil" = now() + interval '1 hour'`, manualId);
+    try {
+      const r = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference: uniq() });
+      expect(r.status).toBe(200);
+      expect(r.body.transfer.status).toBe('succeeded');
+    } finally {
+      for (const rule of rules) await t.prisma.routingRule.update({ where: { id: rule.id }, data: { enabled: rule.enabled, maxAmountMinor: rule.maxAmountMinor } });
+      await t.prisma.$executeRawUnsafe(`UPDATE provider_account_health SET "openedAt" = NULL, "openUntil" = NULL, "consecutiveFailures" = 0 WHERE "providerAccountId" = $1::uuid`, manualId);
+    }
+  });
+
   it('confirmation moves the booking, closes the request and is audited', async () => {
     const b = await booked();
     await c.pay(b.reference, { method: 'payid_transfer' });

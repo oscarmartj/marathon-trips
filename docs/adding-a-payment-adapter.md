@@ -27,7 +27,7 @@ Todo eso lo hace el núcleo: guardas de modo y entorno, descifrado de credencial
    - `failed` es terminal en la pasarela.
    - `verifyWebhook` no usa la red y compara en tiempo constante.
    - `verifyWebhook` rechaza (`stale_timestamp`) una firma a más de 300 s del momento actual, hacia atrás o hacia delante. La batería prueba 299 s (aceptada), 301 s y una hora (rechazadas).
-3. **Registro.** Una línea en `adapters/index.ts` (`createAdapters`).
+3. **Registro.** Una línea en `adapters/index.ts` (`createAdapters`). Si la pasarela tenía ficha `planned` en `adapters/planned.ts` (4.2), se borra esa ficha en el mismo PR (`planned_catalogue_keys_unique_and_unregistered` falla si una clave está en los dos). Cada cuenta nueva recibe sus reglas de enrutado por defecto (todos los métodos del manifiesto salvo `bnpl`, en AUD, cualquier país, sin límites, prioridad 100).
 4. **Sujeto local** en `apps/api/test/contract/subjects/<clave>.ts`, añadido a `LOCAL_SUBJECTS`. La pasarela se simula en memoria o con respuestas grabadas de su documentación. La batería completa (`CONTRACT_CLAUSES`) corre con él en CI. Sin sujeto local, CI falla (`every_adapter_has_a_local_contract_subject`).
 5. **Sujeto de sandbox**, añadido a `SANDBOX_SUBJECTS`.
    - Usa la misma clase que devuelve `createAdapters`.
