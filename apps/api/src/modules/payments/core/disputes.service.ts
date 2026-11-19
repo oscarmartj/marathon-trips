@@ -234,7 +234,8 @@ export class PaymentDisputesService {
     const payments = await this.prisma.payment.findMany({ where: { bookingId: d.bookingId, status: { in: ['succeeded', 'voided'] } }, orderBy: { createdAt: 'asc' }, select: { id: true, method: true, amountMinor: true, currency: true, status: true, succeededAt: true, providerPaymentRef: true } });
     const refunds = await this.prisma.refund.findMany({ where: { bookingId: d.bookingId }, orderBy: { createdAt: 'asc' }, select: { paymentId: true, amountMinor: true, currency: true, status: true, origin: true, createdAt: true, succeededAt: true } });
     const emails = await this.prisma.outboundEmail.findMany({
-      where: { OR: [{ relatedEntityType: 'Booking', relatedEntityId: d.bookingId }, { customerId: booking.customerId }] }, orderBy: { createdAt: 'asc' }, take: 500,
+      // Review of the code, L1: only the emails about this booking, never those of the customer's other bookings.
+      where: { relatedEntityType: 'Booking', relatedEntityId: d.bookingId }, orderBy: { createdAt: 'asc' }, take: 500,
       select: { templateKey: true, subject: true, to: true, status: true, sentAt: true, createdAt: true, bodySha256: true },
     });
     const history = await this.prisma.auditLog.findMany({ where: { entityType: 'Booking', entityId: d.bookingId, action: 'bookings.booking.status_changed' }, orderBy: { occurredAt: 'asc' }, select: { occurredAt: true, changes: true } });

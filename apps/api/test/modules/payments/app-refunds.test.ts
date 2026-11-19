@@ -403,3 +403,131 @@ describe('money out on a cancelled booking (plan 0.1, 6.2; plan 4.5, section 7)'
     expect(await check(bookingId)).toEqual([]);
   });
 });
+
+describe('review of the code (H1, H2, M2)', () => {
+  const service = () => t.app.get(AppRefundsService);
+
+  it('resolve_and_retry_never_interleave: while staff resolve a refund, the sweep sends nothing; a held lease blocks resolve', async () => {
+    const { bookingId, late } = await overpaid(2, 2);
+    sim.queueRefund(acc.id, 'unavailable');
+    expect((await ask(late.id)).status).toBe(202);
+    const [r] = await refundsOf(bookingId);
+    // A sender holds the lease (the sweep in the middle of its call): staff cannot resolve now.
+    await t.prisma.$executeRawUnsafe(`UPDATE refunds SET "sendingUntil" = clock_timestamp() + interval '1 minute' WHERE id = $1::uuid`, r!.id);
+    const busy = await admin.post(`/admin/payments/refunds/${r!.id}/resolve`, { version: r!.version });
+    expect([busy.status, busy.body.code]).toEqual([409, 'refund_send_in_progress']);
+    await t.prisma.$executeRawUnsafe(`UPDATE refunds SET "sendingUntil" = NULL WHERE id = $1::uuid`, r!.id);
+    // Barrier: the sweep runs while resolve is asking the gateway; it must not send.
+    const gateway = t.app.get(ProviderGateway);
+    const real = gateway.call.bind(gateway);
+    let during: string | null = null;
+    const spy = vi.spyOn(gateway, 'call').mockImplementation(async (id, op, fn) => {
+      if (op === 'retrieve' && during === null) during = await service().retryOne(r!.id, new Date(Date.now() + 2 * 60_000));
+      return real(id, op, fn as never) as never;
+    });
+    try {
+      const ok = await admin.post(`/admin/payments/refunds/${r!.id}/resolve`, { version: r!.version });
+      expect([ok.status, ok.body.status]).toEqual([200, 'failed']);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(during).toBe('skipped');
+    expect(simRefunds(late.providerPaymentRef!)).toHaveLength(0);
+    expect(await t.prisma.refund.findUniqueOrThrow({ where: { id: r!.id } })).toMatchObject({ nextAttemptAt: null, sendingUntil: null });
+  });
+
+  it('late_success_of_failed_app_refund_is_recorded_with_review: the money went, so it is posted and the cap is taken again', async () => {
+    const { bookingId, late } = await overpaid(2, 2);
+    sim.queueRefund(acc.id, 'unavailable');
+    expect((await ask(late.id)).status).toBe(202);
+    const [r] = await refundsOf(bookingId);
+    expect((await admin.post(`/admin/payments/refunds/${r!.id}/resolve`, { version: r!.version })).body.status).toBe('failed');
+    expect((await refundableOf(bookingId, late.id)).refundableMinor).toBe(late.amountMinor.toString());
+    // The gateway made it after all (a request that was still in flight somewhere): its webhook arrives.
+    const made = await t.app.get(ProviderGateway).call(acc.id, 'refund', (p, ctx) => p.createRefund(ctx, {
+      paymentRef: late.providerPaymentRef!, amount: { amountMinor: r!.amountMinor, currency: r!.currency }, idempotencyKey: r!.idempotencyKey,
+      metadata: { refundId: r!.id, paymentId: late.id, bookingId }, createdAt: r!.createdAt,
+    }));
+    expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, made.ref))).outcome).toBe('processed');
+    expect(await t.prisma.refund.findUniqueOrThrow({ where: { id: r!.id } })).toMatchObject({ status: 'succeeded', providerRefundRef: made.ref });
+    expect((await ledgerOf(t, bookingId)).map((x) => x.idempotencyKey)).toContain(`refund:${r!.id}:succeeded`);
+    expect((await refundableOf(bookingId, late.id)).refundableMinor).toBe('0');
+    expect(await t.prisma.task.count({ where: { sourceRef: refundReviewTaskRef(r!.id), status: 'open' } })).toBe(1);
+    expect(await check(bookingId)).toEqual([]);
+  });
+
+  it('external_pending_refund_blocks_app_refunds (P10, in flight + new)', async () => {
+    const { bookingId, late } = await overpaid(2, 2);
+    const ext = sim.gatewayRefund(acc.id, late.providerPaymentRef!, 100n, 'pending');
+    expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, ext.ref))).outcome).toBe('processed');
+    expect(await refundableOf(bookingId, late.id)).toMatchObject({ refundableMinor: '0', blockedReason: 'external_refund_in_progress' });
+    const r = await ask(late.id);
+    expect([r.status, r.body.code]).toEqual([409, 'external_refund_in_progress']);
+    sim.settleRefund(acc.id, ext.ref, 'succeeded');
+    expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, ext.ref))).outcome).toBe('processed');
+    expect((await refundableOf(bookingId, late.id)).refundableMinor).toBe((late.amountMinor - 100n).toString());
+  });
+
+  it('refund_of_disputed_payment_rejected: a payment with an overpayment, disputed, gives nothing back from the app', async () => {
+    const { bookingId, late } = await overpaid(2, 2);
+    expect((await refundableOf(bookingId, late.id)).refundableMinor).toBe(late.amountMinor.toString());
+    const d = sim.openDispute(acc.id, late.providerPaymentRef!);
+    expect((await deliver(t, acc, sim.disputeEvent(acc.secret, acc.id, d.ref))).outcome).toBe('processed');
+    expect(await refundableOf(bookingId, late.id)).toMatchObject({ refundableMinor: '0', blockedReason: 'payment_disputed' });
+    const r = await ask(late.id);
+    expect([r.status, r.body.code]).toEqual([409, 'refund_of_disputed_payment_rejected']);
+  });
+
+  it('refund_on_planned_or_missing_adapter_rejected: no adapter, no refund and no row', async () => {
+    const { bookingId, late } = await overpaid(2, 2);
+    const registry = t.app.get(ProviderGateway).registry;
+    const get = registry.get.bind(registry);
+    const spy = vi.spyOn(registry, 'get').mockImplementation((k: string) => (k === 'simulator' ? undefined : get(k)));
+    try {
+      const r = await ask(late.id);
+      expect([r.status, r.body.code]).toEqual([409, 'adapter_unavailable']);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await refundsOf(bookingId)).toHaveLength(0);
+  });
+
+  it('reallocation_does_not_consume_overpayment_reserved_by_pending_refund: a plan that grows is not filled with promised money', async () => {
+    const { bookingId, late } = await overpaid(2, 2);
+    sim.queueRefund(acc.id, 'unavailable');
+    expect((await ask(late.id)).status).toBe(202);
+    const [r] = await refundsOf(bookingId);
+    // The plan grows by 300 (as a change of the booking would), then the ledger reallocates.
+    const owner = await connect('owner');
+    try {
+      await owner.query('BEGIN');
+      await owner.query('ALTER TABLE payment_schedule_items DISABLE TRIGGER USER');
+      await owner.query(`UPDATE payment_schedule_items SET "amountMinor" = "amountMinor" + 300 WHERE id = (SELECT id FROM payment_schedule_items WHERE "bookingId" = $1::uuid AND state = 'active' ORDER BY sequence DESC LIMIT 1)`, [bookingId]);
+      await owner.query('ALTER TABLE payment_schedule_items ENABLE TRIGGER USER');
+      await owner.query('COMMIT');
+    } finally {
+      await owner.end();
+    }
+    const { LedgerService } = await import('../../../src/modules/payments/core/ledger.service');
+    await t.prisma.$transaction((tx) => t.app.get(LedgerService).reallocate(tx, { id: bookingId, currency: 'AUD' }, 'test', `test:${randomUUID()}:reallocation`));
+    const items = (await admin.get(`/admin/payments/bookings/${bookingId}`)).body.allocation.items as Array<{ amountMinor: string; paidMinor: string }>;
+    expect(items.reduce((s, i) => s + BigInt(i.amountMinor) - BigInt(i.paidMinor), 0n)).toBe(300n);
+    expect((await balancesOf(t, bookingId)).overpaymentsMinor).toBe(late.amountMinor);
+    // Released (the gateway never had it), the money fills the grown plan.
+    expect((await admin.post(`/admin/payments/refunds/${r!.id}/resolve`, { version: r!.version })).body.status).toBe('failed');
+    const after = (await admin.get(`/admin/payments/bookings/${bookingId}`)).body.allocation.items as Array<{ amountMinor: string; paidMinor: string }>;
+    expect(after.every((i) => i.paidMinor === i.amountMinor)).toBe(true);
+    expect((await balancesOf(t, bookingId)).overpaymentsMinor).toBe(late.amountMinor - 300n);
+  });
+
+  it('refund_vs_funds_withdrawal_concurrent: a refund and a chargeback of one payment at once never both take the money', async () => {
+    const { bookingId, late } = await overpaid(2, 2);
+    const d = sim.openDispute(acc.id, late.providerPaymentRef!, { withdrawn: true, status: 'lost' });
+    const [res] = await Promise.all([ask(late.id), deliver(t, acc, sim.disputeEvent(acc.secret, acc.id, d.ref))]);
+    expect(res.status).toBe(409);
+    const out = (await refundsOf(bookingId)).filter((x) => x.status === 'succeeded').reduce((s, x) => s + x.amountMinor, 0n);
+    expect(out).toBe(0n);
+    expect(simRefunds(late.providerPaymentRef!)).toHaveLength(0);
+    expect(await check(bookingId)).toEqual([]);
+  });
+});

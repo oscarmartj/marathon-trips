@@ -25,7 +25,12 @@ export const REFUND_STATUS_PAIRS: ReadonlyArray<readonly [RefundStatusName, Refu
 ];
 
 /** What happened to a refund, as the state machine sees it. `reversal_confirmed`: failed after success, confirmed by the gateway. */
-export type RefundEvent = 'pending' | 'succeeded' | 'failed' | 'reversal_confirmed';
+export type RefundEvent = 'pending' | 'succeeded' | 'failed' | 'reversal_confirmed' | 'late_succeeded';
+
+/** Review of the code (H1): a gateway app refund we had failed that the gateway made after all. Only `failed → succeeded`. */
+export const APP_REFUND_LATE_SUCCESS: readonly ['failed', 'succeeded'] = ['failed', 'succeeded'];
+
+export const refundReviewTaskRef = (id: string) => `payments:refund_review:${id}`;
 
 /** A gateway status as an event; a cancelled refund moved no money, so it is a failure (plan 3.3, 12.9). */
 export const refundEventOf = (s: ProviderRefundStatus): 'pending' | 'succeeded' | 'failed' => (s === 'cancelled' ? 'failed' : s);
@@ -41,6 +46,9 @@ export function nextRefundStatus(from: RefundStatusName, event: RefundEvent): Re
       return from === 'requested' || from === 'pending' ? 'failed' : null;
     case 'reversal_confirmed':
       return from === 'succeeded' ? 'reversed' : null;
+    case 'late_succeeded':
+      // Only through apply(), for a gateway app refund (H1): never a move of the plain table.
+      return null;
   }
 }
 
@@ -82,7 +90,13 @@ export async function bookingUnderPaymentReview(db: Pick<Tx, '$queryRaw'>, booki
   // payment link or new charge reaches a customer who is disputing a payment.
   const rows = await db.$queryRaw<Array<{ open: boolean }>>`
     SELECT (EXISTS (SELECT 1 FROM tasks WHERE "sourceRef" = ${coverageLostTaskRef(bookingId)} AND status = 'open' AND "deletedAt" IS NULL)
-         OR EXISTS (SELECT 1 FROM disputes WHERE "bookingId" = ${bookingId}::uuid AND status IN ('open', 'evidence_submitted'))) AS open`;
+         OR EXISTS (SELECT 1 FROM disputes WHERE "bookingId" = ${bookingId}::uuid AND status IN ('open', 'evidence_submitted'))
+         -- Review of the code, M1: while the customer owes money beyond the plan (a receivable), checkout, links and
+         -- reminders stay off even after the task is closed: what came in would pay the debt, not the plan. Oscar
+         -- settles it (a transfer, a change of the booking) first.
+         OR (SELECT COALESCE(sum("amountMinor"), 0) FROM payments WHERE "bookingId" = ${bookingId}::uuid AND status = 'succeeded')
+            - (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND (status = 'succeeded' OR (origin = 'app' AND status IN ('requested', 'pending'))))
+            - (SELECT COALESCE(sum("amountMinor"), 0) FROM disputes WHERE "bookingId" = ${bookingId}::uuid AND "fundsWithdrawnAt" IS NOT NULL AND "fundsReinstatedAt" IS NULL) < 0) AS open`;
   return rows[0]?.open === true;
 }
 
@@ -129,7 +143,9 @@ export class PaymentRefundStateMachine {
 
   async apply(tx: Tx, booking: LockedBooking, p: LockedPayment, r: LockedRefund, event: RefundEvent, ctx: RefundApplyContext): Promise<RefundStatusName | null> {
     if (r.bookingId !== booking.id || r.paymentId !== p.id) throw new AppError('refund_lock_order', 'A refund can only change with its booking and payment locked');
-    const to = nextRefundStatus(r.status, event);
+    const to = event === 'late_succeeded'
+      ? (r.status === 'failed' && r.origin === 'app' && !r.manualRefund && (ctx.providerRefundRef ?? r.providerRefundRef) ? 'succeeded' : null)
+      : nextRefundStatus(r.status, event);
     if (!to) return null;
     const failureCode = to === 'failed' ? (ctx.failureCode ?? 'refund_failed').slice(0, 64) : null;
     const ref = ctx.providerRefundRef ?? null;
@@ -142,7 +158,7 @@ export class PaymentRefundStateMachine {
         "failureCode" = COALESCE(${failureCode}::text, "failureCode"),
         "providerRefundRef" = COALESCE("providerRefundRef", ${ref}::text),
         "confirmedById" = COALESCE("confirmedById", ${confirmedBy}::uuid),
-        "destinationCiphertext" = NULL, "destinationKeyVersion" = NULL, "nextAttemptAt" = NULL
+        "destinationCiphertext" = NULL, "destinationKeyVersion" = NULL, "nextAttemptAt" = NULL, "sendingUntil" = NULL
       WHERE id = ${r.id}::uuid AND status = ${r.status}::"RefundStatus"`;
     if (n !== 1) throw conflict('refund_state_changed', 'This refund changed. Try again.');
     const from = r.status;
@@ -171,6 +187,25 @@ export class PaymentRefundStateMachine {
       await this.coverage.apply(tx, booking, actor);
     }
     return to;
+  }
+
+  /**
+   * What the gateway says of an app refund we already failed (review of the code, H1): the money is what counts. A
+   * success is recorded (failed → succeeded: posted, the cap taken again) and a pending one is kept with its
+   * reference; either way Oscar gets a review task. Returns true when it handled the refund.
+   */
+  async gatewayMovedFailedRefund(tx: Tx, booking: LockedBooking, p: LockedPayment, r: LockedRefund, remote: { ref: string; status: ProviderRefundStatus }, source: RefundApplyContext['source']): Promise<boolean> {
+    if (r.status !== 'failed' || r.origin !== 'app' || r.manualRefund || (remote.status !== 'succeeded' && remote.status !== 'pending')) return false;
+    if (r.providerRefundRef === null) await this.setReference(tx, r, remote.ref);
+    if (remote.status === 'succeeded') await this.apply(tx, booking, p, r, 'late_succeeded', { source, providerRefundRef: remote.ref });
+    await this.tasks.createSystemIn(tx, {
+      title: `Refund on booking ${booking.reference} was made at the gateway after it was marked as not made`,
+      description: remote.status === 'succeeded'
+        ? 'The payment gateway made a refund we had recorded as not made. It is now recorded as made and in the ledger. Check that no second refund paid the customer twice.'
+        : 'The payment gateway is processing a refund we had recorded as not made. Check it at the gateway; when it goes through it will be recorded.',
+      entityType: 'Refund', entityId: r.id, sourceRef: refundReviewTaskRef(r.id),
+    });
+    return true;
   }
 
   /** Fills in the gateway's reference of an app refund matched by our id before the gateway answered (task 4.5). */

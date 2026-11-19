@@ -11,7 +11,8 @@ ALTER TABLE "refunds"
   ADD COLUMN "destinationHint" TEXT,
   ADD COLUMN "confirmedById" UUID,
   ADD COLUMN "nextAttemptAt" TIMESTAMPTZ(3),
-  ADD COLUMN "requestAttempts" INTEGER NOT NULL DEFAULT 0;
+  ADD COLUMN "requestAttempts" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "sendingUntil" TIMESTAMPTZ(3);
 
 ALTER TABLE "refunds" DROP CONSTRAINT "refunds_origin_check";
 ALTER TABLE "refunds"
@@ -26,6 +27,8 @@ ALTER TABLE "refunds"
   ADD CONSTRAINT "refunds_attempts_check" CHECK ("requestAttempts" >= 0 AND ("nextAttemptAt" IS NULL OR ("origin" = 'app' AND NOT "manualRefund")));
 
 CREATE INDEX "refunds_nextAttemptAt_idx" ON "refunds"("nextAttemptAt");
+-- Review of the code, L2: who confirmed a manual refund is a real staff user, kept.
+ALTER TABLE "refunds" ADD CONSTRAINT "refunds_confirmedById_fkey" FOREIGN KEY ("confirmedById") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 -- A bank statement movement id is one outgoing transfer, whatever manual account it is recorded on (plan review, 8).
 CREATE UNIQUE INDEX "refunds_manual_reference_key" ON "refunds"("providerRefundRef") WHERE "manualRefund";
 
@@ -77,11 +80,13 @@ BEGIN
     RAISE EXCEPTION 'a refund destination comes with its hint' USING ERRCODE = 'check_violation';
   END IF;
   IF NEW."status" IS DISTINCT FROM OLD."status" THEN
+    -- Review of the code, H1: an app refund we had failed that the gateway nevertheless made is recorded (the money
+    -- went): failed → succeeded, for gateway app refunds only, with the gateway's reference.
     IF NOT ((OLD."status", NEW."status") IN (
       ('requested'::"RefundStatus", 'pending'::"RefundStatus"), ('requested', 'succeeded'), ('requested', 'failed'),
       ('pending', 'succeeded'), ('pending', 'failed'),
       ('succeeded', 'reversed')
-    )) THEN
+    ) OR (OLD."status" = 'failed' AND NEW."status" = 'succeeded' AND OLD."origin" = 'app' AND NOT OLD."manualRefund" AND NEW."providerRefundRef" IS NOT NULL)) THEN
       RAISE EXCEPTION 'refund status cannot go from % to %', OLD."status", NEW."status" USING ERRCODE = 'check_violation';
     END IF;
     IF NEW."version" <= OLD."version" THEN
@@ -124,6 +129,7 @@ CREATE UNIQUE INDEX "disputes_providerAccountId_providerDisputeRef_key" ON "disp
 CREATE INDEX "disputes_bookingId_idx" ON "disputes"("bookingId");
 CREATE INDEX "disputes_paymentId_idx" ON "disputes"("paymentId");
 CREATE INDEX "disputes_status_idx" ON "disputes"("status");
+ALTER TABLE "disputes" ADD CONSTRAINT "disputes_evidenceSubmittedById_fkey" FOREIGN KEY ("evidenceSubmittedById") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE "disputes" ADD CONSTRAINT "disputes_payment_fkey" FOREIGN KEY ("paymentId", "bookingId", "providerAccountId", "mode", "currency") REFERENCES "payments"("id", "bookingId", "providerAccountId", "mode", "currency") ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE "disputes"
   ADD CONSTRAINT "disputes_amount_check" CHECK ("amountMinor" > 0),
@@ -141,6 +147,11 @@ BEGIN
     RAISE EXCEPTION 'a dispute is never deleted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF TG_OP = 'INSERT' THEN
+    -- Review of the code, L2: a dispute starts with no funds posted, no evidence recorded and version 0.
+    IF NEW."fundsWithdrawnAt" IS NOT NULL OR NEW."fundsReinstatedAt" IS NOT NULL OR NEW."evidenceSubmittedAt" IS NOT NULL
+       OR NEW."evidenceSubmittedById" IS NOT NULL OR NEW."version" <> 0 THEN
+      RAISE EXCEPTION 'a dispute starts with no funds and no evidence recorded' USING ERRCODE = 'check_violation';
+    END IF;
     RETURN NEW;
   END IF;
   IF NEW."id" IS DISTINCT FROM OLD."id" OR NEW."paymentId" IS DISTINCT FROM OLD."paymentId" OR NEW."bookingId" IS DISTINCT FROM OLD."bookingId"

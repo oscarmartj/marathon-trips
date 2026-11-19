@@ -464,10 +464,13 @@ model Refund {
   destinationHint   String?
   /// staff who confirmed a manual refund
   confirmedById     String?           @db.Uuid
+  confirmedBy       User?             @relation("RefundConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii when an unanswered gateway request is tried again with the same key (task 4.5)
   nextAttemptAt     DateTime?         @db.Timestamptz(3)
   /// @nopii how many times the gateway request was sent
   requestAttempts   Int               @default(0)
+  /// @nopii while the gateway request is being sent (or staff resolve it): nobody else sends or resolves (review, H1)
+  sendingUntil      DateTime?         @db.Timestamptz(3)
   /// @nopii timestamp
   createdAt         DateTime          @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
@@ -518,6 +521,7 @@ model Dispute {
   /// @nopii timestamp
   evidenceSubmittedAt   DateTime?     @db.Timestamptz(3)
   evidenceSubmittedById String?       @db.Uuid
+  evidenceSubmittedBy   User?         @relation("DisputeEvidenceSubmittedBy", fields: [evidenceSubmittedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii when the withdrawal was posted
   fundsWithdrawnAt      DateTime?     @db.Timestamptz(3)
   /// @nopii when the reinstatement was posted

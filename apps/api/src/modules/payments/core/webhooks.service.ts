@@ -252,6 +252,8 @@ export class PaymentWebhooksService {
         if (r.amountMinor !== remote.amount.amountMinor) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_amount_mismatch');
         // An app refund matched by our id before the gateway answered us (task 4.5): its reference is filled in now.
         if (r.providerRefundRef !== null && r.providerRefundRef !== remote.ref) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_reference_mismatch');
+        // Review of the code, H1: the gateway made an app refund we had failed: recorded, and Oscar checks it.
+        if (await this.refunds.gatewayMovedFailedRefund(tx, b, p, r, remote, 'webhook')) return this.processedIn(tx, ev.id, r.id);
         await this.refunds.setReference(tx, r, remote.ref);
         const failedNow = remote.status === 'failed' || remote.status === 'cancelled';
         const event: RefundEvent = failedNow && r.status === 'succeeded' ? 'reversal_confirmed' : refundEventOf(remote.status);

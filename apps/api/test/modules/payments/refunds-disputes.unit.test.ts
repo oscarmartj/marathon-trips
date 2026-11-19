@@ -20,6 +20,8 @@ describe('refund_state_event_matrix (plan 0.1, 6.2; plan 4.5, 3.5)', () => {
     succeeded: { requested: 'succeeded', pending: 'succeeded', succeeded: null, failed: null, reversed: null },
     failed: { requested: 'failed', pending: 'failed', succeeded: null, failed: null, reversed: null },
     reversal_confirmed: { requested: null, pending: null, succeeded: 'reversed', failed: null, reversed: null },
+    // Only apply() moves a failed gateway app refund to succeeded (review H1); the plain table never does.
+    late_succeeded: { requested: null, pending: null, succeeded: null, failed: null, reversed: null },
   };
   for (const [event, row] of Object.entries(table) as Array<[RefundEvent, Record<RefundStatusName, RefundStatusName | null>]>) {
     for (const from of S) it(`${event} on ${from} → ${row[from] ?? 'no change'}`, () => expect(nextRefundStatus(from, event)).toBe(row[from]));
@@ -134,5 +136,26 @@ describe('only_state_machines_write_refund_and_dispute_status (plan 4.5)', () =>
     expect(writers).toEqual(['modules/payments/core/disputes.service.ts']);
     const controllers = walk(SRC).filter((f) => /controller/.test(f)).filter((f) => /UPDATE (refunds|disputes)/.test(readFileSync(f, 'utf8')));
     expect(controllers).toEqual([]);
+  });
+});
+
+describe('allocation_with_reservations_and_receivable_invariants_hold (P8 with 4.5, 2,000 seeded cases)', () => {
+  it('paid + overpaid + receivable = allocatable; receivable only when nothing is paid; reservations never fill an item', () => {
+    let seed = 4512;
+    const r = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+    const int = (n: number) => BigInt(Math.floor(r() * n));
+    for (let k = 0; k < 2000; k++) {
+      const items = Array.from({ length: Math.floor(r() * 4) }, (_, i) => ({ sequence: i + 1, amountMinor: 1n + int(800) }));
+      const collected = int(3000) - 1000n;
+      const reserved = collected > 0n ? int(Number(collected) + 1) : 0n;
+      const a = allocate(items, collected - reserved);
+      const paid = a.items.reduce((s, i) => s + i.paidMinor, 0n);
+      expect(paid + a.overpaidMinor + a.receivableMinor).toBe(collected - reserved);
+      expect(a.receivableMinor <= 0n && a.overpaidMinor >= 0n).toBe(true);
+      if (a.receivableMinor < 0n) expect(paid).toBe(0n);
+      for (const i of a.items) expect(i.paidMinor >= 0n && i.paidMinor <= i.amountMinor).toBe(true);
+      // The items never hold more than what is left once reservations are taken off.
+      expect(paid <= (collected - reserved > 0n ? collected - reserved : 0n)).toBe(true);
+    }
   });
 });

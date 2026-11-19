@@ -2718,7 +2718,8 @@
           "nothing_to_refund": "Nothing beyond what the booking owes.",
           "payment_disputed": "The cardholder disputed this payment: it cannot be refunded while the dispute stands.",
           "refunds_not_supported": "This gateway cannot refund from here: refund it at the gateway.",
-          "partial_refund_not_supported": "This gateway only refunds a payment in full."
+          "partial_refund_not_supported": "This gateway only refunds a payment in full.",
+          "external_refund_in_progress": "A refund made at the gateway is still in progress on this booking: wait for it to settle."
         },
         "request": "Refund it",
         "gatewayWarning": "{amount} goes back to the customer through the payment gateway. This cannot be undone.",
@@ -2818,7 +2819,9 @@
           "gateway_unavailable": "The payment gateway did not answer. Nothing changed; try again later.",
           "dispute_not_open": "Only an open dispute can be marked as submitted.",
           "version_conflict": "Someone else changed this. Reload and try again.",
-          "refund_state_changed": "This refund changed. Reload and try again."
+          "refund_state_changed": "This refund changed. Reload and try again.",
+          "external_refund_in_progress": "A refund made at the gateway is still in progress on this booking. Wait for it to settle.",
+          "refund_send_in_progress": "This refund is being sent to the gateway right now. Try again in a few minutes."
         }
       }
     },

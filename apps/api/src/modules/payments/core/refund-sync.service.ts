@@ -46,6 +46,7 @@ export class PaymentRefundSyncService {
       const p = b ? await lockPayment(tx, b, row.paymentId) : null;
       const r = p ? await lockRefund(tx, p, row.id) : null;
       if (!b || !p || !r) return 'unknown_at_gateway' as const;
+      if (remote && remote.amount.amountMinor === r.amountMinor && (await this.machine.gatewayMovedFailedRefund(tx, b, p, r, remote, 'sweep'))) return 'applied' as const;
       if (remote && remote.amount.amountMinor === r.amountMinor) {
         const to = await this.machine.apply(tx, b, p, r, refundEventOf(remote.status), { source: 'sweep', failureCode: remote.failureCode });
         if (to) return 'applied' as const;

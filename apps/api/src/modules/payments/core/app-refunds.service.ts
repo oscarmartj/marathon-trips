@@ -26,7 +26,7 @@ import { PAYMENT_TX_OPTIONS } from './payable-states';
 import { ProviderError } from './provider';
 import type { ProviderRefund } from './provider';
 import { loadRefundable } from './refundable';
-import { PaymentRefundStateMachine, lockRefund, refundEventOf } from './refunds.service';
+import { PaymentRefundStateMachine, lockRefund, refundEventOf, refundReviewTaskRef } from './refunds.service';
 import type { LockedRefund } from './refunds.service';
 
 type Tx = Prisma.TransactionClient;
@@ -39,7 +39,9 @@ export const REFUND_KEY_LIFETIME_MS = 23 * 3_600_000;
 /** A manual refund still waiting for its transfer this long gets a task. */
 export const MANUAL_REFUND_WAITING_MS = 7 * 86_400_000;
 
-export const refundReviewTaskRef = (id: string) => `payments:refund_review:${id}`;
+export { refundReviewTaskRef };
+/** How long one sender (a request, the retry sweep or staff resolving) holds a gateway refund (review of the code, H1). */
+export const REFUND_SEND_LEASE_SECONDS = 120;
 
 const REFUND_SELECT = {
   id: true, paymentId: true, bookingId: true, origin: true, purpose: true, manualRefund: true, mode: true, amountMinor: true, currency: true, status: true,
@@ -113,7 +115,7 @@ export class AppRefundsService {
       const p = payments.find((x) => x.id === r.paymentId)!;
       const manual = p.adapterKey === MANUAL_KEY;
       const caps = this.gateway.registry.get(p.adapterKey)?.manifest.capabilities.refunds ?? 'none';
-      const blockedReason = r.blocked === 'disputed' ? 'payment_disputed'
+      const blockedReason = r.blocked === 'disputed' ? 'payment_disputed' : r.blocked === 'external_refund_in_progress' ? 'external_refund_in_progress'
         : r.refundableMinor === 0n ? 'nothing_to_refund'
           : !manual && caps === 'none' ? 'refunds_not_supported'
             : !manual && caps === 'full' && r.refundableMinor < r.netMinor ? 'partial_refund_not_supported' : null;
@@ -169,6 +171,7 @@ export class AppRefundsService {
       const entry = (await loadRefundable(tx, b.id, p.mode)).find((x) => x.paymentId === p.id);
       if (!entry) throw conflict('payment_not_refundable', 'Only a payment that went through can be refunded');
       if (entry.blocked === 'disputed') throw conflict('refund_of_disputed_payment_rejected', 'This payment is disputed by the cardholder: it cannot be refunded while the dispute stands.');
+      if (entry.blocked === 'external_refund_in_progress') throw conflict('external_refund_in_progress', 'A refund made at the payment gateway is still in progress on this booking. Wait for it to settle.');
       if (entry.refundableMinor <= 0n) throw conflict('nothing_to_refund', 'Nothing paid on this payment is beyond what the booking owes.');
       if (!manual && manifest.capabilities.refunds === 'full' && entry.refundableMinor < entry.netMinor) throw conflict('partial_refund_not_supported', 'This payment gateway only refunds a payment in full.');
       const [inserted] = await tx.$queryRaw<Array<{ id: string }>>`
@@ -196,7 +199,9 @@ export class AppRefundsService {
    * checked again for what makes a second payout possible (plan review, 2): a dispute, or a refund made at the gateway
    * since ours was asked; then nothing is sent and the refund goes to review.
    */
-  async send(refundId: string): Promise<'settled' | 'unanswered' | 'refused' | 'review' | 'skipped'> {
+  async send(refundId: string, opts: { leased?: boolean } = {}): Promise<'settled' | 'unanswered' | 'refused' | 'review' | 'skipped'> {
+    // One sender at a time (H1): the request, the sweep and staff resolving it each take the lease first.
+    if (!opts.leased && !(await this.lease(refundId))) return 'skipped';
     const row = await this.prisma.refund.findUnique({ where: { id: refundId }, select: { id: true, paymentId: true, bookingId: true, providerAccountId: true, amountMinor: true, currency: true, idempotencyKey: true, createdAt: true, status: true, origin: true, manualRefund: true, providerRefundRef: true, requestAttempts: true, payment: { select: { providerPaymentRef: true } } } });
     if (!row || row.origin !== 'app' || row.manualRefund || row.status !== 'requested' || row.providerRefundRef) return 'skipped';
     if (await this.secondPayoutRisk(this.prisma, row)) return this.toReview(refundId, 'payment_disputed_or_refunded_elsewhere');
@@ -214,7 +219,9 @@ export class AppRefundsService {
     }
     return runTransaction(this.prisma, async (tx) => {
       const { b, p, r } = await this.lockRefundChain(tx, row.bookingId, row.paymentId, refundId);
+      await this.unlease(tx, r.id);
       if (remote) {
+        if (await this.machine.gatewayMovedFailedRefund(tx, b, p, r, remote, 'api')) return 'review' as const;
         if (r.providerRefundRef === null) await this.machine.setReference(tx, r, remote.ref);
         const to = await this.machine.apply(tx, b, p, r, refundEventOf(remote.status), { source: 'api', failureCode: remote.failureCode, providerRefundRef: remote.ref });
         if (to === null && r.status === 'requested') await this.bumpAttempt(tx, r.id, null);
@@ -256,6 +263,7 @@ export class AppRefundsService {
   }
 
   async retryOne(refundId: string, now: Date = new Date()): Promise<string> {
+    if (!(await this.lease(refundId))) return 'skipped';
     const row = await this.prisma.refund.findUniqueOrThrow({ where: { id: refundId }, select: { id: true, bookingId: true, paymentId: true, providerAccountId: true, idempotencyKey: true, createdAt: true, payment: { select: { providerPaymentRef: true } } } });
     if (await this.secondPayoutRisk(this.prisma, { ...row })) return this.toReview(refundId, 'payment_disputed_or_refunded_elsewhere');
     let found: ProviderRefund | null;
@@ -265,6 +273,7 @@ export class AppRefundsService {
       // No answer to the lookup: never send blind; try again later (or go to review once the attempts run out).
       return runTransaction(this.prisma, async (tx) => {
         const { b, r } = await this.lockRefundChain(tx, row.bookingId, row.paymentId, refundId);
+        await this.unlease(tx, r.id);
         if (r.status !== 'requested') return 'settled';
         const cur = await tx.refund.findUniqueOrThrow({ where: { id: r.id }, select: { requestAttempts: true } });
         const attempts = cur.requestAttempts + 1;
@@ -275,7 +284,7 @@ export class AppRefundsService {
     }
     if (found) return this.adopt(refundId, found);
     if (now.getTime() - row.createdAt.getTime() >= REFUND_KEY_LIFETIME_MS) return this.toReview(refundId, 'key_lifetime_over');
-    return this.send(refundId);
+    return this.send(refundId, { leased: true });
   }
 
   /**
@@ -288,16 +297,20 @@ export class AppRefundsService {
     if (!row) throw notFound('refund_not_found', 'Refund not found');
     if (row.origin !== 'app' || row.manualRefund || (row.status !== 'requested' && row.status !== 'pending')) throw conflict('refund_not_resolvable', 'Only a refund from the app still waiting for its gateway can be resolved here');
     if (row.version !== version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
+    // H1: stop the sweep and hold the lease, so no request is sent while we ask the gateway and decide.
+    if (row.status === 'requested' && row.providerRefundRef === null && !(await this.lease(refundId, true))) throw conflict('refund_send_in_progress', 'This refund is being sent to the gateway right now. Try again in a few minutes.');
     let found: ProviderRefund | null;
     try {
       found = await this.gateway.call(row.providerAccountId, 'retrieve', (provider, ctx) => (row.providerRefundRef
         ? provider.retrieveRefund(ctx, { ref: row.providerRefundRef })
         : provider.retrieveRefund(ctx, { idempotencyKey: row.idempotencyKey, paymentRef: row.payment.providerPaymentRef!, createdAt: row.createdAt })));
     } catch {
+      await this.prisma.$executeRaw`UPDATE refunds SET "sendingUntil" = NULL, "updatedAt" = clock_timestamp() WHERE id = ${refundId}::uuid`;
       throw new ApiError(502, 'gateway_unavailable', 'The payment gateway did not answer. Nothing was changed; try again later.');
     }
     await runTransaction(this.prisma, async (tx) => {
       const { b, p, r } = await this.lockRefundChain(tx, row.bookingId, row.paymentId, refundId);
+      await this.unlease(tx, r.id);
       if (r.version !== version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
       if (found) {
         if (found.amount.amountMinor !== r.amountMinor || found.amount.currency !== r.currency) throw conflict('refund_amount_mismatch', 'The gateway holds this refund with another amount. Check it at the gateway.');
@@ -392,6 +405,8 @@ export class AppRefundsService {
   async flagWaitingManual(now: Date = new Date()): Promise<string[]> {
     const rows = await this.prisma.refund.findMany({ where: { manualRefund: true, status: 'requested', createdAt: { lte: new Date(now.getTime() - MANUAL_REFUND_WAITING_MS) } }, select: { id: true }, take: 200 });
     for (const r of rows) {
+      // Review of the code, L3: one task per refund, ever; closing it without acting does not bring it back every sweep.
+      if ((await this.prisma.task.count({ where: { sourceRef: `payments:manual_refund_waiting:${r.id}` } })) > 0) continue;
       await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
         title: 'A bank transfer refund is still waiting to be sent',
         description: 'A refund of a bank transfer was asked for more than a week ago and is not confirmed. Send it from the bank and confirm it with its reference, or cancel it.',
@@ -411,6 +426,8 @@ export class AppRefundsService {
         await this.toReviewIn(tx, b.reference, r, 'refund_amount_mismatch');
         return 'review';
       }
+      await this.unlease(tx, r.id);
+      if (await this.machine.gatewayMovedFailedRefund(tx, b, p, r, found, 'sweep')) return 'review';
       if (r.providerRefundRef === null) await this.machine.setReference(tx, r, found.ref);
       await this.machine.apply(tx, b, p, r, refundEventOf(found.status), { source: 'sweep', failureCode: found.failureCode, providerRefundRef: found.ref });
       return 'settled';
@@ -433,6 +450,7 @@ export class AppRefundsService {
     const row = await this.prisma.refund.findUniqueOrThrow({ where: { id: refundId }, select: { bookingId: true, paymentId: true } });
     await runTransaction(this.prisma, async (tx) => {
       const { b, r } = await this.lockRefundChain(tx, row.bookingId, row.paymentId, refundId);
+      await this.unlease(tx, r.id);
       if (r.status === 'requested') await this.toReviewIn(tx, b.reference, r, code);
     }, PAYMENT_TX_OPTIONS);
     return 'review';
@@ -450,6 +468,24 @@ export class AppRefundsService {
       entityType: 'Refund', entityId: refundId, sourceRef: refundReviewTaskRef(refundId),
     });
     await this.audit.record(tx, { actor: { type: 'system', id: null }, action: 'payments.refund.review', entityType: 'Refund', entityId: refundId, context: { code: code.slice(0, 64) } });
+  }
+
+  /**
+   * Takes the send lease of a gateway app refund still `requested` without a reference (review of the code, H1): one
+   * compare-and-set, so a request, the sweep and staff resolving never talk to the gateway about it at once. With
+   * `stopSweep`, the retry schedule is dropped in the same statement (staff take it over).
+   */
+  private async lease(refundId: string, stopSweep = false): Promise<boolean> {
+    const n = await this.prisma.$executeRaw`
+      UPDATE refunds SET "sendingUntil" = clock_timestamp() + make_interval(secs => ${REFUND_SEND_LEASE_SECONDS}), "updatedAt" = clock_timestamp(),
+        "nextAttemptAt" = CASE WHEN ${stopSweep} THEN NULL ELSE "nextAttemptAt" END
+      WHERE id = ${refundId}::uuid AND origin = 'app' AND NOT "manualRefund" AND status = 'requested' AND "providerRefundRef" IS NULL
+        AND ("sendingUntil" IS NULL OR "sendingUntil" < clock_timestamp())`;
+    return n === 1;
+  }
+
+  private async unlease(tx: Tx, refundId: string): Promise<void> {
+    await tx.$executeRaw`UPDATE refunds SET "sendingUntil" = NULL WHERE id = ${refundId}::uuid AND "sendingUntil" IS NOT NULL`;
   }
 
   private async bumpAttempt(tx: Tx, refundId: string, next: Date | null): Promise<void> {

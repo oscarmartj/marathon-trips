@@ -18,6 +18,11 @@ export interface PaymentMoney {
   withdrawnMinor: bigint;
   /** A dispute open, with evidence submitted, or lost. */
   disputed: boolean;
+  /**
+   * Review of the code, H2: a refund made on the gateway's dashboard is still in progress somewhere on the booking.
+   * Until it settles nobody knows what it takes, so nothing is refunded from the app (P10, in-flight + new).
+   */
+  externalPending?: boolean;
 }
 
 export interface Refundable {
@@ -28,7 +33,7 @@ export interface Refundable {
   overpaymentMinor: bigint;
   /** What one refund from the app may take now: 0 when disputed. */
   refundableMinor: bigint;
-  blocked: 'disputed' | null;
+  blocked: 'disputed' | 'external_refund_in_progress' | null;
 }
 
 /**
@@ -44,9 +49,10 @@ export function refundableByPayment(items: readonly ActiveItem[], payments: read
   return payments.map((p) => {
     const share = shares.get(p.id) ?? 0n;
     const capped = share < bookingOver ? share : bookingOver;
+    const blocked = p.disputed ? 'disputed' as const : p.externalPending ? 'external_refund_in_progress' as const : null;
     return {
       paymentId: p.id, netMinor: p.amountMinor - p.refundedMinor - p.withdrawnMinor, overpaymentMinor: share,
-      refundableMinor: p.disputed ? 0n : capped, blocked: p.disputed ? 'disputed' : null,
+      refundableMinor: blocked ? 0n : capped, blocked,
     };
   });
 }
@@ -54,13 +60,14 @@ export function refundableByPayment(items: readonly ActiveItem[], payments: read
 /** Reads what refundableByPayment needs for one booking in one mode. The caller holds the booking's lock. */
 export async function loadRefundable(tx: Pick<Tx, '$queryRaw' | 'paymentScheduleItem'>, bookingId: string, mode: 'test' | 'live'): Promise<Refundable[]> {
   const items = await tx.paymentScheduleItem.findMany({ where: { bookingId, state: 'active' }, select: { sequence: true, amountMinor: true } });
-  const rows = await tx.$queryRaw<Array<{ id: string; amountMinor: bigint; succeededAt: Date; refunded: bigint; reserved: bigint; withdrawn: bigint; disputed: boolean }>>`
+  const rows = await tx.$queryRaw<Array<{ id: string; amountMinor: bigint; succeededAt: Date; refunded: bigint; reserved: bigint; withdrawn: bigint; disputed: boolean; externalPending: boolean }>>`
     SELECT p.id::text AS id, p."amountMinor", p."succeededAt",
       COALESCE((SELECT sum(r."amountMinor") FROM refunds r WHERE r."paymentId" = p.id AND r.status = 'succeeded'), 0)::bigint AS refunded,
       COALESCE((SELECT sum(r."amountMinor") FROM refunds r WHERE r."paymentId" = p.id AND r.origin = 'app' AND r.status IN ('requested', 'pending')), 0)::bigint AS reserved,
       COALESCE((SELECT sum(d."amountMinor") FROM disputes d WHERE d."paymentId" = p.id AND d."fundsWithdrawnAt" IS NOT NULL AND d."fundsReinstatedAt" IS NULL), 0)::bigint AS withdrawn,
-      EXISTS (SELECT 1 FROM disputes d WHERE d."paymentId" = p.id AND d.status IN ('open', 'evidence_submitted', 'lost')) AS disputed
+      EXISTS (SELECT 1 FROM disputes d WHERE d."paymentId" = p.id AND d.status IN ('open', 'evidence_submitted', 'lost')) AS disputed,
+      EXISTS (SELECT 1 FROM refunds r WHERE r."bookingId" = p."bookingId" AND r.origin = 'external' AND r.status = 'pending') AS "externalPending"
     FROM payments p WHERE p."bookingId" = ${bookingId}::uuid AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded'
     ORDER BY p."succeededAt", p.id`;
-  return refundableByPayment(items, rows.map((r) => ({ id: r.id, amountMinor: r.amountMinor, succeededAt: r.succeededAt, refundedMinor: r.refunded, reservedMinor: r.reserved, withdrawnMinor: r.withdrawn, disputed: r.disputed })));
+  return refundableByPayment(items, rows.map((r) => ({ id: r.id, amountMinor: r.amountMinor, succeededAt: r.succeededAt, refundedMinor: r.refunded, reservedMinor: r.reserved, withdrawnMinor: r.withdrawn, disputed: r.disputed, externalPending: r.externalPending })));
 }

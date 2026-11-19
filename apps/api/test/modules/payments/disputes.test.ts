@@ -7,6 +7,7 @@ import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { PaymentRemindersService } from '../../../src/modules/payments/core/reminders.service';
 import { coverageLostTaskRef } from '../../../src/modules/payments/core/refunds.service';
+import { ProviderAccountsService } from '../../../src/modules/payments/core/accounts.service';
 import { ErasureService } from '../../../src/modules/privacy';
 import { SYSTEM_ACTOR } from '../../../src/platform/audit/audit.service';
 import { TestApp, makeApp } from '../../support/auth';
@@ -306,8 +307,7 @@ describe('what money out means for the booking (plan 0.1, 6.2 and P7; plan 4.5, 
     expect(await t.app.get(PaymentRemindersService).remind(item.id, bookingId, [14, 7, 3], today)).toBe('payment_under_review');
     // Refunding a disputed payment from the app is refused.
     const refund = await admin.post(`/admin/payments/payments/${p.id}/refunds`, { paymentVersion: (await t.prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).version, purpose: 'overpayment_return', reason: 'Testing' }).set('Idempotency-Key', randomUUID());
-    expect(refund.status).toBe(409);
-    expect(['refund_of_disputed_payment_rejected', 'nothing_to_refund']).toContain(refund.body.code);
+    expect([refund.status, refund.body.code]).toEqual([409, 'refund_of_disputed_payment_rejected']);
   });
 
   it('chargeback_after_full_refund_posts_receivable; negative_collected_payable_excludes_receivable', async () => {
@@ -419,5 +419,58 @@ describe('the evidence package (plan 4.5, section 6) and erasure (plan review, 7
     } finally {
       c = keep;
     }
+  });
+});
+
+describe('review of the code (M1, M2)', () => {
+  it('receivable_blocks_checkout_until_settled: a debt beyond the plan is never charged at checkout, even with the task closed', async () => {
+    const manualId = (await t.app.get(ProviderAccountsService).createManualAccount({ displayName: 'Debt transfer' })).id;
+    try {
+      const { reference, bookingId } = await booking();
+      const p = await pay(reference, bookingId, 1);
+      const ext = sim.gatewayRefund(acc.id, p.providerPaymentRef!, p.amountMinor);
+      await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, ext.ref));
+      const d = sim.openDispute(acc.id, p.providerPaymentRef!, { withdrawn: true, status: 'lost' });
+      await send(d.ref);
+      expect((await balancesOf(t, bookingId)).receivableMinor).toBe(p.amountMinor);
+      // Oscar closes the review tasks without settling the debt: checkout still says no (it would only pay the debt).
+      await t.prisma.task.updateMany({ where: { entityId: { in: [bookingId] }, status: 'open' }, data: { status: 'done' } });
+      expect(await reviewOpen(bookingId)).toBe(false);
+      const refused = await c.pay(reference, { method: 'card' });
+      expect([refused.status, refused.body.code]).toEqual([409, 'booking_payment_under_review']);
+      // Second payment: Oscar records the customer's transfer that pays the debt. Only then checkout asks for the plan.
+      const paid = await admin.post(`/admin/payments/bookings/${bookingId}/inbound-payments`, { amountMinor: p.amountMinor.toString(), reference: `DEBT-${Date.now().toString(36).toUpperCase()}` });
+      expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+      expect((await balancesOf(t, bookingId)).receivableMinor).toBe(0n);
+      const plan = await c.plan(reference);
+      const owed = (await t.prisma.paymentScheduleItem.findMany({ where: { bookingId, state: 'active' } })).reduce((s, i) => s + i.amountMinor, 0n);
+      expect(BigInt(plan.body.outstandingMinor)).toBe(owed);
+      expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
+      expect(await check(bookingId)).toEqual([]);
+    } finally {
+      await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'paused' } });
+    }
+  });
+
+  it('ledger_check_includes_chargebacks_and_receivable: a chargeback the ledger does not hold is found', async () => {
+    const { reference, bookingId } = await booking();
+    const p = await pay(reference, bookingId);
+    const d = sim.openDispute(acc.id, p.providerPaymentRef!, { withdrawn: true });
+    await send(d.ref);
+    expect(await check(bookingId)).toEqual([]);
+    const dispute = (await disputesOf(bookingId))[0]!;
+    const owner = await connect('owner');
+    try {
+      await owner.query('BEGIN');
+      await owner.query('ALTER TABLE disputes DISABLE TRIGGER disputes_guard');
+      await owner.query(`UPDATE disputes SET "fundsReinstatedAt" = now() WHERE id = $1::uuid`, [dispute.id]);
+      await owner.query('ALTER TABLE disputes ENABLE TRIGGER disputes_guard');
+      await owner.query('COMMIT');
+    } finally {
+      await owner.end();
+    }
+    const found = (await check(bookingId)).map((f) => f.kind);
+    expect(found).toContain('missing_chargeback_posting');
+    expect(found).toContain('booking_total');
   });
 });

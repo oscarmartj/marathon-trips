@@ -1061,6 +1061,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     confirmedById: 'nopii',
     nextAttemptAt: 'nopii',
     requestAttempts: 'nopii',
+    sendingUntil: 'nopii',
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
