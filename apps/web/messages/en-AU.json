@@ -1537,21 +1537,13 @@
         "voidReason": "Reason",
         "voided": "Payment voided.",
         "voidedLine": "Voided: {description}",
-        "instalmentsHeading": "Add instalments",
-        "instalmentsAdd": "Add",
-        "instalmentsAdded": "Added.",
         "errors": {
-          "cost_item_already_paid": "A cost item is already paid.",
-          "cost_item_not_payable": "A cost item is no longer owed.",
           "cost_items_currency_mismatch": "Record one payment per currency.",
           "paid_on_in_future": "Date paid is after today.",
           "paid_on_too_old": "Date paid is over a year ago.",
           "base_currency_same_as_payment": "Leave the bank amount empty for the same currency.",
-          "supplier_payment_already_voided": "Already voided.",
-          "instalment_dates_not_increasing": "Due dates must go up.",
           "cost_item_zero_amount": "A cost of 0 is not paid."
         },
-        "instalment": "Instalment {label}",
         "baseCurrency": "Bank currency"
       },
       "filterLabel": "Filter suppliers by a custom field"
@@ -3777,10 +3769,6 @@
       "unlinkedRow": "{currency}: cost {cost}, paid {paid}, owed {unpaid}"
     },
     "supplierSchedule": {
-      "intro": "What you owe suppliers and when. Recording a payment does not send money.",
-      "from": "From",
-      "to": "To",
-      "currency": "Currency",
       "today": "Brisbane: {date}.",
       "buckets": {
         "overdue": "Overdue",
@@ -3791,7 +3779,7 @@
       },
       "totalRow": "{currency}: {amount}",
       "releasesHeading": "Release dates",
-      "releasesHint": "Held places go back free until release. At stake: their cost if kept; not owed.",
+      "releasesHint": "Held places go back free until release; at stake is their cost if kept, not owed.",
       "atStake": "At stake",
       "passed": "Passed",
       "releaseTotal": "At stake, {currency}: {amount}",

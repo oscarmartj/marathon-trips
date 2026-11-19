@@ -3,14 +3,13 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
-import { formatMinor, toMinor } from '@/lib/supplier-format';
+import { formatMinor } from '@/lib/supplier-format';
 import { newIdempotencyKey, paymentErrorMessage, recordBody } from '@/lib/supplier-payments';
 import { Field, Status } from '../../auth/field';
 import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
 
 interface Cost { id: string; description: string; amountMinor: string; currency: string; dueDate: string | null; status: string; version: number }
-interface Contract { id: string; reference: string }
 interface Payment {
   id: string; amountMinor: string; currency: string; base: { amountMinor: string; currency: string } | null; paidOn: string; reference: string; status: 'recorded' | 'voided';
   voidReason: string | null; version: number; items: Array<{ costItemId: string }>;
@@ -23,7 +22,7 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Bris
  * Task 6.2: payments to one supplier. Recording does not send money; it records a payment already made from the bank. The
  * total shown is the API's (preview), and the API works out the amount again when recording.
  */
-export function SupplierPayments({ supplierId, costs, contracts, onChange }: { supplierId: string; costs: Cost[]; contracts: Contract[]; onChange: () => void }) {
+export function SupplierPayments({ supplierId, costs, onChange }: { supplierId: string; costs: Cost[]; onChange: () => void }) {
   const payments = useLoad<{ items: Payment[] }>(`/admin/suppliers/${supplierId}/payments`);
   const stepUp = useStepUp();
   const owed = costs.filter((c) => c.status === 'planned' || c.status === 'due');
@@ -36,7 +35,7 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
 
   const chosen = owed.filter((c) => selected.includes(c.id));
   const toggle = (id: string) => { setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id])); setTotal(null); };
-  const fail = (code: string | undefined) => setMessage({ text: paymentErrorMessage(code), tone: 'error' });
+  const fail = (code: string | undefined, status?: number) => setMessage({ text: paymentErrorMessage(code, status), tone: 'error' });
   const reloadAll = () => { void payments.reload(); onChange(); };
 
   async function check() {
@@ -45,7 +44,7 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
       const b = r.body as unknown as { amountMinor: string; currency: string };
       setTotal(formatMinor(b.amountMinor, b.currency));
       setMessage(null);
-    } else fail((r.body as { code?: string }).code);
+    } else fail((r.body as { code?: string }).code, r.status);
   }
 
   async function record(e: FormEvent<HTMLFormElement>) {
@@ -65,7 +64,7 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
         setMessage({ text: t('admin.suppliers.payments.recorded'), tone: 'info' });
         (e.target as HTMLFormElement).reset();
         reloadAll();
-      } else fail((r.body as { code?: string }).code);
+      } else fail((r.body as { code?: string }).code, r.status);
     } finally {
       setBusy(false);
     }
@@ -77,7 +76,7 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
     if (r.status === 200) {
       setMessage({ text: t('admin.suppliers.payments.voided'), tone: 'info' });
       reloadAll();
-    } else fail((r.body as { code?: string }).code);
+    } else fail((r.body as { code?: string }).code, r.status);
   }
 
   return (
@@ -131,54 +130,6 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
         ))}
       </ul>
 
-      {contracts.length > 0 ? <Instalments supplierId={supplierId} contracts={contracts} onDone={onChange} /> : null}
     </Section>
-  );
-}
-
-/** Instalments from a contract: each typed as the contract states it (no percentages), due dates going up. */
-function Instalments({ supplierId, contracts, onDone }: { supplierId: string; contracts: Contract[]; onDone: () => void }) {
-  const [message, setMessage] = useState(null as Message);
-  const rows = [1, 2, 3];
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const currency = String(f.get('instCurrency') ?? '').trim().toUpperCase();
-    const instalments = [];
-    for (const n of rows) {
-      const description = String(f.get(`inst-desc-${n}`) ?? '').trim();
-      if (!description) continue;
-      const unitAmountMinor = toMinor(String(f.get(`inst-amount-${n}`) ?? ''), currency);
-      if (unitAmountMinor === null) return setMessage({ text: t('admin.suppliers.errors.bad_amount'), tone: 'error' });
-      instalments.push({ description, unitAmountMinor, dueDate: String(f.get(`inst-date-${n}`) ?? '') });
-    }
-    const r = await api(`/admin/suppliers/${supplierId}/costs/instalments`, { method: 'POST', body: { contractId: String(f.get('instContract')), packageId: null, currency, instalments } });
-    if (r.status === 200 || r.status === 201) {
-      setMessage({ text: t('admin.suppliers.payments.instalmentsAdded'), tone: 'info' });
-      (e.target as HTMLFormElement).reset();
-      onDone();
-    } else setMessage({ text: paymentErrorMessage((r.body as { code?: string }).code), tone: 'error' });
-  }
-  return (
-    <details>
-      <summary>{t('admin.suppliers.payments.instalmentsHeading')}</summary>
-      <form className="stack form" onSubmit={(e) => void submit(e)}>
-        <div className="field">
-          <label htmlFor="instContract">{t('admin.suppliers.costs.contract')}</label>
-          <select id="instContract" name="instContract" required>{contracts.map((c) => <option key={c.id} value={c.id}>{c.reference}</option>)}</select>
-        </div>
-        <Field label={t('admin.suppliers.fields.currencyShort')} id="instCurrency" required maxLength={3} />
-        {rows.map((n) => (
-          <fieldset key={n}>
-            <legend>{t('admin.suppliers.payments.instalment', { label: String(n) })}</legend>
-            <Field label={t('admin.suppliers.costs.description')} id={`inst-desc-${n}`} maxLength={300} required={n <= 2} />
-            <Field label={t('admin.suppliers.costs.unitAmount')} id={`inst-amount-${n}`} inputMode="decimal" required={n <= 2} />
-            <Field label={t('admin.suppliers.costs.dueDate')} id={`inst-date-${n}`} type="date" required={n <= 2} />
-          </fieldset>
-        ))}
-        <div className="actions"><button className="btn" type="submit">{t('admin.suppliers.payments.instalmentsAdd')}</button></div>
-        <Status message={message?.text ?? null} tone={message?.tone} />
-      </form>
-    </details>
   );
 }

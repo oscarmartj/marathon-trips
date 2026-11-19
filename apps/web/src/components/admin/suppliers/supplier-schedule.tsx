@@ -39,9 +39,9 @@ export function SupplierSchedulePanel() {
     <div className="stack">
       <div className="card stack">
         <form className="stack form" onSubmit={apply} aria-label={t('admin.nav.supplierPayments')}>
-          <Field label={t('admin.supplierSchedule.from')} id="from" type="date" />
-          <Field label={t('admin.supplierSchedule.to')} id="to" type="date" />
-          <Field label={t('admin.supplierSchedule.currency')} id="currency" maxLength={3} />
+          <Field label={t('admin.catalogue.editions.startDate')} id="from" type="date" />
+          <Field label={t('admin.catalogue.editions.endDate')} id="to" type="date" />
+          <Field label={t('admin.suppliers.fields.currencyShort')} id="currency" maxLength={3} />
           <div className="actions"><button className="btn" type="submit">{t('admin.table.filters.show')}</button></div>
         </form>
         <Status message={error} />

@@ -3,16 +3,14 @@
 import { toMinor } from './supplier-format';
 import { t } from './i18n';
 
-export const PAYMENT_ERROR_CODES = [
-  'cost_item_already_paid', 'cost_item_not_payable', 'cost_items_currency_mismatch', 'paid_on_in_future', 'paid_on_too_old', 'base_currency_same_as_payment',
-  'supplier_payment_already_voided', 'instalment_dates_not_increasing', 'cost_item_zero_amount',
-] as const;
+export const PAYMENT_ERROR_CODES = ['cost_items_currency_mismatch', 'paid_on_in_future', 'paid_on_too_old', 'base_currency_same_as_payment', 'cost_item_zero_amount'] as const;
 
 /**
  * The message for an API error code of these pages: their own wording, then the panel's shared wording for the code
- * (version_conflict, validation_failed…), then the general one. Kept short: the panel's copy ships with every page.
+ * (version_conflict, validation_failed…), then the general one. Kept short: the panel's copy ships with every page. Any
+ * other 409 (already paid, no longer owed, already voided) means the page is out of date: "reload and try again".
  */
-export function paymentErrorMessage(code: string | undefined): string {
+export function paymentErrorMessage(code: string | undefined, status?: number): string {
   if (code && (PAYMENT_ERROR_CODES as readonly string[]).includes(code)) return t(`admin.suppliers.payments.errors.${code}`);
   if (code === 'bad_amount') return t('admin.suppliers.errors.bad_amount');
   if (code) {
@@ -22,7 +20,7 @@ export function paymentErrorMessage(code: string | undefined): string {
       /* the general message */
     }
   }
-  return t('admin.common.error');
+  return status === 409 ? t('admin.common.conflict') : t('admin.common.error');
 }
 
 /** A fresh Idempotency-Key for one submission of a form (the same key is reused only when that submission is retried). */

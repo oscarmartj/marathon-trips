@@ -256,7 +256,7 @@ export function SupplierDetail({ id }: { id: string }) {
         />
       </Section>
 
-      <SupplierPayments supplierId={s.id} costs={costs.data?.items ?? []} contracts={s.contracts} onChange={() => void costs.reload()} />
+      <SupplierPayments supplierId={s.id} costs={costs.data?.items ?? []} onChange={() => void costs.reload()} />
     </div>
   );
 }
