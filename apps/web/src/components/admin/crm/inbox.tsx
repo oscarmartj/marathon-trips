@@ -12,6 +12,7 @@ import { useStepUp } from '../step-up';
 import { RecordNotes, crmError, formatMoment, fullName, statusLabel } from './crm-kit';
 import { PaymentLinksPanel } from './payment-links';
 import { TransfersPanel } from './transfers';
+import { RefundsPanel } from './refunds';
 import { AmendmentPanel, type AmendmentRow } from './amendments';
 import type { ConfigurationView } from '@/lib/amendments';
 
@@ -200,6 +201,7 @@ export function BookingDetail({ id }: { id: string }) {
       <Status message={message?.text ?? null} tone={message?.tone ?? 'error'} />
       <PaymentLinksPanel bookingId={id} status={b.status} />
       <TransfersPanel bookingId={id} onChanged={reload} />
+      <RefundsPanel bookingId={id} onChanged={reload} />
       {b.snapshots ? (
         <AmendmentPanel
           bookingId={id} packageId={b.packageId} status={b.status} version={b.currentSnapshotVersion} currency={b.currency} rows={b.amendments ?? []}
