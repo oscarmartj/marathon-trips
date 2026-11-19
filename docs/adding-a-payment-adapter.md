@@ -55,3 +55,13 @@ Por ejemplo, una pasarela sin marca de tiempo firmada en sus webhooks. Se cambia
 ## El simulador
 
 Es el adaptador `simulator`: `testOnly`, `experimental` y sin sandbox. Su página alojada (`/api/payments/simulator/checkout/<token>`) existe solo en `development`, `test` y `ci`. Allí se paga o se rechaza un pago de prueba; el simulador entrega el webhook firmado por la misma entrada que una pasarela real. Sirve para probar a mano (`pnpm dev`) y para Playwright (3.5).
+
+## Stripe (3.3)
+
+Adaptador `stripe`, `experimental`: Checkout Sessions (la página alojada de Stripe), reembolsos y webhooks firmados (`stripe-signature`), con la versión de la API fijada en `STRIPE_API_VERSION`. Solo habla con `https://api.stripe.com`. En CI pasa la batería contra un Stripe falso en memoria (`test/contract/subjects/stripe-fake.ts`); el falso sigue la documentación de Stripe y no sustituye a una ejecución real.
+
+Para probarlo con un sandbox de Stripe (cuando Oscar tenga las claves de prueba):
+
+1. En el panel de Stripe (modo de prueba), crear un endpoint de webhook con la **misma versión de la API** que `STRIPE_API_VERSION` y los eventos `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `refund.created`, `refund.updated` y `refund.failed`.
+2. Cuenta en la API, solo en pruebas: `STRIPE_TEST_SECRET_KEY=sk_test_… STRIPE_TEST_WEBHOOK_SECRET=whsec_… pnpm api:cli payments:stripe-test-account`. Las claves se leen solo del entorno; una clave real se rechaza. Imprime una vez la URL del webhook, que se pone en el endpoint del paso 1.
+3. Batería contra el sandbox: añadir antes `playwright` como dependencia de desarrollo de `@mt/api` (el cliente paga en la página de Checkout con la tarjeta de prueba) y ejecutar `SANDBOX_ADAPTER=stripe STRIPE_SANDBOX_SECRET_KEY=… STRIPE_SANDBOX_WEBHOOK_SECRET=… pnpm --filter @mt/api test:sandbox`. Solo con todas las cláusulas en verde y su línea en `docs/done/` puede el manifiesto pasar a `verified`, en un PR revisado.
