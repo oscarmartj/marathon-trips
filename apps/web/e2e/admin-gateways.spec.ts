@@ -45,9 +45,16 @@ test('admin_creates_pauses_retires_and_archives_a_gateway_account', async ({ pag
   const url = page.getByTestId('webhook-url');
   await expect(url).toContainText(/\/payments\/webhooks\/[A-Za-z0-9_-]{43}/);
   const address = (await url.textContent()) ?? '';
-  const row = page.getByRole('row', { name: new RegExp(name) });
+  // The accounts table only: since 4.2 the routing rules table also names the account.
+  const row = page.locator('[data-testid^="account-"]').filter({ hasText: name });
   await expect(row.getByRole('cell', { name: 'Paused', exact: true })).toBeVisible();
   await expect(row).toContainText('Passed');
+
+  // Task 4.2: the new account comes with its default routing rules (card, Apple Pay, Google Pay; never buy now, pay later).
+  await expect(page.getByRole('heading', { name: 'Routing rules' })).toBeVisible();
+  const rules = page.locator('[data-testid^="rule-"]').filter({ hasText: name });
+  await expect(rules).toHaveCount(3);
+  await expect(rules.filter({ hasText: 'Buy now, pay later' })).toHaveCount(0);
 
   // Shown once: gone after a reload.
   await page.reload();
