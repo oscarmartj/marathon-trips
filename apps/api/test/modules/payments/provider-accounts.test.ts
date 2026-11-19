@@ -575,21 +575,32 @@ describe('review of the code (PR #73)', () => {
     await t.prisma.providerAccount.update({ where: { id }, data: { credentialsKeyVersion: row.credentialsKeyVersion + 7, credentialsChangedAt: new Date(row.credentialsChangedAt.getTime() + 1000) } });
     const unreadableAt = (await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } })).credentialsChangedAt;
     const gateway = t.app.get(ProviderGateway);
-    const original = gateway.testConnection.bind(gateway);
-    // Right after the gateway's read, a rotation (readable again) commits before the result is stored.
-    const spy = vi.spyOn(gateway, 'testConnection').mockImplementation(async (accountId: string) => {
-      const out = await original(accountId);
-      await t.prisma.providerAccount.update({ where: { id }, data: { credentialsKeyVersion: row.credentialsKeyVersion, credentialsChangedAt: new Date(unreadableAt.getTime() + 1000), lastConnectionTestResult: 'ok', lastConnectionTestAt: new Date(unreadableAt.getTime() + 2000) } });
+    const testSpy = vi.spyOn(gateway, 'testConnection');
+    // Right after the gateway reads the ciphertexts (before it tries to decrypt them), a rotation that makes the account
+    // readable again commits. Only the change time of that first read may travel with the result.
+    const delegate = t.prisma.providerAccount;
+    const read = delegate.findUniqueOrThrow.bind(delegate);
+    let rotated = false;
+    const readSpy = vi.spyOn(delegate, 'findUniqueOrThrow').mockImplementation((async (args: { where: { id?: string }; select?: Record<string, boolean> }) => {
+      const out = await read(args as never);
+      if (!rotated && args.where.id === id && args.select?.credentialsCiphertext) {
+        rotated = true;
+        await t.prisma.$executeRawUnsafe(`UPDATE provider_accounts SET "credentialsKeyVersion" = $2, "credentialsChangedAt" = $3, "lastConnectionTestResult" = 'ok', "lastConnectionTestAt" = $4 WHERE id = $1::uuid`,
+          id, row.credentialsKeyVersion, new Date(unreadableAt.getTime() + 1000), new Date(unreadableAt.getTime() + 2000));
+      }
       return out;
-    });
+    }) as never);
     try {
       const r = await admin.post(`${ACCOUNTS}/${id}/connection-test`);
+      expect(rotated).toBe(true);
       expect([r.status, r.body.result, r.body.recorded]).toEqual([200, 'credentials_unreadable', false]);
-      const [first] = await spy.mock.results.map((x) => x.value as Promise<{ credentialsChangedAt: Date }>);
-      expect((await first!).credentialsChangedAt.getTime()).toBe(unreadableAt.getTime());
-      expect((await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } })).lastConnectionTestResult).toBe('ok');
+      const out = await (testSpy.mock.results[0]!.value as Promise<{ credentialsChangedAt: Date }>);
+      expect(out.credentialsChangedAt.getTime()).toBe(unreadableAt.getTime());
+      const after = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } });
+      expect([after.lastConnectionTestResult, after.credentialsChangedAt.getTime()]).toEqual(['ok', unreadableAt.getTime() + 1000]);
     } finally {
-      spy.mockRestore();
+      readSpy.mockRestore();
+      testSpy.mockRestore();
     }
   });
 
@@ -632,7 +643,10 @@ describe('review of the code (PR #73)', () => {
     const finished: string[] = [];
     const put = admin.put('/admin/payments/methods/manual_other', { version, enabled: false, countries: [], displayOrder: 0, instructions: null, payeeName: null, payId: null, bank: null }).then((r) => (finished.push('method'), r));
     const pause = admin.post(`${ACCOUNTS}/${made.id}/status`, { version: 0, status: 'retired' }).then((r) => (finished.push('account'), r));
-    await new Promise((r) => setTimeout(r, 800));
+    // Both requests wait on the coverage lock itself, not merely slowly (pg_locks, polled).
+    const waiting = async () => Number((await t.prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*)::bigint AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)[0]!.n);
+    for (let i = 0; i < 100 && (await waiting()) < 2; i++) await new Promise((r) => setTimeout(r, 50));
+    expect(await waiting()).toBe(2);
     expect(finished).toEqual([]);
     release();
     await held;

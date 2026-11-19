@@ -181,6 +181,10 @@ describe('gateway_guard_matrix (plan 3.1, 2.4)', () => {
       if (env !== 'production') {
         await expect(gw.testConnection('a')).rejects.toMatchObject({ status: 409, code: 'live_call_blocked_outside_production' });
         await expect(gw.prepareSecretsChange('a', { credentials: { apiKey: 'x' } })).rejects.toMatchObject({ status: 409, code: 'live_call_blocked_outside_production' });
+      } else {
+        // In production the simulator (test-only, never verified) is refused too, before any secret is read.
+        await expect(gw.testConnection('a')).rejects.toMatchObject({ status: 409 });
+        await expect(gw.prepareSecretsChange('a', { credentials: { apiKey: 'x' } })).rejects.toMatchObject({ status: 409 });
       }
     }
     expect(reads).toEqual([]);
