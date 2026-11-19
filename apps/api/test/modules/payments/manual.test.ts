@@ -216,6 +216,18 @@ describe('the customer asks to pay by transfer (section 2)', () => {
     expect((await t.app.get(PaymentsMaintenanceService).run()).manualIntentsClosed).not.toContain((await paymentsOf(other.bookingId))[0]!.id);
   });
 
+  it('cancellation_cancels_open_manual_intent (task 6.4, review m7): the cancellation ends the open transfer request at once, without calling anyone', async () => {
+    const b = await booked();
+    expect((await c.pay(b.reference, { method: 'payid_transfer' })).status).toBe(201);
+    const [intent] = await paymentsOf(b.bookingId);
+    expect([intent!.origin, intent!.status]).toEqual(['manual_intent', 'created']);
+    const res = await staffCancel(admin, b.bookingId, { version: (await bookingRow(b.bookingId)).version, reason: 'Changed plans' });
+    expect([res.status, res.body.status]).toEqual([200, 'cancelled']);
+    const after = await t.prisma.payment.findUniqueOrThrow({ where: { id: intent!.id } });
+    expect([after.status, after.version > intent!.version]).toEqual(['cancelled', true]);
+    expect(await t.prisma.auditLog.count({ where: { entityId: intent!.id, action: { contains: 'status' } } })).toBeGreaterThan(0);
+  });
+
   it('a live card attempt blocks a transfer request the same way it blocks another card', async () => {
     const b = await booked();
     expect((await c.pay(b.reference, { method: 'card' })).status).toBe(201);

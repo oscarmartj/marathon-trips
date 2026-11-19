@@ -201,7 +201,7 @@ model Booking {
   travellerDetails       Traveller[]
   amendments             BookingAmendment[]
   cancellations          Cancellation[]
-  cancellationRequest    CancellationRequest?
+  cancellationRequests   CancellationRequest[]
 
   @@unique([id, currency])
   @@unique([id, customerId])
@@ -472,11 +472,12 @@ model Cancellation {
   @@map("cancellations")
 }
 
-/// The first cancellation attempt refused while money was moving (plan 6.4, section 13, M4): its date holds for a
-/// fixed window. Immutable, one per booking, no personal data.
+/// A cancellation attempt refused while money was moving (plan 6.4, section 13, M4; review of the code, 2): the first one
+/// of a window, whose date holds for that window; once it has expired, the next refused attempt starts a new one.
+/// Immutable, no personal data.
 model CancellationRequest {
   id            String                  @id @default(uuid(7)) @db.Uuid
-  bookingId     String                  @unique @db.Uuid
+  bookingId     String                  @db.Uuid
   booking       Booking                 @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii customer or staff
   requestedBy   CancellationRequestedBy
@@ -492,5 +493,7 @@ model CancellationRequest {
   createdAt     DateTime                @default(now()) @db.Timestamptz(3)
   cancellation  Cancellation?
 
+  @@unique([bookingId, businessDate])
+  @@index([bookingId])
   @@map("cancellation_requests")
 }

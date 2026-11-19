@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cancellationQuoteViewSchema, paymentPlanViewSchema } from '@mt/shared';
+import { cancellationQuoteViewSchema, paymentPlanItemViewSchema, paymentPlanViewSchema } from '@mt/shared';
 import { CANCELLATION_REQUEST_HOLD_DAYS } from '../../../src/modules/bookings';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
@@ -50,6 +50,24 @@ const quoteOf = async (bookingId: string, operator = false) => {
 };
 const today = async () => (await t.prisma.$queryRaw<Array<{ d: string }>>`SELECT to_char((now() AT TIME ZONE 'Australia/Brisbane')::date, 'YYYY-MM-DD') AS d`)[0]!.d;
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/** A real row lock on a booking, held by another connection until released (the barrier of plan 0.1, 6.3 tests). */
+async function holdBooking(bookingId: string): Promise<{ release: () => Promise<void> }> {
+  const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  await db.query('BEGIN');
+  await db.query('SELECT id FROM bookings WHERE id = $1::uuid FOR UPDATE', [bookingId]);
+  return { release: async () => { await db.query('COMMIT'); await db.end(); } };
+}
+/** Waits until `n` sessions are waiting on a lock (pg_stat_activity), so the order is the one the test set up. */
+async function waitForLockWaiters(n: number): Promise<void> {
+  for (let i = 0; i < 250; i++) {
+    const r = await t.prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`;
+    if (r[0]!.n >= BigInt(n)) return;
+    await new Promise((res) => setTimeout(res, 20));
+  }
+  throw new Error(`fewer than ${n} sessions waited on a lock`);
+}
 
 /** A priced, open package selling under a new active policy. */
 async function policyWorld(tiers: TierBody[] = FOUR_TIERS): Promise<{ w: PricedWorld; policy: { id: string; digest: string } }> {
@@ -212,6 +230,15 @@ describe('penalty_above_collected_is_not_charged (finding 7)', () => {
     expect(plan.status).toBe(200);
     expect(() => paymentPlanViewSchema.parse(plan.body)).not.toThrow();
     expect(plan.body.outstandingMinor).toBe('0');
+    // cancelled_plan_view_validates: the panel's view and the customer area show the new kind with the shared schema.
+    const panel = await admin.get(`/admin/payments/bookings/${bookingId}`);
+    expect(panel.status).toBe(200);
+    const kinds = (panel.body.schedule.items as Array<{ kind: string; state: string }>).filter((i) => i.state === 'active').map((i) => paymentPlanItemViewSchema.shape.kind.parse(i.kind));
+    expect(kinds).toEqual(['penalty']);
+    const area = await t.http().get(`/account/bookings/${reference}`).set('Cookie', c.cookie);
+    expect(area.status).toBe(200);
+    expect(() => paymentPlanViewSchema.parse(area.body.plan)).not.toThrow();
+    expect(area.body.cancellation.record.penaltyMinor).toBe(dep.amountMinor.toString());
   });
 });
 
@@ -261,19 +288,63 @@ describe('one_cancellation_per_booking and the races around a cancellation', () 
     expect(await t.prisma.inventoryMovement.count({ where: { bookingId, reason: 'release' } })).toBe(released);
   });
 
-  it('cancellation_vs_payment_success_concurrent: money that lands after the lock is an overpayment, the booking stays cancelled', async () => {
+  it('cancellation_vs_payment_success_concurrent: the cancel holds the booking first, the webhook waits, its money is an overpayment', async () => {
     const { w, policy } = await policyWorld();
     const { reference, bookingId } = await approvedWithPolicy(c, w, policy);
     await pay(c, reference, bookingId, 1);
     expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
     const live = (await t.prisma.payment.findMany({ where: { bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
     sim.settle(acc.id, live.providerPaymentRef!, 'succeeded');
-    const [cancel, hook] = await Promise.all([staffCancel(admin, bookingId, { version: (await row(bookingId)).version, reason: 'Race' }), deliver(t, acc, await eventFor(t, acc, live.id))]);
-    expect(hook.outcome).toBe('processed');
-    expect([200, 409]).toContain(cancel.status);
-    const final = await row(bookingId);
-    if (cancel.status === 200) expect(final.status).toBe('cancelled');
+    const hookEvent = await eventFor(t, acc, live.id);
+    const q = await quoteOf(bookingId);
+    const version = (await row(bookingId)).version;
+    // A barrier on the real row lock: the cancel queues first, then the webhook; PostgreSQL grants them in that order.
+    const gate = await holdBooking(bookingId);
+    const cancel = admin.post(`/admin/bookings/${bookingId}/cancel`, { version, reason: 'Race', quoteDigest: q.quoteDigest }).then((r) => r);
+    await waitForLockWaiters(1);
+    const hook = deliver(t, acc, hookEvent);
+    await waitForLockWaiters(2);
+    await gate.release();
+    const [cr, hr] = await Promise.all([cancel, hook]);
+    expect([cr.status, hr.outcome]).toEqual([200, 'processed']);
+    expect((await row(bookingId)).status).toBe('cancelled');
+    expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: live.id } })).status).toBe('succeeded');
+    const cx = (await cancellationOf(bookingId))!;
+    // The late money is not what the cancellation counted: it is an overpayment above the cancellation's refundable.
+    const view = await admin.get(`/admin/payments/bookings/${bookingId}/refunds`);
+    const late = (view.body.refundable as Array<{ paymentId: string; refundableMinor: string }>).find((r) => r.paymentId === live.id)!;
+    expect(BigInt(late.refundableMinor)).toBe(live.amountMinor);
+    expect(cx.collectedMinor).toBeLessThan(cx.collectedMinor + live.amountMinor);
     expect(await t.app.get(PaymentLedgerCheckService).check({ bookingIds: [bookingId] })).toEqual([]);
+  });
+
+  it('cancellation_vs_amendment_concurrent: a change and a cancellation at once; one wins, the other is a 409', async () => {
+    const { amendableBookingOf, setCustomerAmendments } = await import('../../support/amendments');
+    const session = await customerClient(t);
+    const { reference, bookingId, body } = await amendableBookingOf(t, session);
+    try {
+      const preview = await t.http().post(`/account/bookings/${reference}/amendments/preview`).set(STATE_HEADERS).set('Cookie', session.cookie).send(body);
+      expect(preview.status).toBe(200);
+      const q = await quoteOf(bookingId);
+      const version = (await row(bookingId)).version;
+      const gate = await holdBooking(bookingId);
+      const amend = t.http().post(`/account/bookings/${reference}/amendments`).set(STATE_HEADERS).set('Cookie', session.cookie).set('Idempotency-Key', randomUUID()).send({ ...body, previewDigest: preview.body.previewDigest, acceptNewPrice: true }).then((r) => r);
+      const cancel = admin.post(`/admin/bookings/${bookingId}/cancel`, { version, reason: 'Race', quoteDigest: q.quoteDigest }).then((r) => r);
+      await waitForLockWaiters(2);
+      await gate.release();
+      const [ar, cr] = await Promise.all([amend, cancel]);
+      const won = [ar, cr].filter((r) => r.status >= 200 && r.status < 300);
+      expect(won).toHaveLength(1);
+      expect([ar, cr].filter((r) => r.status === 409)).toHaveLength(1);
+      const final = await row(bookingId);
+      if (cr.status === 200) {
+        expect([final.status, await t.prisma.bookingAmendment.count({ where: { bookingId } })]).toEqual(['cancelled', 0]);
+      } else {
+        expect([final.status === 'cancelled', final.currentSnapshotVersion, await t.prisma.cancellation.count({ where: { bookingId } })]).toEqual([false, 2, 0]);
+      }
+    } finally {
+      await setCustomerAmendments(t, false);
+    }
   });
 });
 
@@ -293,8 +364,55 @@ describe('cancellation_blocked_while_money_moves and the blocked request keeping
     }
     const reqs = await t.prisma.cancellationRequest.findMany({ where: { bookingId } });
     expect(reqs.map((r) => [r.requestedBy, r.blockedReason, r.businessDate.toISOString().slice(0, 10)])).toEqual([['staff', 'cancellation_blocked_by_pending_payment', await today()]]);
-    expect(await t.prisma.task.count({ where: { sourceRef: `bookings:cancellation_requested:${bookingId}` } })).toBe(1);
+    expect(await t.prisma.task.count({ where: { sourceRef: `bookings:cancellation_requested:${bookingId}:${await today()}` } })).toBe(1);
     expect(await t.prisma.cancellation.count({ where: { bookingId } })).toBe(0);
+  });
+
+  it.each(['app refund requested', 'app refund pending', 'external refund pending', 'late pending at the gateway'] as const)('cancellation_blocked_by_refund_in_progress: %s', async (kind) => {
+    const { w, policy } = await policyWorld();
+    const { reference, bookingId } = await approvedWithPolicy(c, w, policy);
+    const p = await pay(c, reference, bookingId);
+    const db = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await db.connect();
+    try {
+      const id = randomUUID();
+      const external = kind === 'external refund pending';
+      await db.query(`INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, purpose, reason, status, "idempotencyKey", "providerRefundRef", "requestedById", "updatedAt")
+        SELECT $2::uuid, p.id, p."bookingId", p."providerAccountId", p.mode, p.currency, 1, $3::"RefundOrigin", $4::"RefundPurpose", 'In flight', $5::"RefundStatus", 'refund:test:' || $2, $6, $7::uuid, now() FROM payments p WHERE p.id = $1::uuid`,
+        [p.id, id, external ? 'external' : 'app', external ? null : 'overpayment_return', external ? 'pending' : 'requested', external ? `ext_${id}` : null, external ? null : (await t.prisma.user.findFirstOrThrow({ where: { kind: 'staff' } })).id]);
+      if (kind === 'app refund pending') await db.query(`UPDATE refunds SET status = 'pending', "providerRefundRef" = 'sim_ref_' || id::text, version = version + 1 WHERE id = $1::uuid`, [id]);
+      if (kind === 'late pending at the gateway') await db.query(`UPDATE refunds SET status = 'failed', "failureCode" = 'late_pending_at_gateway', version = version + 1 WHERE id = $1::uuid`, [id]);
+    } finally {
+      await db.end();
+    }
+    expect((await quoteOf(bookingId)).blockedReason).toBe('cancellation_blocked_by_refund_in_progress');
+    const res = await staffCancel(admin, bookingId, { version: (await row(bookingId)).version, reason: 'In flight' });
+    expect([res.status, res.body.code]).toEqual([409, 'cancellation_blocked_by_refund_in_progress']);
+    expect(await t.prisma.cancellation.count({ where: { bookingId } })).toBe(0);
+  });
+
+  it('blocked_again_after_window_starts_new_request; inside the window the task comes back, the date stays (review of the code, 2)', async () => {
+    const { w, policy } = await policyWorld();
+    const { reference, bookingId } = await approvedWithPolicy(c, w, policy);
+    await pay(c, reference, bookingId, 1);
+    expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
+    const live = (await t.prisma.payment.findMany({ where: { bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
+    sim.settle(acc.id, live.providerPaymentRef!, 'pending');
+    expect((await deliver(t, acc, await eventFor(t, acc, live.id, { status: 'pending' }))).outcome).toBe('processed');
+    // A request from long ago, whose window has run out.
+    const old = addDays(await today(), -(CANCELLATION_REQUEST_HOLD_DAYS + 16));
+    await requestOn(bookingId, old);
+    const block = async () => expect((await staffCancel(admin, bookingId, { version: (await row(bookingId)).version, reason: 'Again' })).body.code).toBe('cancellation_blocked_by_pending_payment');
+    await block();
+    const dates = async () => (await t.prisma.cancellationRequest.findMany({ where: { bookingId }, orderBy: { businessDate: 'asc' } })).map((r) => r.businessDate.toISOString().slice(0, 10));
+    expect(await dates()).toEqual([old, await today()]);
+    const ref = `bookings:cancellation_requested:${bookingId}:${await today()}`;
+    expect(await t.prisma.task.count({ where: { sourceRef: ref, status: 'open' } })).toBe(1);
+    // Oscar closes the task; the customer asks again within the window: no new request, the task is open again.
+    await t.prisma.task.updateMany({ where: { sourceRef: ref }, data: { status: 'done' } });
+    await block();
+    expect(await dates()).toEqual([old, await today()]);
+    expect(await t.prisma.task.count({ where: { sourceRef: ref, status: 'open' } })).toBe(1);
   });
 
   const requestOn = (bookingId: string, date: string) => t.prisma.$executeRawUnsafe(
@@ -334,9 +452,14 @@ describe('cancellation_blocked_while_money_moves and the blocked request keeping
     try {
       const cq = await t.http().get(`/account/bookings/${reference}/cancellation-quote`).set('Cookie', who.cookie);
       expect(cq.body.blockedReason).toBe('cancellation_blocked_by_dispute');
-      const own = await t.http().post(`/account/bookings/${reference}/cancel`).set(STATE_HEADERS).set('Cookie', who.cookie).set('Idempotency-Key', randomUUID()).send({ quoteDigest: cq.body.quoteDigest });
+      const key = randomUUID();
+      const own = await t.http().post(`/account/bookings/${reference}/cancel`).set(STATE_HEADERS).set('Cookie', who.cookie).set('Idempotency-Key', key).send({ quoteDigest: cq.body.quoteDigest });
       expect([own.status, own.body.code]).toEqual([409, 'cancellation_blocked_by_dispute']);
-      expect((await t.prisma.cancellationRequest.findUniqueOrThrow({ where: { bookingId } })).requestedBy).toBe('customer');
+      // The same key again after a refused attempt: the same answer, never "in progress" or a stored success.
+      const again = await t.http().post(`/account/bookings/${reference}/cancel`).set(STATE_HEADERS).set('Cookie', who.cookie).set('Idempotency-Key', key).send({ quoteDigest: cq.body.quoteDigest });
+      expect([again.status, again.body.code]).toEqual([409, 'cancellation_blocked_by_dispute']);
+      expect(await t.prisma.cancellationRequest.count({ where: { bookingId } })).toBe(1);
+      expect((await t.prisma.cancellationRequest.findFirstOrThrow({ where: { bookingId } })).requestedBy).toBe('customer');
     } finally {
       await setCustomerCancellations(t, false);
     }
@@ -473,6 +596,30 @@ describe('the policy the customer saw (review M2)', () => {
     expect(snap.cancellationPolicyId).toBe(policy.id);
   });
 
+  it('cancellation_policy_in_use and cancellation_policy_currency_mismatch through the API', async () => {
+    const w = await pricedWorld(admin);
+    const p = await activePolicy(admin);
+    await assignPolicy(admin, w.pkg.id, p.id);
+    const pol = await admin.get(`/admin/pricing/cancellation-policies/${p.id}`);
+    const inUse = await admin.post(`/admin/pricing/cancellation-policies/${p.id}/archive`, { version: pol.body.version });
+    expect([inUse.status, inUse.body.code]).toEqual([409, 'cancellation_policy_in_use']);
+    // A policy with a fixed tier in NZD (the API takes AUD only, so it is written as the owner) cannot be given to an AUD package.
+    const nzd = randomUUID();
+    const db = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+    await db.connect();
+    try {
+      await db.query(`INSERT INTO cancellation_policies (id, name, description, currency, "updatedAt") VALUES ($1::uuid, 'NZD policy', '{"en-AU": "x"}', 'NZD', now())`, [nzd]);
+      await db.query(`INSERT INTO cancellation_tiers (id, "policyId", "minDaysBeforeDeparture", "penaltyMode", "penaltyMinor", currency) VALUES (gen_random_uuid(), $1::uuid, 0, 'fixed_per_booking', 1000, 'NZD')`, [nzd]);
+      await db.query(`UPDATE cancellation_policies SET status = 'active', "activatedAt" = now() WHERE id = $1::uuid`, [nzd]);
+    } finally {
+      await db.end();
+    }
+    const cur = await admin.get(`/admin/pricing/packages/${w.pkg.id}/cancellation-policy`);
+    const mismatch = await admin.put(`/admin/pricing/packages/${w.pkg.id}/cancellation-policy`, { policyId: nzd, version: cur.body.version });
+    expect([mismatch.status, mismatch.body.code]).toEqual([409, 'cancellation_policy_currency_mismatch']);
+    expect((await admin.get(`/admin/pricing/packages/${w.pkg.id}/cancellation-policy`)).body.policyId).toBe(p.id);
+  });
+
   it('policy_change_does_not_alter_existing_bookings: archived policies still bind what was sold under them', async () => {
     const { w, policy } = await policyWorld();
     const { bookingId } = await departingIn(w, 45, policy.id);
@@ -581,12 +728,14 @@ describe('the database keeps the rules (section 5, review m1, m4, m5, m8)', () =
     const cx = (await cancellationOf(bookingId))!;
     const db = owner();
     await db.connect();
-    const insert = (purpose: string | null, cancellationId: string | null, origin = 'app') => code(db, `INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, purpose, reason, status, "idempotencyKey", "cancellationId", "requestedById", "updatedAt")
-      SELECT gen_random_uuid(), p.id, p."bookingId", p."providerAccountId", p.mode, p.currency, 1, $2::"RefundOrigin", $3::"RefundPurpose", 'Scope test', 'requested', 'refund:test:' || gen_random_uuid()::text, $4::uuid, (SELECT id FROM users WHERE kind = 'staff' LIMIT 1), now() FROM payments p WHERE p.id = $1::uuid`, [p.id, origin, purpose, cancellationId]);
+    const insert = (purpose: string | null, cancellationId: string | null, origin = 'app') => code(db, `INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, purpose, reason, status, "idempotencyKey", "cancellationId", "requestedById", "providerRefundRef", "updatedAt")
+      SELECT gen_random_uuid(), p.id, p."bookingId", p."providerAccountId", p.mode, p.currency, 1, $2::"RefundOrigin", $3::"RefundPurpose", 'Scope test', 'requested', 'refund:test:' || gen_random_uuid()::text, $4::uuid, (SELECT id FROM users WHERE kind = 'staff' LIMIT 1), CASE WHEN $2 = 'external' THEN 'ext_' || gen_random_uuid()::text END, now() FROM payments p WHERE p.id = $1::uuid`, [p.id, origin, purpose, cancellationId]);
     try {
       expect(await insert('cancellation', null)).toMatch(/refunds_cancellation_check/);
       expect(await insert('overpayment_return', cx.id)).toMatch(/refunds_cancellation_check/);
-      expect(await insert(null, cx.id, 'external')).toMatch(/refunds_cancellation_check|refunds_/);
+      expect(await insert(null, cx.id, 'external')).toMatch(/refunds_cancellation_check/);
+      // And the same external refund without a cancellation is fine: the check is about the purpose, not the origin.
+      expect(await insert(null, null, 'external')).toBeNull();
       expect(await insert('price_reduction', null)).toMatch(/refunds_purpose_scope_check/);
       const otherBooking = await departingIn(w, 90, policy.id);
       await staffCancel(admin, otherBooking.bookingId, { version: (await row(otherBooking.bookingId)).version, reason: 'Other' });

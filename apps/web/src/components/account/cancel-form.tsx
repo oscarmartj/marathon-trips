@@ -8,7 +8,7 @@ import { CancellationPolicyTerms } from '@/components/cancellation/policy-terms'
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
 import { formatDate } from '@/lib/catalogue-format';
-import { tierLine } from '@/lib/cancellation';
+import { tierLineIn } from '@/lib/cancellation';
 import { newIdempotencyKey } from '@/lib/checkout';
 import { t } from '@/lib/i18n';
 
@@ -30,7 +30,7 @@ export function CancelForm({ reference, initial }: { reference: string; initial:
   const [busy, setBusy] = useState(false);
   const key = useRef(newIdempotencyKey());
   const money = moneyIn(q.currency);
-  const tier = q.tier ? tierLine(q.tier, null) : null;
+  const tier = q.tier ? tierLineIn(q.policy, q.tier) : null;
 
   async function confirm() {
     if (busy) return;

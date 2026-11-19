@@ -135,7 +135,10 @@ CREATE INDEX "cancellations_cancellationPolicyId_idx" ON "cancellations"("cancel
 CREATE UNIQUE INDEX "cancellations_id_bookingId_key" ON "cancellations"("id", "bookingId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "cancellation_requests_bookingId_key" ON "cancellation_requests"("bookingId");
+CREATE UNIQUE INDEX "cancellation_requests_bookingId_businessDate_key" ON "cancellation_requests"("bookingId", "businessDate");
+
+-- CreateIndex
+CREATE INDEX "cancellation_requests_bookingId_idx" ON "cancellation_requests"("bookingId");
 
 -- CreateIndex
 CREATE INDEX "refunds_cancellationId_idx" ON "refunds"("cancellationId");
@@ -403,10 +406,13 @@ CREATE CONSTRAINT TRIGGER cancellations_booking_cancelled AFTER INSERT ON "cance
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION public.mt_cancellation_matches_booking();
 
--- ---- The first blocked attempt (section 13, M4): immutable, one per booking ----
+-- ---- Blocked attempts (section 13, M4): immutable; the first of each window, one per booking and date ----
 ALTER TABLE "cancellation_requests"
   ADD CONSTRAINT "cancellation_requests_reason_check" CHECK ("blockedReason" ~ '^[a-z][a-z_]{0,59}$'),
   ADD CONSTRAINT "cancellation_requests_digest_check" CHECK ("quoteDigest" ~ '^[0-9a-f]{64}$');
+-- Like disputes (0035): the API's role never deletes or truncates these records (the triggers refuse it too).
+REVOKE DELETE, TRUNCATE ON "cancellations" FROM mt_app;
+REVOKE DELETE, TRUNCATE ON "cancellation_requests" FROM mt_app;
 CREATE TRIGGER cancellation_requests_immutable BEFORE UPDATE OR DELETE ON "cancellation_requests"
   FOR EACH ROW EXECUTE FUNCTION public.mt_reject_modification();
 CREATE TRIGGER cancellation_requests_no_truncate BEFORE TRUNCATE ON "cancellation_requests"

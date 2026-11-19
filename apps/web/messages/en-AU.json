@@ -4285,6 +4285,11 @@
         "percent": "At any time: {amount} of the total",
         "perPerson": "At any time: {amount} per traveller",
         "perBooking": "At any time: {amount} per booking"
+      },
+      "between": {
+        "percent": "{days} to {until} days before departure: {amount} of the total",
+        "perPerson": "{days} to {until} days before departure: {amount} per traveller",
+        "perBooking": "{days} to {until} days before departure: {amount} per booking"
       }
     },
     "page": {
@@ -4298,7 +4303,7 @@
       "kept": "We keep",
       "notCharged": "Not charged",
       "refund": "Refunded to you",
-      "refundNote": "We send the refund to how you paid. We will email you when it is on its way.",
+      "refundNote": "The refund goes back the way you paid. Our team arranges it once your cancellation is recorded; it may take a few business days to reach you.",
       "confirm": "Cancel my booking",
       "working": "Cancelling…",
       "done": "Your cancellation is recorded. We have noted what we keep and what goes back to you.",

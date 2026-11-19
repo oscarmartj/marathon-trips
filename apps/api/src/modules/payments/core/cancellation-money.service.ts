@@ -4,7 +4,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../generated/prisma/client';
 import { BookingCancellationHooks, BookingTransitionHooks } from '../../bookings';
-import type { BookingHookContext, CancellationMoneyFacts, CancellationMoneyPort, HookedBooking, LockedBooking } from '../../bookings';
+import type { BookingHookContext, CancellationMoneyFacts, CancellationMoneyPort, HookedBooking } from '../../bookings';
 import { readBookingForPayments } from '../../bookings';
 import { PaymentStateMachine, lockPayment } from './attempt-state';
 import { PaymentCoverageService } from './coverage.service';
@@ -51,7 +51,7 @@ export class PaymentCancellationService implements CancellationMoneyPort {
    * is refunded at once).
    */
   private async afterCancel(tx: Tx, hooked: HookedBooking, ctx: BookingHookContext): Promise<void> {
-    const b = (await readBookingForPayments(tx, { id: hooked.id }, true)) as LockedBooking | null;
+    const b = await readBookingForPayments(tx, { id: hooked.id }, true);
     if (!b) return;
     const open = await tx.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM payments WHERE "bookingId" = ${b.id}::uuid AND origin = 'manual_intent' AND status = 'created' ORDER BY id`;
     for (const o of open) {

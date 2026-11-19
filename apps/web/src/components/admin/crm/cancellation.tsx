@@ -5,7 +5,7 @@ import type { CancellationQuoteView, CancellationView } from '@mt/shared';
 import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
-import { tierLine } from '@/lib/cancellation';
+import { tierLineIn } from '@/lib/cancellation';
 import { t } from '@/lib/i18n';
 import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
@@ -79,7 +79,7 @@ export function CancellationPanel({ bookingId, status, version, cancellation, on
 /** The quote as the API gave it: amounts formatted, never added up. */
 function QuoteLines({ q }: { q: CancellationQuoteView }) {
   const money = moneyIn(q.currency);
-  const tier = q.tier ? tierLine(q.tier, null) : null;
+  const tier = q.tier ? tierLineIn(q.policy, q.tier) : null;
   return (
     <dl>
       <dt>{t('admin.crm.cancellation.basis')}</dt>

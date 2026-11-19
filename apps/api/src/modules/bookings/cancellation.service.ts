@@ -186,35 +186,51 @@ export class BookingCancellationService {
     return row.id;
   }
 
-  /** The first attempt refused while money was moving (M4): once per booking, audited, with a task for Oscar. */
+  /**
+   * An attempt refused while money was moving (M4; review of the code, 2). Inside the window of the latest request it
+   * changes nothing but the task, which is opened again if someone closed it; past that window it starts a new request,
+   * with today's date. Every refused attempt has an open task for Oscar.
+   */
   private async recordRequest(tx: Tx, where: { id: string } | { reference: string }, by: CancelledBy, blocked: MoneyBlocked, actor: AuditActor): Promise<void> {
     const b = await this.load(tx, where, true);
     if (!b || !['requested', 'approved', 'deposit_paid', 'confirmed', 'balance_paid'].includes(b.status)) return;
-    const [row] = await tx.$queryRaw<Array<{ id: string }>>`
-      INSERT INTO cancellation_requests (id, "bookingId", "requestedBy", "requestedById", "businessDate", "blockedReason", "quoteDigest")
-      VALUES (gen_random_uuid(), ${b.id}::uuid, ${by}::"CancellationRequestedBy", ${actor.id}::uuid, ${blocked.businessDate}::date, ${blocked.code}, ${blocked.digest})
-      ON CONFLICT ("bookingId") DO NOTHING RETURNING id::text AS id`;
-    if (!row) return;
-    await this.audit.record(tx, {
-      actor, action: 'bookings.cancellation.requested', entityType: 'Booking', entityId: b.id, model: 'Booking',
-      after: { cancellationRequestId: row.id, requestedBy: by, businessDate: blocked.businessDate, blockedReason: blocked.code },
-      fieldClasses: { cancellationRequestId: 'nopii', requestedBy: 'nopii', businessDate: 'nopii', blockedReason: 'nopii' },
-    });
+    const active = await this.activeRequest(tx, b.id, blocked.businessDate);
+    let date = active?.date ?? blocked.businessDate;
+    if (!active) {
+      const [row] = await tx.$queryRaw<Array<{ id: string }>>`
+        INSERT INTO cancellation_requests (id, "bookingId", "requestedBy", "requestedById", "businessDate", "blockedReason", "quoteDigest")
+        VALUES (gen_random_uuid(), ${b.id}::uuid, ${by}::"CancellationRequestedBy", ${actor.id}::uuid, ${blocked.businessDate}::date, ${blocked.code}, ${blocked.digest})
+        ON CONFLICT ("bookingId", "businessDate") DO NOTHING RETURNING id::text AS id`;
+      date = blocked.businessDate;
+      if (row) {
+        await this.audit.record(tx, {
+          actor, action: 'bookings.cancellation.requested', entityType: 'Booking', entityId: b.id, model: 'Booking',
+          after: { cancellationRequestId: row.id, requestedBy: by, businessDate: blocked.businessDate, blockedReason: blocked.code },
+          fieldClasses: { cancellationRequestId: 'nopii', requestedBy: 'nopii', businessDate: 'nopii', blockedReason: 'nopii' },
+        });
+      }
+    }
     await this.tasks.createSystemIn(tx, {
       title: `Cancellation requested on booking ${b.reference}`,
-      description: `A cancellation was asked for on ${blocked.businessDate} but could not go ahead (${blocked.code}). Its tier holds for ${CANCELLATION_REQUEST_HOLD_DAYS} days: settle what is in progress and cancel it.`,
-      entityType: 'Booking', entityId: b.id, sourceRef: `bookings:cancellation_requested:${b.id}`,
+      description: `A cancellation was asked for on ${date} but could not go ahead (${blocked.code}). Its tier holds until ${CANCELLATION_REQUEST_HOLD_DAYS} days after that date: settle what is in progress and cancel it.`,
+      entityType: 'Booking', entityId: b.id, sourceRef: `bookings:cancellation_requested:${b.id}:${date}`,
     });
+  }
+
+  /** The latest blocked request of a booking whose date still holds on `today` (within the window), or none. */
+  private async activeRequest(tx: Tx, bookingId: string, today: string): Promise<{ id: string; date: string } | null> {
+    const req = await tx.cancellationRequest.findFirst({ where: { bookingId }, orderBy: { businessDate: 'desc' }, select: { id: true, businessDate: true } });
+    if (!req) return null;
+    const date = req.businessDate.toISOString().slice(0, 10);
+    return daysBetween(date, today) <= CANCELLATION_REQUEST_HOLD_DAYS ? { id: req.id, date } : null;
   }
 
   private async compute(tx: Tx, b: Loaded, by: CancelledBy, operatorCancelled: boolean, customerEnabled: boolean): Promise<Computed> {
     const policy = await this.policies.frozen(tx, b.cancellationPolicyId);
     const facts = await this.hooks.money.facts(tx, b.id);
     const today = todayInBrisbane(await dbNow(tx));
-    const req = await tx.cancellationRequest.findUnique({ where: { bookingId: b.id }, select: { id: true, businessDate: true } });
-    const reqDate = req ? req.businessDate.toISOString().slice(0, 10) : null;
-    const held = reqDate !== null && daysBetween(reqDate, today) <= CANCELLATION_REQUEST_HOLD_DAYS;
-    const effectiveDate = held ? reqDate! : today;
+    const req = await this.activeRequest(tx, b.id, today);
+    const effectiveDate = req ? req.date : today;
     const heldMinor = facts.collectedMinor - facts.disputedMinor;
     // Places of the current snapshot: its configuration's travellers (runners and supporters alike, decision 12).
     const places = (b.configuration.rooms ?? []).reduce((n, r) => n + (r.travellers?.length ?? 0), 0);
@@ -248,7 +264,7 @@ export class BookingCancellationService {
       basis: quote?.basis ?? null, tier: quote?.tier?.minDaysBeforeDeparture ?? null, policy: policy?.digest ?? null, held: heldMinor.toString(),
       policyPenalty: quote?.policyPenaltyMinor.toString() ?? null, penalty: quote?.penaltyMinor.toString() ?? null, refundable: quote?.refundableMinor.toString() ?? null,
     }));
-    return { booking: b, policy, facts, today, effectiveDate, requestId: held ? req!.id : null, heldMinor, places, quote, blockedReason, digest };
+    return { booking: b, policy, facts, today, effectiveDate, requestId: req ? req.id : null, heldMinor, places, quote, blockedReason, digest };
   }
 
   private view(c: Computed): CancellationQuoteView {

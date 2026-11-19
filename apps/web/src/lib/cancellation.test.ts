@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { percentText, policyRef, tierLine, tierLines } from './cancellation';
+import { percentText, policyRef, tierLine, tierLineIn, tierLines } from './cancellation';
 import { refundAmount, refundBody, refundPurpose } from './refunds-panel';
 import { t } from './i18n';
 
@@ -15,12 +15,17 @@ describe('cancellation_policy_display', () => {
     expect([percentText(1000), percentText(1250), percentText(5), percentText(0), percentText(10_000)]).toEqual(['10%', '12.5%', '0.05%', '0%', '100%']);
   });
 
-  it('every tier has wording, from the highest threshold down; the 0 tier reads "less than" the one above', () => {
+  it('every tier has wording, from the highest threshold down, as ranges that do not overlap; the 0 tier reads "less than" the one above', () => {
     const lines = tierLines(policy).map((l) => t(l.key, l.params));
     expect(lines[0]).toMatch(/60 days or more.*10% of the total/);
-    expect(lines[1]).toMatch(/14 days or more.*\$500\.00 per traveller/);
+    expect(lines[1]).toMatch(/14 to 59 days before departure.*\$500\.00 per traveller/);
     expect(lines[2]).toMatch(/Less than 14 days.*100% of the total/);
     expect(t(tierLine(pct(0, 2000), null).key, tierLine(pct(0, 2000), null).params)).toMatch(/At any time: 20% of the total/);
+  });
+
+  it('the tier a quote names reads its range from the policy', () => {
+    const l = tierLineIn(policy, policy.tiers[1]!);
+    expect(t(l.key, l.params)).toMatch(/^14 to 59 days before departure/);
   });
 
   it('what goes back to the API is the policy seen, or null when none was shown', () => {
