@@ -98,7 +98,7 @@ describe('a manual refund from request to confirmation (P13)', () => {
     const again = await admin.post(`/admin/payments/refunds/${id}/confirm-manual`, { version: set.body.version, bankReference: ref });
     expect([ok.status, ok.body.status, ok.body.providerRefundRef, again.status, again.body.status]).toEqual([200, 'succeeded', ref, 200, 'succeeded']);
     const row = await refundOf(id);
-    expect(row).toMatchObject({ destinationCiphertext: null, destinationKeyVersion: null, destinationHint: 'BSB 062-••• acct •••678', confirmedById: admin.staff.id });
+    expect(row).toMatchObject({ destinationCiphertext: null, destinationKeyVersion: null, destinationHint: 'BSB 062-••• acct •••678', confirmedById: (admin as unknown as { staff: { id: string } }).staff.id });
     expect((await admin.get(`/admin/payments/refunds/${id}/destination`)).body.code).toBe('destination_not_available');
     const posted = (await ledgerOf(t, bookingId)).filter((x) => x.idempotencyKey === `refund:${id}:succeeded`);
     expect(posted).toEqual([{ idempotencyKey: `refund:${id}:succeeded`, kind: 'refund', entries: { clearing: -extraMinor, customer_overpayments: extraMinor } }]);

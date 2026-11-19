@@ -372,7 +372,7 @@ describe('the evidence package (plan 4.5, section 6) and erasure (plan review, 7
     expect([marked.status, marked.body.status]).toEqual([200, 'evidence_submitted']);
     const twice = await admin.post(`/admin/payments/disputes/${dispute.id}/evidence-submitted`, { version: marked.body.version });
     expect([twice.status, twice.body.code]).toEqual([409, 'dispute_not_open']);
-    expect((await t.prisma.dispute.findUniqueOrThrow({ where: { id: dispute.id } })).evidenceSubmittedById).toBe(admin.staff.id);
+    expect((await t.prisma.dispute.findUniqueOrThrow({ where: { id: dispute.id } })).evidenceSubmittedById).toBe((admin as unknown as { staff: { id: string } }).staff.id);
   });
 
   it('erasure_refused_with_open_dispute and erasure_refused_with_open_dispute_as_payer; evidence_package_after_erasure_has_no_personal_data', async () => {

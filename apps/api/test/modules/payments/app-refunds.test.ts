@@ -40,7 +40,7 @@ const paymentOf = (id: string) => t.prisma.payment.findUniqueOrThrow({ where: { 
 const refundsOf = (bookingId: string) => t.prisma.refund.findMany({ where: { bookingId }, orderBy: { createdAt: 'asc' } });
 const view = (bookingId: string, who: Client = admin) => who.get(`/admin/payments/bookings/${bookingId}/refunds`);
 const refundableOf = async (bookingId: string, paymentId: string) => ((await view(bookingId)).body.refundable as Array<{ paymentId: string; refundableMinor: string; blockedReason: string | null; paymentVersion: number }>).find((r) => r.paymentId === paymentId)!;
-const ask = async (paymentId: string, over: Record<string, unknown> = {}, key = randomUUID(), who: Client = admin) => {
+const ask = async (paymentId: string, over: Record<string, unknown> = {}, key: string = randomUUID(), who: Client = admin) => {
   const version = over.paymentVersion ?? (await t.prisma.payment.findUnique({ where: { id: paymentId } }))?.version ?? 0;
   return who.post(`/admin/payments/payments/${paymentId}/refunds`, { paymentVersion: version, purpose: 'overpayment_return', reason: 'Paid twice by mistake', ...over }).set('Idempotency-Key', key);
 };
@@ -95,7 +95,7 @@ describe('what a refund request may not carry or ask (P1, P9)', () => {
       const insert = (purpose: string, reason: string | null) => txError(db, [[
         `INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, purpose, reason, status, "idempotencyKey", "requestedById", "updatedAt")
          VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'test', 'AUD', 100, 'app', $4::"RefundPurpose", $5, 'requested', 'refund:app:' || gen_random_uuid()::text, $6::uuid, now())`,
-        [...base, purpose, reason, admin.staff.id],
+        [...base, purpose, reason, (admin as unknown as { staff: { id: string } }).staff.id],
       ]]);
       expect(await insert('cancellation', 'A reason')).toBe('23514');
       expect(await insert('price_reduction', 'A reason')).toBe('23514');
@@ -140,7 +140,7 @@ describe('total and partial refunds (plan 4.5, 3.1 and 3.2)', () => {
     expect(r.body).toMatchObject({ status: 'succeeded', amountMinor: late.amountMinor.toString(), origin: 'app', purpose: 'overpayment_return', manualRefund: false });
     expect(r.body.providerRefundRef).toMatch(/^sim_ref_/);
     const [row] = await refundsOf(bookingId);
-    expect(row).toMatchObject({ idempotencyKey: `refund:app:${row!.id}`, reason: 'Paid twice by mistake', requestedById: admin.staff.id });
+    expect(row).toMatchObject({ idempotencyKey: `refund:app:${row!.id}`, reason: 'Paid twice by mistake', requestedById: (admin as unknown as { staff: { id: string } }).staff.id });
     expect(simRefunds(late.providerPaymentRef!).map((x) => x.idempotencyKey)).toEqual([row!.idempotencyKey]);
     expect((await ledgerOf(t, bookingId)).at(-1)).toEqual({ idempotencyKey: `refund:${row!.id}:succeeded`, kind: 'refund', entries: { clearing: -late.amountMinor, customer_overpayments: late.amountMinor } });
     expect((await balancesOf(t, bookingId)).overpaymentsMinor).toBe(0n);

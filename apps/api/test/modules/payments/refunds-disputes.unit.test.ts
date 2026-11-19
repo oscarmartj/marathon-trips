@@ -123,3 +123,16 @@ describe('manual refund destination hint (P13)', () => {
     expect(destinationHint({ payId: { type: 'email', value: 'ada@example.com' }, bank: null })).toBe('PayID a•••.com');
   });
 });
+
+describe('only_state_machines_write_refund_and_dispute_status (plan 4.5)', () => {
+  it('only the dispute service writes a dispute status, and no controller writes either', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    const { join, relative } = await import('node:path');
+    const SRC = join(__dirname, '../../../src');
+    const walk = (d: string): string[] => readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? (f === 'generated' ? [] : walk(join(d, f))) : f.endsWith('.ts') ? [join(d, f)] : []));
+    const writers = walk(SRC).filter((f) => /UPDATE disputes SET status|dispute\.(update|updateMany|upsert)\(/.test(readFileSync(f, 'utf8'))).map((f) => relative(SRC, f));
+    expect(writers).toEqual(['modules/payments/core/disputes.service.ts']);
+    const controllers = walk(SRC).filter((f) => /controller/.test(f)).filter((f) => /UPDATE (refunds|disputes)/.test(readFileSync(f, 'utf8')));
+    expect(controllers).toEqual([]);
+  });
+});
