@@ -10,7 +10,7 @@ import { PAYMENT_METHODS } from '@mt/shared';
 import { CONTRACT_CLAUSES } from '../../src/modules/payments/core/contract-clauses';
 import type { ContractClause } from '../../src/modules/payments/core/contract-clauses';
 import { PROVIDER_ERROR_CODES, ProviderError } from '../../src/modules/payments/core/provider';
-import type { CreatePaymentInput, PaymentLookup, PaymentProvider, ProviderContext, ProviderDispute, ProviderPayment, ProviderPaymentStatus, ProviderRefund, WebhookVerification } from '../../src/modules/payments/core/provider';
+import type { CreatePaymentInput, PaymentLookup, PaymentProvider, ProviderActivity, ProviderContext, ProviderDispute, ProviderPayment, ProviderPaymentStatus, ProviderRefund, WebhookVerification } from '../../src/modules/payments/core/provider';
 import { manifestProblems } from '../../src/modules/payments/core/registry';
 
 export interface SignedBody {
@@ -45,6 +45,8 @@ export interface ContractSubject {
   cardholderDisputes?(ctx: ProviderContext, payment: ProviderPayment): Promise<{ ref: string }>;
   disputeMoves?(ctx: ProviderContext, ref: string, to: { status?: 'lost' | 'won'; withdraw?: boolean; reinstate?: boolean }): Promise<void>;
   disputeWebhookFor?(ctx: ProviderContext, ref: string, at: Date): Promise<SignedBody>;
+  /** Task 4.6, required when the manifest declares `reconciliation.settlements`: the gateway pays out what it holds. */
+  paysOut?(ctx: ProviderContext, payoutDate: string): Promise<void>;
   /** A currency the gateway refuses for this account. */
   unsupportedCurrency: string;
   /** Throws unless the environment holds test-mode credentials for this gateway (checked before any network call). */
@@ -703,6 +705,56 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
       // A boolean, so a failure never prints the secret.
       expect(leaked, `C20 ${name}`).toBe(false);
     }
+  },
+
+  async activity_lists_what_was_collected(h) {
+    if (!h.p.manifest.capabilities.reconciliation?.activity) {
+      expect(typeof h.p.listActivity, 'listActivity without the capability').not.toBe('function');
+      return;
+    }
+    const ctx = await h.ctx();
+    const from = new Date(Date.now() - HOUR);
+    const { input, p } = await h.paid(ctx, 2300n);
+    const seen: ProviderActivity[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 50; i++) {
+      const page = await h.value('listActivity', () => h.p.listActivity!(ctx, { from, to: new Date(Date.now() + HOUR), ...(cursor ? { cursor } : {}) }));
+      seen.push(...page.items);
+      if (!page.next) break;
+      cursor = page.next;
+    }
+    const hit = seen.filter((a) => a.kind === 'payment' && a.ref === p.ref);
+    expect(hit, 'the collected payment, once').toHaveLength(1);
+    expect(hit[0]!.amount, 'its amount').toEqual(input.amount);
+    expect(hit[0]!.status, 'its status').toBe('succeeded');
+    if (hit[0]!.ourId !== undefined) expect(hit[0]!.ourId, 'our id').toBe(input.metadata.paymentId);
+    expect(new Set(seen.map((a) => `${a.kind}:${a.ref}`)).size, 'no item on two pages').toBe(seen.length);
+    const bad = await h.error('listActivity (bad)', () => h.p.listActivity!(h.bad(ctx), { from, to: new Date() }));
+    expect(bad.code, 'bad credentials').toBe('provider_auth_failed');
+  },
+
+  async settlement_totals_and_lines_consistent(h) {
+    if (!h.p.manifest.capabilities.reconciliation?.settlements) {
+      expect(typeof h.p.listSettlements, 'listSettlements without the capability').not.toBe('function');
+      return;
+    }
+    expect(typeof h.s.paysOut, 'the subject pays out').toBe('function');
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx, 4100n);
+    const r = await h.value('createRefund', () => h.p.createRefund(ctx, h.refundInput(p, 600n)));
+    const day = new Date().toISOString().slice(0, 10);
+    await h.s.paysOut!(ctx, day);
+    const page = await h.value('listSettlements', () => h.p.listSettlements!(ctx, { payoutDateFrom: day }));
+    expect(page.items.length, 'a payout').toBeGreaterThan(0);
+    for (const st of page.items) {
+      expect(st.netMinor, 'net is gross less fees').toBe(st.grossMinor - st.feesMinor);
+      expect(st.lines.reduce((t, l) => t + l.amountMinor, 0n), 'lines add up to gross').toBe(st.grossMinor);
+      expect(st.lines.reduce((t, l) => t + l.feeMinor, 0n), 'line fees add up to fees').toBe(st.feesMinor);
+      expect(/^\d{4}-\d{2}-\d{2}$/.test(st.payoutDate), 'a calendar date').toBe(true);
+    }
+    const lines = page.items.flatMap((st) => st.lines);
+    expect(lines.find((l) => l.kind === 'charge' && l.paymentRef === p.ref)?.amountMinor, 'the charge line').toBe(p.amount.amountMinor);
+    expect(lines.find((l) => l.kind === 'refund' && l.refundRef === r.ref)?.amountMinor, 'the refund line is negative').toBe(-600n);
   },
 };
 

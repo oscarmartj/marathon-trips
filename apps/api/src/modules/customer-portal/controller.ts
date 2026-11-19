@@ -49,6 +49,24 @@ export class CustomerAccountController {
     res.status(200).set({ 'Content-Type': 'application/pdf', 'Content-Disposition': contentDisposition('attachment', filename), 'Cache-Control': 'no-store' }).send(pdf);
   }
 
+  // Receipts and notes (task 4.6): the booking's own, by number.
+
+  @Get(':reference/receipts')
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'account-booking-receipts', owns: (ctx) => ownsBookingReference(ctx) })
+  @Header('Cache-Control', 'no-store')
+  receipts(@Param('reference') reference: string) {
+    return this.account.receiptList(reference);
+  }
+
+  @Get(':reference/receipts/:number')
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'account-booking-receipt', owns: (ctx) => ownsBookingReference(ctx) })
+  @UseGuards(DocumentRateLimitGuard)
+  @Header('Cache-Control', 'no-store')
+  async receipt(@Param('reference') reference: string, @Param('number') number: string, @Res() res: Response) {
+    const { pdf, filename } = await this.account.receiptPdf(reference, number);
+    res.status(200).set({ 'Content-Type': 'application/pdf', 'Content-Disposition': contentDisposition('attachment', filename), 'Cache-Control': 'no-store' }).send(pdf);
+  }
+
   // Traveller details (task 5.2). The slot is a place number of the booking; anything that is not one is the same 404.
 
   @Get(':reference/travellers')

@@ -47,6 +47,9 @@ export function simulatorLocalSubject(): ContractSubject {
       const w = provider.currentDisputeWebhook(ctx, ref, at);
       return { body: w.body, headers: w.headers };
     },
+    async paysOut(ctx, payoutDate) {
+      control.payout(ctx.accountId, payoutDate);
+    },
     unsupportedCurrency: 'NZD',
     assertSandboxCredentials() {
       throw new Error('the simulator has no sandbox: it is test-only');

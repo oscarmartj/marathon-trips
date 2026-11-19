@@ -160,6 +160,8 @@ model ProviderAccount {
   webhookEvents            WebhookEvent[]
   webhookRejections        WebhookRejection[]
   routingRules             RoutingRule[]
+  settlements              Settlement[]
+  reconciliationRuns       ReconciliationRun[]
   health                   ProviderAccountHealth?
 
   @@unique([id, mode])
@@ -278,10 +280,14 @@ model Payment {
   refunds              Refund[]
   disputes             Dispute[]
   ledgerTransactions   LedgerTransaction[]
+  receipts             Receipt[]
+  settlementMatches    SettlementLineMatch[]
 
   @@unique([id, bookingId, currency])
   @@unique([id, mode])
   @@unique([id, bookingId, providerAccountId, mode, currency])
+  /// Task 4.6: a receipt carries its payment's booking, mode, currency and amount.
+  @@unique([id, bookingId, mode, currency, amountMinor])
   @@unique([bookingId, attemptNumber])
   @@index([providerAccountId, providerPaymentRef])
   @@index([status, pendingExpiresAt])
@@ -479,6 +485,8 @@ model Refund {
   updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
   webhookEvents     WebhookEvent[]
   ledgerTransactions LedgerTransaction[]
+  receiptNotes      ReceiptNote[]
+  settlementMatches SettlementLineMatch[]
 
   @@unique([id, mode])
   @@unique([providerAccountId, providerRefundRef])
@@ -536,6 +544,8 @@ model Dispute {
   updatedAt             DateTime      @updatedAt @db.Timestamptz(3)
   webhookEvents         WebhookEvent[]
   ledgerTransactions    LedgerTransaction[]
+  receiptNotes          ReceiptNote[]
+  settlementMatches     SettlementLineMatch[]
 
   @@unique([id, mode])
   @@unique([providerAccountId, providerDisputeRef])
@@ -742,4 +752,262 @@ model ProviderAccountHealth {
   updatedAt           DateTime        @default(now()) @db.Timestamptz(3)
 
   @@map("provider_account_health")
+}
+
+// ---- Task 4.6: settlements, reconciliation and receipts (plan docs/plans/4.6-reconciliation-receipts.md) ----
+// CHECKs, guards and grants live in migration 0037. Nothing here holds personal data.
+
+/// What a line of a gateway settlement (payout) is.
+enum SettlementLineKind {
+  charge
+  refund
+  dispute_withdrawal
+  dispute_reinstatement
+  adjustment
+  other
+}
+
+enum ReconciliationRunStatus {
+  running
+  matched
+  mismatch
+  partial
+  failed
+  not_applicable
+}
+
+enum ReconciliationTrigger {
+  scheduled
+  manual
+}
+
+/// What a note records about the receipt it references (plan 4.6, section 4.1).
+enum ReceiptNoteKind {
+  refund
+  refund_reversal
+  chargeback
+  chargeback_reinstatement
+  void
+}
+
+enum ReceiptNoteDirection {
+  decrease
+  increase
+}
+
+/// A settlement (payout) as the gateway reported it, stored once and never changed (guard of 0037).
+model Settlement {
+  id                    String            @id @default(uuid(7)) @db.Uuid
+  providerAccountId     String            @db.Uuid
+  /// @nopii test or live, the account's
+  mode                  PaymentMode
+  account               ProviderAccount   @relation(fields: [providerAccountId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the gateway's payout id
+  providerSettlementRef String
+  /// @nopii calendar date the gateway paid out
+  payoutDate            DateTime          @db.Date
+  /// @nopii ISO 4217, the payout's
+  currency              String            @db.Char(3)
+  /// @signed minor units, everything the lines move
+  grossMinor            BigInt
+  /// @signed minor units, the gateway's fees (negative when it gave fees back)
+  feesMinor             BigInt
+  /// @signed minor units, gross less fees (negative when the gateway took money)
+  netMinor              BigInt
+  /// @nopii SHA-256 of the settlement as imported: a later listing with other content is a difference
+  contentSha256         String
+  /// @nopii timestamp
+  importedAt            DateTime          @default(now()) @db.Timestamptz(3)
+  lines                 SettlementLine[]
+
+  @@unique([providerAccountId, providerSettlementRef])
+  @@unique([id, mode, currency])
+  @@map("settlements")
+}
+
+/// One line of a settlement. The gateway's references only; what it matches is in SettlementLineMatch.
+model SettlementLine {
+  id              String              @id @default(uuid(7)) @db.Uuid
+  settlementId    String              @db.Uuid
+  /// @nopii the settlement's
+  mode            PaymentMode
+  /// @nopii ISO 4217, the settlement's
+  currency        String              @db.Char(3)
+  settlement      Settlement          @relation(fields: [settlementId, mode, currency], references: [id, mode, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the gateway's id for the line
+  providerLineRef String
+  /// @nopii
+  kind            SettlementLineKind
+  /// @signed minor units moved by the line (a refund is negative)
+  amountMinor     BigInt
+  /// @signed minor units, the gateway's fee on the line
+  feeMinor        BigInt
+  /// @nopii the gateway's payment reference, if any
+  paymentRef      String?
+  /// @nopii the gateway's refund reference, if any
+  refundRef       String?
+  /// @nopii the gateway's dispute reference, if any
+  disputeRef      String?
+  /// @nopii timestamp
+  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
+  matches         SettlementLineMatch[]
+
+  @@unique([settlementId, providerLineRef])
+  @@unique([id, mode])
+  @@map("settlement_lines")
+}
+
+/// What a settlement line was matched to, written once (at import or on a later run). Lines stay immutable.
+model SettlementLineMatch {
+  id        String         @id @default(uuid(7)) @db.Uuid
+  lineId    String         @unique @db.Uuid
+  /// @nopii the line's
+  mode      PaymentMode
+  line      SettlementLine @relation(fields: [lineId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the line's kind (one match per object and kind: code review M1)
+  kind      SettlementLineKind
+  paymentId String?        @db.Uuid
+  payment   Payment?       @relation(fields: [paymentId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  refundId  String?        @db.Uuid
+  refund    Refund?        @relation(fields: [refundId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  disputeId String?        @db.Uuid
+  dispute   Dispute?       @relation(fields: [disputeId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// the booking of what it matched (checked by the guard of 0037)
+  bookingId String         @db.Uuid
+  /// @nopii timestamp
+  matchedAt DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([paymentId])
+  @@index([refundId])
+  @@index([disputeId])
+  @@index([bookingId])
+  @@map("settlement_line_matches")
+}
+
+/// One reconciliation of one gateway account for one day. Closed once (status, counts and differences), then immutable.
+model ReconciliationRun {
+  id                String                  @id @default(uuid(7)) @db.Uuid
+  providerAccountId String                  @db.Uuid
+  /// @nopii the account's
+  mode              PaymentMode
+  account           ProviderAccount         @relation(fields: [providerAccountId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii Brisbane calendar date the run is for
+  forDate           DateTime                @db.Date
+  /// @nopii 1 for the first run of the day, then 2, 3…
+  attempt           Int
+  /// @nopii
+  trigger           ReconciliationTrigger
+  /// staff who asked for it (manual runs); the audit log names them too
+  triggeredById     String?                 @db.Uuid
+  /// @nopii
+  status            ReconciliationRunStatus @default(running)
+  /// @nopii closed list (provider_unavailable, stale_run…)
+  errorCode         String?
+  /// @nopii how many of our objects and gateway items were compared
+  checkedObjects    Int                     @default(0)
+  /// @nopii codes, entity ids, statuses and amounts only (validated before it is written)
+  differences       Json                    @default("[]")
+  /// @nopii timestamp
+  startedAt         DateTime                @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  finishedAt        DateTime?               @db.Timestamptz(3)
+
+  @@unique([providerAccountId, forDate, attempt])
+  @@index([status])
+  @@map("reconciliation_runs")
+}
+
+/// The one numbering of receipts and notes, per mode (MT-T-… in test, MT-R-… live): a number is used once, by one document.
+model ReceiptNumber {
+  /// @nopii the document number
+  number    String       @id
+  /// @nopii
+  mode      PaymentMode
+  /// @nopii receipt or note
+  kind      String
+  /// @nopii timestamp
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+  receipt   Receipt?
+  note      ReceiptNote?
+
+  @@map("receipt_numbers")
+}
+
+/// A receipt: one per payment collected, issued once from its ledger posting and never changed (no GST while not registered).
+model Receipt {
+  id                   String        @id @default(uuid(7)) @db.Uuid
+  /// @nopii the document number
+  number               String        @unique
+  numbering            ReceiptNumber @relation(fields: [number], references: [number], onDelete: Restrict, onUpdate: Restrict)
+  bookingId            String        @db.Uuid
+  paymentId            String        @unique @db.Uuid
+  /// @nopii the payment's
+  mode                 PaymentMode
+  /// @nopii ISO 4217, the payment's
+  currency             String        @db.Char(3)
+  /// @nopii minor units, the payment's amount
+  amountMinor          BigInt
+  payment              Payment       @relation(fields: [paymentId, bookingId, mode, currency, amountMinor], references: [id, bookingId, mode, currency, amountMinor], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the ledger posting it records (payment:<id>:succeeded)
+  causeKey             String        @unique
+  /// @nopii minor units in customer_funds after the posting (the base of GST once it can be switched on)
+  fundsAfterMinor      BigInt
+  /// @nopii always false in task 4.6 (GST registration cannot be switched on yet)
+  gstRegisteredAtIssue Boolean       @default(false)
+  /// @nopii exactly what is printed: no customer name, email or address
+  content              Json
+  /// @nopii the fixed layout that prints it
+  layoutVersion        Int
+  /// @nopii SHA-256 of the content
+  contentSha256        String
+  /// @nopii timestamp
+  issuedAt             DateTime      @default(now()) @db.Timestamptz(3)
+  notes                ReceiptNote[]
+
+  @@unique([id, bookingId, mode, currency])
+  @@index([bookingId])
+  @@map("receipts")
+}
+
+/// A note about a receipt (refund, reversal, chargeback, reinstatement, void), issued once from its ledger posting.
+model ReceiptNote {
+  id                   String               @id @default(uuid(7)) @db.Uuid
+  /// @nopii the document number
+  number               String               @unique
+  numbering            ReceiptNumber        @relation(fields: [number], references: [number], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii
+  kind                 ReceiptNoteKind
+  /// @nopii
+  direction            ReceiptNoteDirection
+  receiptId            String               @db.Uuid
+  bookingId            String               @db.Uuid
+  /// @nopii the receipt's
+  mode                 PaymentMode
+  /// @nopii ISO 4217, the receipt's
+  currency             String               @db.Char(3)
+  receipt              Receipt              @relation(fields: [receiptId, bookingId, mode, currency], references: [id, bookingId, mode, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii minor units the note records
+  amountMinor          BigInt
+  refundId             String?              @db.Uuid
+  refund               Refund?              @relation(fields: [refundId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  disputeId            String?              @db.Uuid
+  dispute              Dispute?             @relation(fields: [disputeId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the ledger posting it records
+  causeKey             String               @unique
+  /// @nopii minor units in customer_funds after the posting
+  fundsAfterMinor      BigInt
+  /// @nopii always false in task 4.6
+  gstRegisteredAtIssue Boolean              @default(false)
+  /// @nopii exactly what is printed: no customer name, email or address
+  content              Json
+  /// @nopii the fixed layout that prints it
+  layoutVersion        Int
+  /// @nopii SHA-256 of the content
+  contentSha256        String
+  /// @nopii timestamp
+  issuedAt             DateTime             @default(now()) @db.Timestamptz(3)
+
+  @@index([receiptId])
+  @@index([bookingId])
+  @@map("receipt_notes")
 }

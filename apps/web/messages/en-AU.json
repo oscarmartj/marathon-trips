@@ -350,7 +350,9 @@
       "triplists": "Trip lists",
       "reports": "Reports",
       "waitlist": "Waiting list",
-      "gateways": "Payment gateways"
+      "gateways": "Payment gateways",
+      "reconciliation": "Reconciliation",
+      "customerMoney": "Customer money"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -2828,6 +2830,21 @@
           "late_refund_in_progress": "One of our refunds on this booking is still being processed by the gateway. Check it with the gateway first."
         },
         "latePending": "This is our refund: it was marked as not made, but the payment gateway is still processing it. No other refund can be made on this booking until it settles. Check with the gateway to settle it."
+      },
+      "receipts": {
+        "heading": "Receipts",
+        "none": "No receipts yet. A receipt is issued for each payment received.",
+        "row": "{title} {number}, {amount}, {when}",
+        "about": " (about {receipt})",
+        "download": "Download {number} (PDF)",
+        "kinds": {
+          "receipt": "Receipt",
+          "refund": "Refund note",
+          "refund_reversal": "Refund reversal note",
+          "chargeback": "Chargeback note",
+          "chargeback_reinstatement": "Chargeback reversal note",
+          "void": "Receipt voided"
+        }
       }
     },
     "templates": {
@@ -3500,6 +3517,91 @@
         "account_not_accepting_charges": "That account takes no new payments.",
         "version_conflict": "Someone else changed this rule. Reload and try again."
       }
+    },
+    "reconciliation": {
+      "title": "Reconciliation",
+      "intro": "Every day at 4:10 am (Brisbane time) each payment gateway account is compared with what the gateway reports: payments, refunds, disputes and payouts. Each difference also opens a task. Nothing is changed by a reconciliation except the gateway fees of a payout, which are recorded once.",
+      "runsHeading": "Recent reconciliations",
+      "none": "No reconciliation has run yet.",
+      "row": "{account}, {date}, run {attempt}: {status}, {count} differences, {checked} items compared",
+      "details": "Show the differences",
+      "hide": "Hide the differences",
+      "noDifferences": "No differences.",
+      "difference": "{code}: {entity} {id}",
+      "ours": "The app: {value}",
+      "gateway": "The gateway: {value}",
+      "runNow": "Run now for {account}",
+      "ran": "The reconciliation ran: {status}.",
+      "running": "A reconciliation of this account is already running. Try again in a few minutes.",
+      "tooMany": "You have run the reconciliation several times in the last hour. Try again later.",
+      "forbidden": "You do not have permission to run a reconciliation.",
+      "stepUpCancelled": "The reconciliation needs your authenticator code. It did not run.",
+      "statuses": {
+        "running": "running",
+        "matched": "matched",
+        "mismatch": "differences found",
+        "partial": "partly checked",
+        "failed": "could not run",
+        "not_applicable": "not applicable (no gateway to compare with)"
+      },
+      "codes": {
+        "payment_missing_at_gateway": "Payment the gateway does not know",
+        "payment_status_differs": "Payment status differs",
+        "payment_amount_differs": "Payment amount differs",
+        "refund_missing_at_gateway": "Refund the gateway does not know",
+        "refund_status_differs": "Refund status differs",
+        "refund_amount_differs": "Refund amount differs",
+        "dispute_status_differs": "Dispute status differs",
+        "dispute_funds_differ": "Dispute funds differ",
+        "dispute_unknown_at_gateway": "Dispute the gateway does not know",
+        "unknown_gateway_payment": "Payment at the gateway the app does not know",
+        "unknown_gateway_refund": "Refund at the gateway the app does not know",
+        "unknown_gateway_dispute": "Dispute at the gateway the app does not know",
+        "gateway_amount_differs": "Amount at the gateway differs",
+        "settlement_totals_inconsistent": "Payout that does not add up",
+        "settlement_line_unmatched": "Payout line with nothing to match",
+        "settlement_line_amount_differs": "Payout line amount differs",
+        "settlement_currency_differs": "Payout line in another currency",
+        "settlement_changed": "Payout changed after it was imported",
+        "receipt_missing": "Payment without a receipt",
+        "not_settled_in_time": "Not paid out by the gateway in time",
+        "settlement_line_duplicate": "Payout line for something already paid out"
+      },
+      "entities": {
+        "Payment": "Payment",
+        "Refund": "Refund",
+        "Dispute": "Dispute",
+        "Settlement": "Payout",
+        "SettlementLine": "Payout line",
+        "GatewayObject": "Gateway item"
+      }
+    },
+    "customerMoney": {
+      "title": "Customer money",
+      "intro": "What customers have paid, per trip, split into what is still owed to suppliers, margin not yet earned, overpayments to give back and margin earned. Keep the \"keep separate\" amount in the customer bank account. Margin counts as earned only once every booking of the trip has travelled. Without supplier costs in the trip's currency there is no margin: everything is kept separate.",
+      "asOf": "As at {when} (Brisbane date {today}). Test-mode amounts outside production.",
+      "none": "No customer money is held.",
+      "caption": "Customer money by trip",
+      "trip": "Trip",
+      "bookings": "Bookings",
+      "held": "Paid by customers",
+      "owed": "Owed to suppliers",
+      "notEarned": "Margin not yet earned",
+      "over": "Overpayments to give back",
+      "debt": "Owed by customers",
+      "earned": "Margin earned",
+      "keep": "Keep separate",
+      "fees": "Gateway fees taken",
+      "notes": {
+        "ok": "",
+        "no_supplier_costs": "No supplier costs recorded: no margin shown.",
+        "costs_in_other_currency": "Supplier costs in another currency: no margin shown."
+      },
+      "feesNotImported": "Fees not imported for this trip's gateway.",
+      "notAvailable": "not shown",
+      "totalsHeading": "Totals by currency",
+      "totalRow": "{currency}: paid by customers {held}, keep separate {keep}, margin earned {earned}, owed by customers {debt}, gateway fees {fees}",
+      "footer": "Gateway fees come out of customer money: put the same amount back from the business's own funds. This report is a working aid, not accounting or tax advice."
     }
   },
   "auth": {
@@ -3920,7 +4022,7 @@
       "paymentsHeading": "Payments received",
       "noPayments": "No payments yet.",
       "paymentLine": "{amount} on {when} (Brisbane time), by {method}",
-      "receiptsNote": "This is a record of the payments we have received. It is not a receipt or a tax invoice.",
+      "receiptsNote": "This is a record of the payments we have received. Each payment has its own receipt under Receipts.",
       "documentsHeading": "Documents",
       "noDocuments": "Your documents appear here once your booking is confirmed.",
       "back": "Back to your bookings"
@@ -4026,6 +4128,19 @@
         "deleteAccount": "Delete my sign-in account",
         "deleted": "Your sign-in account has been deleted."
       }
+    },
+    "receipts": {
+      "heading": "Receipts",
+      "none": "No receipts yet. You get a receipt for each payment we receive.",
+      "kinds": {
+        "receipt": "Receipt",
+        "refund": "Refund note",
+        "refund_reversal": "Refund reversal note",
+        "chargeback": "Chargeback note",
+        "chargeback_reinstatement": "Chargeback reversal note",
+        "void": "Receipt voided"
+      },
+      "link": "{title} {number}, {amount} (PDF)"
     }
   },
   "payLink": {

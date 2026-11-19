@@ -39,6 +39,9 @@ export const CONTRACT_CLAUSES = [
   'dispute_funds_flags_are_cumulative',
   'refund_of_disputed_payment_refused',
   'no_secret_in_results_or_errors',
+  // Task 4.6: they apply when the manifest declares `reconciliation`; otherwise each checks the methods are absent.
+  'activity_lists_what_was_collected',
+  'settlement_totals_and_lines_consistent',
 ] as const;
 
 export type ContractClause = (typeof CONTRACT_CLAUSES)[number];
