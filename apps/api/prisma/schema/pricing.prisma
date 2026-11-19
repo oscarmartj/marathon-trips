@@ -302,26 +302,26 @@ enum CancellationPenaltyMode {
 /// A tiered cancellation policy. A draft is edited freely; an active policy is frozen (triggers in 0038) and is what
 /// a booking is sold under (`BookingSnapshot.cancellationPolicyId`); archived only once no package uses it.
 model CancellationPolicy {
-  id            String                     @id @default(uuid(7)) @db.Uuid
+  id            String                      @id @default(uuid(7)) @db.Uuid
   /// @nopii staff label, never personal data
   name          String
   /// @nopii LocalizedText shown to customers next to the tiers
   description   Json
   /// @nopii catalogue data
-  status        CancellationPolicyStatus   @default(draft)
+  status        CancellationPolicyStatus    @default(draft)
   /// @nopii ISO 4217 of the fixed tiers; null when every tier is a percentage
-  currency      String?                    @db.Char(3)
+  currency      String?                     @db.Char(3)
   /// @nopii timestamp
-  activatedAt   DateTime?                  @db.Timestamptz(3)
-  activatedById String?                    @db.Uuid
+  activatedAt   DateTime?                   @db.Timestamptz(3)
+  activatedById String?                     @db.Uuid
   /// @nopii timestamp
-  archivedAt    DateTime?                  @db.Timestamptz(3)
+  archivedAt    DateTime?                   @db.Timestamptz(3)
   /// @nopii optimistic lock for the panel
-  version       Int                        @default(0)
+  version       Int                         @default(0)
   /// @nopii timestamp
-  createdAt     DateTime                   @default(now()) @db.Timestamptz(3)
+  createdAt     DateTime                    @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt     DateTime                   @updatedAt @db.Timestamptz(3)
+  updatedAt     DateTime                    @updatedAt @db.Timestamptz(3)
   tiers         CancellationTier[]
   packages      PackageCancellationPolicy[]
   snapshots     BookingSnapshot[]

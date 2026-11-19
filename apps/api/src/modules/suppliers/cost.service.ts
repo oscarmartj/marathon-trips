@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { z } from 'zod';
-import type { createCostSchema, costStatusSchema, updateCostSchema } from '@mt/shared';
+import type { createCostSchema, createInstalmentsSchema, costStatusSchema, updateCostSchema } from '@mt/shared';
 import { AuditService } from '../../platform/audit/audit.service';
 import type { AuditActor } from '../../platform/audit/audit.service';
 import { PrismaService } from '../../platform/database/prisma.service';
@@ -94,6 +94,32 @@ export class CostService {
         const after = await tx.costItem.findUniqueOrThrow({ where: { id } });
         await this.audit.record(tx, { actor, action: 'suppliers.cost.status_changed', entityType: 'CostItem', entityId: id, reason: input.reason, before: { status: before.status }, after: { status: after.status } });
         return after;
+      }),
+    );
+  }
+
+  /**
+   * Task 6.2 (plan section 3.2): instalments of one contract, each a fixed cost with its own amount and due date, in one
+   * transaction. Staff type each amount (no percentages, so no rounding); due dates must go up strictly.
+   */
+  async createInstalments(actor: Actor, supplierId: string, input: z.infer<typeof createInstalmentsSchema>) {
+    const dates = input.instalments.map((i) => i.dueDate);
+    if (dates.some((d, i) => i > 0 && d <= dates[i - 1]!)) throw unprocessable('instalment_dates_not_increasing', 'Each instalment is due after the one before it');
+    return view(
+      await this.prisma.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM suppliers WHERE id = ${supplierId}::uuid AND "deletedAt" IS NULL FOR SHARE`;
+        if (rows.length === 0) throw notFound('supplier_not_found', 'Supplier not found');
+        await this.checkLinks(tx, supplierId, input.contractId, input.packageId);
+        const created = [];
+        for (const i of input.instalments) {
+          const unit = BigInt(i.unitAmountMinor);
+          const row = await tx.costItem.create({
+            data: { supplierId, contractId: input.contractId, packageId: input.packageId, description: i.description, basis: 'fixed', quantity: 1, unitAmountMinor: unit, amountMinor: costAmount(1, unit), currency: input.currency, dueDate: toDate(i.dueDate) },
+          });
+          await this.audit.record(tx, { actor, action: 'suppliers.cost.created', entityType: 'CostItem', entityId: row.id, reason: input.reason, after: view(row), context: { instalments: input.instalments.length } });
+          created.push(row);
+        }
+        return { items: created };
       }),
     );
   }

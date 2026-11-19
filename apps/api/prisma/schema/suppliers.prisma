@@ -62,6 +62,7 @@ model Supplier {
   contacts        SupplierContact[]
   contracts       SupplierContract[]
   costItems       CostItem[]
+  payments        SupplierPayment[]
 
   @@index([kind])
   @@map("suppliers")
@@ -155,13 +156,13 @@ model Allotment {
 }
 
 model CostItem {
-  id              String            @id @default(uuid(7)) @db.Uuid
-  supplierId      String            @db.Uuid
-  supplier        Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  contractId      String?           @db.Uuid
-  contract        SupplierContract? @relation(fields: [contractId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  packageId       String?           @db.Uuid
-  package         Package?          @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id              String                @id @default(uuid(7)) @db.Uuid
+  supplierId      String                @db.Uuid
+  supplier        Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  contractId      String?               @db.Uuid
+  contract        SupplierContract?     @relation(fields: [contractId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  packageId       String?               @db.Uuid
+  package         Package?              @relation(fields: [packageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @pii free text written by staff, may name travellers
   description     String
   /// @nopii how the quantity is counted
@@ -173,21 +174,102 @@ model CostItem {
   /// @nopii minor units of `currency`, always quantity x unit, worked out by the server
   amountMinor     BigInt
   /// @nopii ISO 4217, the supplier's currency
-  currency        String            @db.Char(3)
+  currency        String                @db.Char(3)
   /// @nopii calendar date the supplier expects payment
-  dueDate         DateTime?         @db.Date
+  dueDate         DateTime?             @db.Date
   /// @nopii planned, due, paid (set only by supplier payments, task 6.2) or cancelled
-  status          CostStatus        @default(planned)
+  status          CostStatus            @default(planned)
   /// @nopii optimistic lock for the admin panel
-  version         Int               @default(0)
+  version         Int                   @default(0)
   /// @nopii timestamp
-  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
+  paymentItems    SupplierPaymentItem[]
 
   @@unique([id, currency])
   @@index([supplierId, status])
   @@index([packageId])
   @@index([contractId])
   @@map("cost_items")
+}
+
+// ---- Task 6.2: supplier payments, recorded after the fact ----
+// Plan: docs/plans/6.2-supplier-payments.md. The app never pays a supplier: Oscar pays from his bank and records it here,
+// so the schedule, the ledger and the customer money report agree. Guards, deferred checks and the partial unique index
+// on active items live in migration 0040. The rules of .claude/rules/payments.md apply to these models.
+
+enum SupplierPaymentStatus {
+  recorded
+  voided
+}
+
+/// A payment made to a supplier outside the app, recorded by staff. Its amount is the sum of its items, worked out by the
+/// server. Only the recorded -> voided transition (with its void fields) ever changes a row; nothing is deleted.
+model SupplierPayment {
+  id                 String                @id @default(uuid(7)) @db.Uuid
+  supplierId         String                @db.Uuid
+  supplier           Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii test or live: the environment's, never from the request
+  mode               PaymentMode
+  /// @nopii minor units of `currency`: the sum of the items
+  amountMinor        BigInt
+  /// @nopii ISO 4217, the cost items' currency
+  currency           String                @db.Char(3)
+  /// @nopii minor units of `baseCurrency`: what the bank debited in another currency, typed by staff, never computed
+  baseAmountMinor    BigInt?
+  /// @nopii ISO 4217 of the bank account the payment left from, when it differs from `currency`
+  baseCurrency       String?               @db.Char(3)
+  /// @nopii calendar date of the bank transfer, in Brisbane
+  paidOn             DateTime              @db.Date
+  /// @pii bank or invoice reference typed by staff
+  reference          String
+  /// @nopii recorded or voided
+  status             SupplierPaymentStatus @default(recorded)
+  /// @nopii server-made from the staff scope and the client key (plan 0.1, 1.2)
+  idempotencyKey     String                @unique
+  recordedById       String                @db.Uuid
+  /// @nopii timestamp
+  recordedAt         DateTime              @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  voidedAt           DateTime?             @db.Timestamptz(3)
+  voidedById         String?               @db.Uuid
+  /// @pii free text written by staff
+  voidReason         String?
+  /// @nopii optimistic lock; changes only with the status
+  version            Int                   @default(0)
+  /// @nopii pg_current_xact_id() of the database transaction that created it, set by a trigger
+  createdTxId        BigInt?
+  items              SupplierPaymentItem[]
+  ledgerTransactions LedgerTransaction[]
+
+  @@unique([id, mode])
+  @@unique([id, mode, currency])
+  @@index([supplierId, status])
+  @@index([paidOn])
+  @@map("supplier_payments")
+}
+
+/// One cost item paid by a supplier payment, for its whole amount. At most one active item per cost item (partial unique
+/// index in migration 0040); voiding the payment sets `active` to false in the same transaction.
+model SupplierPaymentItem {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  supplierPaymentId String          @db.Uuid
+  /// @nopii the payment's
+  mode              PaymentMode
+  payment           SupplierPayment @relation(fields: [supplierPaymentId, mode, currency], references: [id, mode, currency], onDelete: Restrict, onUpdate: Restrict)
+  costItemId        String          @db.Uuid
+  costItem          CostItem        @relation(fields: [costItemId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii minor units of `currency`: the cost item's amount
+  amountMinor       BigInt
+  /// @nopii ISO 4217, the payment's and the cost item's
+  currency          String          @db.Char(3)
+  /// @nopii false once the payment is voided
+  active            Boolean         @default(true)
+  /// @nopii timestamp
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@unique([supplierPaymentId, costItemId])
+  @@index([costItemId])
+  @@map("supplier_payment_items")
 }

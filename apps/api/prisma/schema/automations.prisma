@@ -21,41 +21,41 @@ enum AutomationRunStatus {
 }
 
 model AutomationRule {
-  id          String                @id @default(uuid(7)) @db.Uuid
+  id                 String                @id @default(uuid(7)) @db.Uuid
   /// @pii free text typed by staff
-  name        String
+  name               String
   /// @nopii event or schedule
-  triggerType AutomationTriggerType
+  triggerType        AutomationTriggerType
   /// @nopii event type from the trigger catalogue in code, such as bookings.booking.requested
-  eventType   String?
+  eventType          String?
   /// @nopii { frequency, time, weekdays } validated by a strict zod schema (no free text)
-  schedule    Json?
+  schedule           Json?
   /// @nopii list of { fact, op, value }: fact keys, operator codes, ids and enum values only (strict zod schema)
-  conditions  Json                  @default("[]")
+  conditions         Json                  @default("[]")
   /// @pii list of actions; a task title or description is free text typed by staff
-  actions     Json                  @default("[]")
+  actions            Json                  @default("[]")
   /// @nopii
-  enabled     Boolean               @default(false)
+  enabled            Boolean               @default(false)
   /// @nopii new rules start in test mode: runs only simulate their actions
-  testMode    Boolean               @default(true)
+  testMode           Boolean               @default(true)
   /// @nopii when the rule was last switched on; events before it never start a run
-  enabledAt   DateTime?             @db.Timestamptz(3)
+  enabledAt          DateTime?             @db.Timestamptz(3)
   /// @nopii task 7.fix-2: when whoever switched the rule on confirmed its customer notices are service messages; void after any later change of the rule or of the notice's wording
-  serviceNoticeAckAt DateTime?      @db.Timestamptz(3)
-  ownerUserId String                @db.Uuid
+  serviceNoticeAckAt DateTime?             @db.Timestamptz(3)
+  ownerUserId        String                @db.Uuid
   /// @nopii always staff (CHECK)
-  ownerKind   UserKind              @default(staff)
-  owner       User                  @relation(fields: [ownerUserId, ownerKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  ownerKind          UserKind              @default(staff)
+  owner              User                  @relation(fields: [ownerUserId, ownerKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii optimistic lock
-  version     Int                   @default(0)
+  version            Int                   @default(0)
   /// @nopii soft delete only (the API role has no DELETE on this table, migration 0020)
-  deletedAt   DateTime?             @db.Timestamptz(3)
-  deletedById String?               @db.Uuid
+  deletedAt          DateTime?             @db.Timestamptz(3)
+  deletedById        String?               @db.Uuid
   /// @nopii
-  createdAt   DateTime              @default(now()) @db.Timestamptz(3)
+  createdAt          DateTime              @default(now()) @db.Timestamptz(3)
   /// @nopii
-  updatedAt   DateTime              @updatedAt @db.Timestamptz(3)
-  runs        AutomationRun[]
+  updatedAt          DateTime              @updatedAt @db.Timestamptz(3)
+  runs               AutomationRun[]
 
   @@index([triggerType, eventType])
   @@index([ownerUserId])

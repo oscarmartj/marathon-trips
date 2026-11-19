@@ -53,6 +53,7 @@ import { AppRefundsService } from './core/app-refunds.service';
 import { PaymentDisputesService } from './core/disputes.service';
 import { PaymentRefundsAdminController } from './refunds.controller';
 import { PaymentReconciliationAdminController } from './reconciliation.controller';
+import { SupplierLedger } from './core/supplier-ledger.service';
 import { ClientMoneyService } from './core/client-money.service';
 import { DisputeSyncService } from './core/dispute-sync.service';
 import { RECEIPT_EVENTS, ReceiptsService } from './core/receipts.service';
@@ -72,9 +73,9 @@ import { ConsumerRegistry } from '../../platform/events/consumers';
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
     CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard, RoutingRulesAdminService,
     AppRefundsService, PaymentDisputesService,
-    SettlementsService, DisputeSyncService, ReconciliationService, ReceiptsService, ClientMoneyService,
+    SettlementsService, DisputeSyncService, ReconciliationService, ReceiptsService, ClientMoneyService, SupplierLedger,
   ],
-  exports: [ReceiptsService, ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
+  exports: [SupplierLedger, ReceiptsService, ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(

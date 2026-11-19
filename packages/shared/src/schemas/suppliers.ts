@@ -114,3 +114,42 @@ const costFields = {
 export const createCostSchema = z.strictObject({ ...costFields, contractId: costFields.contractId.default(null), packageId: costFields.packageId.default(null), dueDate: optionalDate.default(null), reason });
 export const updateCostSchema = z.strictObject({ ...Object.fromEntries(Object.entries(costFields).map(([k, v]) => [k, v.optional()])) as { [K in keyof typeof costFields]: z.ZodOptional<(typeof costFields)[K]> }, version: versionSchema, reason });
 export const costStatusSchema = z.strictObject({ status: z.enum(COST_STATUS_CHOICES), version: versionSchema, reason });
+
+// ---- Supplier payments (task 6.2) ----
+// The app never pays a supplier: these bodies record a payment Oscar already made from his bank. There is no amount
+// field: the server sums the cost items. The only amount staff type is what the bank debited in another currency.
+
+export const MAX_PAYMENT_ITEMS = 100;
+const positiveMinor = unitMinor.refine((s) => /^\d+$/.test(s) && BigInt(s) > 0n, { message: 'Amount must be above 0' });
+
+const paymentItems = z
+  .array(z.strictObject({ costItemId: z.uuid(), version: versionSchema }))
+  .min(1)
+  .max(MAX_PAYMENT_ITEMS)
+  .refine((items) => new Set(items.map((i) => i.costItemId)).size === items.length, { message: 'A cost item appears twice' });
+
+export const recordSupplierPaymentSchema = z.strictObject({
+  items: paymentItems,
+  paidOn: isoDateSchema,
+  reference: text(80),
+  base: z.strictObject({ amountMinor: positiveMinor, currency: supplierCurrencySchema }).nullable().default(null),
+});
+export const previewSupplierPaymentSchema = z.strictObject({ items: paymentItems });
+export const voidSupplierPaymentSchema = z.strictObject({ version: versionSchema, reason: text(500) });
+export const supplierScheduleQuerySchema = z.strictObject({
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+  supplierId: z.uuid().optional(),
+  packageId: z.uuid().optional(),
+  currency: supplierCurrencySchema.optional(),
+});
+/** Instalments of one contract: each a fixed cost with its own amount and due date (no percentages, no rounding). */
+export const createInstalmentsSchema = z.strictObject({
+  contractId: z.uuid(),
+  packageId: z.uuid().nullable().default(null),
+  currency: supplierCurrencySchema,
+  instalments: z.array(z.strictObject({ description: text(300), unitAmountMinor: positiveMinor, dueDate: isoDateSchema })).min(2).max(12),
+  reason,
+});
+export const SCHEDULE_BUCKETS = ['overdue', 'due_today', 'upcoming', 'later', 'undated'] as const;
+export type ScheduleBucket = (typeof SCHEDULE_BUCKETS)[number];

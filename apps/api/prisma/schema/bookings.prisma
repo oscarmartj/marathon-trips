@@ -105,7 +105,7 @@ model Customer {
   bookings           Booking[]
   quotes             Quote[]
   promoRedemptions   PromoRedemption[]
-  termsAcceptances    TermsAcceptance[]
+  termsAcceptances   TermsAcceptance[]
   payments           Payment[]
   waitlistEntries    WaitlistEntry[]
   complaints         Complaint[]
@@ -119,69 +119,69 @@ model Customer {
 /// A booking request and, later, the booking (plan 0.1, 5.4 and 6.2). Its status only changes through
 /// BookingStateMachine and the allowed pairs of a trigger; its totals always mirror its current snapshot. Never deleted.
 model Booking {
-  id                     String               @id @default(uuid(7)) @db.Uuid
+  id                     String                @id @default(uuid(7)) @db.Uuid
   /// @nopii human reference MT-XXXXXX, random (Crockford base32)
-  reference              String               @unique
-  customerId             String               @db.Uuid
-  customer               Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reference              String                @unique
+  customerId             String                @db.Uuid
+  customer               Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii catalogue or bespoke
   kind                   BookingKind
-  packageId              String               @db.Uuid
-  package                Package              @relation(fields: [packageId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
-  editionId              String               @db.Uuid
-  edition                RaceEdition          @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  packageId              String                @db.Uuid
+  package                Package               @relation(fields: [packageId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  editionId              String                @db.Uuid
+  edition                RaceEdition           @relation(fields: [editionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii state of the booking (plan 0.1, 6.2)
   status                 BookingStatus
   /// @nopii version of the snapshot in force
   currentSnapshotVersion Int
   /// @nopii calendar date, extra nights included
-  departureDate          DateTime             @db.Date
+  departureDate          DateTime              @db.Date
   /// @nopii calendar date, extra nights included
-  returnDate             DateTime             @db.Date
+  returnDate             DateTime              @db.Date
   /// @nopii ISO 4217
-  currency               String               @db.Char(3)
+  currency               String                @db.Char(3)
   /// @nopii minor units, in `currency`; mirrors the current snapshot
   totalMinor             BigInt
   /// @nopii minor units, in `currency`; mirrors the current snapshot
   depositMinor           BigInt
   /// @nopii calendar date
-  balanceDueDate         DateTime             @db.Date
+  balanceDueDate         DateTime              @db.Date
   /// @pii country of residence declared with the request; ZZ once erased
-  residenceCountry       String               @db.Char(2)
+  residenceCountry       String                @db.Char(2)
   /// @nopii timestamp
-  requestedAt            DateTime             @db.Timestamptz(3)
+  requestedAt            DateTime              @db.Timestamptz(3)
   /// @nopii timestamp
-  requestExpiresAt       DateTime             @db.Timestamptz(3)
+  requestExpiresAt       DateTime              @db.Timestamptz(3)
   /// @nopii timestamp
-  approvedAt             DateTime?            @db.Timestamptz(3)
+  approvedAt             DateTime?             @db.Timestamptz(3)
   /// @nopii timestamp (swept by 3.2)
-  approvalExpiresAt      DateTime?            @db.Timestamptz(3)
+  approvalExpiresAt      DateTime?             @db.Timestamptz(3)
   /// @nopii timestamp
-  declinedAt             DateTime?            @db.Timestamptz(3)
+  declinedAt             DateTime?             @db.Timestamptz(3)
   /// @nopii timestamp
-  expiredAt              DateTime?            @db.Timestamptz(3)
+  expiredAt              DateTime?             @db.Timestamptz(3)
   /// @nopii timestamp
-  cancelledAt            DateTime?            @db.Timestamptz(3)
+  cancelledAt            DateTime?             @db.Timestamptz(3)
   /// @pii staff reason for the last decline or cancellation, free text
   statusReason           String?
   /// @nopii where the request came from
   sourceChannel          BookingSourceChannel
   /// @secret SHA-256 of the user id and the client's Idempotency-Key: one booking per key and customer
-  requestKeyHash         String               @db.Char(64)
+  requestKeyHash         String                @db.Char(64)
   /// @secret SHA-256 of the requested configuration and code (no personal data)
-  requestConfigHash      String               @db.Char(64)
+  requestConfigHash      String                @db.Char(64)
   /// @secret HMAC of the contact details sent with the request; NULL once erased
-  requestContactHmac     String?              @db.Char(64)
+  requestContactHmac     String?               @db.Char(64)
   /// @nopii demo data root (plan 0.1, 1.3)
-  isDemo                 Boolean              @default(false)
+  isDemo                 Boolean               @default(false)
   /// @pii custom fields are free text
-  customFields           Json                 @default("{}")
+  customFields           Json                  @default("{}")
   /// @nopii optimistic lock for the admin panel
-  version                Int                  @default(0)
+  version                Int                   @default(0)
   /// @nopii timestamp
-  createdAt              DateTime             @default(now()) @db.Timestamptz(3)
+  createdAt              DateTime              @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt              DateTime             @updatedAt @db.Timestamptz(3)
+  updatedAt              DateTime              @updatedAt @db.Timestamptz(3)
   snapshots              BookingSnapshot[]
   quote                  Quote?
   travellers             BookingTraveller[]
@@ -217,32 +217,32 @@ model Booking {
 /// TRUNCATE are refused by triggers (not marked append-only, because it points at bookings; plan 2.4, section 2.2).
 /// No personal data and no free text: travellers are slots, everything else ids, codes, dates and amounts.
 model BookingSnapshot {
-  id             String              @id @default(uuid(7)) @db.Uuid
-  bookingId      String              @db.Uuid
-  booking        Booking             @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  id                   String              @id @default(uuid(7)) @db.Uuid
+  bookingId            String              @db.Uuid
+  booking              Booking             @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii 1 for the request; each amendment adds one
-  version        Int
+  version              Int
   /// @nopii original or amendment
-  kind           BookingSnapshotKind
+  kind                 BookingSnapshotKind
   /// @nopii PricedConfiguration from the engine: ids, slots and counts only (bookingSnapshotSchema)
-  configuration  Json
+  configuration        Json
   /// @nopii PriceBreakdown from the engine: lines, totals, rule trace (ids and outcomes); no free text
-  priceBreakdown Json
+  priceBreakdown       Json
   /// @nopii minor units, in `currency`
-  totalMinor     BigInt
+  totalMinor           BigInt
   /// @nopii minor units, in `currency`
-  depositMinor   BigInt
+  depositMinor         BigInt
   /// @nopii ISO 4217
-  currency       String              @db.Char(3)
-  priceVersionId String              @db.Uuid
-  priceVersion   PriceVersion        @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  currency             String              @db.Char(3)
+  priceVersionId       String              @db.Uuid
+  priceVersion         PriceVersion        @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii engine version that priced it
-  engineVersion  String
+  engineVersion        String
   /// The cancellation policy the booking was sold under (task 6.4): set at the request, copied by every amendment
-  cancellationPolicyId String?          @db.Uuid
+  cancellationPolicyId String?             @db.Uuid
   cancellationPolicy   CancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii timestamp
-  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
 
   @@unique([bookingId, version])
   @@index([priceVersionId])
@@ -351,48 +351,48 @@ model InventoryClaim {
 /// moment (history; screens show the current values derived from the plan and the payments). Append-only, no personal
 /// data and no free text; written in the same transaction as its snapshot (deferred triggers in 0029).
 model BookingAmendment {
-  id                  String                    @id @default(uuid(7)) @db.Uuid
-  bookingId           String                    @db.Uuid
+  id                   String                    @id @default(uuid(7)) @db.Uuid
+  bookingId            String                    @db.Uuid
   /// @nopii ISO 4217, the booking's
-  currency            String                    @db.Char(3)
-  booking             Booking                   @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  currency             String                    @db.Char(3)
+  booking              Booking                   @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii snapshot version before the change
-  fromVersion         Int
+  fromVersion          Int
   /// @nopii snapshot version the change created (fromVersion + 1)
-  toVersion           Int
+  toVersion            Int
   /// @nopii customer or staff
-  initiatedBy         BookingAmendmentInitiator
+  initiatedBy          BookingAmendmentInitiator
   /// the user who made the change (a customer or a member of staff)
-  actorUserId         String                    @db.Uuid
+  actorUserId          String                    @db.Uuid
   /// @nopii why
-  reasonCode          BookingAmendmentReason
+  reasonCode           BookingAmendmentReason
   /// @nopii what changed
-  changes             BookingAmendmentChange[]
+  changes              BookingAmendmentChange[]
   /// @nopii minor units, in `currency`: the total of snapshot fromVersion
-  previousTotalMinor  BigInt
+  previousTotalMinor   BigInt
   /// @nopii minor units, in `currency`: the total of snapshot toVersion
-  newTotalMinor       BigInt
+  newTotalMinor        BigInt
   /// @signed minor units, in `currency`: newTotalMinor − previousTotalMinor, from the pricing engine's totals
   priceDifferenceMinor BigInt
   /// @nopii minor units, in `currency`: succeeded payments when the change was made
-  collectedMinor      BigInt
+  collectedMinor       BigInt
   /// @nopii minor units, in `currency`: what was left to pay after the change
-  outstandingMinor    BigInt
+  outstandingMinor     BigInt
   /// @nopii minor units, in `currency`: paid beyond the new total after the change (parked: no refund until 4.5)
-  creditPendingMinor  BigInt
+  creditPendingMinor   BigInt
   /// @signed minor units, in `currency`: re-pricing the unchanged configuration on the basis minus its stored total; ≤ 0 and
   /// only with reasonCode correction (plan, decision 4)
-  basisDriftMinor     BigInt                    @default(0)
-  basisPriceVersionId String                    @db.Uuid
-  basisPriceVersion   PriceVersion              @relation(fields: [basisPriceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  basisDriftMinor      BigInt                    @default(0)
+  basisPriceVersionId  String                    @db.Uuid
+  basisPriceVersion    PriceVersion              @relation(fields: [basisPriceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii the instant the engine prices this booking at (its first pricing; plan, decision 3)
-  basisAt             DateTime                  @db.Timestamptz(3)
+  basisAt              DateTime                  @db.Timestamptz(3)
   /// @secret SHA-256 of the user id and the client's Idempotency-Key: one change per key and booking
-  requestKeyHash      String                    @db.Char(64)
+  requestKeyHash       String                    @db.Char(64)
   /// @secret SHA-256 of the request body (no personal data)
-  requestBodyHash     String                    @db.Char(64)
+  requestBodyHash      String                    @db.Char(64)
   /// @nopii timestamp
-  createdAt           DateTime                  @default(now()) @db.Timestamptz(3)
+  createdAt            DateTime                  @default(now()) @db.Timestamptz(3)
 
   @@unique([bookingId, toVersion])
   @@unique([bookingId, requestKeyHash])

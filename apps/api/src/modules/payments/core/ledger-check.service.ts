@@ -13,11 +13,13 @@ import { SettingsService } from '../../../platform/flags/flags.service';
 
 export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'missing_chargeback' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction'
   // Task 4.6 (plan review R1): fees are checked against the gateway's settlement lines, never against the ledger itself.
-  | 'missing_fee_posting' | 'fee_without_line';
+  | 'missing_fee_posting' | 'fee_without_line'
+  // Task 6.2: a recorded supplier payment without its posting, or a voided one without its reversal.
+  | 'missing_supplier_payment_posting';
 
 export interface LedgerFinding {
   kind: LedgerFindingKind;
-  entityType: 'Payment' | 'Refund' | 'Dispute' | 'Booking' | 'ProviderAccount' | 'LedgerTransaction' | 'SettlementLine';
+  entityType: 'Payment' | 'Refund' | 'Dispute' | 'Booking' | 'ProviderAccount' | 'LedgerTransaction' | 'SettlementLine' | 'SupplierPayment';
   entityId: string;
 }
 
@@ -181,6 +183,14 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
               AND (SELECT e."amountMinor" FROM ledger_entries e WHERE e."transactionId" = t.id AND e."accountCode" = 'provider_clearing:' || s."providerAccountId"::text) = -l."feeMinor")
           ORDER BY t.id LIMIT 500`;
         for (const r of strayFees) out.push({ kind: 'fee_without_line', entityType: 'LedgerTransaction', entityId: r.id });
+        // Task 6.2: booking-less supplier postings are never part of a booking's balances above; they are checked here.
+        const missingSupplier = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT sp.id::text AS id FROM supplier_payments sp
+          WHERE sp.mode = ${mode}::"PaymentMode"
+            AND (NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'supplier_payment:' || sp.id::text AND t."supplierPaymentId" = sp.id)
+                 OR (sp.status = 'voided' AND NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'supplier_payment:' || sp.id::text || ':voided' AND t."supplierPaymentId" = sp.id)))
+          ORDER BY sp.id LIMIT 500`;
+        for (const r of missingSupplier) out.push({ kind: 'missing_supplier_payment_posting', entityType: 'SupplierPayment', entityId: r.id });
         const empty = await tx.$queryRaw<Array<{ id: string }>>`
           SELECT t.id::text AS id FROM ledger_transactions t WHERE NOT EXISTS (SELECT 1 FROM ledger_entries e WHERE e."transactionId" = t.id) ORDER BY t.id LIMIT 100`;
         for (const r of empty) out.push({ kind: 'empty_transaction', entityType: 'LedgerTransaction', entityId: r.id });

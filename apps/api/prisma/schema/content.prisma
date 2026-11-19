@@ -25,64 +25,64 @@ enum MenuLocation {
 }
 
 model MediaAsset {
-  id          String         @id @default(uuid(7)) @db.Uuid
+  id         String         @id @default(uuid(7)) @db.Uuid
   /// @nopii https address or a path on this site; the image itself lives elsewhere
-  src         String
+  src        String
   /// @nopii what the image shows; empty only when decorative
-  altText     String         @default("")
+  altText    String         @default("")
   /// @nopii true for an image that adds nothing for a screen reader (alt text stays empty)
-  decorative  Boolean        @default(false)
+  decorative Boolean        @default(false)
   /// @nopii pixels, so the page can reserve space
-  width       Int?
-  height      Int?
+  width      Int?
+  height     Int?
   /// @nopii where the image comes from, such as a placeholder or a licence note
-  credit      String         @default("")
+  credit     String         @default("")
   /// @nopii name in the library
-  label       String
+  label      String
   /// @nopii optimistic lock for the admin panel
-  version     Int            @default(0)
+  version    Int            @default(0)
   /// @nopii timestamp
-  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt   DateTime       @updatedAt @db.Timestamptz(3)
-  guides      ContentGuide[]
-  pages       ContentPage[]
+  updatedAt  DateTime       @updatedAt @db.Timestamptz(3)
+  guides     ContentGuide[]
+  pages      ContentPage[]
 
   @@map("content_media")
 }
 
 model ContentPage {
-  id                 String         @id @default(uuid(7)) @db.Uuid
+  id                 String        @id @default(uuid(7)) @db.Uuid
   /// @nopii language tag such as en-AU
-  locale             String         @default("en-AU")
+  locale             String        @default("en-AU")
   /// @nopii address segment, such as about or terms
   slug               String
   /// @nopii general or legal
-  kind               PageKind       @default(general)
+  kind               PageKind      @default(general)
   /// @nopii editorial text
   title              String
   /// @nopii editorial text
-  intro              String         @default("")
+  intro              String        @default("")
   /// @nopii editorial text, paragraphs separated by a blank line
-  body               String         @default("")
+  body               String        @default("")
   /// @nopii draft or published
-  status             ContentStatus  @default(draft)
+  status             ContentStatus @default(draft)
   /// @nopii timestamp
-  publishedAt        DateTime?      @db.Timestamptz(3)
+  publishedAt        DateTime?     @db.Timestamptz(3)
   /// @nopii editorial text
-  seoTitle           String         @default("")
+  seoTitle           String        @default("")
   /// @nopii editorial text
-  seoDescription     String         @default("")
+  seoDescription     String        @default("")
   /// @nopii true while a legal page has not been reviewed; the web shows a visible notice
-  legalReviewPending Boolean        @default(false)
-  heroMediaId        String?        @db.Uuid
-  heroMedia          MediaAsset?    @relation(fields: [heroMediaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  legalReviewPending Boolean       @default(false)
+  heroMediaId        String?       @db.Uuid
+  heroMedia          MediaAsset?   @relation(fields: [heroMediaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii optimistic lock for the admin panel
-  version            Int            @default(0)
+  version            Int           @default(0)
   /// @nopii timestamp
-  createdAt          DateTime       @default(now()) @db.Timestamptz(3)
+  createdAt          DateTime      @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt          DateTime       @updatedAt @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @db.Timestamptz(3)
 
   @@unique([locale, slug])
   @@index([status])

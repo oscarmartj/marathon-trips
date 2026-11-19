@@ -297,7 +297,9 @@ describe('cost items', () => {
   it('a paid item (set by 6.2 later) cannot be edited or moved', async () => {
     const s = must(await admin.post('/admin/suppliers', supplierBody()), 'create').body;
     const c = must(await admin.post(`/admin/suppliers/${s.id}/costs`, cost()), 'cost').body;
-    await t.prisma.costItem.update({ where: { id: c.id }, data: { status: 'paid', version: { increment: 1 } } });
+    // Task 6.2: `paid` is reached only by recording a supplier payment (the database refuses it otherwise), so the item is
+    // paid the way the panel does it; the assertions are unchanged.
+    must(await admin.post(`/admin/suppliers/${s.id}/payments`, { items: [{ costItemId: c.id, version: c.version }], paidOn: new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane' }).format(new Date()), reference: 'INV-1' }).set('Idempotency-Key', `k-${crypto.randomUUID()}`), 'pay');
     expect((await admin.patch(`/admin/suppliers/costs/${c.id}`, { quantity: 1, version: 1 })).body).toMatchObject({ code: 'cost_not_editable' });
     expect((await admin.post(`/admin/suppliers/costs/${c.id}/status`, { status: 'cancelled', version: 1 })).body).toMatchObject({ code: 'transition_not_allowed' });
   });
