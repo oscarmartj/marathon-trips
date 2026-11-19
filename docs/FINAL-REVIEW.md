@@ -28,7 +28,7 @@ Todo lo abierto, por importancia: seguridad y legal, luego corrección y por úl
 8. **Casilla de `serviceMessageAck` en el panel: no existe**, así que todos los avisos al cliente salen como marketing. Decidir si se quiere avisos de servicio. Fuente: `docs/done/7.fix-2.md`.
 9. **Datos personales:** riesgo residual aceptado en la fase 0; 5.5 ya borra, pero restaurar una copia antigua resucita a los clientes borrados (`privacy:erasures-reapply`) y `?audience=full` lleva notas del personal. Fuente: `docs/done/5.5.md`.
 10. **Pendientes de 8.5:** ZAP y SSL Labs contra el entorno de pruebas, `includeSubDomains` en HSTS (S-24), y para 9.x S-19 y ampliar la CSP y `Permissions-Policy: payment`. Fuente: `docs/done/8.5.md`.
-11. **Antes de dinero real:** lista de arriba, cuando se retome el dinero (3.3, 3.4, 4.x, 6.2, 6.4, 6.6 y 9.x, aparcados).
+11. **Antes de dinero real:** lista de arriba, cuando terminen 3.3, 3.4, 4.x, 6.2, 6.4, 6.6 y 9.x (dinero retomado el 2026-11-19).
 
 ### Corrección
 
@@ -86,7 +86,7 @@ Ordenados por importancia.
 3. **Minores del revisor de 0.3 aún abiertos** (los tres, tal como los transmitió el coordinador; el informe del revisor no está en el repositorio): el arnés de pruebas de rutas `self` es ciego a `@Req`; carrera al añadir un titular a un rol; el orden de bloqueo no sigue del todo la sección 6.3 de la arquitectura. La ronda 2 del revisor de 0.3 figura como pendiente en su `done`.
 4. **Pruebas que dependen de una base propia por hilo.** Las que desactivan a todos los owners (`admin.test.ts`) y el monitor de 8.6 parten de una base sin otros hilos; dos hilos con la misma base se pisan. Hoy se evita por convención (0.fix-1); en CI cada ejecución tiene su base.
 5. **Desviación de «Sin código» en 0.1.** `scripts/check-dependency-table.mjs` (solo lectura, sin dependencias) se escribió en la tarea de arquitectura para comprobar la tabla de `docs/autonomous.md`; 0.2 lo añadió a `pnpm lint`. Se acepta; ver `docs/done/0.1.md`.
-6. **Revisión del plan 0.1 con ronda 18 «aprobar con cambios».** Los 8 hallazgos abiertos están aparcados con el dinero y son vinculantes al retomarlo.
+6. **Revisión del plan 0.1 con ronda 18 «aprobar con cambios».** Los 8 hallazgos abiertos son vinculantes desde que se retomó el dinero (2026-11-19); el plan los reparte por tarea.
 7. **Investigación 0.7 incompleta.** 31 de 38 pasarelas sin confirmar la política de viajes, y casi todas sin confirmar sole trader, liquidaciones y retenciones; cada fila conserva su fuente y fecha.
 
 ## Revisión por fase
@@ -135,11 +135,11 @@ Sección «Revisión de Oscar» de `docs/phases/phase-2.md` y lo que dejan los `
 - **Sin verificar:** `prisma migrate diff` de las migraciones 0007 a 0017 (sin motor local; lo valida CI); lector de pantalla y teclado completo del panel de precios y del constructor (2.2b, 2.3).
 - **Rama remota obsoleta** `task/8.1-web-foundation`: borrar a mano (`docs/BLOCKED.md`).
 
-### Fase 3 (cerrada con el dinero aparcado)
+### Fase 3 (cerrada con el dinero parcial; 3.3 y 3.4 reabiertas el 2026-11-19)
 
-Hechas 3.1, 3.2, 3.5 y 3.6, solo contra el simulador; 3.3 (Stripe) y 3.4 (PayID) aparcadas y no empezadas. Evidencia en `docs/done/3.1.md`, `3.2.md`, `3.5.md` y `3.6.md`. Llegan también 5.4, 6.5, 7.3, 7.4 y 7.6, fusionadas fuera de su fase.
+Hechas 3.1, 3.2, 3.5 y 3.6, solo contra el simulador; 3.3 (Stripe) y 3.4 (PayID) reabiertas el 2026-11-19, aún no hechas. Evidencia en `docs/done/3.1.md`, `3.2.md`, `3.5.md` y `3.6.md`. Llegan también 5.4, 6.5, 7.3, 7.4 y 7.6, fusionadas fuera de su fase.
 
-- **Revisión de Oscar de la fase:** pago de prueba completo y claves de Stripe, imposibles hasta retomar el dinero. Mientras tanto, publicar la página `terms` en el panel y probar el checkout con el simulador (`payments:simulator-account`).
+- **Revisión de Oscar de la fase:** pago de prueba completo y claves de Stripe, imposibles hasta que 3.3 y haya sandbox real. Mientras tanto, publicar la página `terms` en el panel y probar el checkout con el simulador (`payments:simulator-account`).
 - **Permisos que debe asignar Oscar:** ver `docs/BLOCKED.md` (`bookings.booking.confirm`, plantillas, reclamaciones, fechas clave, automatizaciones).
 - **Límites conocidos de 3.2:** `PaymentLink` pasa a 5.1 y los recordatorios a 5.6; la aprobación automática `instantBooking` queda para 5.1/3.5. Menor: si un intento termina como `not_live` entre dos transacciones, el cliente recibe 409 `payment_attempt_in_progress` aunque no haya nada vivo (reintentar funciona). Corregido: se perdía el error original en un fallo de cobertura.
 - **3.5:** las condiciones son la página publicada `terms`; `legalReviewPending` no bloquea el pago; la web solo admite redirección http a localhost cuando se sirve desde localhost, mientras la API admite más en los adaptadores de prueba.
@@ -158,7 +158,7 @@ Sección «Revisión de Oscar» de `docs/phases/phase-5.md`: hacer el recorrido 
 - **Decisiones de 5.1 a 5.6:** enlaces de pago de un solo uso (caducan a los 7 días o al vencer el depósito, solo al correo de la reserva); documentos generados al pedirlos; datos mínimos de viajeros sin pasaporte ni datos médicos; borrado solo por owner con step-up y 409 con viaje o dinero vivo; la baja de marketing también suprime las alertas.
 - **Sin verificar:** correo real (solo buzón de pruebas), lector de pantalla, `compose-smoke` solo en CI, borrar a un cliente de punta a punta (pide un viaje terminado). El revisor de 5.2 no tuvo ronda final.
 
-### Fase 6 (cerrada con 6.2, 6.4 y 6.6 aparcadas, `docs/done/6.close.md`)
+### Fase 6 (cerrada sin 6.2, 6.4 y 6.6, reabiertas el 2026-11-19; `docs/done/6.close.md`)
 
 Sección «Revisión de Oscar» de `docs/phases/phase-6.md`: simular un viaje con un cambio y una cancelación y comprobar los números a mano. **No se puede hacer entera**: sin 6.4 no hay penalización ni reembolso y sin 6.6 no hay resultado por viaje. Lo que sí se puede: un cambio (6.3) con su diferencia, una cancelación que promociona a la lista de espera (6.5) y costes y cobertura de stock por proveedor (6.1).
 
