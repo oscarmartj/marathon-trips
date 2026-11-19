@@ -330,7 +330,7 @@ export class PaymentAttemptsService {
     return p.paymentLinkId ? `${this.config.WEB_ORIGIN}/pay/return` : `${this.config.WEB_ORIGIN}/payments/return?ref=${p.booking.reference}`;
   }
 
-  private assertPayable(b: BookingForPayments, at: Date): void {
+  assertPayable(b: BookingForPayments, at: Date): void {
     // Paid in full (plan 0.1, 6.2: "409, nothing outstanding"): say so rather than "not payable".
     if (b.status === 'balance_paid') throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
     if (!PAYABLE_STATES.includes(b.status)) throw conflict('booking_not_payable', 'This booking cannot take a payment in its current state');

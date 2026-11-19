@@ -3,15 +3,30 @@
 // only changes in a reviewed PR. Options are passed in by the payments module: an adapter reads no environment.
 import type { AppEnv } from '@mt/shared';
 import { TEST_ADAPTER_ENVS } from '../core/gateway';
+import { CardSessionProvider } from '../core/card-sessions/provider';
+import type { CardSessionStore } from '../core/card-sessions/store';
+import { unwiredCardSessionStore } from '../core/card-sessions/store';
 import type { PaymentProvider } from '../core/provider';
 import { PayPalProvider } from './paypal/paypal';
+import { PinPaymentsGateway } from './pin_payments/pin';
 import { SimulatorProvider } from './simulator/simulator';
 import { StripeProvider } from './stripe/stripe';
 
 export interface AdapterOptions {
   /** Where the simulator's hosted checkout page is served: WEB_ORIGIN in development, test and ci. */
   webOrigin: string;
+  /**
+   * Task 4.4: where our own card page is served (Pin Payments' hosted fields). WEB_ORIGIN in development, test and ci;
+   * elsewhere WEB_ORIGIN only when it is a plain https origin, else an inert one (no card session is then created).
+   */
+  cardPageOrigin?: string;
+  /** Task 4.4: the database store of card sessions; absent for registries built for static checks. */
+  cardSessions?: CardSessionStore;
 }
+
+/** The card page origin outside test environments when WEB_ORIGIN is not a plain https origin. */
+export const INERT_CARD_PAGE_ORIGIN = 'https://card-page.invalid';
+const PLAIN_HTTPS_ORIGIN = /^https:\/\/[a-z0-9.-]+$/;
 
 /**
  * Outside development, test and ci the simulator never runs (the gateway wrapper refuses it), so its page origin is
@@ -19,13 +34,19 @@ export interface AdapterOptions {
  */
 export const INERT_SIMULATOR_ORIGIN = 'https://checkout.simulator.invalid';
 
-export function adapterOptions(env: AppEnv, webOrigin: string): AdapterOptions {
-  return { webOrigin: TEST_ADAPTER_ENVS.includes(env) ? webOrigin : INERT_SIMULATOR_ORIGIN };
+export function adapterOptions(env: AppEnv, webOrigin: string, cardSessions?: CardSessionStore): AdapterOptions {
+  const testEnv = TEST_ADAPTER_ENVS.includes(env);
+  const cardPageOrigin = testEnv || PLAIN_HTTPS_ORIGIN.test(webOrigin) ? webOrigin : INERT_CARD_PAGE_ORIGIN;
+  return { webOrigin: testEnv ? webOrigin : INERT_SIMULATOR_ORIGIN, cardPageOrigin, ...(cardSessions ? { cardSessions } : {}) };
 }
 
 export function createAdapters(opts: AdapterOptions): PaymentProvider[] {
   // Stripe is experimental (task 3.3): the gateway wrapper never lets it charge live, and it has no account unless one
   // is created with `payments:stripe-test-account`.
   // PayPal is experimental too (task 4.3): test accounts only reach PayPal's sandbox.
-  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider()];
+  // Pin Payments is experimental too (task 4.4): its card is typed into Pin's iframes on our card page, so the core's
+  // CardSessionProvider holds the session before the card is submitted; test accounts only reach test-api.pinpayments.com.
+  const cardPageOrigin = opts.cardPageOrigin ?? opts.webOrigin;
+  const pin = new CardSessionProvider(new PinPaymentsGateway(), opts.cardSessions ?? unwiredCardSessionStore(), { cardPageOrigin, usable: cardPageOrigin !== INERT_CARD_PAGE_ORIGIN });
+  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider(), pin];
 }

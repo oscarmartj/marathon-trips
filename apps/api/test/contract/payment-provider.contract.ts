@@ -18,6 +18,15 @@ export interface SignedBody {
   headers: Record<string, string>;
 }
 
+/**
+ * Task 4.4 (plan docs/plans/4.4-au-card-gateway.md, sections 12.2 and 18 M1): what a subject answers to `webhookFor` for
+ * an object that has no counterpart at the gateway yet (a card session before its card is submitted), where the gateway
+ * has no event at all. Valid only when the manifest declares `capabilities.preCardSession` (set by CardSessionProvider
+ * only, checked by the registry); any other provider giving it fails the clause.
+ */
+export const NO_GATEWAY_EVENT = Symbol('no_gateway_event');
+export type NoGatewayEvent = typeof NO_GATEWAY_EVENT;
+
 /** What one adapter brings to the suite. Every member is required, so every clause runs for every adapter. */
 export interface ContractSubject {
   provider: PaymentProvider;
@@ -32,12 +41,20 @@ export interface ContractSubject {
    * 12.4): a declined card where that ends it, the session expiring where it does not. Never by our cancelPayment.
    */
   endAtGateway(ctx: ProviderContext, payment: ProviderPayment): Promise<void>;
-  /** The webhook the gateway would send now for this object, signed at `at` with ctx.webhookSecret. */
-  webhookFor(ctx: ProviderContext, ref: string, at: Date): Promise<SignedBody>;
+  /**
+   * The webhook the gateway would send now for this object, signed at `at` with ctx.webhookSecret; NO_GATEWAY_EVENT only
+   * for an object the gateway does not have yet (preCardSession).
+   */
+  webhookFor(ctx: ProviderContext, ref: string, at: Date): Promise<SignedBody | NoGatewayEvent>;
   /** A refund made on the gateway's own dashboard (no id of ours), read back through the adapter. */
   gatewayRefunds(ctx: ProviderContext, payment: ProviderPayment, amountMinor: bigint): Promise<ProviderRefund>;
   /** The webhook the gateway would send now for this refund, signed at `at` with ctx.webhookSecret. */
   refundWebhookFor(ctx: ProviderContext, refundRef: string, at: Date): Promise<SignedBody>;
+  /**
+   * Task 4.4, required with preCardSession: the gateway finishes a pending refund (Pin's refunds start Pending), so two
+   * real events of one refund give the "older event keeps its own state" check of webhook_previous_state_and_duplicate.
+   */
+  refundSettles?(ctx: ProviderContext, refundRef: string): Promise<void>;
   /**
    * Task 4.5, required when the manifest declares `disputes`: a cardholder disputes a collected payment (the whole
    * amount, no funds taken yet), the dispute moves at the gateway, and the webhook the gateway would send now.
@@ -163,6 +180,26 @@ class Harness {
     return { input, p };
   }
 
+  /** Whether the provider's payments wait for a card on our page with no gateway object (task 4.4, plan 4.4 18 M1). */
+  get preCardSession(): boolean {
+    return this.p.manifest.capabilities.preCardSession === true;
+  }
+
+  /**
+   * A signed webhook to check signatures with (task 4.4, plan 4.4 18 M1): the one of `p` when the gateway has one; when
+   * the subject answers NO_GATEWAY_EVENT (allowed only with preCardSession), the event of a collected payment instead.
+   * A signature does not depend on the object's state, so no check is lost.
+   */
+  async signedFor(ctx: ProviderContext, p: ProviderPayment, at: Date): Promise<SignedBody> {
+    const w = await this.s.webhookFor(ctx, p.ref, at);
+    if (w !== NO_GATEWAY_EVENT) return w;
+    expect(this.preCardSession, 'NO_GATEWAY_EVENT only with capabilities.preCardSession').toBe(true);
+    const { p: paid } = await this.paid(ctx);
+    const after = await this.s.webhookFor(ctx, paid.ref, at);
+    if (after === NO_GATEWAY_EVENT) expect.fail('a collected payment has a gateway event');
+    return after;
+  }
+
   refundInput(p: ProviderPayment, amountMinor: bigint, key = `contract-refund:${randomUUID()}`) {
     return { paymentRef: p.ref, amount: { amountMinor, currency: p.amount.currency }, idempotencyKey: key, metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() };
   }
@@ -216,6 +253,37 @@ class Harness {
 
 const now = () => new Date();
 const HOUR = 3_600_000;
+
+/**
+ * webhook_previous_state_and_duplicate for a payment the gateway has no event for before the card is submitted (task
+ * 4.4, plan 4.4 section 12.2): only with preCardSession; the duplicate and two-ids checks run on the collected payment's
+ * real events, and "an older event keeps its own state" on two real events of one refund (pending, then succeeded).
+ */
+async function previousStateWithoutGatewayEvent(h: Harness, ctx: ProviderContext, p: ProviderPayment): Promise<void> {
+  expect(h.preCardSession, 'NO_GATEWAY_EVENT only with capabilities.preCardSession').toBe(true);
+  expect(p.status, 'no gateway event only while the payment waits for the card').toBe('requires_action');
+  expect(typeof h.s.refundSettles, 'a preCardSession subject lets a refund settle').toBe('function');
+  await h.s.customerCompletes(ctx, p, 'pay');
+  const after = await h.s.webhookFor(ctx, p.ref, now());
+  if (after === NO_GATEWAY_EVENT) expect.fail('a collected payment has a gateway event');
+  const v2 = await h.value('verifyWebhook (current state)', () => h.verify(ctx, after.body, after.headers, now()));
+  const v2again = await h.value('verifyWebhook (same body again)', () => h.verify(ctx, after.body, after.headers, now()));
+  if (!v2.ok || !v2again.ok) expect.fail('a valid webhook was refused');
+  expect(v2.event.payment?.status).toBe('succeeded');
+  expect(v2again.event.providerEventId, 'the same body is the same event (duplicate key)').toBe(v2.event.providerEventId);
+  expect((await h.value('parseEvent', () => h.p.parseEvent(after.body)))?.providerEventId).toBe(v2.event.providerEventId);
+  const r = await h.value('createRefund', () => h.p.createRefund(ctx, h.refundInput(p, p.amount.amountMinor)));
+  const older = await h.s.refundWebhookFor(ctx, r.ref, now());
+  await h.s.refundSettles!(ctx, r.ref);
+  const newer = await h.s.refundWebhookFor(ctx, r.ref, now());
+  const o = await h.value('verifyWebhook (older refund state)', () => h.verify(ctx, older.body, older.headers, now()));
+  const n = await h.value('verifyWebhook (newer refund state)', () => h.verify(ctx, newer.body, newer.headers, now()));
+  if (!o.ok || !n.ok) expect.fail('a valid refund webhook was refused');
+  expect(o.event.refund?.status, 'an older event keeps its own state').toBe(r.status);
+  expect(n.event.refund?.status).toBe('succeeded');
+  expect(o.event.providerEventId, 'two events, two ids').not.toBe(n.event.providerEventId);
+  expect([o.event.providerEventId, n.event.providerEventId]).not.toContain(v2.event.providerEventId);
+}
 
 /** One implementation per clause; the type makes a missing or extra clause a compile error. */
 export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Promise<void> } = {
@@ -424,6 +492,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     await h.s.customerCompletes(ctx, p, 'pay');
     const at = now();
     const w = await h.s.webhookFor(ctx, p.ref, at);
+    if (w === NO_GATEWAY_EVENT) expect.fail('a collected payment has a gateway event');
     for (const name of h.p.signatureHeaders) expect(Object.keys(w.headers).map((k) => k.toLowerCase()), 'signature header present').toContain(name);
     const v = await h.value('verifyWebhook', () => h.verify(ctx, w.body, w.headers, at));
     if (!v.ok) expect.fail(`verifyWebhook refused a valid webhook: ${v.code}`);
@@ -445,8 +514,10 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
     const before = await h.s.webhookFor(ctx, p.ref, now());
+    if (before === NO_GATEWAY_EVENT) return previousStateWithoutGatewayEvent(h, ctx, p);
     await h.s.customerCompletes(ctx, p, 'pay');
     const after = await h.s.webhookFor(ctx, p.ref, now());
+    if (after === NO_GATEWAY_EVENT) expect.fail('a collected payment has a gateway event');
     const v1 = await h.value('verifyWebhook (previous state)', () => h.verify(ctx, before.body, before.headers, now()));
     const v2 = await h.value('verifyWebhook (current state)', () => h.verify(ctx, after.body, after.headers, now()));
     const v2again = await h.value('verifyWebhook (same body again)', () => h.verify(ctx, after.body, after.headers, now()));
@@ -462,7 +533,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
     const at = now();
-    const w = await h.s.webhookFor(ctx, p.ref, at);
+    const w = await h.signedFor(ctx, p, at);
     const verify = (label: string, c: ProviderContext, body: Buffer, headers: Record<string, string>, when: Date) => h.value(label, () => h.verify(c, body, headers, when));
     const tampered = Buffer.from(w.body);
     const mid = Math.floor(tampered.length / 2);
@@ -482,7 +553,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   async verify_and_parse_never_throw(h) {
     const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
-    const w = await h.s.webhookFor(ctx, p.ref, now());
+    const w = await h.signedFor(ctx, p, now());
     const bodies = [Buffer.alloc(0), Buffer.from('not json'), Buffer.from([0xff, 0xfe, 0x00, 0xc3, 0x28]), Buffer.alloc(256 * 1024, 0x7b), Buffer.from('null'), Buffer.from('[]'), Buffer.from('{"id":1}')];
     for (const body of bodies) {
       expect((await h.value('verifyWebhook (garbage)', () => h.verify(ctx, body, w.headers, now()))).ok).toBe(false);
@@ -590,7 +661,14 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     expect(v.event.kind).toBe('refund');
     const ev = h.expectRefund(v.event.refund ?? null, p.amount.amountMinor);
     expect(ev.ref).toBe(r.ref);
-    expect(ev.ourRefundId).toBe(input.metadata.refundId);
+    if (h.p.manifest.capabilities.refundEventOurId === 'via_retrieve') {
+      // Task 4.4 (plan 4.4, section 7): the gateway's refund events carry no id of ours; the core asks retrieveRefund
+      // before recording a refund as external, and that answer must carry it.
+      expect(ev.ourRefundId, 'the event itself claims no id').toBeUndefined();
+      expect((await h.value('retrieveRefund (event ref)', () => h.p.retrieveRefund(ctx, { ref: ev.ref })))?.ourRefundId).toBe(input.metadata.refundId);
+    } else {
+      expect(ev.ourRefundId).toBe(input.metadata.refundId);
+    }
     expect(ev.amount.currency).toBe(p.amount.currency);
     // The core finds the payment through the gateway's name for it.
     expect((await h.retrieve(ctx, { ref: ev.paymentRef }))?.ref).toBe(p.ref);
@@ -688,7 +766,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const { p: paid } = await h.paid(ctx);
     const r = await h.call('createRefund', () => h.p.createRefund(ctx, h.refundInput(paid, 100n)));
     if (r.ok) await h.call('retrieveRefund', () => h.p.retrieveRefund(ctx, { ref: r.value.ref }));
-    const w = await h.s.webhookFor(ctx, p.ref, now());
+    const w = await h.signedFor(ctx, p, now());
     await h.call('verifyWebhook (other secret)', () => h.verify(bad.webhookSecret === ctx.webhookSecret ? { ...bad, webhookSecret: randomBytes(32).toString('hex') } : bad, w.body, w.headers, now()));
     const haystack = h.seen.map(serialise).join('\n');
     // The secrets of every context handed out in this suite (C3 to C19 used their own accounts), each field once.
