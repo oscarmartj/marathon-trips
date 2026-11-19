@@ -117,14 +117,15 @@ describe('adapter registry and states (plan 3.1, 2.3)', () => {
 describe('gateway_guard_matrix (plan 3.1, 2.4)', () => {
   const verified = { ...simulatorManifest, key: 'real', status: 'verified' as const, testOnly: false, evidence: 'docs/done/x.md' };
   const experimental = { ...simulatorManifest, key: 'exp', status: 'experimental' as const, testOnly: false };
-  const ops: GatewayOperation[] = ['create', 'retrieve', 'cancel', 'webhook', 'test_connection'];
+  const ops: GatewayOperation[] = ['create', 'retrieve', 'cancel', 'refund', 'webhook', 'test_connection'];
   const statuses: AccountForCall['status'][] = ['active', 'paused', 'retired', 'archived'];
 
   const expected = (acc: AccountForCall, man: AdapterManifest, op: GatewayOperation, env: AppEnv): string | null => {
     if (acc.mode === 'live' && env !== 'production') return 'live_call_blocked_outside_production';
     if (acc.mode === 'live' && (man.status !== 'verified' || man.testOnly)) return 'adapter_not_verified_for_live';
     if (man.testOnly && !['development', 'test', 'ci'].includes(env)) return 'test_adapter_blocked_in_environment';
-    if (op === 'create' && acc.mode !== (env === 'production' ? 'live' : 'test')) return 'account_mode_not_for_environment';
+    // Task 3.3: a refund, like a charge, only on an account of the environment's mode; it is allowed on any status.
+    if ((op === 'create' || op === 'refund') && acc.mode !== (env === 'production' ? 'live' : 'test')) return 'account_mode_not_for_environment';
     if (op === 'create' && acc.status !== 'active') return 'account_not_accepting_charges';
     return null;
   };
@@ -137,6 +138,11 @@ describe('gateway_guard_matrix (plan 3.1, 2.4)', () => {
       if (got !== want) wrong.push(`${env}/${mode}/${man.key}/${status}/${op}: ${got} ≠ ${want}`);
     }
     expect(wrong).toEqual([]);
+  });
+  it('non_production_refund_on_live_account_rejected; a retired account still refunds (plan 0.1, 6.4)', () => {
+    for (const env of APP_ENVS.filter((e) => e !== 'production')) expect(callBlockReason({ id: 'a', adapterKey: 'real', mode: 'live', status: 'active' }, verified, 'refund', env)).toBe('live_call_blocked_outside_production');
+    expect(callBlockReason({ id: 'a', adapterKey: 'exp', mode: 'test', status: 'retired' }, experimental, 'refund', 'test')).toBeNull();
+    expect(callBlockReason({ id: 'a', adapterKey: 'exp', mode: 'test', status: 'retired' }, experimental, 'create', 'test')).toBe('account_not_accepting_charges');
   });
   it('live_call_blocked_outside_production, live_charge_rejected_when_adapter_not_verified, test_only_adapter_never_live', () => {
     for (const env of APP_ENVS.filter((e) => e !== 'production')) expect(callBlockReason({ id: 'a', adapterKey: 'real', mode: 'live', status: 'active' }, verified, 'retrieve', env)).toBe('live_call_blocked_outside_production');
@@ -247,10 +253,10 @@ describe('simulator_signature_verification (plan 3.1, 6)', () => {
   });
   it('simulator_failed_is_terminal: a declined object cannot be charged or reused', async () => {
     control.queue('acc', 'decline');
-    const p = await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU' });
+    const p = await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU', createdAt: new Date() });
     expect(p.status).toBe('failed');
     expect((await provider.cancelPayment(ctx, p.ref)).status).toBe('failed');
-    expect((await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU' })).status).toBe('failed');
+    expect((await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU', createdAt: new Date() })).status).toBe('failed');
   });
 });
 

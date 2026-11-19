@@ -10,8 +10,10 @@ import type { AmendmentMoneyAfter, AmendmentMoneyFacts, AmendmentMoneyPort, Amen
 import { PAYMENT_EVENTS } from './attempt-state';
 import { PaymentCoverageService } from './coverage.service';
 import { ProviderGateway } from './gateway';
-import { payable, succeededPaymentsSource } from './payable';
+import { payable, netCollectedSource } from './payable';
 import { amendedPlanItems, dateIn } from './schedule';
+import { LedgerService } from './ledger.service';
+import { scheduleReallocationKey } from './ledger';
 
 type Tx = Prisma.TransactionClient;
 
@@ -35,6 +37,7 @@ export class PaymentAmendmentService implements AmendmentMoneyPort {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
+    @Inject(LedgerService) private readonly ledger: LedgerService,
   ) {}
 
   register(hooks: BookingAmendmentHooks): void {
@@ -42,7 +45,7 @@ export class PaymentAmendmentService implements AmendmentMoneyPort {
   }
 
   async facts(tx: Tx, bookingId: string): Promise<AmendmentMoneyFacts> {
-    const collectedMinor = await succeededPaymentsSource.collected(tx, bookingId, this.gateway.mode);
+    const collectedMinor = await netCollectedSource.collected(tx, bookingId, this.gateway.mode);
     const live = await tx.payment.findUnique({ where: { liveBookingId: bookingId }, select: { id: true } });
     return { collectedMinor, liveAttempt: live !== null };
   }
@@ -72,6 +75,8 @@ export class PaymentAmendmentService implements AmendmentMoneyPort {
       const revoked = await tx.$queryRaw<Array<{ id: string }>>`
         UPDATE payment_links SET status = 'revoked', "revokedAt" = clock_timestamp() WHERE "bookingId" = ${booking.id}::uuid AND status = 'active' RETURNING id::text AS id`;
       for (const r of revoked) await this.audit.record(tx, { actor: ctx.actor, action: 'payments.paymentLink.revoked', entityType: 'PaymentLink', entityId: r.id, before: { status: 'active' }, after: { status: 'revoked' }, context: { bookingId: booking.id, reason: 'plan_changed' } });
+      // Funds and overpayments follow the new plan (plan 3.3, 1.5).
+      await this.ledger.reallocate(tx, { id: booking.id, currency: schedule.currency }, this.gateway.mode, scheduleReallocationKey(booking.id, version));
     }
 
     // Coverage C with the booking locked by the change (Booking → Payment is never reversed: nothing here locks a payment).

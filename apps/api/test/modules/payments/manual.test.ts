@@ -8,6 +8,8 @@ import { PaymentRouting } from '../../../src/modules/payments/core/routing';
 import { ProviderGateway, modeForEnv } from '../../../src/modules/payments/core/gateway';
 import { ProviderAccountsService } from '../../../src/modules/payments/core/accounts.service';
 import { TestApp, makeApp } from '../../support/auth';
+import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
+import { balancesOf, ledgerOf } from '../../support/ledger';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
 import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, requestBody } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
@@ -422,6 +424,21 @@ describe('staff confirm a transfer (section 3)', () => {
     expect(view.allocation.byPayment.map((s: { amountMinor: string }) => BigInt(s.amountMinor)).reduce((a: bigint, x: bigint) => a + x, 0n)).toBe(b.totalMinor);
   });
 
+  it('inbound_payment_posts_once (task 3.3): a confirmation repeated with the same statement ID posts one transfer once', async () => {
+    const b = await booked(false);
+    const reference = uniq();
+    const first = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference });
+    const again = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference });
+    expect([first.status, again.status]).toEqual([200, 200]);
+    expect(await inbound(b.bookingId)).toHaveLength(1);
+    expect(await ledgerOf(t, b.bookingId)).toEqual([
+      { idempotencyKey: `payment:${first.body.transfer.id}:succeeded`, kind: 'payment', entries: { clearing: b.depositMinor, customer_funds: -b.depositMinor } },
+    ]);
+    const clearing = await t.prisma.ledgerEntry.findFirstOrThrow({ where: { transaction: { idempotencyKey: `payment:${first.body.transfer.id}:succeeded` }, amountMinor: { gt: 0n } } });
+    expect(clearing.accountCode).toBe(`provider_clearing:${manualId}`);
+    expect(await t.app.get(PaymentLedgerCheckService).check({ bookingIds: [b.bookingId] })).toEqual([]);
+  });
+
   it('transfer_over_the_total_records_overpayment_task', async () => {
     const b = await booked();
     const r = await confirm(b.bookingId, { amountMinor: (b.totalMinor + 500n).toString(), reference: uniq() });
@@ -471,10 +488,21 @@ describe('voiding a mistaken transfer (section 4)', () => {
     const view = (await admin.get(`/admin/payments/bookings/${b.bookingId}`)).body;
     expect(view.coverage).toMatchObject({ collectedMinor: '0', depositCovered: false });
     expect(view.allocation.byPayment).toEqual([]);
+    // The ledger follows (task 3.3): the void is a reversal of the transfer's posting, cash line mirrored, nothing left.
+    const id = wrong.body.transfer.id as string;
+    expect(await ledgerOf(t, b.bookingId)).toEqual([
+      { idempotencyKey: `payment:${id}:succeeded`, kind: 'payment', entries: { clearing: b.depositMinor, customer_funds: -b.depositMinor } },
+      { idempotencyKey: `inbound:${id}:voided`, kind: 'reversal', entries: { clearing: -b.depositMinor, customer_funds: b.depositMinor } },
+    ]);
+    const original = await t.prisma.ledgerTransaction.findUniqueOrThrow({ where: { idempotencyKey: `payment:${id}:succeeded` } });
+    expect((await t.prisma.ledgerTransaction.findUniqueOrThrow({ where: { idempotencyKey: `inbound:${id}:voided` } })).reversesTransactionId).toBe(original.id);
+    expect(await balancesOf(t, b.bookingId)).toEqual({ fundsMinor: 0n, overpaymentsMinor: 0n, receivableMinor: 0n });
     // voided_inbound_reference_can_be_reconfirmed, with the right amount.
     const right = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference });
     expect([right.status, right.body.replayed]).toEqual([200, false]);
     expect((await bookingRow(b.bookingId)).status).toBe('deposit_paid');
+    expect((await ledgerOf(t, b.bookingId)).map((x) => x.idempotencyKey)).toEqual([`payment:${id}:succeeded`, `inbound:${id}:voided`, `payment:${right.body.transfer.id}:succeeded`]);
+    expect(await t.app.get(PaymentLedgerCheckService).check({ bookingIds: [b.bookingId] })).toEqual([]);
     // reference_unique_per_account_while_not_voided (the database too).
     await expect(t.prisma.$executeRawUnsafe(
       `INSERT INTO payments (id, "bookingId", currency, origin, "attemptNumber", "payerCustomerId", "providerAccountId", mode, "adapterKey", method, "amountMinor", status, "idempotencyKey", "providerPaymentRef", "payerReference", "pendingExpiresAt", "updatedAt")

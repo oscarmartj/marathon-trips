@@ -6,8 +6,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { PaymentMethod } from '@mt/shared';
 import {
-  AdapterManifest, CreatePaymentInput, Money, NormalisedEvent, PaymentProvider, ProviderContext, ProviderError, ProviderPayment, ProviderPaymentStatus,
-  WebhookVerification,
+  AdapterManifest, CreatePaymentInput, CreateRefundInput, Money, NormalisedEvent, PaymentLookup, PaymentProvider, ProviderContext, ProviderError, ProviderPayment,
+  ProviderPaymentStatus, ProviderRefund, ProviderRefundStatus, RefundLookup, WebhookVerification,
 } from '../../core/provider';
 
 export const SIMULATOR_KEY = 'simulator';
@@ -36,7 +36,7 @@ export function simulatorManifest(webOrigin: string): AdapterManifest {
     currencies: ['AUD'],
     countries: 'any',
     checkoutOrigin: new URL(webOrigin).origin,
-    capabilities: { refunds: 'none', deferredCapture: false, lookupByIdempotencyKey: true },
+    capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed' },
   };
 }
 
@@ -63,9 +63,24 @@ export type SimulatorOutcome =
   | 'in_use';
 export type SimulatorRetrieveFault = 'unavailable' | 'not_found' | 'not_found_error' | 'auth_failed';
 
+/** A refund at the simulated gateway (task 3.3): made by us (with a key) or on its "dashboard" (without). */
+interface SimRefund {
+  ref: string;
+  paymentRef: string;
+  status: ProviderRefundStatus;
+  amount: Money;
+  idempotencyKey?: string;
+  refundId?: string;
+  failureCode?: string;
+}
+
 class SimAccount {
   readonly payments = new Map<string, SimPayment>();
   readonly byKey = new Map<string, string>();
+  readonly refunds = new Map<string, SimRefund>();
+  readonly refundsByKey = new Map<string, string>();
+  readonly nextRefund: Array<'pending' | 'unavailable'> = [];
+  readonly nextRefundRetrieve: SimulatorRetrieveFault[] = [];
   readonly next: SimulatorOutcome[] = [];
   readonly nextCancel: Array<'unavailable'> = [];
   readonly nextRetrieve: SimulatorRetrieveFault[] = [];
@@ -113,6 +128,18 @@ export class SimulatorWorld {
 }
 
 export const SIMULATOR_WORLD = new SimulatorWorld();
+
+const refundView = (r: SimRefund): ProviderRefund => ({
+  ref: r.ref, status: r.status, amount: { ...r.amount }, paymentRef: r.paymentRef,
+  ...(r.refundId ? { ourRefundId: r.refundId } : {}), ...(r.failureCode ? { failureCode: r.failureCode } : {}),
+});
+
+/** What is still refundable on a payment: its amount less every refund not failed or cancelled. */
+function refundable(acc: SimAccount, p: SimPayment): bigint {
+  let left = p.amount.amountMinor;
+  for (const r of acc.refunds.values()) if (r.paymentRef === p.ref && r.status !== 'failed' && r.status !== 'cancelled') left -= r.amount.amountMinor;
+  return left;
+}
 
 const view = (p: SimPayment, checkoutBase?: string): ProviderPayment => ({
   ref: p.ref,
@@ -196,7 +223,7 @@ export class SimulatorProvider implements PaymentProvider {
     return view(p, this.checkoutBase);
   }
 
-  async retrievePayment(ctx: ProviderContext, by: { ref: string } | { idempotencyKey: string }): Promise<ProviderPayment | null> {
+  async retrievePayment(ctx: ProviderContext, by: PaymentLookup): Promise<ProviderPayment | null> {
     checkCredentials(ctx);
     const acc = this.world.account(ctx.accountId);
     const fault = acc.nextRetrieve.shift();
@@ -221,6 +248,52 @@ export class SimulatorProvider implements PaymentProvider {
       acc.effectiveCancels += 1;
     }
     return view(p);
+  }
+
+  async createRefund(ctx: ProviderContext, input: CreateRefundInput): Promise<ProviderRefund> {
+    checkCredentials(ctx);
+    const acc = this.world.account(ctx.accountId);
+    const known = acc.refundsByKey.get(input.idempotencyKey);
+    if (known) {
+      const r = acc.refunds.get(known)!;
+      if (r.amount.amountMinor !== input.amount.amountMinor || r.paymentRef !== input.paymentRef) throw new ProviderError('provider_rejected', false);
+      return refundView(r);
+    }
+    const outcome = acc.nextRefund.shift();
+    if (outcome === 'unavailable') throw new ProviderError('provider_unavailable', true);
+    const p = acc.payments.get(input.paymentRef);
+    if (!p) throw new ProviderError('provider_not_found', false);
+    if (p.status !== 'succeeded' || input.amount.currency !== p.amount.currency || input.amount.amountMinor <= 0n || input.amount.amountMinor > refundable(acc, p)) {
+      throw new ProviderError('provider_rejected', false);
+    }
+    const r: SimRefund = {
+      ref: `sim_ref_${randomBytes(12).toString('hex')}`, paymentRef: p.ref, status: outcome === 'pending' ? 'pending' : 'succeeded', amount: { ...input.amount },
+      idempotencyKey: input.idempotencyKey, refundId: input.metadata.refundId,
+    };
+    acc.refunds.set(r.ref, r);
+    acc.refundsByKey.set(input.idempotencyKey, r.ref);
+    return refundView(r);
+  }
+
+  async retrieveRefund(ctx: ProviderContext, by: RefundLookup): Promise<ProviderRefund | null> {
+    checkCredentials(ctx);
+    const acc = this.world.account(ctx.accountId);
+    const fault = acc.nextRefundRetrieve.shift();
+    if (fault === 'unavailable') throw new ProviderError('provider_unavailable', true);
+    if (fault === 'auth_failed') throw new ProviderError('provider_auth_failed', false);
+    if (fault === 'not_found') return null;
+    if (fault === 'not_found_error') throw new ProviderError('provider_not_found', false);
+    const ref = 'ref' in by ? by.ref : acc.refundsByKey.get(by.idempotencyKey);
+    const r = ref ? acc.refunds.get(ref) : undefined;
+    return r ? refundView(r) : null;
+  }
+
+  /** The webhook the gateway would send now for a refund of this account, signed at `at` (contract suite). */
+  currentRefundWebhook(ctx: ProviderContext, ref: string, at: Date): SignedWebhook {
+    checkCredentials(ctx);
+    const r = this.world.account(ctx.accountId).refunds.get(ref);
+    if (!r) throw new ProviderError('provider_not_found', false);
+    return signedRefundEvent(ctx.webhookSecret, r, { at, signedAt: at });
   }
 
   /** The hosted page's view of a checkout token, or null. Reads memory only. */
@@ -293,6 +366,7 @@ function parseEvent(body: unknown): NormalisedEvent | null {
   if (typeof b.id !== 'string' || !/^sim_evt_[A-Za-z0-9_]{1,80}$/.test(b.id) || typeof b.created !== 'number' || typeof b.type !== 'string') return null;
   if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(b.type)) return null;
   const base = { providerEventId: b.id, type: b.type, occurredAt: new Date(b.created * 1000) };
+  if (b.type === 'refund.updated') return parseRefundEvent(base, b.data);
   if (b.type !== 'payment.updated') return { ...base, kind: 'unsupported' };
   const d = b.data as Record<string, unknown> | undefined;
   if (!d || typeof d.ref !== 'string' || !STATUSES.includes(d.status as ProviderPaymentStatus) || typeof d.amountMinor !== 'string' || !/^\d{1,18}$/.test(d.amountMinor) || typeof d.currency !== 'string') return null;
@@ -308,6 +382,38 @@ function parseEvent(body: unknown): NormalisedEvent | null {
       ...(typeof d.failureCode === 'string' ? { failureCode: d.failureCode } : {}),
     },
   };
+}
+
+const REFUND_STATUSES: readonly ProviderRefundStatus[] = ['pending', 'succeeded', 'failed', 'cancelled'];
+
+function parseRefundEvent(base: { providerEventId: string; type: string; occurredAt: Date }, data: unknown): NormalisedEvent | null {
+  const d = data as Record<string, unknown> | undefined;
+  if (!d || typeof d.ref !== 'string' || typeof d.paymentRef !== 'string' || !REFUND_STATUSES.includes(d.status as ProviderRefundStatus)
+    || typeof d.amountMinor !== 'string' || !/^\d{1,18}$/.test(d.amountMinor) || typeof d.currency !== 'string') return null;
+  const meta = d.metadata as Record<string, unknown> | undefined;
+  return {
+    ...base,
+    kind: 'refund',
+    refund: {
+      ref: d.ref, paymentRef: d.paymentRef, status: d.status as ProviderRefundStatus, amount: { amountMinor: BigInt(d.amountMinor), currency: d.currency },
+      ...(typeof meta?.refundId === 'string' ? { ourRefundId: meta.refundId } : {}),
+      ...(typeof d.failureCode === 'string' ? { failureCode: d.failureCode } : {}),
+    },
+  };
+}
+
+/** The simulated gateway's refund.updated event, signed with `secret`. */
+function signedRefundEvent(secret: string, r: SimRefund, opts: EventOptions = {}): SignedWebhook {
+  const eventId = opts.eventId ?? `sim_evt_${randomBytes(10).toString('hex')}`;
+  const created = Math.floor((opts.at ?? new Date()).getTime() / 1000);
+  const body = Buffer.from(JSON.stringify({
+    id: eventId, type: 'refund.updated', created,
+    data: {
+      ref: r.ref, paymentRef: r.paymentRef, status: r.status, amountMinor: r.amount.amountMinor.toString(), currency: r.amount.currency,
+      ...(r.refundId ? { metadata: { refundId: r.refundId } } : {}), ...(r.failureCode ? { failureCode: r.failureCode } : {}),
+    },
+  }));
+  return { body, eventId, headers: { 'content-type': 'application/json', [SIMULATOR_SIGNATURE_HEADER]: signSimulator(secret, body, opts.signedAt ?? new Date()) } };
 }
 
 export interface SignedWebhook {
@@ -365,6 +471,48 @@ export class SimulatorControl {
 
   forget(accountId: string): void {
     this.world.forget(accountId);
+  }
+
+  /** A refund made on the gateway's own dashboard (task 3.3): no key and no id of ours. Refused beyond what is left. */
+  gatewayRefund(accountId: string, paymentRef: string, amountMinor: bigint, status: ProviderRefundStatus = 'succeeded'): ProviderRefund {
+    const acc = this.world.account(accountId);
+    const p = acc.payments.get(paymentRef);
+    if (!p || p.status !== 'succeeded' || amountMinor <= 0n || amountMinor > refundable(acc, p)) throw new Error('simulator: refund refused');
+    const r: SimRefund = { ref: `sim_ref_${randomBytes(12).toString('hex')}`, paymentRef, status, amount: { amountMinor, currency: p.amount.currency } };
+    acc.refunds.set(r.ref, r);
+    return refundView(r);
+  }
+
+  /** Moves a refund on the gateway side (a pending one settles or fails; a succeeded one can fail later). */
+  settleRefund(accountId: string, ref: string, status: ProviderRefundStatus, failureCode?: string): ProviderRefund {
+    const r = this.world.account(accountId).refunds.get(ref);
+    if (!r) throw new Error('simulator: unknown refund');
+    r.status = status;
+    if (failureCode) r.failureCode = failureCode;
+    return refundView(r);
+  }
+
+  findRefund(accountId: string, ref: string): ProviderRefund | null {
+    const r = this.world.account(accountId).refunds.get(ref);
+    return r ? refundView(r) : null;
+  }
+
+  /** The next retrieveRefund fails this way (its own queue: retrievePayment has another). */
+  failNextRefundRetrieve(accountId: string, how: SimulatorRetrieveFault = 'unavailable'): void {
+    this.world.account(accountId).nextRefundRetrieve.push(how);
+  }
+
+  /** The next createRefund answers pending, or fails as unavailable. */
+  queueRefund(accountId: string, outcome: 'pending' | 'unavailable'): void {
+    this.world.account(accountId).nextRefund.push(outcome);
+  }
+
+  /** A refund webhook as the gateway would send it now; `over` changes what it says. */
+  refundEvent(secret: string, accountId: string, ref: string, over: { amountMinor?: bigint; currency?: string; status?: ProviderRefundStatus; eventId?: string; paymentRef?: string } = {}): SignedWebhook {
+    const r = this.world.account(accountId).refunds.get(ref);
+    if (!r) throw new Error('simulator: unknown refund');
+    const said: SimRefund = { ...r, amount: { amountMinor: over.amountMinor ?? r.amount.amountMinor, currency: over.currency ?? r.amount.currency }, status: over.status ?? r.status, paymentRef: over.paymentRef ?? r.paymentRef };
+    return signedRefundEvent(secret, said, over.eventId ? { eventId: over.eventId } : {});
   }
 
   /** A webhook for a payment, signed with `secret`; `over` changes what the event says (amount, currency, metadata…). */

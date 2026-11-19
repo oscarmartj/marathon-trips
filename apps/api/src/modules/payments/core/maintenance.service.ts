@@ -9,6 +9,7 @@ import { PaymentAttemptSyncService } from './attempt-sync.service';
 import type { SyncAction } from './attempt-sync.service';
 import { PaymentWebhooksService } from './webhooks.service';
 import { PaymentAmendmentService } from './amendment-plan.service';
+import { PaymentRefundSyncService } from './refund-sync.service';
 import { ManualTransfersService } from './manual-transfers.service';
 
 export const RAW_BODY_RETENTION_DAYS = 180;
@@ -36,6 +37,7 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
     @Inject(ManualTransfersService) private readonly transfers: ManualTransfersService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(PaymentRefundSyncService) private readonly refundSync: PaymentRefundSyncService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -46,7 +48,7 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     await this.jobs.schedule(QUEUES.paymentsMaintenance, '*/10 * * * *');
   }
 
-  async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; failedFlagged: string[]; bodiesPurged: number; rejectionsPurged: number; manualIntentsClosed: string[] }> {
+  async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; failedFlagged: string[]; bodiesPurged: number; rejectionsPurged: number; manualIntentsClosed: string[]; refundsRequeried: string[] }> {
     // An attempt whose collected money could not be applied waits for Oscar (its task): no loop (plan 3.2, section 11.8).
     const due = await this.prisma.$queryRaw<Array<{ id: string }>>`
       SELECT p.id::text AS id FROM payments p
@@ -91,6 +93,16 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     } catch (err) {
       this.logger.error(`manual intent sweep failed: ${safeError(err).code}`);
     }
+    // Refunds still open after a day are read again from the gateway (plan 0.1, 6.2; plan 3.3, 12.6).
+    const refundsRequeried: string[] = [];
+    for (const id of await this.refundSync.due(now)) {
+      try {
+        await this.refundSync.requery(id);
+        refundsRequeried.push(id);
+      } catch (err) {
+        this.logger.warn(`refund requery failed: ${safeError(err).code}`);
+      }
+    }
     let bodiesPurged = 0;
     let rejectionsPurged = 0;
     try {
@@ -99,6 +111,6 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     } catch (err) {
       this.logger.error(`payments retention failed: ${safeError(err).code}`);
     }
-    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), failedFlagged: flagged, bodiesPurged, rejectionsPurged, manualIntentsClosed };
+    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), failedFlagged: flagged, bodiesPurged, rejectionsPurged, manualIntentsClosed, refundsRequeried };
   }
 }

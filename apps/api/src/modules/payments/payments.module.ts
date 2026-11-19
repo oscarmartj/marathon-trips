@@ -35,6 +35,10 @@ import { WEBHOOK_MAX_BYTES, WEBHOOK_PATH_PREFIX, PaymentWebhooksService } from '
 import { PAYMENT_ENTITIES } from './entities';
 import { paymentsManifest } from './manifest';
 import { TermsService } from './core/terms.service';
+import { LedgerService } from './core/ledger.service';
+import { PaymentRefundStateMachine } from './core/refunds.service';
+import { PaymentRefundSyncService } from './core/refund-sync.service';
+import { PaymentLedgerCheckService } from './core/ledger-check.service';
 import { PaymentAmendmentService } from './core/amendment-plan.service';
 import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
@@ -48,7 +52,7 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
-    SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks,
+    SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
   ],
   exports: [ProviderAccountsService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
@@ -67,6 +71,8 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(PaymentRemindersService) private readonly reminders: PaymentRemindersService,
     @Inject(BookingAmendmentHooks) private readonly amendmentHooks: BookingAmendmentHooks,
     @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
+    @Inject(InboundPaymentHooks) private readonly inbound: InboundPaymentHooks,
+    @Inject(LedgerService) private readonly ledger: LedgerService,
   ) {}
 
   /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
@@ -77,6 +83,9 @@ export class PaymentsModule implements OnModuleInit {
     this.schedule.register(this.hooks);
     this.coverage.register(this.hooks);
     this.amendments.register(this.amendmentHooks);
+    // Task 3.3: the ledger follows a confirmed bank transfer and its void (task 3.4's hooks), in the same transaction.
+    this.inbound.onConfirmed('payments.ledger', async (tx, p) => void (await this.ledger.postPaymentSucceeded(tx, { id: p.bookingId, currency: p.currency }, p)));
+    this.inbound.onVoided('payments.ledger', async (tx, p) => void (await this.ledger.postInboundVoided(tx, { id: p.bookingId, currency: p.currency }, p)));
     this.mailTemplates.register({ ...PAYMENT_LINK_TEMPLATE, render: (ctx) => this.links.renderEmail(ctx) });
     this.mailTemplates.register({ ...PAYMENT_REMINDER_TEMPLATE, render: (ctx) => this.reminders.renderEmail(ctx) });
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });

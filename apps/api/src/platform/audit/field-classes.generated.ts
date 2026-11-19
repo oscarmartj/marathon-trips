@@ -538,6 +538,38 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  LedgerAccount: {
+    id: 'nopii',
+    code: 'nopii',
+    kind: 'nopii',
+    currency: 'nopii',
+    mode: 'nopii',
+    createdAt: 'nopii'
+  },
+  LedgerEntry: {
+    id: 'nopii',
+    transactionId: 'nopii',
+    mode: 'nopii',
+    accountCode: 'nopii',
+    currency: 'nopii',
+    amountMinor: 'pii',
+    bookingId: 'nopii',
+    createdAt: 'nopii'
+  },
+  LedgerTransaction: {
+    id: 'nopii',
+    occurredAt: 'nopii',
+    kind: 'nopii',
+    mode: 'nopii',
+    bookingId: 'nopii',
+    paymentId: 'nopii',
+    refundId: 'nopii',
+    reversesTransactionId: 'nopii',
+    idempotencyKey: 'nopii',
+    description: 'nopii',
+    contentSha256: 'nopii',
+    createdTxId: 'nopii'
+  },
   LoginToken: {
     id: 'nopii',
     purpose: 'nopii',
@@ -981,6 +1013,27 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     usedAt: 'nopii',
     createdAt: 'nopii'
   },
+  Refund: {
+    id: 'nopii',
+    paymentId: 'nopii',
+    bookingId: 'nopii',
+    providerAccountId: 'nopii',
+    mode: 'nopii',
+    currency: 'nopii',
+    amountMinor: 'nopii',
+    origin: 'nopii',
+    purpose: 'nopii',
+    reason: 'pii',
+    status: 'nopii',
+    idempotencyKey: 'nopii',
+    providerRefundRef: 'nopii',
+    failureCode: 'nopii',
+    requestedById: 'nopii',
+    succeededAt: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   ReportRun: {
     id: 'nopii',
     reportId: 'nopii',
@@ -1286,6 +1339,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     providerEventId: 'nopii',
     bookingId: 'nopii',
     paymentId: 'nopii',
+    refundId: 'nopii',
     type: 'nopii',
     rawBody: 'pii',
     headers: 'nopii',

@@ -11,7 +11,7 @@ export class ManualProvider implements PaymentProvider {
   readonly manifest: AdapterManifest = {
     key: MANUAL_KEY, displayName: 'Bank transfer (manual)', status: 'experimental', testOnly: false, cardDataHandling: 'hosted_only',
     methods: ['payid_transfer', 'manual_other'], currencies: ['AUD'], countries: 'any', checkoutOrigin: 'https://manual.invalid',
-    capabilities: { refunds: 'none', deferredCapture: false, lookupByIdempotencyKey: true },
+    capabilities: { refunds: 'none', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed' },
   };
   readonly signatureHeaders: readonly string[] = [];
 
@@ -30,6 +30,15 @@ export class ManualProvider implements PaymentProvider {
 
   cancelPayment(): Promise<never> {
     return Promise.reject(new ProviderError('provider_rejected', false));
+  }
+
+  /** A transfer is refunded by staff from the bank (task 4.5, finding 1), never through an adapter. */
+  createRefund(): Promise<never> {
+    return Promise.reject(new ProviderError('provider_rejected', false));
+  }
+
+  retrieveRefund(): Promise<null> {
+    return Promise.resolve(null);
   }
 
   verifyWebhook(): WebhookVerification {

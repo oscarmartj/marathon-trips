@@ -29,7 +29,16 @@ export interface AdapterManifest {
   countries: readonly string[] | 'any';
   /** Where its redirect URLs may point; anything else is never handed to a customer. */
   checkoutOrigin: string;
-  capabilities: { refunds: 'none' | 'full' | 'partial'; deferredCapture: boolean; lookupByIdempotencyKey: true };
+  capabilities: {
+    refunds: 'none' | 'full' | 'partial';
+    deferredCapture: boolean;
+    lookupByIdempotencyKey: true;
+    /**
+     * What a declined card does to the object (plan 3.3, section 12.4): `failed` ends it; `stays_payable` leaves it
+     * waiting for the customer, who may try another card (Stripe Checkout). Checked by the contract suite.
+     */
+    declineOutcome: 'failed' | 'stays_payable';
+  };
 }
 
 /** What the gateway wrapper hands an adapter for one call. Credentials are decrypted only for that call. */
@@ -51,7 +60,16 @@ export interface CreatePaymentInput {
   /** Built by the server from WEB_ORIGIN and a fixed path; never from the request. */
   returnUrl: string;
   customerCountry: string;
+  /**
+   * When our attempt row was created (plan 3.3, section 12.5): always the row's, never the time of the call, so every
+   * parameter sent under one idempotency key is the same on every retry, and a gateway without lookup by key can search
+   * a bounded window.
+   */
+  createdAt: Date;
 }
+
+/** How a payment is looked up: by the gateway's reference, or by our idempotency key and the attempt row's createdAt. */
+export type PaymentLookup = { ref: string } | { idempotencyKey: string; createdAt: Date };
 
 /**
  * `failed` means terminal at the gateway: the object can no longer be charged. A gateway that leaves a failed object
@@ -76,9 +94,37 @@ export interface NormalisedEvent {
   type: string;
   occurredAt: Date;
   /** Refunds, disputes and settlements are extensions for 4.5 and 4.6. */
-  kind: 'payment' | 'unsupported';
+  kind: 'payment' | 'refund' | 'unsupported';
   payment?: ProviderPayment;
+  refund?: ProviderRefund;
 }
+
+/** `cancelled`: the gateway dropped it before any money moved. */
+export type ProviderRefundStatus = 'pending' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface ProviderRefund {
+  ref: string;
+  status: ProviderRefundStatus;
+  amount: Money;
+  /** The payment refunded, as the gateway names it: retrievePayment({ ref: paymentRef }) resolves it (plan 3.3, 3.2). */
+  paymentRef: string;
+  /** Our refund id from the metadata, when the refund was started by us (task 4.5). */
+  ourRefundId?: string;
+  failureCode?: string;
+}
+
+/** No index signature, as for payments. */
+export interface CreateRefundInput {
+  /** The payment's reference as createPayment returned it. */
+  paymentRef: string;
+  amount: Money;
+  idempotencyKey: string;
+  metadata: { refundId: string; paymentId: string; bookingId: string };
+  /** When our refund row was created: the window a gateway without lookup by key searches. */
+  createdAt: Date;
+}
+
+export type RefundLookup = { ref: string } | { idempotencyKey: string; paymentRef: string; createdAt: Date };
 
 export type WebhookVerification = { ok: true; event: NormalisedEvent } | { ok: false; code: 'bad_signature' | 'stale_timestamp' | 'malformed'; claimedEventId?: string };
 
@@ -86,8 +132,12 @@ export interface PaymentProvider {
   readonly manifest: AdapterManifest;
   testConnection(ctx: ProviderContext): Promise<{ ok: true } | { ok: false; code: string }>;
   createPayment(ctx: ProviderContext, input: CreatePaymentInput): Promise<ProviderPayment>;
-  retrievePayment(ctx: ProviderContext, by: { ref: string } | { idempotencyKey: string }): Promise<ProviderPayment | null>;
+  /** `ref` may also be the `paymentRef` of a refund event (the gateway's other name for the payment). */
+  retrievePayment(ctx: ProviderContext, by: PaymentLookup): Promise<ProviderPayment | null>;
   cancelPayment(ctx: ProviderContext, ref: string, idempotencyKey: string): Promise<ProviderPayment>;
+  /** A refund of a collected payment; refused (provider_rejected, definitive) beyond what is left or if the capability says so. */
+  createRefund(ctx: ProviderContext, input: CreateRefundInput): Promise<ProviderRefund>;
+  retrieveRefund(ctx: ProviderContext, by: RefundLookup): Promise<ProviderRefund | null>;
   /** No network: checks the signature over the raw body with this account's secret, and the timestamp. */
   verifyWebhook(ctx: ProviderContext, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): WebhookVerification;
   /** Reads a body that already passed verifyWebhook (when it was received), for processing later and on retries. */

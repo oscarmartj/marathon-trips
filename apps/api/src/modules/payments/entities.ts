@@ -47,6 +47,26 @@ export const PAYMENT_ENTITIES: EntityDef[] = [
     },
   },
   {
+    // Task 3.3: a refund's reason is staff's free text about the customer (task 4.5): erasure empties it.
+    entityType: 'Refund', model: 'Refund', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: {
+      export: (tx: Tx, customerId) => tx.refund.findMany({ where: { payment: { booking: { customerId } } }, select: { bookingId: true, amountMinor: true, currency: true, status: true, origin: true, createdAt: true, succeededAt: true } }),
+      anonymise: async (tx: Tx, customerId) => {
+        await tx.refund.updateMany({ where: { payment: { booking: { customerId } }, reason: { not: null } }, data: { reason: null } });
+      },
+    },
+  },
+  {
+    // Task 3.3: the ledger holds no personal data (codes, amounts, ids) and is kept when a customer is erased.
+    entityType: 'LedgerTransaction', model: 'LedgerTransaction', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: { export: async () => [], anonymise: async () => undefined },
+  },
+  {
+    entityType: 'LedgerEntry', model: 'LedgerEntry', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: { export: async () => [], anonymise: async () => undefined },
+  },
+  { entityType: 'LedgerAccount', model: 'LedgerAccount' },
+  {
     // Task 5.1: a link holds no personal data, but it is a way into the customer's booking: erasure revokes it and drops
     // its token hash, so nothing can use it again.
     entityType: 'PaymentLink', model: 'PaymentLink', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },

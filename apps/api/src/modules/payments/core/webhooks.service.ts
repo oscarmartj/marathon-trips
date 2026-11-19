@@ -6,7 +6,7 @@ import { bossDb } from '../../../platform/database/boss-db';
 import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
 import { hmacHex, sha256Hex } from '../../../platform/crypto/hmac';
-import { safeError } from '../../../platform/errors/safe-error';
+import { AppError, safeError } from '../../../platform/errors/safe-error';
 import { ApiError, notFound } from '../../../platform/http/api-error';
 import { JobsService } from '../../../platform/jobs/jobs.service';
 import { QUEUES } from '../../../platform/jobs/queues';
@@ -16,6 +16,9 @@ import { CoverageFailedError } from './coverage.service';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import { ACCOUNT_PUBLIC_SELECT, ProviderGateway } from './gateway';
 import type { AccountForCall } from './gateway';
+import type { ProviderPayment, ProviderRefund } from './provider';
+import { PaymentRefundStateMachine, lockRefund, refundEventOf } from './refunds.service';
+import type { RefundEvent } from './refunds.service';
 
 export const WEBHOOK_PATH_PREFIX = '/payments/webhooks';
 export const WEBHOOK_MAX_BYTES = 256 * 1024;
@@ -48,6 +51,7 @@ export class PaymentWebhooksService {
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(PaymentRefundStateMachine) private readonly refunds: PaymentRefundStateMachine,
   ) {}
 
   sanitiseHeaders(headers: Record<string, string | string[] | undefined>, signatureHeaders: readonly string[]): Record<string, string> {
@@ -130,6 +134,7 @@ export class PaymentWebhooksService {
     const provider = this.gateway.registry.get(ev.providerAccount.adapterKey);
     const parsed = ev.rawBody && provider ? provider.parseEvent(Buffer.from(ev.rawBody)) : null;
     if (!parsed) return this.ignore(ev.id, ev.rawBody ? 'malformed' : 'body_purged');
+    if (parsed.kind === 'refund' && parsed.refund) return this.processRefund(ev, parsed.refund);
     if (parsed.kind !== 'payment' || !parsed.payment) return this.ignore(ev.id, 'unsupported');
     const remote = parsed.payment;
 
@@ -175,6 +180,121 @@ export class PaymentWebhooksService {
       await this.tasks.closeSystemIn(tx, `payments:webhook_failed:${ev.id}`);
       return 'processed' as const;
     }, PAYMENT_TX_OPTIONS);
+  }
+
+  /**
+   * A refund event (plan 3.3, sections 3.3 and 12.6). Outside any transaction, through the account that received it:
+   * the payment it refunds (the gateway's word, also used to catch up a payment we have not seen succeed), and the real
+   * state of a refund said to have failed and of this payment's refunds still open locally. A gateway error leaves the
+   * event failed, to be retried. Then booking, payment and refund are locked in that order and the state machine runs.
+   */
+  private async processRefund(ev: { id: string; providerAccountId: string }, said: ProviderRefund): Promise<ProcessOutcome> {
+    const accountId = ev.providerAccountId;
+    const remotePayment = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { ref: said.paymentRef }));
+    let remote = said;
+    if (said.status === 'failed' || said.status === 'cancelled') {
+      // A failure is believed only when the gateway confirms it (plan 0.1, 6.2): if it does not know the refund, the event
+      // stays failed and is retried (fail closed), never applied on its own word.
+      const confirmed = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrieveRefund(ctx, { ref: said.ref }));
+      if (!confirmed) throw new AppError('refund_not_confirmed_by_gateway', 'The gateway does not confirm this refund');
+      remote = confirmed;
+    }
+    const match = remotePayment ? await this.matchPayment(accountId, remotePayment) : null;
+    if (!match || !remotePayment) return this.unknownPayment(ev.id);
+    // Refunds of this payment still open here: their real state first, so a stale one never blocks a real refund.
+    const open = await this.prisma.refund.findMany({ where: { paymentId: match.id, status: { in: ['requested', 'pending'] }, providerRefundRef: { not: null }, NOT: { providerRefundRef: said.ref } }, select: { id: true, providerRefundRef: true } });
+    const refreshed: Array<{ id: string; event: RefundEvent; failureCode?: string }> = [];
+    for (const o of open) {
+      const r = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrieveRefund(ctx, { ref: o.providerRefundRef! }));
+      if (r) refreshed.push({ id: o.id, event: refundEventOf(r.status), failureCode: r.failureCode });
+    }
+
+    return runTransaction(this.prisma, async (tx) => {
+      const b = await readBookingForPayments(tx, { id: match.bookingId }, true);
+      if (!b) throw notFound();
+      const p = await lockPayment(tx, b, match.id);
+      if (!p) throw notFound();
+      const current = await tx.webhookEvent.findUniqueOrThrow({ where: { id: ev.id }, select: { status: true } });
+      if (current.status !== 'received' && current.status !== 'failed') return 'skipped' as const;
+      const [owner] = await tx.$queryRaw<Array<{ erased: boolean }>>`SELECT ("anonymisedAt" IS NOT NULL) AS erased FROM customers WHERE id = ${b.customerId}::uuid`;
+      await tx.webhookEvent.update({ where: { id: ev.id }, data: { bookingId: b.id, paymentId: p.id, ...(owner?.erased ? { rawBody: null } : {}) } });
+      // The payment first (plan 0.1, P7): a refund of money we have not seen arrive catches the payment up.
+      if (p.status !== 'succeeded' && remotePayment.status === 'succeeded') {
+        if (remotePayment.amount.amountMinor !== p.amountMinor || remotePayment.amount.currency !== p.currency || (p.providerPaymentRef !== null && p.providerPaymentRef !== remotePayment.ref)) {
+          await this.attempts.mismatchTask(tx, p, b.reference);
+          return this.ignoreIn(tx, ev.id, 'amount_or_currency_mismatch');
+        }
+        await this.machine.setReference(tx, p, remotePayment.ref);
+        await this.machine.apply(tx, b, p, 'succeeded', { source: 'webhook' });
+      }
+      if (p.status !== 'succeeded') return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_of_uncollected_payment');
+      // The refunded object must be this payment's own (as for payment events): another session carrying our id is not it.
+      if (p.providerPaymentRef !== remotePayment.ref) {
+        await this.attempts.mismatchTask(tx, p, b.reference);
+        return this.ignoreIn(tx, ev.id, 'reference_mismatch');
+      }
+      for (const f of refreshed) {
+        const r = await lockRefund(tx, p, f.id);
+        if (r) await this.refunds.apply(tx, b, p, r, f.event, { source: 'webhook', failureCode: f.failureCode });
+      }
+      if (remote.amount.currency !== p.currency) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_currency_mismatch');
+
+      const byOurs = remote.ourRefundId && UUID.test(remote.ourRefundId)
+        ? await tx.refund.findFirst({ where: { id: remote.ourRefundId, providerAccountId: accountId }, select: { id: true } })
+        : null;
+      const known = byOurs ?? await tx.refund.findFirst({ where: { providerAccountId: accountId, providerRefundRef: remote.ref }, select: { id: true } });
+      if (known) {
+        const r = await lockRefund(tx, p, known.id);
+        if (!r) throw notFound();
+        if (r.amountMinor !== remote.amount.amountMinor) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_amount_mismatch');
+        const failedNow = remote.status === 'failed' || remote.status === 'cancelled';
+        const event: RefundEvent = failedNow && r.status === 'succeeded' ? 'reversal_confirmed' : refundEventOf(remote.status);
+        await this.refunds.apply(tx, b, p, r, event, { source: 'webhook', failureCode: remote.failureCode });
+        return this.processedIn(tx, ev.id, r.id);
+      }
+      // A refund made on the gateway's dashboard. It may not take more than is left of the payment (plan 3.3, 3.3).
+      if (remote.status === 'pending' || remote.status === 'succeeded') {
+        const held = await tx.refund.aggregate({ where: { paymentId: p.id, status: { in: ['requested', 'pending', 'succeeded'] } }, _sum: { amountMinor: true } });
+        if ((held._sum.amountMinor ?? 0n) + remote.amount.amountMinor > p.amountMinor) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_over_payment');
+      }
+      const r = await this.refunds.createExternal(tx, b, p, remote);
+      return this.processedIn(tx, ev.id, r.id);
+    }, PAYMENT_TX_OPTIONS);
+  }
+
+  /** Our payment for the gateway's: by our id among this account's payments only (finding 2), then by reference. */
+  private async matchPayment(accountId: string, remote: ProviderPayment): Promise<{ id: string; bookingId: string } | null> {
+    const byId = remote.ourPaymentId && UUID.test(remote.ourPaymentId)
+      ? await this.prisma.payment.findFirst({ where: { id: remote.ourPaymentId, providerAccountId: accountId }, select: { id: true, bookingId: true } })
+      : null;
+    return byId ?? this.prisma.payment.findFirst({ where: { providerAccountId: accountId, providerPaymentRef: remote.ref }, select: { id: true, bookingId: true } });
+  }
+
+  private unknownPayment(eventId: string): Promise<ProcessOutcome> {
+    return runTransaction(this.prisma, async (tx) => {
+      await this.tasks.createSystemIn(tx, {
+        title: 'Payment webhook for an unknown payment',
+        description: 'A payment gateway sent an event for a payment we cannot match. If money came in or went out, register it against the right booking.',
+        entityType: 'WebhookEvent', entityId: eventId, sourceRef: `payments:unknown_event:${eventId}`,
+      });
+      return this.ignoreIn(tx, eventId, 'unknown_payment');
+    });
+  }
+
+  /** A refund event that is not posted (plan 3.3, 3.3): visible with its code, and a task for Oscar. */
+  private async refusedRefund(tx: Prisma.TransactionClient, eventId: string, reference: string, paymentId: string, code: string): Promise<'ignored'> {
+    await this.tasks.createSystemIn(tx, {
+      title: `Refund at the payment gateway not recorded on booking ${reference}`,
+      description: `The payment gateway reported a refund that cannot be recorded as it is (${code}). Nothing was posted; check the gateway and the booking.`,
+      entityType: 'Payment', entityId: paymentId, sourceRef: `payments:refund_refused:${eventId}`,
+    });
+    return this.ignoreIn(tx, eventId, code);
+  }
+
+  private async processedIn(tx: Prisma.TransactionClient, eventId: string, refundId: string): Promise<'processed'> {
+    await tx.webhookEvent.update({ where: { id: eventId }, data: { refundId, status: 'processed', processedAt: new Date(), attempts: { increment: 1 }, errorCode: null } });
+    await this.tasks.closeSystemIn(tx, `payments:webhook_failed:${eventId}`);
+    return 'processed';
   }
 
   private ignore(id: string, code: string): Promise<ProcessOutcome> {

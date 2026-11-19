@@ -12,6 +12,8 @@ import { FlagsAdminService } from './platform/flags/flags-admin.service';
 import { FeatureFlagService } from './platform/flags/flags.service';
 import { ProviderAccountsService } from './modules/payments';
 import { TEST_ADAPTER_ENVS } from './modules/payments/core/gateway';
+import { STRIPE_TEST_KEY, STRIPE_WEBHOOK_SECRET } from './modules/payments/core/accounts.service';
+import { AppError } from './platform/errors/safe-error';
 
 /**
  * Console commands for the people who run the server (plan 4.2): the first owner is created here, and an owner who lost
@@ -22,6 +24,7 @@ import { TEST_ADAPTER_ENVS } from './modules/payments/core/gateway';
  *   pnpm api:cli maintenance:on | maintenance:off | maintenance:status
  *   pnpm api:cli payments:simulator-account [--name <display name>]
  *   pnpm api:cli payments:manual-account [--name <display name>]
+ *   STRIPE_TEST_SECRET_KEY=… STRIPE_TEST_WEBHOOK_SECRET=… pnpm api:cli payments:stripe-test-account [--name <display name>]
  *   pnpm api:cli privacy:erasures-list > erasures.json
  *   pnpm api:cli privacy:erasures-reapply erasures.json
  *
@@ -37,10 +40,11 @@ export async function runCli(argv: string[], print: (line: string) => void = con
   if (command === 'maintenance:on' || command === 'maintenance:off' || command === 'maintenance:status') return runMaintenance(command, print);
   if (command === 'payments:simulator-account') return runSimulatorAccount(value('name'), print);
   if (command === 'payments:manual-account') return runManualAccount(value('name'), print);
+  if (command === 'payments:stripe-test-account') return runStripeTestAccount(value('name'), print);
   if (command === 'privacy:erasures-list') return runErasuresList(print);
   if (command === 'privacy:erasures-reapply') return runErasuresReapply(rest[0], print);
   if (command !== 'staff:create' && command !== 'staff:reset') {
-    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>] | payments:manual-account [--name <name>] | privacy:erasures-list | privacy:erasures-reapply <file>');
+    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>] | payments:manual-account [--name <name>] | payments:stripe-test-account [--name <name>] | privacy:erasures-list | privacy:erasures-reapply <file>');
     return 2;
   }
   const email = emailSchema.safeParse(value('email'));
@@ -146,6 +150,43 @@ async function runManualAccount(name: string | undefined, print: (line: string) 
     return 0;
   } catch (e) {
     print(e instanceof Error ? e.message : 'Failed');
+    return 1;
+  } finally {
+    await app.close();
+  }
+}
+
+/**
+ * A Stripe account in test mode (task 3.3). The keys come only from STRIPE_TEST_SECRET_KEY and STRIPE_TEST_WEBHOOK_SECRET
+ * (an argument would stay in the shell history); a live key is refused before anything else; never in production.
+ */
+export async function runStripeTestAccount(name: string | undefined, print: (line: string) => void, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const appEnv = appEnvSchema.safeParse(env.APP_ENV);
+  if (!appEnv.success || appEnv.data === 'production') {
+    print('Stripe test accounts are not created in production');
+    return 1;
+  }
+  const secretKey = env.STRIPE_TEST_SECRET_KEY ?? '';
+  const webhookSecret = env.STRIPE_TEST_WEBHOOK_SECRET ?? '';
+  // The values are never printed, not even in an error.
+  if (!STRIPE_TEST_KEY.test(secretKey)) {
+    print('STRIPE_TEST_SECRET_KEY must hold a Stripe test-mode key (sk_test_… or rk_test_…)');
+    return 2;
+  }
+  if (!STRIPE_WEBHOOK_SECRET.test(webhookSecret)) {
+    print('STRIPE_TEST_WEBHOOK_SECRET must hold the endpoint signing secret (whsec_…)');
+    return 2;
+  }
+  process.env.JOBS_WORKERS = 'off';
+  loadConfig();
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
+  try {
+    const created = await app.get(ProviderAccountsService).createStripeTestAccount({ displayName: name, secretKey, webhookSecret });
+    print(`Stripe account ${created.id} created (test mode, adapter experimental). Its webhook URL, shown once:`);
+    print(created.webhookUrl);
+    return 0;
+  } catch (e) {
+    print(e instanceof AppError ? e.message : 'Failed');
     return 1;
   } finally {
     await app.close();

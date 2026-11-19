@@ -13,8 +13,9 @@ import { QUEUES } from '../../../platform/jobs/queues';
 import { approvalExpiryJob } from '../../bookings';
 import type { LockedBooking } from '../../bookings';
 import { CoverageFailedError, PaymentCoverageService } from './coverage.service';
+import { LedgerService } from './ledger.service';
 import type { ProviderPaymentStatus } from './provider';
-import { succeededPaymentsSource } from './payable';
+import { netCollectedSource } from './payable';
 import { InboundPaymentHooks } from './inbound-hooks';
 
 type Tx = Prisma.TransactionClient;
@@ -68,6 +69,9 @@ export const PAYMENT_EVENTS = {
   voided: 'payments.payment.voided',
   scheduleCreated: 'payments.schedule.created',
   scheduleSuperseded: 'payments.schedule.superseded',
+  refundSucceeded: 'payments.refund.succeeded',
+  refundFailed: 'payments.refund.failed',
+  refundReversed: 'payments.refund.reversed',
 } as const;
 
 export interface LockedPayment {
@@ -116,6 +120,7 @@ export class PaymentStateMachine {
     @Inject(PaymentCoverageService) private readonly coverage: PaymentCoverageService,
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(InboundPaymentHooks) private readonly inboundHooks: InboundPaymentHooks,
+    @Inject(LedgerService) private readonly ledger: LedgerService,
   ) {}
 
   /** Fills in the gateway reference once (the webhook can arrive before the gateway's answer). */
@@ -163,7 +168,9 @@ export class PaymentStateMachine {
         UPDATE payment_links SET status = 'used', "usedAt" = clock_timestamp()
         WHERE status = 'active' AND id = (SELECT "paymentLinkId" FROM payments WHERE id = ${p.id}::uuid)`;
       await this.checkOverpayment(tx, p, bookingReference);
-      await this.applyCoverage(tx, booking, p, {}, p.origin === 'inbound' ? () => this.inboundHooks.runConfirmed(tx, p) : undefined);
+      // The ledger posting `payment:<id>:succeeded` (task 3.3): for a transfer through the inbound hooks the ledger
+      // registers, for any other payment directly.
+      await this.applyCoverage(tx, booking, p, {}, p.origin === 'inbound' ? () => this.inboundHooks.runConfirmed(tx, p) : () => this.ledger.postPaymentSucceeded(tx, booking, p).then(() => undefined));
     }
     if (to === 'voided') {
       // Money that was recorded is taken back: the entries follow, then the booking is looked at again (plan 3.4, section 4).
@@ -176,7 +183,8 @@ export class PaymentStateMachine {
   /**
    * The coverage rule in the same transaction as the money (plan 0.1, 6.2; plan 3.2, section 1.4). If it fails, the
    * whole change is undone: a database retry stays a retry, anything else becomes CoverageFailedError, which the callers
-   * turn into a task for Oscar (plan 3.2, section 11, point 8). Once recorded, an earlier such task is closed.
+   * turn into a task for Oscar (plan 3.2, section 11, point 8). Once recorded, an earlier such task is closed. The
+   * ledger posting `payment:<id>:succeeded` is part of the same step (plan 3.3, 1.5): no money without its posting.
    */
   private async applyCoverage(tx: Tx, booking: LockedBooking, p: LockedPayment, opts: { reopenDeposit?: boolean } = {}, before?: () => Promise<void>): Promise<void> {
     try {
@@ -236,7 +244,7 @@ export class PaymentStateMachine {
    */
   private async checkOverpayment(tx: Tx, p: LockedPayment, reference: string): Promise<void> {
     const owed = await tx.paymentScheduleItem.aggregate({ where: { bookingId: p.bookingId, state: 'active' }, _sum: { amountMinor: true } });
-    const collected = await succeededPaymentsSource.collected(tx, p.bookingId, p.mode);
+    const collected = await netCollectedSource.collected(tx, p.bookingId, p.mode);
     if (collected <= (owed._sum.amountMinor ?? 0n)) return;
     await this.tasks.createSystemIn(tx, {
       title: `Overpayment on booking ${reference}`,

@@ -12,7 +12,7 @@ import { PaymentStateMachine, lockPayment } from './attempt-state';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import { coverageFacts } from './allocation';
 import { ProviderGateway, callBlockReason } from './gateway';
-import { payable, succeededPaymentsSource } from './payable';
+import { payable, netCollectedSource } from './payable';
 import { PAYABLE_STATES } from './payable-states';
 
 /** The most a single transfer can be recorded for: A$1,000,000 in minor units (plan 0.1, 1.1). */
@@ -81,7 +81,7 @@ export class ManualTransfersService {
         }
 
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
-        const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
+        const collected = await netCollectedSource.collected(tx, b.id, this.gateway.mode);
         const next = payable(items, collected).next;
         const target = next ? items.find((i) => i.sequence === next.sequence) : undefined;
         const last = await tx.payment.aggregate({ where: { bookingId: b.id }, _max: { attemptNumber: true } });
@@ -135,7 +135,7 @@ export class ManualTransfersService {
         if (!RECEIVING.includes(b.status)) throw conflict('booking_cannot_receive_payment', 'This booking cannot change its payments in its current state');
         // Oscar confirmed the booking on a covered deposit: taking that money back is a refund or a cancellation (4.5, 6.4).
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { kind: true, sequence: true, amountMinor: true } });
-        const after = (await succeededPaymentsSource.collected(tx, b.id, p.mode)) - p.amountMinor;
+        const after = (await netCollectedSource.collected(tx, b.id, p.mode)) - p.amountMinor;
         if (NEEDS_DEPOSIT.includes(b.status) && !coverageFacts(items, after).depositCovered) {
           throw conflict('void_would_uncover_confirmed_booking', 'This booking was confirmed on this payment. Refund or cancel it instead.');
         }
