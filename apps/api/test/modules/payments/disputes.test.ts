@@ -470,7 +470,10 @@ describe('review of the code (M1, M2)', () => {
       await owner.end();
     }
     const found = (await check(bookingId)).map((f) => f.kind);
-    expect(found).toContain('missing_chargeback_posting');
+    expect(found).toContain('missing_chargeback');
     expect(found).toContain('booking_total');
+    // The daily run opens its task (its reference is a code that fits the audit rules).
+    await t.app.get(PaymentLedgerCheckService).run({ bookingIds: [bookingId] });
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:ledger_check:missing_chargeback:${dispute.id}` } })).toBe(1);
   });
 });

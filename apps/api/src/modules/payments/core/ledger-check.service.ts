@@ -11,7 +11,7 @@ import { LEDGER_ACCOUNTS } from './ledger';
 import { PAYMENT_SETTINGS } from './settings';
 import { SettingsService } from '../../../platform/flags/flags.service';
 
-export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'missing_chargeback_posting' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction';
+export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'missing_chargeback' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction';
 
 export interface LedgerFinding {
   kind: LedgerFindingKind;
@@ -110,7 +110,7 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
           AND ((d."fundsWithdrawnAt" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'chargeback:' || d.id::text || ':withdrawn'))
                OR (d."fundsReinstatedAt" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'chargeback:' || d.id::text || ':reinstated')))
         ORDER BY d.id`;
-      for (const r of missingChargebacks) out.push({ kind: 'missing_chargeback_posting', entityType: 'Dispute', entityId: r.id });
+      for (const r of missingChargebacks) out.push({ kind: 'missing_chargeback', entityType: 'Dispute', entityId: r.id });
 
       const bookings = await tx.$queryRaw<Array<{ id: string; currency: string; net: bigint; reserved: bigint; funds: bigint; over: bigint; receivable: bigint }>>`
         WITH money AS (
