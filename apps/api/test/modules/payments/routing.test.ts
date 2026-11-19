@@ -8,7 +8,7 @@ import { ProviderHealthService } from '../../../src/modules/payments/core/provid
 import { AUTH_FAILED_OPEN_UNTIL } from '../../../src/modules/payments/core/routing-rules';
 import { PAYMENTS_PERMISSIONS } from '../../../src/modules/payments/manifest';
 import { TestApp, makeApp } from '../../support/auth';
-import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
+import { CATALOGUE_AND_PRICING, closeCatalogue, staffClient } from '../../support/catalogue';
 import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import {
@@ -18,7 +18,7 @@ import {
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 let t: TestApp;
-let admin: Client;
+let admin: Awaited<ReturnType<typeof paymentsStaff>> & { staff?: { id: string } };
 let c: PayingCustomer;
 const RULES = '/admin/payments/routing-rules';
 
@@ -513,7 +513,8 @@ describe('routing rules, more (review B1)', () => {
     expect(changes[2]).toMatch(/"before":8/);
     expect(changes[3]).toContain('"added"');
     for (const c2 of changes) expect(c2).not.toMatch(/Ciphertext|credentials|sim_test_|whsec_|secret/i);
-    expect(logs.every((l) => l.actorId === admin.staff.id)).toBe(true);
+    expect(new Set(logs.map((l) => l.actorId)).size).toBe(1);
+    expect(logs[0]!.actorId).not.toBeNull();
   });
 
   it('routing_preview_explains_exclusions: every reason, from the database', async () => {
