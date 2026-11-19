@@ -57,28 +57,32 @@ export function pinError(body: unknown): { error?: string; chargeToken?: string 
 /** The object of a success answer: Pin wraps it in `response`. */
 export const responseOf = (body: unknown): unknown => (isObj(body) ? body.response : undefined);
 
-/** A charge, or undefined if it does not have the documented shape. */
-export function chargeOf(v: unknown): GatewayCharge | undefined {
+/**
+ * A charge, or undefined if it does not have the documented shape. Its state is read defensively (review M1): failed
+ * only on an explicit failure, pending while 3-D Secure is open or the charge is successful but not yet captured, and
+ * `unknown` for anything else (the caller treats that as "cannot read it", never as a decline).
+ */
+export function chargeOf(v: unknown): (GatewayCharge & { unknown: boolean }) | undefined {
   if (!isObj(v)) return undefined;
   const { token, currency } = v;
   const amount = minorOf(v.amount);
   if (typeof token !== 'string' || !CHARGE_TOKEN.test(token) || typeof currency !== 'string' || !CURRENCY.test(currency) || amount === undefined) return undefined;
   const success = v.success === true;
   const captured = v.captured === true;
-  // A 3-D Secure charge waiting for the customer (plan 4.4, sections 2 and 6.4): status "Pending", not yet successful.
-  const pending = !success && v.status_message === 'Pending';
+  const pending = (success && !captured) || (v.success !== true && v.status_message === 'Pending');
+  const failed = v.success === false && !pending && (v.status_message === 'Failed' || (typeof v.error_message === 'string' && v.error_message.length > 0));
   const meta = isObj(v.metadata) ? v.metadata : {};
   const sessionRef = typeof meta[META_SESSION] === 'string' && CARD_SESSION_REF.test(meta[META_SESSION]) ? meta[META_SESSION] : undefined;
   const ourPaymentId = typeof meta[META_PAYMENT] === 'string' && UUID.test(meta[META_PAYMENT]) ? meta[META_PAYMENT] : undefined;
-  const charge: GatewayCharge = { token, success, captured, pending, amount: { amountMinor: amount, currency } };
+  const charge: GatewayCharge & { unknown: boolean } = { token, success, captured, pending, failed, amount: { amountMinor: amount, currency }, unknown: !(success && captured) && !pending && !failed };
   if (sessionRef) charge.sessionRef = sessionRef;
   if (ourPaymentId) charge.ourPaymentId = ourPaymentId;
-  if (!success && !pending) charge.failureCode = 'card_declined';
+  if (failed) charge.failureCode = 'card_declined';
   return charge;
 }
 
-/** The charge's status as ours: collected, waiting for 3-D Secure, or ended without money. */
-export const chargeStatus = (c: GatewayCharge): ProviderPaymentStatus => (c.success && c.captured ? 'succeeded' : c.pending || c.success ? 'pending' : 'failed');
+/** The charge's status as ours: collected, still in progress, or ended without money (only an explicit failure). */
+export const chargeStatus = (c: GatewayCharge): ProviderPaymentStatus => (c.success && c.captured ? 'succeeded' : c.failed ? 'failed' : 'pending');
 
 /** A refund's status from `status_message` (plan 4.4, section 7); undefined if we cannot read it. */
 export function refundStatusOf(v: Obj): ProviderRefundStatus | undefined {
@@ -118,7 +122,9 @@ export function parsePinEvent(v: unknown): NormalisedEvent | null {
   if (PAYMENT_EVENTS.has(type)) {
     const c = chargeOf(v.data);
     if (!c) return null;
-    const status: ProviderPaymentStatus = type === 'charge.failed' || type === 'charge.voided' ? 'failed' : chargeStatus(c);
+    // A state we cannot read is not processed: the next read of the gateway decides (review M1).
+    if (c.unknown) return { ...base, kind: 'unsupported' };
+    const status: ProviderPaymentStatus = chargeStatus(c);
     const payment = { ref: c.sessionRef ?? c.token, status, amount: c.amount, ...(c.ourPaymentId ? { ourPaymentId: c.ourPaymentId } : {}), ...(status === 'failed' ? { failureCode: c.failureCode ?? 'card_declined' } : {}) };
     return { ...base, kind: 'payment', payment };
   }

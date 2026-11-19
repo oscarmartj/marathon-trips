@@ -79,7 +79,7 @@ beforeEach(async () => {
 });
 afterAll(async () => {
   if (registered) (t.app.get(PaymentAdapterRegistry) as unknown as { byKey: Map<string, PaymentProvider> }).byKey.set('pin_payments', registered);
-  await t.prisma.providerAccount.updateMany({ where: { adapterKey: 'pin_payments' }, data: { status: 'paused' } });
+  await t.prisma.providerAccount.updateMany({ where: { adapterKey: 'pin_payments', status: 'active' }, data: { status: 'paused' } });
   await cleanPayments(t);
   await cleanBookingEvents(t);
   await closeCatalogue(t);
@@ -116,11 +116,12 @@ async function deliverTo(a: PinAccount, w: { body: Buffer; headers: Record<strin
 }
 
 async function checkout() {
-  const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+  const w = await pricedWorld(admin);
+  const { reference, bookingId } = await approvedBooking(t, admin, w, c);
   const res = await c.pay(reference, { method: 'card' });
   expect(res.status).toBe(201);
   const p = await t.prisma.payment.findFirstOrThrow({ where: { bookingId }, orderBy: { attemptNumber: 'desc' } });
-  return { reference, bookingId, res, p, ref: p.providerPaymentRef! };
+  return { reference, bookingId, res, p, ref: p.providerPaymentRef!, packageId: w.pkg.id };
 }
 
 /** The customer on the card page through to the bank's page and back (3-D Secure). */
@@ -388,7 +389,7 @@ describe('Pin card page through the API (plan 4.4)', () => {
     const extra = fake.extraCharge(acc.secretKey, a.ref, 500);
     await sync().run(a.p.id, 'sync');
     expect(await statusOf(a.p.id)).toBe('succeeded');
-    expect(await t.prisma.task.count({ where: { sourceRef: `payments:card_session_extra_charge:${extra}`, status: 'open' } })).toBe(1);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:card_extra_charge:${extra}`, status: 'open' } })).toBe(1);
     expect(await t.prisma.cardSessionCharge.count({ where: { sessionId: (await sessionOf(a.ref)).id } })).toBe(2);
     // The amount on the card page and in the charge is the attempt's: no surcharge for paying by card here.
     const b = await checkout();
@@ -421,6 +422,109 @@ describe('Pin card page through the API (plan 4.4)', () => {
       await expect(app.query(`UPDATE card_session_charges SET success = true`)).rejects.toThrow();
     } finally {
       await app.end();
+    }
+  });
+});
+
+describe('failure paths of the review (M2)', () => {
+  it('refund_event_unmatched_and_unknown_still_external: a failing re-read leaves the event failed, never external; once readable, external', async () => {
+    const a = await checkout();
+    await payWith3ds(a.ref);
+    await sync().run(a.p.id, 'sync');
+    const s = await sessionOf(a.ref);
+    const rf = fake.dashboardRefund(acc.secretKey, s.chargeRef!, 100);
+    const ev = fake.refundEvent(acc.secretKey, rf, new Date());
+    fake.switches.failRefundReads = true;
+    const res = await sendWebhook(t, acc, ev);
+    expect(res.status).toBe(200);
+    const row = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: acc.id, providerEventId: ev.eventId } } });
+    await expect(t.app.get(PaymentWebhooksService).process(row.id)).rejects.toBeTruthy();
+    expect((await t.prisma.webhookEvent.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('failed');
+    expect(await t.prisma.refund.count({ where: { paymentId: a.p.id } })).toBe(0);
+    fake.switches.failRefundReads = false;
+    expect(await t.app.get(PaymentWebhooksService).process(row.id)).toBe('processed');
+    expect(await t.prisma.refund.findMany({ where: { paymentId: a.p.id } })).toMatchObject([{ origin: 'external', providerRefundRef: rf }]);
+  });
+
+  it('three verify calls per session, then the way back asks nothing; /authenticated is limited per IP', async () => {
+    const a = await checkout();
+    await submit(a.ref, fake.tokenise(acc.publishableKey, 'pay'));
+    const verifies = () => fake.requests.filter((r) => r.url.includes('/charges/verify')).length;
+    const before = verifies();
+    for (let i = 0; i < 5; i++) expect((await back(a.ref, `se_${'b'.repeat(16)}${i}`)).status).toBe(303);
+    expect(verifies() - before).toBe(3);
+    expect((await sessionOf(a.ref)).verifyCalls).toBe(3);
+    const t2 = await makeApp({ CARD_AUTHENTICATED_PER_10_MIN_PER_IP: '2' });
+    try {
+      const b = await checkout();
+      await submit(b.ref, fake.tokenise(acc.publishableKey, 'pay'));
+      const byKey2 = (t2.app.get(PaymentAdapterRegistry) as unknown as { byKey: Map<string, PaymentProvider> }).byKey;
+      byKey2.set('pin_payments', provider);
+      const v0 = verifies();
+      for (let i = 0; i < 3; i++) expect((await t2.http().get(`/payments/card-sessions/${b.ref}/authenticated?session_token=se_${'c'.repeat(16)}${i}`)).status).toBe(303);
+      expect(verifies() - v0).toBe(2);
+    } finally {
+      await t2.app.close();
+    }
+  });
+
+  it('session_outlives_attempt_expiry: the session expires 30 minutes after the attempt, from its pendingExpiresAt', async () => {
+    const a = await checkout();
+    const s = await sessionOf(a.ref);
+    const p = await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } });
+    expect(s.expiresAt.getTime() - p.pendingExpiresAt.getTime()).toBe(30 * 60_000);
+  });
+
+  it('card_declines_spike_opens_task_without_blocking', async () => {
+    const t2 = await makeApp({ CARD_DECLINES_PER_HOUR_PER_ACCOUNT: '2' });
+    try {
+      (t2.app.get(PaymentAdapterRegistry) as unknown as { byKey: Map<string, PaymentProvider> }).byKey.set('pin_payments', provider);
+      const hour = new Date().toISOString().slice(0, 13).replace(/[-T]/g, '');
+      const ref = `payments:card_declines_spike:${acc.id}:${hour}`;
+      for (let i = 0; i < 3; i++) {
+        const a = await checkout();
+        const r = await t2.http().post('/payments/card-sessions/submit').set(STATE_HEADERS).send({ ref: a.ref, cardToken: fake.tokenise(acc.publishableKey, 'decline') });
+        expect(r.status).toBe(200);
+      }
+      expect(await t.prisma.task.count({ where: { sourceRef: ref, status: 'open' } })).toBe(1);
+      // Nothing is blocked: the next card is still charged.
+      const b = await checkout();
+      expect((await t2.http().post('/payments/card-sessions/submit').set(STATE_HEADERS).send({ ref: b.ref, cardToken: fake.tokenise(acc.publishableKey, 'pay_frictionless') })).body.next).toBe('redirect');
+      expect((await sessionOf(b.ref)).status).toBe('succeeded');
+    } finally {
+      await t2.app.close();
+    }
+  });
+
+  it('pin_reconciliation_reports_fees_not_imported', async () => {
+    const a = await checkout();
+    await payWith3ds(a.ref);
+    await sync().run(a.p.id, 'sync');
+    const res = await admin.get('/admin/payments/reports/client-money');
+    expect(res.status).toBe(200);
+    const row = (res.body.rows as Array<{ packageId: string; feesImported: boolean }>).find((r) => r.packageId === a.packageId)!;
+    expect(row.feesImported).toBe(false);
+  });
+
+  it('retired_account_refunds_but_rejects_new_charges (pin)', async () => {
+    // Its own account: a retired account never comes back.
+    const main = acc;
+    acc = await pinAccount();
+    try {
+      await onlyAccount(t, acc.id);
+      const a = await checkout();
+      await payWith3ds(a.ref);
+      await sync().run(a.p.id, 'sync');
+      const b = await checkout();
+      await t.prisma.providerAccount.update({ where: { id: acc.id }, data: { status: 'retired' } });
+      expect((await submit(b.ref, fake.tokenise(acc.publishableKey, 'pay_frictionless'))).status).toBe(409);
+      expect((await sessionOf(b.ref)).status).toBe('open');
+      const r = await t.app.get(ProviderGateway).call(acc.id, 'refund', (p, ctx) => p.createRefund(ctx, {
+        paymentRef: a.ref, amount: { amountMinor: 100n, currency: 'AUD' }, idempotencyKey: `refund:retired:${randomUUID()}`, metadata: { refundId: randomUUID(), paymentId: a.p.id, bookingId: a.bookingId }, createdAt: new Date(),
+      }));
+      expect(r.status).toBe('pending');
+    } finally {
+      acc = main;
     }
   });
 });

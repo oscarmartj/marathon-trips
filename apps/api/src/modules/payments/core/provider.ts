@@ -338,7 +338,10 @@ export interface GatewayCharge {
   token: string;
   success: boolean;
   captured: boolean;
+  /** Still in progress: a 3-D Secure challenge open, or successful but not yet captured. */
   pending: boolean;
+  /** Ended without money, said explicitly by the gateway (never inferred from an unknown state: review M1). */
+  failed: boolean;
   amount: Money;
   /** Our session reference and payment id from the charge's metadata, when present and well formed. */
   sessionRef?: string;
@@ -386,6 +389,8 @@ export type GatewayRefundOutcome = { kind: 'created'; refund: GatewayRefund } | 
  */
 export interface CardTokenGateway {
   readonly manifest: AdapterManifest;
+  /** Whether the gateway's refund events carry our refund id; if not, CardSessionProvider declares refundEventOurId. */
+  readonly refundEventsCarryOurId: boolean;
   readonly signatureHeaders: readonly string[];
   /** One authenticated read that moves nothing: bad credentials throw provider_auth_failed. */
   probe(ctx: ProviderContext): Promise<void>;

@@ -167,7 +167,7 @@ export class PrismaCardSessionStore implements CardSessionStore {
 
   async openTask(kind: CardSessionTask, accountId: string, subject: string): Promise<void> {
     await runTransaction(this.prisma, (tx) => this.tasks.createSystemIn(tx, {
-      title: TASK_TITLES[kind], description: TASK_TEXT[kind], entityType: 'ProviderAccount', entityId: accountId, sourceRef: `payments:card_session_${kind}:${subject}`,
+      title: TASK_TITLES[kind], description: TASK_TEXT[kind], entityType: 'ProviderAccount', entityId: accountId, sourceRef: `payments:card_${kind}:${subject}`.slice(0, 80),
     }));
   }
 }

@@ -25,7 +25,7 @@ beforeAll(async () => {
   store = new PrismaCardSessionStore(t.prisma, t.app.get(TasksService));
 });
 afterAll(async () => {
-  await t.prisma.providerAccount.updateMany({ where: { adapterKey: 'pin_payments' }, data: { status: 'paused' } });
+  await t.prisma.providerAccount.updateMany({ where: { adapterKey: 'pin_payments', status: 'active' }, data: { status: 'paused' } });
 });
 
 /** A paused test-mode Pin account row for a context (sessions and intents reference it; the trigger checks its mode). */

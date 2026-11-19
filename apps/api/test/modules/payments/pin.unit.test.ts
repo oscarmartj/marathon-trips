@@ -20,6 +20,8 @@ import { createAdapters, adapterOptions, INERT_CARD_PAGE_ORIGIN } from '../../..
 import { CARD_PAGE_FRAME_ORIGINS, PIN_CARD_FIELDS } from '@mt/shared';
 import { FakePin } from '../../contract/subjects/pin-fake';
 import { expiringStore, payOnCardPage } from '../../contract/subjects/pin';
+import { CLAUSE_IMPLS, Harness, NO_GATEWAY_EVENT } from '../../contract/payment-provider.contract';
+import { simulatorLocalSubject } from '../../contract/subjects/simulator';
 
 const KEY = 'K'.repeat(22);
 const body = Buffer.from(JSON.stringify({ token: 'evt_aaaaaaaaaaaa', type: 'charge.captured', created_at: '2026-11-20T01:02:03Z', data: { token: 'ch_aaaaaaaaaaaa', success: true, captured: true, amount: 1500, currency: 'AUD', metadata: { mt_session: `cs_${'a'.repeat(32)}`, mt_payment: randomUUID() } } }));
@@ -203,9 +205,84 @@ describe('card sessions on the memory store (plan 4.4, sections 6 and 7)', () =>
     fake.switches.challengeOrigin = 'https://evil.example';
     const p = await provider.createPayment(ctx, input());
     const r = await provider.submitCard(ctx, p.ref, fake.tokenise(ctx.credentials.publishableKey!, 'pay'), PAYER);
-    expect(r.next.kind).toBe('wait');
+    // Never followed: back to the return page (review m3), the session waits for Pin to end the charge.
+    expect(r.next).toEqual({ kind: 'redirect', url: 'https://example.com/r' });
     expect(r.session.status).toBe('authenticating');
   });
+
+  it('review M1: success without capture is pending; an unknown state is unreadable, never a decline; money later is refundable', async () => {
+    const { fake, provider, ctx, input, store } = world();
+    const a = await provider.createPayment(ctx, input());
+    fake.switches.nextChargeState = { success: true, captured: false, status_message: 'Success', error_message: null };
+    const r = await provider.submitCard(ctx, a.ref, fake.tokenise(ctx.credentials.publishableKey!, 'pay_frictionless'), PAYER);
+    expect(r.session.status).toBe('authenticating');
+    expect((await provider.retrievePayment(ctx, { ref: a.ref }))?.status).toBe('pending');
+    const chargeA = (await store.byRef(ctx.accountId, a.ref))!.chargeRef!;
+    fake.completeCharge(ctx.credentials.secretKey!, chargeA);
+    expect((await provider.retrievePayment(ctx, { ref: a.ref }))?.status).toBe('succeeded');
+    // A status we do not know: the submission's answer is unknown (retryable), the session stays submitting.
+    const b = await provider.createPayment(ctx, input());
+    fake.switches.nextChargeState = { success: false, captured: false, status_message: 'Processing', error_message: null };
+    const rb = await provider.submitCard(ctx, b.ref, fake.tokenise(ctx.credentials.publishableKey!, 'pay_frictionless'), PAYER);
+    expect([rb.session.status, rb.next.kind]).toEqual(['submitting', 'wait']);
+    await expect(provider.retrievePayment(ctx, { ref: b.ref })).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
+    expect((await store.byRef(ctx.accountId, b.ref))!.status).toBe('submitting');
+    // The charge then completes at Pin: found and collected, then refunded.
+    const chargeB = fake.chargesWith(ctx.credentials.secretKey!, b.ref)[0]!.token;
+    fake.completeCharge(ctx.credentials.secretKey!, chargeB);
+    expect((await provider.retrievePayment(ctx, { ref: b.ref }))?.status).toBe('succeeded');
+    const refund = await provider.createRefund(ctx, { paymentRef: b.ref, amount: { amountMinor: 100n, currency: 'AUD' }, idempotencyKey: `r:${randomUUID()}`, metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() });
+    expect(refund.status).toBe('pending');
+  });
+
+  it('review M1: a session that failed with a charge is still refundable if Pin says the charge collected', async () => {
+    const { fake, provider, ctx, input, store } = world();
+    fake.switches.declineCreatesCharge = true;
+    const a = await provider.createPayment(ctx, input());
+    await payOnCardPage(fake, provider, ctx, a.ref, 'decline');
+    const s = (await store.byRef(ctx.accountId, a.ref))!;
+    expect([s.status, s.chargeRef !== null]).toEqual(['failed', true]);
+    fake.completeCharge(ctx.credentials.secretKey!, s.chargeRef!);
+    const refund = await provider.createRefund(ctx, { paymentRef: a.ref, amount: { amountMinor: 100n, currency: 'AUD' }, idempotencyKey: `r:${randomUUID()}`, metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() });
+    expect(refund.paymentRef).toBe(s.chargeRef);
+  });
+
+  it('pin_event_unknown_state_is_not_processed', () => {
+    const ev = parsePinEvent({ token: 'evt_cccccccccccc', type: 'charge.captured', created_at: '2026-11-20T01:02:03Z', data: { token: 'ch_aaaaaaaaaaaa', success: false, captured: false, amount: 1500, currency: 'AUD', status_message: 'Processing' } });
+    expect(ev).toMatchObject({ kind: 'unsupported' });
+    expect(ev?.review).toBeUndefined();
+  });
+
+  it('refund candidates: a refund made more than 10 minutes after the request is never taken for ours (review m1)', async () => {
+    const fake = new FakePin();
+    const keys = fake.newAccount();
+    const mem = new MemoryCardSessionStore();
+    const provider = new CardSessionProvider(new PinPaymentsGateway({ transport: fake.transport }), mem, { cardPageOrigin: 'http://localhost:3000', usable: true });
+    const ctx: ProviderContext = { accountId: randomUUID(), mode: 'test', credentials: { secretKey: keys.secretKey, publishableKey: keys.publishableKey }, webhookSecret: keys.webhookKey };
+    const p = await provider.createPayment(ctx, { amount: { amountMinor: 1500n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k', metadata: { paymentId: randomUUID(), bookingId: randomUUID() }, returnUrl: 'https://example.com/r', customerCountry: 'AU', createdAt: new Date() });
+    await payOnCardPage(fake, provider, ctx, p.ref, 'pay_frictionless');
+    const ask = () => provider.createRefund(ctx, { paymentRef: p.ref, amount: { amountMinor: 100n, currency: 'AUD' }, idempotencyKey: 'late', metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() });
+    fake.switches.loseNextRefundAnswer = true;
+    await expect(ask()).rejects.toMatchObject({ retryable: true });
+    // The request is an hour old by now; the only refund at Pin was made just now: not its answer.
+    for (const i of mem.intents.values()) i.createdAt = new Date(Date.now() - 3_600_000);
+    await expect(ask()).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
+    const charge = (await mem.byRef(ctx.accountId, p.ref))!.chargeRef!;
+    expect(fake.refundsOf(keys.secretKey, charge)).toHaveLength(1);
+    // Inside the window it binds.
+    for (const i of mem.intents.values()) i.createdAt = new Date();
+    await expect(ask()).resolves.toMatchObject({ ref: fake.refundsOf(keys.secretKey, charge)[0] });
+  });
+});
+
+describe('contract amendment guard (review M2)', () => {
+  it('no_gateway_event_only_with_capability: a provider without preCardSession answering NO_GATEWAY_EVENT fails the clauses', async () => {
+    for (const clause of ['webhook_rejections', 'webhook_previous_state_and_duplicate', 'verify_and_parse_never_throw'] as const) {
+      const h = new Harness({ ...simulatorLocalSubject(), webhookFor: async () => NO_GATEWAY_EVENT });
+      await expect(CLAUSE_IMPLS[clause](h), clause).rejects.toThrow();
+    }
+  });
+
 
   it('refund_intent_binds_single_candidate_else_unavailable; refund_never_posted_twice_after_timeout; refund_over_remaining_refused_without_call', async () => {
     const { fake, provider, ctx, input, store } = world();

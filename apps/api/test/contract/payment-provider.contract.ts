@@ -92,7 +92,7 @@ function serialise(v: unknown): string {
   return json(v);
 }
 
-class Harness {
+export class Harness {
   /** Everything the adapter returned or threw during this suite, for C20. */
   readonly seen: unknown[] = [];
   /** Every context the subject handed out (good and bad credentials), for C20: their secrets are what must not leak. */

@@ -21,9 +21,15 @@ import type { CardSession } from './store';
 
 /** Submissions and 3-D Secure returns per IP over this window (plan 4.4, section 10.1; limits in the configuration). */
 const SUBMIT_WINDOW_MS = 10 * 60_000;
-/** Declines on one account in an hour before a task for Oscar (nothing is blocked: section 10.1). */
-const DECLINES_PER_ACCOUNT = 20;
+/** Declines on one account per hour before a task for Oscar (nothing is blocked: section 10.1; limit in the configuration). */
 const DECLINE_WINDOW_MS = 3_600_000;
+
+/** An IPv4 address as Node reports it on a dual-stack socket (`::ffff:a.b.c.d`) becomes plain a.b.c.d (review m6). */
+export const normaliseIp = (ip: string | undefined): string | undefined => {
+  if (!ip) return undefined;
+  const m = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+  return m ? m[1] : ip;
+};
 
 const isFailure = (v: string | null): v is CardSessionFailure => v !== null && (CARD_SESSION_FAILURES as readonly string[]).includes(v);
 
@@ -31,7 +37,7 @@ const isFailure = (v: string | null): v is CardSessionFailure => v !== null && (
 export class CardSessionsService {
   private readonly submitsPerIp: WindowLimiter;
   private readonly authenticatedPerIp: WindowLimiter;
-  private readonly declines = new WindowLimiter(DECLINES_PER_ACCOUNT, DECLINE_WINDOW_MS);
+  private readonly declines: WindowLimiter;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -41,6 +47,7 @@ export class CardSessionsService {
   ) {
     this.submitsPerIp = new WindowLimiter(config.CARD_SUBMITS_PER_10_MIN_PER_IP, SUBMIT_WINDOW_MS);
     this.authenticatedPerIp = new WindowLimiter(config.CARD_AUTHENTICATED_PER_10_MIN_PER_IP, SUBMIT_WINDOW_MS);
+    this.declines = new WindowLimiter(config.CARD_DECLINES_PER_HOUR_PER_ACCOUNT, DECLINE_WINDOW_MS);
   }
 
   /** The session of a reference, in this environment's mode, with the card-session provider of its account; else 404. */
@@ -79,7 +86,8 @@ export class CardSessionsService {
    * pay and is not under review; then the gateway is called outside any transaction, through the wrapper's `create`
    * rules (active account, mode, never live unless verified).
    */
-  async submit(ref: string, cardToken: string, ipAddress: string | undefined): Promise<CardSubmitResult> {
+  async submit(ref: string, cardToken: string, rawIp: string | undefined): Promise<CardSubmitResult> {
+    const ipAddress = normaliseIp(rawIp);
     if (!ipAddress || !this.submitsPerIp.allow(`card-submit:ip:${ipAddress}`)) throw tooManyRequests(600);
     const { accountId, provider } = await this.locate(ref);
     const session = await provider.session(accountId, ref);
@@ -127,7 +135,7 @@ export class CardSessionsService {
   private async noteDecline(accountId: string, s: CardSession): Promise<void> {
     if (s.status !== 'failed' || !(CARD_DECLINE_CODES as readonly string[]).includes(s.failureCode ?? '')) return;
     if (this.declines.allow(`card-declines:${accountId}`)) return;
-    const hour = new Date().toISOString().slice(0, 13);
+    const hour = new Date().toISOString().slice(0, 13).replace(/[-T]/g, '');
     const provider = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: { adapterKey: true } });
     const p = provider ? this.gateway.registry.get(provider.adapterKey) : undefined;
     if (p instanceof CardSessionProvider) await p.openTask('declines_spike', accountId, `${accountId}:${hour}`).catch(() => undefined);

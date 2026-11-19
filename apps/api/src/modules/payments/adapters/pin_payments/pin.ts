@@ -101,6 +101,8 @@ type Answer = { status: number; body: unknown };
 export class PinPaymentsGateway implements CardTokenGateway {
   readonly manifest = pinManifest();
   readonly signatureHeaders = [PIN_SIGNATURE_HEADER] as const;
+  /** Pin documents no refund metadata (A9). */
+  readonly refundEventsCarryOurId = false;
   private readonly transport: PinTransport;
 
   constructor(opts: PinOptions = {}) {
@@ -156,10 +158,12 @@ export class PinPaymentsGateway implements CardTokenGateway {
     return this.fail(a.status);
   }
 
+  /** A charge we can read; a state we cannot read is "unknown" (retryable), never a decline (review M1). */
   private static charge(v: unknown): GatewayCharge {
     const c = chargeOf(v);
-    if (!c) throw new ProviderError('provider_unavailable', true);
-    return c;
+    if (!c || c.unknown) throw new ProviderError('provider_unavailable', true);
+    const { unknown: _unknown, ...charge } = c;
+    return charge;
   }
 
   // ---- CardTokenGateway ----
@@ -201,13 +205,15 @@ export class PinPaymentsGateway implements CardTokenGateway {
     const a = await this.exchange(ctx, 'POST', '/charges', body, CHARGE_TIMEOUT_MS);
     if (a.status === 201 || a.status === 200) {
       const c = PinPaymentsGateway.charge(this.ok(a));
-      return c.success ? { kind: 'charged', charge: c } : { kind: 'declined', code: c.failureCode ?? 'card_declined', chargeToken: c.token };
+      if (c.success && c.captured) return { kind: 'charged', charge: c };
+      if (c.failed) return { kind: 'declined', code: c.failureCode ?? 'card_declined', chargeToken: c.token };
+      return { kind: 'challenge', charge: c };
     }
     if (a.status === 202) {
       const v = this.ok(a);
       const c = PinPaymentsGateway.charge(v);
       const url = isObj(v) && typeof v.redirect_url === 'string' && v.redirect_url.length <= 2048 ? v.redirect_url : undefined;
-      return { kind: 'challenge', charge: { ...c, pending: !c.success }, ...(url ? { redirectUrl: url } : {}) };
+      return { kind: 'challenge', charge: c, ...(url ? { redirectUrl: url } : {}) };
     }
     const { error, chargeToken } = pinError(a.body);
     if (a.status === 400) {
@@ -246,7 +252,8 @@ export class PinPaymentsGateway implements CardTokenGateway {
     const pagination = isObj(a.body) && isObj(a.body.pagination) ? a.body.pagination : {};
     if (!Array.isArray(list) || (typeof pagination.pages === 'number' && pagination.pages > 1)) throw new ProviderError('provider_unavailable', true);
     // The search matches any metadata value (and other fields): only an exact mt_session counts.
-    return list.map((v) => chargeOf(v)).filter((c): c is GatewayCharge => !!c && c.sessionRef === sessionRef);
+    // An unreadable charge of this session makes the answer "unknown", never "none" (review M1).
+    return list.filter((v) => chargeOf(v)?.sessionRef === sessionRef).map((v) => PinPaymentsGateway.charge(v));
   }
 
   async refundState(ctx: ProviderContext, chargeToken: string): Promise<{ charge: GatewayCharge; refunded: bigint } | null> {

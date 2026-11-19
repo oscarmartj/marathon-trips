@@ -183,9 +183,12 @@ export function pinSandboxSubject(): ContractSubject {
     async webhookFor(ctx, ref, at) {
       const s = await store.byRef(ctx.accountId, ref);
       const search = await api(ctx, 'GET', `/charges/search?query=${ref}`);
-      const list = (search.response as unknown as Array<Record<string, unknown>> | undefined) ?? [];
-      if (!s?.chargeRef && list.length === 0) return NO_GATEWAY_EVENT;
-      const charge = (await api(ctx, 'GET', `/charges/${s!.chargeRef}`)).response!;
+      const all = (search.response as unknown as Array<Record<string, unknown>> | undefined) ?? [];
+      // Only charges whose metadata names exactly this session (the search matches any field).
+      const mine = all.filter((c) => (c.metadata as Record<string, unknown> | undefined)?.mt_session === ref);
+      if (!s?.chargeRef && mine.length === 0) return NO_GATEWAY_EVENT;
+      const token = s?.chargeRef ?? String(mine[0]!.token);
+      const charge = (await api(ctx, 'GET', `/charges/${token}`)).response!;
       return sign(ctx, charge.success ? 'charge.captured' : 'charge.failed', charge, at);
     },
     async gatewayRefunds(ctx, payment, amountMinor) {

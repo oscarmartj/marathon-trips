@@ -9,7 +9,7 @@ import { ProviderError } from '../../../src/modules/payments/core/provider';
 type Outcome = 'pay' | 'decline' | 'pay_frictionless';
 
 interface FakeCharge {
-  token: string; success: boolean; captured: boolean; status_message: 'Success' | 'Pending' | 'Failed'; amount: number; currency: string;
+  token: string; success: boolean; captured: boolean; status_message: string; amount: number; currency: string;
   amount_refunded: number; metadata: Record<string, string>; created_at: string; error_message: string | null;
   challengeOutcome?: 'pay' | 'decline'; sessionToken?: string;
 }
@@ -36,6 +36,10 @@ export interface FakePinSwitches {
   nextRefundStatus?: number;
   /** The 3-D Secure redirect goes to this origin (A11). */
   challengeOrigin?: string;
+  /** Every read of a refund answers 500. */
+  failRefundReads?: boolean;
+  /** The next charge POST answers 201 with this charge state instead of the outcome's. */
+  nextChargeState?: { success: boolean; captured: boolean; status_message: string; error_message: string | null };
 }
 
 export class FakePin {
@@ -88,6 +92,12 @@ export class FakePin {
     c.error_message = c.success ? null : 'Authentication failed';
     c.sessionToken = id('se');
     return c.sessionToken;
+  }
+
+  /** Pin finishes a charge on its own (a capture after an in-progress state). */
+  completeCharge(secretKey: string, chargeToken: string): void {
+    const c = this.account(secretKey).charges.get(chargeToken)!;
+    Object.assign(c, { success: true, captured: true, status_message: 'Success', error_message: null });
   }
 
   /** A charge made outside our code under a session's reference (only for the extra-charge test). */
@@ -196,6 +206,7 @@ export class FakePin {
       return c ? json(200, { response: c }) : json(404, { error: 'resource_not_found' });
     }
     m = /^\/refunds\/(rf_[A-Za-z0-9_-]+)$/.exec(path);
+    if (m && req.method === 'GET' && this.switches.failRefundReads) return json(500, { error: 'server_error' });
     if (m && req.method === 'GET') {
       const r = acc.refunds.get(m[1]!);
       return r ? json(200, { response: r }) : json(404, { error: 'resource_not_found' });
@@ -231,6 +242,12 @@ export class FakePin {
     }
     const lose = this.switches.loseNextChargeAnswer;
     this.switches.loseNextChargeAnswer = false;
+    if (this.switches.nextChargeState) {
+      const c = { ...base, token: id('ch'), ...this.switches.nextChargeState } as FakeCharge;
+      this.switches.nextChargeState = undefined;
+      acc.charges.set(c.token, c);
+      return json(201, { response: c });
+    }
     if (outcome === 'pay_frictionless' || !tds?.enabled) {
       const c: FakeCharge = { ...base, token: id('ch'), success: true, captured: true, status_message: 'Success', error_message: null };
       acc.charges.set(c.token, c);

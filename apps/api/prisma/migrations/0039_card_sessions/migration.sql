@@ -73,6 +73,9 @@ CREATE UNIQUE INDEX "card_sessions_providerAccountId_idempotencyKey_key" ON "car
 CREATE UNIQUE INDEX "card_sessions_providerAccountId_chargeRef_key" ON "card_sessions"("providerAccountId", "chargeRef");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "card_sessions_id_providerAccountId_mode_key" ON "card_sessions"("id", "providerAccountId", "mode");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "card_session_charges_chargeRef_key" ON "card_session_charges"("chargeRef");
 
 -- CreateIndex
@@ -89,6 +92,12 @@ CREATE UNIQUE INDEX "card_refund_intents_providerAccountId_refundRef_key" ON "ca
 
 -- AddForeignKey
 ALTER TABLE "card_sessions" ADD CONSTRAINT "card_sessions_providerAccountId_fkey" FOREIGN KEY ("providerAccountId") REFERENCES "provider_accounts"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- AddForeignKey
+ALTER TABLE "card_session_charges" ADD CONSTRAINT "card_session_charges_sessionId_providerAccountId_mode_fkey" FOREIGN KEY ("sessionId", "providerAccountId", "mode") REFERENCES "card_sessions"("id", "providerAccountId", "mode") ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- AddForeignKey
+ALTER TABLE "card_session_charges" ADD CONSTRAINT "card_session_charges_providerAccountId_fkey" FOREIGN KEY ("providerAccountId") REFERENCES "provider_accounts"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- AddForeignKey
 ALTER TABLE "card_refund_intents" ADD CONSTRAINT "card_refund_intents_providerAccountId_fkey" FOREIGN KEY ("providerAccountId") REFERENCES "provider_accounts"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;

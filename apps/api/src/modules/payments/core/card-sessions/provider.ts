@@ -17,6 +17,8 @@ const CHARGE_TOKEN = /^ch_[A-Za-z0-9_-]{10,40}$/;
 const MAX_AMOUNT = 999_999_999n;
 /** A gateway refund made up to this long before our intent can still be the one of a timed-out request. */
 const REFUND_CANDIDATE_SKEW_MS = 120_000;
+/** ...and no later than this after it: a refund made days later on the dashboard is never taken for ours (review m1). */
+const REFUND_CANDIDATE_LATE_MS = 10 * 60_000;
 export const CARD_PAGE_PATH = '/pay/card';
 export const AUTHENTICATED_PATH = '/api/payments/card-sessions';
 /** At most this many 3-D Secure verify calls per session (plan 4.4, section 10.1). */
@@ -48,7 +50,7 @@ export class CardSessionProvider implements PaymentProvider {
   ) {
     const m = gateway.manifest;
     // Plan 4.4, 18 M1: only this class declares preCardSession; the registry checks the pairing both ways.
-    this.manifest = { ...m, checkoutOrigin: opts.cardPageOrigin, capabilities: { ...m.capabilities, preCardSession: true, refundEventOurId: 'via_retrieve' } };
+    this.manifest = { ...m, checkoutOrigin: opts.cardPageOrigin, capabilities: { ...m.capabilities, preCardSession: true, ...(gateway.refundEventsCarryOurId ? {} : { refundEventOurId: 'via_retrieve' as const }) } };
     this.signatureHeaders = gateway.signatureHeaders;
   }
 
@@ -113,7 +115,8 @@ export class CardSessionProvider implements PaymentProvider {
       if (s.status === 'submitting') return this.change(s, { status: 'authenticating', chargeRef: c.token });
       return s;
     }
-    if (s.status === 'submitting' || s.status === 'authenticating') return this.change(s, { status: 'failed', chargeRef: c.token, failureCode: failureOfCharge(c) });
+    // Failed only when the gateway says so explicitly (review M1); anything else leaves the session as it is.
+    if (c.failed && (s.status === 'submitting' || s.status === 'authenticating')) return this.change(s, { status: 'failed', chargeRef: c.token, failureCode: failureOfCharge(c) });
     return s;
   }
 
@@ -177,7 +180,7 @@ export class CardSessionProvider implements PaymentProvider {
   }
 
   private chargeView(c: GatewayCharge): ProviderPayment {
-    const status = c.success && c.captured ? 'succeeded' : c.pending ? 'pending' : 'failed';
+    const status = c.success && c.captured ? 'succeeded' : c.failed ? 'failed' : 'pending';
     return { ref: c.token, status, amount: c.amount, ...(c.ourPaymentId ? { ourPaymentId: c.ourPaymentId } : {}), ...(status === 'failed' ? { failureCode: c.failureCode ?? 'card_declined' } : {}) };
   }
 
@@ -284,7 +287,9 @@ export class CardSessionProvider implements PaymentProvider {
         }
         // A11: only a challenge host of this mode is followed; otherwise the charge ends at the gateway and a read finds it.
         if (url && origin && url.startsWith(`${origin}/`) && allowed.includes(origin)) return { session: waiting, next: { kind: 'redirect', url } };
-        return { session: waiting, next: { kind: 'wait' } };
+        // A challenge we will not follow (A11), or a charge still in progress without one: back to the return page, which
+        // shows the payment as in progress (review m3).
+        return { session: waiting, next: { kind: 'redirect', url: s.returnUrl } };
       }
       case 'declined': {
         if (outcome.chargeToken) await this.store.recordCharge(started, { chargeRef: outcome.chargeToken, success: false, amountMinor: s.amountMinor, currency: s.currency });
@@ -317,13 +322,18 @@ export class CardSessionProvider implements PaymentProvider {
     return { ref: r.token, status: r.status, amount: r.amount, paymentRef: r.chargeToken, ...(intent ? { ourRefundId: intent.refundId } : {}), ...(r.failureCode ? { failureCode: r.failureCode } : {}) };
   }
 
-  /** The charge a refund of `paymentRef` is made against: a collected one, or null. */
+  /**
+   * The charge a refund of `paymentRef` is made against, as the gateway says now: a session with a charge is never
+   * judged by its stored state (review M1), so money that came in after a session ended can still be refunded.
+   */
   private async collectedCharge(ctx: ProviderContext, paymentRef: string): Promise<string | null> {
     const found = await this.sessionOf(ctx, paymentRef);
     if (!found) return null;
     if ('charge' in found) return found.charge.success && found.charge.captured ? found.charge.token : null;
     const s = await this.settle(ctx, found.session);
-    return s.status === 'succeeded' ? s.chargeRef : null;
+    if (!s.chargeRef) return null;
+    const c = await this.gateway.retrieveCharge(ctx, s.chargeRef);
+    return c && c.success && c.captured ? c.token : null;
   }
 
   /** Binds a submitting intent to the one gateway refund it can be; null if none yet, an error if several. */
@@ -332,7 +342,7 @@ export class CardSessionProvider implements PaymentProvider {
     const candidates: GatewayRefund[] = [];
     for (const r of refunds) {
       if (r.amount.amountMinor !== i.amountMinor || r.amount.currency !== i.currency) continue;
-      if (r.createdAt.getTime() < i.createdAt.getTime() - REFUND_CANDIDATE_SKEW_MS) continue;
+      if (r.createdAt.getTime() < i.createdAt.getTime() - REFUND_CANDIDATE_SKEW_MS || r.createdAt.getTime() > i.createdAt.getTime() + REFUND_CANDIDATE_LATE_MS) continue;
       if (await this.store.intentByRefundRef(ctx.accountId, r.token)) continue;
       candidates.push(r);
     }
@@ -423,7 +433,7 @@ export class CardSessionProvider implements PaymentProvider {
     let intent = await this.store.intentByRefundRef(ctx.accountId, r.token);
     if (!intent) {
       // A refund event processed before our POST's answer (plan 4.4, section 7): the one submitting intent it can be.
-      const waiting = (await this.store.submittingIntents(ctx.accountId, r.chargeToken)).filter((i) => i.amountMinor === r.amount.amountMinor && i.currency === r.amount.currency && r.createdAt.getTime() >= i.createdAt.getTime() - REFUND_CANDIDATE_SKEW_MS);
+      const waiting = (await this.store.submittingIntents(ctx.accountId, r.chargeToken)).filter((i) => i.amountMinor === r.amount.amountMinor && i.currency === r.amount.currency && r.createdAt.getTime() >= i.createdAt.getTime() - REFUND_CANDIDATE_SKEW_MS && r.createdAt.getTime() <= i.createdAt.getTime() + REFUND_CANDIDATE_LATE_MS);
       if (waiting.length > 1) throw new ProviderError('provider_unavailable', true);
       if (waiting.length === 1) intent = await this.bind(ctx, waiting[0]!, r.token);
     }
