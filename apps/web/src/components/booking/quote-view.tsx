@@ -8,6 +8,9 @@ import { formatMoney } from '@/lib/builder';
 import { localisedText } from '@/lib/catalogue';
 import { formatDate } from '@/lib/catalogue-format';
 import { t } from '@/lib/i18n';
+import type { CancellationPolicyPublicView } from '@mt/shared';
+import { CancellationPolicyTerms } from '@/components/cancellation/policy-terms';
+import { policyRef } from '@/lib/cancellation';
 
 /** The instant the price stops standing, in Brisbane time (the API holds an instant, not a day). */
 export const formatStands = (iso: string): string =>
@@ -27,6 +30,8 @@ export interface QuoteView {
   bookingReference: string | null;
   package: { name: Record<string, string> };
   price: { subtotals: { accommodation: string; participation: string; extras: string }; surchargesMinor: string; discountsMinor: string };
+  /** Task 6.4: the cancellation policy accepting binds to; sent back on accept. */
+  cancellationPolicy?: CancellationPolicyPublicView | null;
 }
 
 /**
@@ -42,7 +47,7 @@ export function QuoteDetailView({ view }: { view: QuoteView }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ bookingReference: string }>(`/quotes/${encodeURIComponent(view.reference)}/accept`, { method: 'POST', body: {} });
+      const r = await api<{ bookingReference: string }>(`/quotes/${encodeURIComponent(view.reference)}/accept`, { method: 'POST', body: { cancellationPolicy: policyRef(view.cancellationPolicy) } });
       if (r.status === 200 && typeof r.body.bookingReference === 'string') {
         window.location.assign(`/trips/requests/${encodeURIComponent(r.body.bookingReference)}`);
         return;
@@ -52,6 +57,7 @@ export function QuoteDetailView({ view }: { view: QuoteView }) {
       else if (r.body.code === 'quote_expired') key = 'quote.errors.quote_expired';
       else if (r.body.code === 'quote_not_available' || r.body.code === 'package_not_open' || r.body.code === 'package_departed') key = 'quote.errors.quote_not_available';
       else if (r.body.code === 'busy_try_again') key = 'quote.errors.busy';
+      else if (r.body.code === 'cancellation_policy_changed') key = 'quote.errors.policyChanged';
       setError(t(key));
     } catch {
       setError(t('quote.errors.network'));
@@ -95,6 +101,7 @@ export function QuoteDetailView({ view }: { view: QuoteView }) {
             </div>
           ))}
         </dl>
+        {view.acceptable ? <CancellationPolicyTerms policy={view.cancellationPolicy ?? null} /> : null}
         <Status message={error} />
         {view.acceptable ? (
           <p>

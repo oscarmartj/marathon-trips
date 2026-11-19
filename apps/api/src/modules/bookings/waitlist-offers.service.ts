@@ -161,16 +161,19 @@ export class WaitlistOffersService {
     const v = await this.waitlist.entryView(entryId);
     if (!v) throw notFound('not_found', 'Not found');
     const { configuration, ...rest } = v;
-    if (v.status !== 'offered') return { ...rest, price: null };
+    if (v.status !== 'offered') return { ...rest, price: null, cancellationPolicy: null };
+    // Task 6.4 (plan section 13, M2): the cancellation policy accepting the offer binds to; sent back on accept.
+    const packageId = (configuration as unknown as { packageId: string }).packageId;
+    const { policy: cancellationPolicy } = await this.policies.publicForPackage(packageId);
     try {
       const breakdown = await this.prisma.$transaction(
         async (tx) => (await this.quotes.priceIn(tx, configuration as unknown as QuoteRequest, { audience: 'staff', now: new Date() })),
         { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
       );
       const { trace: _trace, ...b } = breakdown;
-      return { ...rest, price: jsonOf({ ...b, promo: { status: publicPromoStatus(b.promo.status) } }) };
+      return { ...rest, price: jsonOf({ ...b, promo: { status: publicPromoStatus(b.promo.status) } }), cancellationPolicy };
     } catch (err) {
-      if (err instanceof ApiError) return { ...rest, price: null };
+      if (err instanceof ApiError) return { ...rest, price: null, cancellationPolicy };
       throw err;
     }
   }

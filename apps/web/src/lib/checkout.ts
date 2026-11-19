@@ -17,9 +17,12 @@ export function startPaymentBody(method: PaymentMethod): { method: PaymentMethod
 }
 
 /** The body that accepts the terms the person was shown: the version and digest the server gave. */
-export function acceptTermsBody(terms: Pick<CheckoutTermsView, 'digest'> & { version: number }): { version: number; digest: string } {
+export function acceptTermsBody(terms: Pick<CheckoutTermsView, 'digest'> & { version: number; cancellationPolicy?: { digest: string } | null }): { version: number; digest: string; cancellationPolicyDigest: string | null } {
   if (!Number.isInteger(terms.version) || terms.version < 0 || terms.version > 1_000_000 || !/^[0-9a-f]{64}$/.test(terms.digest)) throw new Error('Not a terms version and digest');
-  return { version: terms.version, digest: terms.digest };
+  const policy = terms.cancellationPolicy?.digest ?? null;
+  if (policy !== null && !/^[0-9a-f]{64}$/.test(policy)) throw new Error('Not a cancellation policy digest');
+  // Task 6.4: the booking's cancellation policy, shown with the terms, is accepted with them.
+  return { version: terms.version, digest: terms.digest, cancellationPolicyDigest: policy };
 }
 
 /**

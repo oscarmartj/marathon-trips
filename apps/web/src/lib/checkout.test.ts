@@ -12,7 +12,10 @@ describe('checkout request bodies', () => {
   });
 
   it('accept_body_carries_the_version_and_digest_the_server_gave, nothing else', () => {
-    expect(acceptTermsBody({ version: 3, digest: 'a'.repeat(64) })).toEqual({ version: 3, digest: 'a'.repeat(64) });
+    expect(acceptTermsBody({ version: 3, digest: 'a'.repeat(64) })).toEqual({ version: 3, digest: 'a'.repeat(64), cancellationPolicyDigest: null });
+    // Task 6.4: the cancellation policy shown with the terms goes back with them.
+    expect(acceptTermsBody({ version: 3, digest: 'a'.repeat(64), cancellationPolicy: { digest: 'b'.repeat(64) } })).toEqual({ version: 3, digest: 'a'.repeat(64), cancellationPolicyDigest: 'b'.repeat(64) });
+    expect(() => acceptTermsBody({ version: 3, digest: 'a'.repeat(64), cancellationPolicy: { digest: 'nope' } })).toThrow();
     expect(() => acceptTermsBody({ version: 3, digest: 'not a digest' })).toThrow();
     expect(() => acceptTermsBody({ version: -1, digest: 'a'.repeat(64) })).toThrow();
   });
