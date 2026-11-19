@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProviderAccountsService } from '../../../src/modules/payments/core/accounts.service';
+import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
 import { ProviderHealthService } from '../../../src/modules/payments/core/provider-health.service';
 import { AUTH_FAILED_OPEN_UNTIL } from '../../../src/modules/payments/core/routing-rules';
 import { PAYMENTS_PERMISSIONS } from '../../../src/modules/payments/manifest';
@@ -224,6 +225,60 @@ describe('breaker (plan 3 and 15.2 to 15.6)', () => {
     expect((await health(A!.id))!.openUntil).toBeNull();
   });
 
+  it('create_failing_retrieve_working_keeps_counting (review M1): a key that can read but not create still opens the breaker', async () => {
+    const [A] = await accounts(1);
+    for (let i = 0; i < 3; i++) {
+      const b = await fresh();
+      // The create is refused; the lookup by our key that follows works (and must not count as the gateway being fine).
+      sim.queue(A!.id, 'auth_failed');
+      await c.pay(b.reference, { method: 'card' });
+    }
+    expect((await health(A!.id))!.openUntil).toEqual(AUTH_FAILED_OPEN_UNTIL);
+  });
+
+  it('only a successful create or an ok connection test closes the breaker; reads and webhooks never touch it (review M1, B3)', async () => {
+    const [A] = await accounts(1);
+    const svc = t.app.get(ProviderHealthService);
+    for (let i = 0; i < 3; i++) await svc.failure(A!.id, 'provider_unavailable');
+    const before = (await health(A!.id))!;
+    expect(before.openUntil).not.toBeNull();
+    const gw = t.app.get(ProviderGateway);
+    await gw.call(A!.id, 'retrieve', (p, ctx) => p.retrievePayment(ctx, { idempotencyKey: `none-${randomUUID()}`, createdAt: new Date() }));
+    await gw.call(A!.id, 'webhook', async () => 'no network');
+    expect(await health(A!.id)).toMatchObject({ openUntil: before.openUntil, consecutiveFailures: 3, lastSuccessAt: null });
+    // The simulated checkout page goes through the webhook operation: paying there leaves health alone too.
+    expect(await t.prisma.auditLog.count({ where: { action: 'payments.providerAccount.reachable', entityId: A!.id } })).toBe(0);
+  });
+
+  it('slow_success_does_not_close_newer_failure (integration, database clock)', async () => {
+    const [A] = await accounts(1);
+    const svc = t.app.get(ProviderHealthService);
+    const startedAt = await svc.dbNow();
+    for (let i = 0; i < 3; i++) await svc.failure(A!.id, 'provider_timeout');
+    await svc.success(A!.id, startedAt);
+    expect((await health(A!.id))!.openUntil).not.toBeNull();
+    await svc.success(A!.id, await svc.dbNow());
+    expect((await health(A!.id))!.openUntil).toBeNull();
+  });
+
+  it('the breaker runs on the database clock: an instance clock 90 s ahead does not let a second probe in (review B2)', async () => {
+    const [A, B] = await accounts(2);
+    await setPriority((await cardRule(B!.id)).id, 200);
+    await outage(A!);
+    // Open for 60 more seconds by the database; an instance 90 s ahead would think the cooldown is over.
+    await t.prisma.$executeRawUnsafe(`UPDATE provider_account_health SET "openUntil" = clock_timestamp() + interval '60 seconds', "probeUntil" = NULL WHERE "providerAccountId" = $1::uuid`, A!.id);
+    const b = await fresh();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() + 90_000));
+    try {
+      expect((await c.pay(b.reference, { method: 'card' })).status).toBe(201);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect((await paymentsOf(b.bookingId))[0]!.providerAccountId).toBe(B!.id);
+    expect((await health(A!.id))!.probeUntil).toBeNull();
+  });
+
   it('breaker_counts_auth_failed_not_rejected', async () => {
     const [A] = await accounts(1);
     for (let i = 0; i < 4; i++) {
@@ -433,6 +488,99 @@ describe('routing rules in the panel (plan section 8)', () => {
     expect(preview.status).toBe(200);
     expect(preview.body.route).toEqual([]);
     expect((preview.body.reasons as Array<{ ruleId: string; reason: string }>).find((x) => x.ruleId === rule.id)!.reason).toBe('above_max');
+  });
+});
+
+describe('routing rules, more (review B1)', () => {
+  it('routing_rule_changes_audited: created, updated, deleted and defaults restored, before and after, never a secret', async () => {
+    const [A, B] = await accounts(2);
+    const made = await admin.post(RULES, { providerAccountId: B!.id, method: 'card', countries: ['AU'], currency: 'AUD', minAmountMinor: '100', priority: 7, enabled: true });
+    expect(made.status).toBe(201);
+    const upd = await admin.patch(`${RULES}/${made.body.id}`, { version: 0, priority: 8, maxAmountMinor: '900000' });
+    expect(upd.status).toBe(200);
+    const del = await admin.post(`${RULES}/${made.body.id}/delete`, { version: 1 });
+    expect(del.status).toBe(200);
+    const apple = (await rulesOf(A!.id)).find((r) => r.method === 'apple_pay')!;
+    expect((await admin.post(`${RULES}/${apple.id}/delete`, { version: apple.version, confirmCoverageLoss: true })).status).toBe(200);
+    expect((await admin.post(`/admin/payments/provider-accounts/${A!.id}/routing-rules/defaults`, {})).body.added).toBe(1);
+    const logs = await t.prisma.auditLog.findMany({ where: { OR: [{ entityId: made.body.id }, { entityId: A!.id, action: 'payments.routingRule.defaultsRestored' }] }, orderBy: { occurredAt: 'asc' } });
+    expect(logs.map((l) => l.action)).toEqual(['payments.routingRule.created', 'payments.routingRule.updated', 'payments.routingRule.deleted', 'payments.routingRule.defaultsRestored']);
+    const changes = logs.map((l) => JSON.stringify(l.changes));
+    expect(changes[1]).toContain('"priority"');
+    expect(changes[1]).toMatch(/"before":7/);
+    expect(changes[1]).toMatch(/"after":8/);
+    expect(changes[1]).toContain('900000');
+    expect(changes[2]).toMatch(/"before":8/);
+    expect(changes[3]).toContain('"added"');
+    for (const c2 of changes) expect(c2).not.toMatch(/Ciphertext|credentials|sim_test_|whsec_|secret/i);
+    expect(logs.every((l) => l.actorId === admin.staff.id)).toBe(true);
+  });
+
+  it('routing_preview_explains_exclusions: every reason, from the database', async () => {
+    const [A, B, C, D, E] = await accounts(5);
+    const manual = await t.app.get(ProviderAccountsService).createManualAccount({ displayName: 'Transfers (preview)' });
+    const base = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: A!.id } });
+    const ghost = randomUUID();
+    const { id: _i, createdAt: _c, updatedAt: _u, webhookPathTokenHash: _w, ...copy } = base;
+    await t.prisma.providerAccount.create({ data: { ...copy, id: ghost, adapterKey: 'ghost_adapter', displayName: 'Ghost', webhookPathTokenHash: randomUUID().replace(/-/g, '').padEnd(64, '0') } });
+    const insert = (accountId: string, over: Record<string, unknown>) => t.prisma.routingRule.create({ data: { providerAccountId: accountId, method: 'card', countries: [], anyCountry: true, currency: 'AUD', priority: 100, ...over } });
+    try {
+      const aCard = await cardRule(A!.id);
+      await insert(A!.id, { enabled: false });
+      await insert(A!.id, { currency: 'NZD' });
+      const nz = await insert(A!.id, { countries: ['NZ'], anyCountry: false });
+      await insert(A!.id, { minAmountMinor: 5000n });
+      await insert(A!.id, { maxAmountMinor: 500n });
+      await insert(A!.id, { method: 'payto' });
+      await t.prisma.providerAccount.update({ where: { id: D!.id }, data: { status: 'paused', pauseReasonCode: 'staff' } });
+      await insert(ghost, {});
+      await t.prisma.$executeRawUnsafe(`INSERT INTO provider_account_health ("providerAccountId", "openedAt", "openUntil", "consecutiveFailures") VALUES ($1::uuid, clock_timestamp(), clock_timestamp() + interval '1 hour', 3)`, E!.id);
+      await insert(B!.id, { fallbackForRuleId: aCard.id });
+      await insert(C!.id, { fallbackForRuleId: nz.id });
+      const reasons = new Set<string>();
+      for (const qs of ['method=card&country=AU&currency=AUD&amountMinor=1000', 'method=payto&country=AU&currency=AUD', 'method=payid_transfer&country=AU&currency=AUD']) {
+        const r = await admin.get(`/admin/payments/routing/preview?${qs}`);
+        expect(r.status).toBe(200);
+        for (const x of r.body.reasons as Array<{ reason: string | null }>) if (x.reason) reasons.add(x.reason);
+      }
+      expect([...reasons].sort()).toEqual([
+        'above_max', 'account_not_active', 'adapter_blocked', 'below_min', 'country', 'currency', 'disabled', 'manual_off', 'method', 'outside_adapter', 'primary_not_matching', 'primary_serving', 'unreachable',
+      ]);
+    } finally {
+      await t.prisma.providerAccount.update({ where: { id: ghost }, data: { status: 'paused', pauseReasonCode: 'staff' } });
+      await t.prisma.providerAccount.update({ where: { id: manual.id }, data: { status: 'paused', pauseReasonCode: 'staff' } });
+    }
+  });
+
+  it('no_surcharge_by_payment_method (task 4.2): the same amount is charged whichever account, rule or method takes it', async () => {
+    const [A, B] = await accounts(2);
+    const world = await pricedWorld(admin);
+    const one = await approvedBooking(t, admin, world, c);
+    const two = await approvedBooking(t, admin, world, c);
+    const due = (await c.plan(one.reference)).body.nextPayable.amountMinor as string;
+    expect((await c.plan(two.reference)).body.nextPayable.amountMinor).toBe(due);
+    expect((await c.pay(one.reference, { method: 'card' })).status).toBe(201);
+    for (const r of await rulesOf(B!.id)) await setPriority(r.id, 1);
+    expect((await c.pay(two.reference, { method: 'apple_pay' })).status).toBe(201);
+    const [p1] = await paymentsOf(one.bookingId);
+    const [p2] = await paymentsOf(two.bookingId);
+    expect([p1!.providerAccountId, p2!.providerAccountId]).toEqual([A!.id, B!.id]);
+    expect([p1!.amountMinor.toString(), p2!.amountMinor.toString()]).toEqual([due, due]);
+  });
+
+  it('default_rules_created_with_account: the panel and the Stripe console paths too', async () => {
+    await onlyAccount(t, null);
+    const made = await admin.post('/admin/payments/provider-accounts', { adapterKey: 'simulator', displayName: `Sim ${randomUUID().slice(0, 6)}`, mode: 'test' });
+    expect((await rulesOf(made.body.id)).map((r) => r.method).sort()).toEqual(['apple_pay', 'card', 'google_pay']);
+    const stripe = await t.app.get(ProviderAccountsService).createStripeTestAccount({ secretKey: `sk_test_${'a'.repeat(24)}`, webhookSecret: `whsec_${'b'.repeat(24)}`, displayName: 'Stripe (routing test)' });
+    try {
+      const rules = await rulesOf(stripe.id);
+      expect(rules.map((r) => r.method).sort()).toEqual(['apple_pay', 'card', 'google_pay']);
+      const row = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: stripe.id } });
+      expect(rules.every((r) => r.createdAt.getTime() === row.createdAt.getTime() && r.currency === 'AUD' && r.anyCountry)).toBe(true);
+    } finally {
+      await t.prisma.providerAccount.update({ where: { id: stripe.id }, data: { status: 'paused', pauseReasonCode: 'staff' } });
+    }
   });
 });
 

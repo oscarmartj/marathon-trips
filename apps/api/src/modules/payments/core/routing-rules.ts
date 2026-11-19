@@ -84,7 +84,10 @@ export type ExclusionReason =
   | 'disabled' | 'method' | 'currency' | 'country' | 'below_min' | 'above_max' | 'outside_adapter'
   | 'account_not_active' | 'adapter_blocked' | 'manual_off' | 'unreachable' | 'primary_serving' | 'primary_not_matching';
 
-/** Why a rule's own criteria do not match the query (enabled ignored), or null. */
+/**
+ * Why a rule's own criteria do not match the query (enabled ignored), or null. `outside_adapter` is not a criterion of
+ * the payment but something the rule's account cannot do: a backup serves its primary then (review B4).
+ */
 function criteriaMismatch(r: RuleRow, q: RouteQuery, ctx: RouteContext): ExclusionReason | null {
   if (q.method && r.method !== q.method) return 'method';
   if (r.currency !== q.currency) return 'currency';
@@ -146,8 +149,9 @@ export function explain(rules: readonly RuleRow[], ctx: RouteContext, q: RouteQu
       continue;
     }
     const target = byId.get(r.fallbackForRuleId);
-    if (!target || criteriaMismatch(target, q, ctx) !== null) out.set(r.id, 'primary_not_matching');
-    else if (own(target) === null) out.set(r.id, 'primary_serving');
+    const targetMismatch = target ? criteriaMismatch(target, q, ctx) : 'method';
+    if (targetMismatch !== null && targetMismatch !== 'outside_adapter') out.set(r.id, 'primary_not_matching');
+    else if (own(target!) === null) out.set(r.id, 'primary_serving');
     else out.set(r.id, null);
   }
   return out;

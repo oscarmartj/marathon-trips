@@ -56,6 +56,17 @@ test('admin_creates_pauses_retires_and_archives_a_gateway_account', async ({ pag
   await expect(rules).toHaveCount(3);
   await expect(rules.filter({ hasText: 'Buy now, pay later' })).toHaveCount(0);
 
+  // Add a rule and ask who would take a payment: the paused account is listed with its reason.
+  await page.getByLabel('Account', { exact: true }).selectOption({ label: name });
+  await page.getByLabel('Maximum amount (A$, optional)', { exact: true }).fill('100');
+  await page.getByRole('button', { name: 'Add rule' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Routing rule saved.' })).toBeVisible();
+  await expect(rules).toHaveCount(4);
+  await expect(rules.filter({ hasText: 'A$100.00' })).toHaveCount(1);
+  await page.getByLabel('Amount (A$, optional)', { exact: true }).fill('50');
+  await page.getByRole('button', { name: 'Check', exact: true }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: `Card · ${name}: account is not active` }).first()).toBeVisible();
+
   // Shown once: gone after a reload.
   await page.reload();
   await expect(page.getByTestId('webhook-url')).toHaveCount(0);

@@ -6,6 +6,11 @@ import { SettingsService } from '../../../platform/flags/flags.service';
 import { type BreakerCode, type HealthCounters, afterFailure, afterSuccess } from './routing-rules';
 import { PAYMENT_SETTINGS } from './settings';
 
+async function txNow(tx: Prisma.TransactionClient): Promise<Date> {
+  const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now` as [{ now: Date }];
+  return now;
+}
+
 const HEALTH_SELECT = { consecutiveFailures: true, lastFailureAt: true, lastFailureCode: true, openedAt: true, openUntil: true, probeUntil: true, lastSuccessAt: true } as const;
 
 /**
@@ -24,7 +29,13 @@ export class ProviderHealthService {
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
-  async failure(accountId: string, code: BreakerCode, now: Date = new Date()): Promise<void> {
+  /** The database clock: every health time is read and compared on it, never on an instance's clock (review B2). */
+  async dbNow(): Promise<Date> {
+    const [{ now }] = await this.prisma.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now` as [{ now: Date }];
+    return now;
+  }
+
+  async failure(accountId: string, code: BreakerCode): Promise<void> {
     try {
       const s = {
         failures: await this.settings.get(PAYMENT_SETTINGS.breakerFailures.key, PAYMENT_SETTINGS.breakerFailures.fallback),
@@ -33,6 +44,7 @@ export class ProviderHealthService {
       };
       await this.prisma.$transaction(async (tx) => {
         const prev = await this.lockRow(tx, accountId);
+        const now = await txNow(tx);
         const next = afterFailure(prev, code, now, s);
         await tx.providerAccountHealth.update({ where: { providerAccountId: accountId }, data: { ...next, updatedAt: now } });
         if (!prev.openedAt && next.openedAt) {
@@ -44,14 +56,18 @@ export class ProviderHealthService {
     }
   }
 
-  /** A success of a call that started at `startedAt`; ignored when a failure was recorded after it started (15.6). */
-  async success(accountId: string, startedAt: Date, now: Date = new Date()): Promise<void> {
+  /**
+   * A successful create or ok connection test that started at `startedAt` (database clock); ignored when a failure was
+   * recorded after it started (15.6). Reads, cancellations and refunds never close the breaker (review M1).
+   */
+  async success(accountId: string, startedAt: Date): Promise<void> {
     try {
       const row = await this.prisma.providerAccountHealth.findUnique({ where: { providerAccountId: accountId }, select: HEALTH_SELECT });
       // Nothing to reset: no row, or already clean (keeps the hot path to one read).
       if (!row || (row.consecutiveFailures === 0 && !row.openUntil && !row.probeUntil)) return;
       await this.prisma.$transaction(async (tx) => {
         const prev = await this.lockRow(tx, accountId);
+        const now = await txNow(tx);
         const next = afterSuccess(prev, startedAt, now);
         if (!next) return;
         await tx.providerAccountHealth.update({ where: { providerAccountId: accountId }, data: { ...next, updatedAt: now } });
@@ -63,7 +79,8 @@ export class ProviderHealthService {
   }
 
   /** Credentials that tested ok were stored (plan 15.6): the account starts clean, inside the caller's transaction. */
-  async reset(tx: Prisma.TransactionClient, accountId: string, now: Date = new Date()): Promise<void> {
+  async reset(tx: Prisma.TransactionClient, accountId: string): Promise<void> {
+    const now = await txNow(tx);
     await tx.providerAccountHealth.updateMany({ where: { providerAccountId: accountId }, data: { consecutiveFailures: 0, openedAt: null, openUntil: null, probeUntil: null, lastSuccessAt: now, updatedAt: now } });
   }
 

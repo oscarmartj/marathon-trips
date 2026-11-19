@@ -139,7 +139,7 @@ export class ProviderAccountsService {
       });
       if (n.count !== 1) throw conflict('version_conflict', 'Someone else changed this account. Reload and try again.');
       // New details that tested ok: the account's health starts clean (plan 4.2, 15.6); the test itself wrote none.
-      if (prepared.result === 'ok') await this.health.reset(tx, id, now);
+      if (prepared.result === 'ok') await this.health.reset(tx, id);
       await this.audit.record(tx, {
         actor, action, entityType: 'ProviderAccount', entityId: id, model: 'ProviderAccount',
         before: { credentialsCiphertext: 'a', ...(patch.webhookSecret !== undefined ? { webhookSecretCiphertext: 'a' } : {}), lastConnectionTestResult: null },

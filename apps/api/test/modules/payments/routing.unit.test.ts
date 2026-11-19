@@ -122,6 +122,13 @@ describe('fallback_table', () => {
     expect(ids(route(rules, c, q({ country: 'NZ' })))).toEqual([]);
     expect(ids(route(rules, c, q({ amountMinor: 1000n })))).toEqual(['B']);
   });
+  it('a backup serves a primary its gateway can no longer do (outside_adapter, review B4)', () => {
+    const p = rule('A', { method: 'payto' });
+    const rules = [p, rule('C', { method: 'payto', fallbackForRuleId: p.id })];
+    const c = ctx([acct('A'), acct('C', { adapterKey: 'debits' })], { manifest: (k) => (k === 'debits' ? manifest('debits', { methods: ['payto'] }) : MANIFESTS[k]) });
+    expect(explain(rules, c, q({ method: 'payto' })).get(p.id)).toBe('outside_adapter');
+    expect(ids(route(rules, c, q({ method: 'payto' })))).toEqual(['C']);
+  });
   it('a backup must match itself', () => {
     expect(ids(route(pair({}, { maxAmountMinor: 10n }), ctx([acct('A', { status: 'paused' }), acct('B')]), q({ amountMinor: 11n })))).toEqual([]);
   });

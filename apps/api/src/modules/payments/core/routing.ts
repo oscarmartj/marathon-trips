@@ -43,13 +43,15 @@ export class PaymentRouting {
     @Inject(ManualMethodsService) private readonly manual: ManualMethodsService,
   ) {}
 
-  private async load(db: Db, q: { currency: string; country: string }, opts: { ignoreHealth?: boolean; excludeAccountIds?: readonly string[]; now?: Date } = {}): Promise<Loaded> {
-    const rows = await db.routingRule.findMany({ where: { currency: q.currency }, select: RULE_SELECT });
+  private async load(db: Db, q: { currency: string; country: string }, opts: { ignoreHealth?: boolean; excludeAccountIds?: readonly string[]; now?: Date; allCurrencies?: boolean } = {}): Promise<Loaded> {
+    // A rule of another currency never matches; only the preview lists them, to say why.
+    const rows = await db.routingRule.findMany({ where: opts.allCurrencies ? {} : { currency: q.currency }, select: RULE_SELECT });
     const ids = [...new Set(rows.map((r) => r.providerAccountId))];
     const accounts = ids.length === 0 ? [] : await db.providerAccount.findMany({ where: { id: { in: ids } }, select: ACCOUNT_PUBLIC_SELECT });
-    const now = opts.now ?? new Date();
     const health = new Map<string, HealthState>();
     if (!opts.ignoreHealth && ids.length > 0) {
+      // The database clock, as the health writes and the probe claim use (review B2).
+      const now = opts.now ?? (await db.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0]!.now;
       const hs = await db.providerAccountHealth.findMany({ where: { providerAccountId: { in: ids } }, select: { providerAccountId: true, openedAt: true, openUntil: true, probeUntil: true } });
       for (const h of hs) health.set(h.providerAccountId, healthState(h, now));
     }
@@ -97,11 +99,10 @@ export class PaymentRouting {
   }
 
   private async claimProbe(db: Db, accountId: string): Promise<boolean> {
-    const until = new Date(Date.now() + PROBE_HOLD_MS);
     const n = await db.$executeRaw`
-      UPDATE provider_account_health SET "probeUntil" = ${until}, "updatedAt" = now()
-      WHERE "providerAccountId" = ${accountId}::uuid AND "openUntil" IS NOT NULL AND "openUntil" <= now()
-        AND ("probeUntil" IS NULL OR "probeUntil" <= now())`;
+      UPDATE provider_account_health SET "probeUntil" = clock_timestamp() + make_interval(secs => ${PROBE_HOLD_MS / 1000}), "updatedAt" = clock_timestamp()
+      WHERE "providerAccountId" = ${accountId}::uuid AND "openUntil" IS NOT NULL AND "openUntil" <= clock_timestamp()
+        AND ("probeUntil" IS NULL OR "probeUntil" <= clock_timestamp())`;
     return n === 1;
   }
 
@@ -156,7 +157,7 @@ export class PaymentRouting {
 
   /** "Who would take this payment?" for the panel (plan 8): the ordered choice and why each other rule is left out. */
   async preview(db: Db, q: Required<Pick<RouteQuery, 'method'>> & RouteQuery): Promise<{ route: RouteChoice[]; reasons: Array<{ ruleId: string; reason: ExclusionReason | null }> }> {
-    const { rules, ctx } = await this.load(db, q);
+    const { rules, ctx } = await this.load(db, q, { allCurrencies: true });
     const reasons = explain(rules, ctx, this.query(q));
     return { route: route(rules, ctx, this.query(q)), reasons: rules.map((r) => ({ ruleId: r.id, reason: reasons.get(r.id) ?? null })) };
   }

@@ -48,6 +48,13 @@ export function callBlockReason(account: AccountForCall, manifest: AdapterManife
 
 const CALL_TIMEOUT_MS = 10_000;
 
+/**
+ * The calls that feed gateway health (plan 4.2, 15.6; review M1, B3): the breaker answers "can this account take a new
+ * payment?", so only `create` counts, failing or succeeding (plus the stored connection test). A read, cancellation or
+ * refund says nothing about charging; `webhook` has no network; candidate tests never write health.
+ */
+const HEALTH_OPS: readonly GatewayOperation[] = ['create'];
+
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -105,15 +112,17 @@ export class ProviderGateway {
     if (!account) throw new ApiError(409, 'provider_account_missing', 'The payment account no longer exists');
     const provider = await this.allow(account, op);
     const { ctx } = await this.context(account);
-    const startedAt = new Date();
+    // Health (plan 4.2, 15.6 and review M1, B2, B3): only creates count, on the database clock.
+    const tracked = HEALTH_OPS.includes(op);
+    const startedAt = tracked ? await this.health?.dbNow() : undefined;
     try {
       const result = await withTimeout(fn(provider, ctx), CALL_TIMEOUT_MS);
-      await this.health?.success(account.id, startedAt);
+      if (startedAt) await this.health?.success(account.id, startedAt);
       return result;
     } catch (err) {
       // Never the gateway's message: it can carry credentials or the payer's details.
       const e = err instanceof ProviderError ? err : new ProviderError('provider_unavailable', true);
-      await this.noteFailure(account.id, e.code);
+      if (tracked) await this.noteFailure(account.id, e.code);
       throw e;
     }
   }
@@ -152,10 +161,10 @@ export class ProviderGateway {
     } catch {
       return { result: 'credentials_unreadable', credentialsChangedAt: row.credentialsChangedAt };
     }
-    const startedAt = new Date();
+    const startedAt = await this.health?.dbNow();
     const result = await this.runTest(provider, ctx);
     // A stored account's test feeds its health (plan 4.2, 15.6); candidate tests below never do.
-    if (result === 'ok') await this.health?.success(account.id, startedAt);
+    if (result === 'ok' && startedAt) await this.health?.success(account.id, startedAt);
     else await this.noteFailure(account.id, result);
     return { result, credentialsChangedAt: row.credentialsChangedAt };
   }
