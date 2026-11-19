@@ -333,7 +333,11 @@ ALTER TABLE "cancellations"
     AND "waivedMinor" = "policyPenaltyMinor" - "penaltyMinor"
     AND "refundableMinor" = GREATEST("collectedMinor", 0) - "penaltyMinor"),
   ADD CONSTRAINT "cancellations_places_check" CHECK ("places" BETWEEN 0 AND 80 AND "snapshotVersion" >= 1),
-  ADD CONSTRAINT "cancellations_dates_check" CHECK ("businessDate" <= "processedDate"),
+  -- Review of the code (round 2, 6): the days count from the processing day, or from a blocked request's day within the
+  -- 14-day window (CANCELLATION_REQUEST_HOLD_DAYS); never a date back-dated without a request.
+  ADD CONSTRAINT "cancellations_dates_check" CHECK (
+    ("cancellationRequestId" IS NULL AND "businessDate" = "processedDate")
+    OR ("cancellationRequestId" IS NOT NULL AND "processedDate" - "businessDate" BETWEEN 0 AND 14)),
   ADD CONSTRAINT "cancellations_basis_check" CHECK (
     ("basis" = 'policy') = ("cancellationPolicyId" IS NOT NULL AND "tierMinDays" IS NOT NULL)
     AND ("basis" = 'policy' OR "policyPenaltyMinor" = 0)

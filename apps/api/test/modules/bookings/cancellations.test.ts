@@ -3,7 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cancellationQuoteViewSchema, paymentPlanItemViewSchema, paymentPlanViewSchema } from '@mt/shared';
+import { cancellationQuoteViewSchema, cancellationViewSchema, paymentPlanItemViewSchema, paymentPlanViewSchema } from '@mt/shared';
+import { z } from 'zod';
 import { CANCELLATION_REQUEST_HOLD_DAYS } from '../../../src/modules/bookings';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
@@ -52,21 +53,34 @@ const today = async () => (await t.prisma.$queryRaw<Array<{ d: string }>>`SELECT
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 /** A real row lock on a booking, held by another connection until released (the barrier of plan 0.1, 6.3 tests). */
-async function holdBooking(bookingId: string): Promise<{ release: () => Promise<void> }> {
+interface Gate { pid: number; release: () => Promise<void> }
+async function holdBooking(bookingId: string): Promise<Gate> {
   const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
+  const pid = (await db.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
   await db.query('BEGIN');
   await db.query('SELECT id FROM bookings WHERE id = $1::uuid FOR UPDATE', [bookingId]);
-  return { release: async () => { await db.query('COMMIT'); await db.end(); } };
+  return { pid, release: async () => { await db.query('COMMIT'); await db.end(); } };
 }
-/** Waits until `n` sessions are waiting on a lock (pg_stat_activity), so the order is the one the test set up. */
-async function waitForLockWaiters(n: number): Promise<void> {
+/**
+ * Waits until `n` sessions are queued behind the gate: blocked by its session, or by one already queued behind it (a
+ * second waiter on a row waits on the first one's tuple lock). Locks of anything else (job workers, outbox) never count.
+ */
+async function waitForLockWaiters(gate: Gate, n: number): Promise<number[]> {
   for (let i = 0; i < 250; i++) {
-    const r = await t.prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`;
-    if (r[0]!.n >= BigInt(n)) return;
+    const rows = await t.prisma.$queryRaw<Array<{ pid: number; blockers: number[] }>>`
+      SELECT pid, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+    const queued = new Set<number>([gate.pid]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const r of rows) if (!queued.has(r.pid) && r.blockers.some((b) => queued.has(b))) { queued.add(r.pid); grew = true; }
+    }
+    queued.delete(gate.pid);
+    if (queued.size >= n) return [...queued];
     await new Promise((res) => setTimeout(res, 20));
   }
-  throw new Error(`fewer than ${n} sessions waited on a lock`);
+  throw new Error(`fewer than ${n} sessions queued behind the gate`);
 }
 
 /** A priced, open package selling under a new active policy. */
@@ -233,12 +247,22 @@ describe('penalty_above_collected_is_not_charged (finding 7)', () => {
     // cancelled_plan_view_validates: the panel's view and the customer area show the new kind with the shared schema.
     const panel = await admin.get(`/admin/payments/bookings/${bookingId}`);
     expect(panel.status).toBe(200);
-    const kinds = (panel.body.schedule.items as Array<{ kind: string; state: string }>).filter((i) => i.state === 'active').map((i) => paymentPlanItemViewSchema.shape.kind.parse(i.kind));
-    expect(kinds).toEqual(['penalty']);
+    // The panel's plan has no shared schema of its own: the whole schedule is checked strictly, its kinds with the shared enum.
+    const digits = z.string().regex(/^\d+$/);
+    const panelSchedule = z.strictObject({
+      id: z.uuid(), version: z.number().int().min(1),
+      items: z.array(z.strictObject({
+        id: z.uuid(), kind: paymentPlanItemViewSchema.shape.kind, sequence: z.number().int().min(1), planVersion: z.number().int().min(1), amountMinor: digits,
+        dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), state: z.enum(['active', 'waived', 'superseded']), supersededInVersion: z.number().int().nullable(),
+      })),
+    });
+    const schedule = panelSchedule.parse(panel.body.schedule);
+    expect(schedule.items.filter((i) => i.state === 'active').map((i) => [i.kind, i.amountMinor])).toEqual([['penalty', dep.amountMinor.toString()]]);
+    expect(panel.body.booking.status).toBe('cancelled');
     const area = await t.http().get(`/account/bookings/${reference}`).set('Cookie', c.cookie);
     expect(area.status).toBe(200);
     expect(() => paymentPlanViewSchema.parse(area.body.plan)).not.toThrow();
-    expect(area.body.cancellation.record.penaltyMinor).toBe(dep.amountMinor.toString());
+    expect(cancellationViewSchema.strict().parse(area.body.cancellation.record).penaltyMinor).toBe(dep.amountMinor.toString());
   });
 });
 
@@ -291,7 +315,7 @@ describe('one_cancellation_per_booking and the races around a cancellation', () 
   it('cancellation_vs_payment_success_concurrent: the cancel holds the booking first, the webhook waits, its money is an overpayment', async () => {
     const { w, policy } = await policyWorld();
     const { reference, bookingId } = await approvedWithPolicy(c, w, policy);
-    await pay(c, reference, bookingId, 1);
+    const first = await pay(c, reference, bookingId, 1);
     expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
     const live = (await t.prisma.payment.findMany({ where: { bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
     sim.settle(acc.id, live.providerPaymentRef!, 'succeeded');
@@ -301,9 +325,9 @@ describe('one_cancellation_per_booking and the races around a cancellation', () 
     // A barrier on the real row lock: the cancel queues first, then the webhook; PostgreSQL grants them in that order.
     const gate = await holdBooking(bookingId);
     const cancel = admin.post(`/admin/bookings/${bookingId}/cancel`, { version, reason: 'Race', quoteDigest: q.quoteDigest }).then((r) => r);
-    await waitForLockWaiters(1);
+    await waitForLockWaiters(gate, 1);
     const hook = deliver(t, acc, hookEvent);
-    await waitForLockWaiters(2);
+    await waitForLockWaiters(gate, 2);
     await gate.release();
     const [cr, hr] = await Promise.all([cancel, hook]);
     expect([cr.status, hr.outcome]).toEqual([200, 'processed']);
@@ -314,11 +338,12 @@ describe('one_cancellation_per_booking and the races around a cancellation', () 
     const view = await admin.get(`/admin/payments/bookings/${bookingId}/refunds`);
     const late = (view.body.refundable as Array<{ paymentId: string; refundableMinor: string }>).find((r) => r.paymentId === live.id)!;
     expect(BigInt(late.refundableMinor)).toBe(live.amountMinor);
-    expect(cx.collectedMinor).toBeLessThan(cx.collectedMinor + live.amountMinor);
+    // The cancellation counted only the money in before it: the first payment, not the one that landed after the lock.
+    expect(cx.collectedMinor).toBe(first.amountMinor);
     expect(await t.app.get(PaymentLedgerCheckService).check({ bookingIds: [bookingId] })).toEqual([]);
   });
 
-  it('cancellation_vs_amendment_concurrent: a change and a cancellation at once; one wins, the other is a 409', async () => {
+  it.each(['amendment first', 'cancellation first'] as const)('cancellation_vs_amendment_concurrent: %s takes the lock; the other is a 409', async (order) => {
     const { amendableBookingOf, setCustomerAmendments } = await import('../../support/amendments');
     const session = await customerClient(t);
     const { reference, bookingId, body } = await amendableBookingOf(t, session);
@@ -327,20 +352,24 @@ describe('one_cancellation_per_booking and the races around a cancellation', () 
       expect(preview.status).toBe(200);
       const q = await quoteOf(bookingId);
       const version = (await row(bookingId)).version;
+      const amendNow = () => t.http().post(`/account/bookings/${reference}/amendments`).set(STATE_HEADERS).set('Cookie', session.cookie).set('Idempotency-Key', randomUUID()).send({ ...body, previewDigest: preview.body.previewDigest, acceptNewPrice: true }).then((r) => r);
+      const cancelNow = () => admin.post(`/admin/bookings/${bookingId}/cancel`, { version, reason: 'Race', quoteDigest: q.quoteDigest }).then((r) => r);
+      // A barrier on the real row lock: the first request queues behind the gate, then the second behind it.
       const gate = await holdBooking(bookingId);
-      const amend = t.http().post(`/account/bookings/${reference}/amendments`).set(STATE_HEADERS).set('Cookie', session.cookie).set('Idempotency-Key', randomUUID()).send({ ...body, previewDigest: preview.body.previewDigest, acceptNewPrice: true }).then((r) => r);
-      const cancel = admin.post(`/admin/bookings/${bookingId}/cancel`, { version, reason: 'Race', quoteDigest: q.quoteDigest }).then((r) => r);
-      await waitForLockWaiters(2);
+      const firstCall = order === 'amendment first' ? amendNow() : cancelNow();
+      await waitForLockWaiters(gate, 1);
+      const secondCall = order === 'amendment first' ? cancelNow() : amendNow();
+      await waitForLockWaiters(gate, 2);
       await gate.release();
-      const [ar, cr] = await Promise.all([amend, cancel]);
-      const won = [ar, cr].filter((r) => r.status >= 200 && r.status < 300);
-      expect(won).toHaveLength(1);
-      expect([ar, cr].filter((r) => r.status === 409)).toHaveLength(1);
+      const [one, two] = await Promise.all([firstCall, secondCall]);
+      const [ar, cr] = order === 'amendment first' ? [one, two] : [two, one];
       const final = await row(bookingId);
-      if (cr.status === 200) {
-        expect([final.status, await t.prisma.bookingAmendment.count({ where: { bookingId } })]).toEqual(['cancelled', 0]);
-      } else {
+      if (order === 'amendment first') {
+        expect([ar.status, cr.status, cr.body.code]).toEqual([201, 409, 'version_conflict']);
         expect([final.status === 'cancelled', final.currentSnapshotVersion, await t.prisma.cancellation.count({ where: { bookingId } })]).toEqual([false, 2, 0]);
+      } else {
+        expect([cr.status, ar.status, ar.body.code]).toEqual([200, 409, 'amendment_not_allowed']);
+        expect([final.status, await t.prisma.bookingAmendment.count({ where: { bookingId } })]).toEqual(['cancelled', 0]);
       }
     } finally {
       await setCustomerAmendments(t, false);
@@ -428,6 +457,15 @@ describe('cancellation_blocked_while_money_moves and the blocked request keeping
     expect((await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: (await row(bookingId)).version, reason: 'Kept date', quoteDigest: q.quoteDigest })).status).toBe(200);
     const cx = (await cancellationOf(bookingId))!;
     expect([cx.tierMinDays, cx.businessDate.toISOString().slice(0, 10), cx.processedDate.toISOString().slice(0, 10), cx.cancellationRequestId !== null]).toEqual([30, addDays(await today(), -1), await today(), true]);
+  });
+
+  it.each([[CANCELLATION_REQUEST_HOLD_DAYS, true], [CANCELLATION_REQUEST_HOLD_DAYS + 1, false]] as const)('the window edge: a request %i days old keeps its date: %s', async (age, kept) => {
+    const { w, policy } = await policyWorld();
+    // 29 days away today (the 14-day tier); on the request's day it was 29 + age days away (the 30-day tier).
+    const { bookingId } = await departingIn(w, 29, policy.id);
+    await requestOn(bookingId, addDays(await today(), -age));
+    const q = await quoteOf(bookingId);
+    expect([q.effectiveDate, q.tier?.minDaysBeforeDeparture]).toEqual(kept ? [addDays(await today(), -age), 30] : [await today(), 14]);
   });
 
   it('blocked_cancellation_after_window_uses_processing_date', async () => {
@@ -762,8 +800,14 @@ describe('the database keeps the rules (section 5, review m1, m4, m5, m8)', () =
         SELECT gen_random_uuid(), id, currency, 'customer', gen_random_uuid(), status, 1, 'operator_cancelled', current_date, current_date, 0, '{}', "totalMinor", 2, 0, 0, 0, 0, 0 FROM bookings WHERE id = $1::uuid`, [bookingId])).toMatch(/cancellations_basis_check/);
       const q = await quoteOf(bookingId);
       await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: (await row(bookingId)).version, reason: 'Real', quoteDigest: q.quoteDigest });
-      expect(await code(db, `UPDATE cancellations SET "penaltyMinor" = 0 WHERE "bookingId" = $1::uuid`, [bookingId])).not.toBeNull();
-      expect(await code(db, `DELETE FROM cancellations WHERE "bookingId" = $1::uuid`, [bookingId])).not.toBeNull();
+      expect(await code(db, `UPDATE cancellations SET "penaltyMinor" = 0 WHERE "bookingId" = $1::uuid`, [bookingId])).toMatch(/append-only|never|modif/i);
+      // The API's role has no DELETE or TRUNCATE on either table (the REVOKEs of 0038), whatever the triggers say.
+      expect(await code(db, `DELETE FROM cancellations WHERE "bookingId" = $1::uuid`, [bookingId])).toMatch(/permission denied for table cancellations/);
+      expect(await code(db, `DELETE FROM cancellation_requests WHERE "bookingId" = $1::uuid`, [bookingId])).toMatch(/permission denied for table cancellation_requests/);
+      const privileges = await t.prisma.$queryRaw<Array<{ t: string; del: boolean; trunc: boolean; ins: boolean }>>`
+        SELECT t, has_table_privilege('mt_app', t, 'DELETE') AS del, has_table_privilege('mt_app', t, 'TRUNCATE') AS trunc, has_table_privilege('mt_app', t, 'INSERT') AS ins
+          FROM unnest(ARRAY['cancellations', 'cancellation_requests']) AS t ORDER BY t`;
+      expect(privileges).toEqual([{ t: 'cancellation_requests', del: false, trunc: false, ins: true }, { t: 'cancellations', del: false, trunc: false, ins: true }]);
     } finally {
       await db.end();
     }
@@ -778,6 +822,25 @@ describe('the database keeps the rules (section 5, review m1, m4, m5, m8)', () =
         SELECT gen_random_uuid(), id, currency, 'staff', gen_random_uuid(), status, 1, 'operator_cancelled', current_date, current_date, 0, '{}', "totalMinor", 2, 0, 0, 0, 0, 0 FROM bookings WHERE id = $1::uuid`, bookingId);
       await tx.$executeRawUnsafe(`UPDATE bookings SET status = 'cancelled', version = version + 1, "cancelledAt" = now() WHERE id = $1::uuid`, bookingId);
     }).then(() => { throw new Error('committed'); }, (err: Error) => expect(err.message).toMatch(/must add up to what the booking owes/));
+  });
+
+  it('cancellations_dates_check: a cancellation counts from its processing day, or from its request within the window', async () => {
+    const { w, policy } = await policyWorld();
+    const { bookingId } = await departingIn(w, 90, policy.id);
+    const db = app();
+    await db.connect();
+    const insert = (businessOffset: number, request: string | null) => code(db, `INSERT INTO cancellations (id, "bookingId", currency, "requestedBy", "requestedById", "bookingStatus", "snapshotVersion", basis, "cancellationRequestId", "businessDate", "processedDate", "daysBeforeDeparture", "policySnapshot", "baseTotalMinor", places, "collectedMinor", "policyPenaltyMinor", "penaltyMinor", "waivedMinor", "refundableMinor")
+      SELECT gen_random_uuid(), id, currency, 'staff', gen_random_uuid(), status, 1, 'operator_cancelled', $2::uuid, current_date + $3::int, current_date, 0, '{}', "totalMinor", 2, 0, 0, 0, 0, 0 FROM bookings WHERE id = $1::uuid`, [bookingId, request, businessOffset]);
+    try {
+      // Back-dated without a request: refused.
+      expect(await insert(-1, null)).toMatch(/cancellations_dates_check/);
+      // A request older than the window: refused, even though its date matches the request.
+      const old = randomUUID();
+      await t.prisma.$executeRawUnsafe(`INSERT INTO cancellation_requests (id, "bookingId", "requestedBy", "requestedById", "businessDate", "blockedReason", "quoteDigest") VALUES ($1::uuid, $2::uuid, 'staff', gen_random_uuid(), current_date - 15, 'cancellation_blocked_by_pending_payment', repeat('a', 64))`, old, bookingId);
+      expect(await insert(-15, old)).toMatch(/cancellations_dates_check/);
+    } finally {
+      await db.end();
+    }
   });
 
   it('bookings_cancelled_before_0038_keep_working (m8): no record, the plan owes 0, refunded and back, the old erasure rule', async () => {

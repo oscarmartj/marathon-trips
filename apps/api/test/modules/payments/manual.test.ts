@@ -221,8 +221,16 @@ describe('the customer asks to pay by transfer (section 2)', () => {
     expect((await c.pay(b.reference, { method: 'payid_transfer' })).status).toBe(201);
     const [intent] = await paymentsOf(b.bookingId);
     expect([intent!.origin, intent!.status]).toEqual(['manual_intent', 'created']);
+    // "Without calling anyone" (P2): no gateway call and no job queued for the intent while the booking is cancelled.
+    const gateway = t.app.get(ProviderGateway);
+    const calls = vi.spyOn(gateway, 'call');
+    const jobsBefore = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pgboss.job WHERE data->>'paymentId' = $1`, intent!.id);
     const res = await staffCancel(admin, b.bookingId, { version: (await bookingRow(b.bookingId)).version, reason: 'Changed plans' });
     expect([res.status, res.body.status]).toEqual([200, 'cancelled']);
+    expect(calls).not.toHaveBeenCalled();
+    calls.mockRestore();
+    const jobsAfter = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pgboss.job WHERE data->>'paymentId' = $1`, intent!.id);
+    expect(jobsAfter[0]!.n).toBe(jobsBefore[0]!.n);
     const after = await t.prisma.payment.findUniqueOrThrow({ where: { id: intent!.id } });
     expect([after.status, after.version > intent!.version]).toEqual(['cancelled', true]);
     expect(await t.prisma.auditLog.count({ where: { entityId: intent!.id, action: { contains: 'status' } } })).toBeGreaterThan(0);
