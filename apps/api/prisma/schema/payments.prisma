@@ -1,7 +1,7 @@
 // Payments core (task 3.1; plan docs/plans/3.1-payment-provider-core.md and plan 0.1, 5.5), with the ledger and gateway
 // refunds of task 3.3 (plan docs/plans/3.3-stripe-adapter-ledger.md). No disputes, receipts, GST, FX or supplier
 // payments here. Only test-mode accounts exist until a task manages live ones (CHECK). CHECKs and triggers live in the
-// migrations 0017_payments and 0032_ledger_refunds.
+// migrations 0017_payments and 0033_ledger_refunds.
 
 enum PaymentMode {
   test
@@ -77,7 +77,7 @@ enum RefundPurpose {
   cancellation
 }
 
-/// The refund state machine (plan 0.1, 6.2): forward only; pairs in a trigger of migration 0032.
+/// The refund state machine (plan 0.1, 6.2): forward only; pairs in a trigger of migration 0033.
 enum RefundStatus {
   requested
   pending
@@ -476,7 +476,7 @@ model LedgerAccount {
 }
 
 /// One fact of the ledger (plan 0.1, 5.5; task 3.3): append-only, with at least two entries summing to 0 per currency,
-/// all inserted in the database transaction that created it (triggers in migration 0032). A correction is a new
+/// all inserted in the database transaction that created it (triggers in migration 0033). A correction is a new
 /// transaction (reversal or adjustment). Only LedgerService writes here.
 model LedgerTransaction {
   id                    String                @id @default(uuid(7)) @db.Uuid

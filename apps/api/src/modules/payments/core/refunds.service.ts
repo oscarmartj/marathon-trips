@@ -15,7 +15,7 @@ import type { ProviderRefund, ProviderRefundStatus } from './provider';
 type Tx = Prisma.TransactionClient;
 export type RefundStatusName = 'requested' | 'pending' | 'succeeded' | 'failed' | 'reversed';
 
-/** Every pair the refund state machine and the trigger of migration 0032 allow (plan 0.1, 6.2; plan 3.3, 3.1). */
+/** Every pair the refund state machine and the trigger of migration 0033 allow (plan 0.1, 6.2; plan 3.3, 3.1). */
 export const REFUND_STATUS_PAIRS: ReadonlyArray<readonly [RefundStatusName, RefundStatusName]> = [
   ['requested', 'pending'], ['requested', 'succeeded'], ['requested', 'failed'],
   ['pending', 'succeeded'], ['pending', 'failed'],
