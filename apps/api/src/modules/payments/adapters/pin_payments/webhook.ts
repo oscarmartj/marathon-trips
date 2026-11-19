@@ -61,8 +61,8 @@ export function verifyPinWebhook(key: string, rawBody: Buffer, headers: Readonly
     for (const v of sig.v1) if (timingSafeEqual(expected, Buffer.from(v, 'hex'))) match = true;
     if (!match) return { ok: false, code: 'bad_signature' };
     // After the signature, so only genuine deliveries are told their timestamp is the problem.
-    const signedAt = Number(sig.t) * 1000;
-    if (Math.abs(now.getTime() - signedAt) > STALE_AFTER_MS) return { ok: false, code: 'stale_timestamp' };
+    const drift = now.getTime() - Number(sig.t) * 1000;
+    if (drift > STALE_AFTER_MS || drift < -STALE_AFTER_MS) return { ok: false, code: 'stale_timestamp' };
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawBody.toString('utf8'));

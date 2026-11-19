@@ -102,6 +102,10 @@ export class FakePin {
     return this.makeRefund(this.account(secretKey), chargeToken, amount).token;
   }
 
+  refundsOf(secretKey: string, chargeToken: string): string[] {
+    return [...this.account(secretKey).refunds.values()].filter((r) => r.charge === chargeToken).map((r) => r.token);
+  }
+
   settleRefund(secretKey: string, refundToken: string): void {
     const acc = this.account(secretKey);
     const r = acc.refunds.get(refundToken);
@@ -118,11 +122,12 @@ export class FakePin {
   }
 
   /** A signed event as Pin would deliver it (plan 4.4, A1 to A3). */
-  event(secretKey: string, type: string, data: unknown, at: Date): { body: Buffer; headers: Record<string, string> } {
+  event(secretKey: string, type: string, data: unknown, at: Date): { body: Buffer; headers: Record<string, string>; eventId: string } {
     const acc = this.account(secretKey);
-    const body = Buffer.from(JSON.stringify({ token: id('evt'), type, data, created_at: at.toISOString() }));
+    const eventId = id('evt');
+    const body = Buffer.from(JSON.stringify({ token: eventId, type, data, created_at: at.toISOString() }));
     const t = String(Math.floor(at.getTime() / 1000));
-    return { body, headers: { 'content-type': 'application/json', [PIN_SIGNATURE_HEADER]: `t=${t},v1=${pinSignature(acc.webhookKey, t, body)}` } };
+    return { body, headers: { 'content-type': 'application/json', [PIN_SIGNATURE_HEADER]: `t=${t},v1=${pinSignature(acc.webhookKey, t, body)}` }, eventId };
   }
 
   chargeEvent(secretKey: string, chargeToken: string, at: Date) {

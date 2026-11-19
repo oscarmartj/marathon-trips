@@ -58,6 +58,9 @@ const configSchema = z.object({
   PAYMENT_ATTEMPTS_PER_HOUR_PER_USER: z.coerce.number().int().min(1).default(10),
   PAYMENT_ATTEMPTS_PER_HOUR_PER_IP: z.coerce.number().int().min(1).default(30),
   PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP: z.coerce.number().int().min(1).default(600),
+  // Task 4.4: card submissions and 3-D Secure returns of card sessions, per IP and 10 minutes (card testing).
+  CARD_SUBMITS_PER_10_MIN_PER_IP: z.coerce.number().int().min(1).default(10),
+  CARD_AUTHENTICATED_PER_10_MIN_PER_IP: z.coerce.number().int().min(1).default(20),
 
   // Task 8.6: file written by scripts/backup/backup.sh after each good backup; the system monitor reads it. Optional.
   BACKUP_STATUS_FILE: z.string().min(1).optional(),

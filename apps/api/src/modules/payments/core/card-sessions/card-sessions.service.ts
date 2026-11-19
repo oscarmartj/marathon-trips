@@ -19,11 +19,8 @@ import { bookingUnderPaymentReview, underReview } from '../refunds.service';
 import { CardSessionProvider } from './provider';
 import type { CardSession } from './store';
 
-/** Submissions per IP (plan 4.4, section 10.1); one per session is the store's own rule. */
-const SUBMITS_PER_IP = 10;
+/** Submissions and 3-D Secure returns per IP over this window (plan 4.4, section 10.1; limits in the configuration). */
 const SUBMIT_WINDOW_MS = 10 * 60_000;
-/** Calls of the 3-D Secure return per IP; each one may ask the gateway. */
-const AUTHENTICATED_PER_IP = 20;
 /** Declines on one account in an hour before a task for Oscar (nothing is blocked: section 10.1). */
 const DECLINES_PER_ACCOUNT = 20;
 const DECLINE_WINDOW_MS = 3_600_000;
@@ -32,8 +29,8 @@ const isFailure = (v: string | null): v is CardSessionFailure => v !== null && (
 
 @Injectable()
 export class CardSessionsService {
-  private readonly submitsPerIp = new WindowLimiter(SUBMITS_PER_IP, SUBMIT_WINDOW_MS);
-  private readonly authenticatedPerIp = new WindowLimiter(AUTHENTICATED_PER_IP, SUBMIT_WINDOW_MS);
+  private readonly submitsPerIp: WindowLimiter;
+  private readonly authenticatedPerIp: WindowLimiter;
   private readonly declines = new WindowLimiter(DECLINES_PER_ACCOUNT, DECLINE_WINDOW_MS);
 
   constructor(
@@ -41,7 +38,10 @@ export class CardSessionsService {
     @Inject(ProviderGateway) private readonly gateway: ProviderGateway,
     @Inject(PaymentAttemptsService) private readonly attempts: PaymentAttemptsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-  ) {}
+  ) {
+    this.submitsPerIp = new WindowLimiter(config.CARD_SUBMITS_PER_10_MIN_PER_IP, SUBMIT_WINDOW_MS);
+    this.authenticatedPerIp = new WindowLimiter(config.CARD_AUTHENTICATED_PER_10_MIN_PER_IP, SUBMIT_WINDOW_MS);
+  }
 
   /** The session of a reference, in this environment's mode, with the card-session provider of its account; else 404. */
   private async locate(ref: string): Promise<{ accountId: string; provider: CardSessionProvider; returnUrl: string }> {
