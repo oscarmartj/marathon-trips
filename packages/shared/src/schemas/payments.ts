@@ -7,6 +7,12 @@ import { z } from 'zod';
 export const PAYMENT_METHODS = ['card', 'apple_pay', 'google_pay', 'payto', 'becs', 'payid_transfer', 'bpay', 'bnpl', 'manual_other'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+export const PAY_ID_TYPES = ['email', 'phone', 'abn', 'org_id'] as const;
+export type PayIdType = (typeof PAY_ID_TYPES)[number];
+
+export const MANUAL_PAYMENT_METHODS = ['payid_transfer', 'manual_other'] as const;
+export type ManualPaymentMethod = (typeof MANUAL_PAYMENT_METHODS)[number];
+
 export const PAYMENT_STATUSES = ['created', 'pending', 'requires_action', 'succeeded', 'failed', 'cancelled', 'expired', 'voided'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
@@ -32,12 +38,33 @@ export const paymentPlanItemViewSchema = z.object({
   paidMinor: minor,
 });
 
+/**
+ * How to pay by bank transfer (task 3.4): where to send it, the reference to write on it and the amount the plan asks for.
+ * The business's own details; nothing about any customer. The customer never sends an amount.
+ */
+export const manualInstructionsViewSchema = z.object({
+  method: z.enum(['payid_transfer', 'manual_other']),
+  /** The booking's reference: the payer writes it on the transfer so staff can find the booking. */
+  reference: z.string(),
+  amountMinor: minor,
+  currency: z.string().length(3),
+  payeeName: z.string(),
+  payId: z.object({ type: z.enum(PAY_ID_TYPES), value: z.string() }).nullable(),
+  bank: z.object({ bsb: z.string(), accountNumber: z.string() }).nullable(),
+  /** The staff's words for this method, in the customer's language when there is one, else en-AU. */
+  note: z.string().nullable(),
+  /** When this request to pay by transfer lapses (ISO 8601). */
+  expiresAt: z.string(),
+});
+export type ManualInstructionsView = z.infer<typeof manualInstructionsViewSchema>;
+
 export const paymentAttemptViewSchema = z.object({
   status: z.enum(PAYMENT_STATUSES),
   method: z.enum(PAYMENT_METHODS),
   amountMinor: minor,
   currency: z.string().length(3),
   nextAction: z.object({ type: z.literal('redirect'), url: z.string().url() }).optional(),
+  manual: manualInstructionsViewSchema.optional(),
 });
 export type PaymentAttemptView = z.infer<typeof paymentAttemptViewSchema>;
 
@@ -55,7 +82,9 @@ export const paymentPlanViewSchema = z.object({
   depositDueBy: z.string().nullable(),
   nextPayable: z.object({ sequence: z.number().int(), amountMinor: minor }).nullable(),
   methods: z.array(z.enum(PAYMENT_METHODS)),
-  liveAttempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),
+  liveAttempt: paymentAttemptViewSchema.omit({ nextAction: true, manual: true }).nullable(),
+  /** The open request to pay by bank transfer, if any (task 3.4). */
+  manualIntent: manualInstructionsViewSchema.nullable(),
 });
 export type PaymentPlanView = z.infer<typeof paymentPlanViewSchema>;
 
@@ -84,7 +113,7 @@ export type CheckoutTermsView = z.infer<typeof checkoutTermsViewSchema>;
 /** Answer of POST /booking-requests/:reference/payments/refresh: where the latest attempt stands, as the gateway says. */
 export const paymentRefreshViewSchema = z.object({
   bookingStatus: z.string(),
-  attempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),
+  attempt: paymentAttemptViewSchema.omit({ nextAction: true, manual: true }).nullable(),
 });
 export type PaymentRefreshView = z.infer<typeof paymentRefreshViewSchema>;
 
@@ -123,9 +152,44 @@ export type PaymentLinkView = z.infer<typeof paymentLinkViewSchema>;
 /** Answer of POST /payment-links/refresh: the latest attempt started through this link, and whether the link has served. */
 export const paymentLinkRefreshViewSchema = z.strictObject({
   used: z.boolean(),
-  attempt: paymentAttemptViewSchema.omit({ nextAction: true }).nullable(),
+  attempt: paymentAttemptViewSchema.omit({ nextAction: true, manual: true }).nullable(),
 });
 export type PaymentLinkRefreshView = z.infer<typeof paymentLinkRefreshViewSchema>;
 
 /** Body of POST /admin/payments/bookings/:id/payment-links: nothing; the target and the expiry are the server's. */
 export const sendPaymentLinkSchema = z.strictObject({});
+
+// Bank transfers confirmed by staff and the manual methods' configuration (task 3.4, plan docs/plans/3.4-manual-payid-transfer.md).
+
+/** The bank's own identifier of a movement: the one reference of a transfer (unique per account until voided). */
+export const BANK_REFERENCE = /^[A-Z0-9][A-Z0-9 _./:#-]{0,63}$/;
+
+/** Normalises what staff typed: trimmed, spaces collapsed, upper case. The API checks the result against BANK_REFERENCE. */
+export const normaliseBankReference = (v: string): string => v.trim().replace(/\s+/g, ' ').toUpperCase();
+
+/** Body of POST /admin/payments/bookings/:id/inbound-payments. The amount is the one the bank shows, in the booking's currency. */
+export const confirmTransferSchema = z.strictObject({
+  method: z.enum(MANUAL_PAYMENT_METHODS).default('payid_transfer'),
+  amountMinor: z.string().regex(/^[1-9]\d{0,11}$/),
+  reference: z.string().min(1).max(100).transform(normaliseBankReference).refine((v) => BANK_REFERENCE.test(v), 'Not a bank reference'),
+});
+export type ConfirmTransfer = z.infer<typeof confirmTransferSchema>;
+
+/** Body of POST /admin/payments/payments/:id/void. */
+export const voidTransferSchema = z.strictObject({ version: z.number().int().min(0), reason: z.string().trim().min(1).max(200) });
+export type VoidTransfer = z.infer<typeof voidTransferSchema>;
+
+const localised = z.record(z.string().regex(/^[a-z]{2}-[A-Z]{2}$/), z.string().trim().min(1).max(2000)).refine((o) => Object.keys(o).length <= 10);
+
+/** Body of PUT /admin/payments/methods/:method. Everything is replaced; `version` is the one the panel read. */
+export const manualMethodConfigSchema = z.strictObject({
+  version: z.number().int().min(0),
+  enabled: z.boolean(),
+  countries: z.array(z.string().regex(/^[A-Z]{2}$/)).max(250),
+  displayOrder: z.number().int().min(0).max(1000).default(0),
+  instructions: localised.nullable().default(null),
+  payeeName: z.string().trim().min(1).max(140).nullable().default(null),
+  payId: z.object({ type: z.enum(PAY_ID_TYPES), value: z.string().trim().min(1).max(80) }).nullable().default(null),
+  bank: z.object({ bsb: z.string().trim(), accountNumber: z.string().trim() }).nullable().default(null),
+});
+export type ManualMethodConfigInput = z.infer<typeof manualMethodConfigSchema>;

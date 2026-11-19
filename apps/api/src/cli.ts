@@ -21,6 +21,7 @@ import { TEST_ADAPTER_ENVS } from './modules/payments/core/gateway';
  *   pnpm api:cli staff:reset --email someone@example.com
  *   pnpm api:cli maintenance:on | maintenance:off | maintenance:status
  *   pnpm api:cli payments:simulator-account [--name <display name>]
+ *   pnpm api:cli payments:manual-account [--name <display name>]
  *   pnpm api:cli privacy:erasures-list > erasures.json
  *   pnpm api:cli privacy:erasures-reapply erasures.json
  *
@@ -35,10 +36,11 @@ export async function runCli(argv: string[], print: (line: string) => void = con
   };
   if (command === 'maintenance:on' || command === 'maintenance:off' || command === 'maintenance:status') return runMaintenance(command, print);
   if (command === 'payments:simulator-account') return runSimulatorAccount(value('name'), print);
+  if (command === 'payments:manual-account') return runManualAccount(value('name'), print);
   if (command === 'privacy:erasures-list') return runErasuresList(print);
   if (command === 'privacy:erasures-reapply') return runErasuresReapply(rest[0], print);
   if (command !== 'staff:create' && command !== 'staff:reset') {
-    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>] | privacy:erasures-list | privacy:erasures-reapply <file>');
+    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>] | payments:manual-account [--name <name>] | privacy:erasures-list | privacy:erasures-reapply <file>');
     return 2;
   }
   const email = emailSchema.safeParse(value('email'));
@@ -121,6 +123,26 @@ async function runSimulatorAccount(name: string | undefined, print: (line: strin
     const created = await app.get(ProviderAccountsService).createSimulatorAccount({ displayName: name });
     print(`Simulator account ${created.id} created (test mode). Its webhook URL, shown once:`);
     print(created.webhookUrl);
+    return 0;
+  } catch (e) {
+    print(e instanceof Error ? e.message : 'Failed');
+    return 1;
+  } finally {
+    await app.close();
+  }
+}
+
+/**
+ * Task 3.4: the account bank transfers are recorded against (adapter `manual`, test mode). It has no secrets to show: the
+ * business's PayID or bank details are set in the payment method's configuration, with step-up, in the panel.
+ */
+async function runManualAccount(name: string | undefined, print: (line: string) => void): Promise<number> {
+  process.env.JOBS_WORKERS = 'off';
+  loadConfig();
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
+  try {
+    const created = await app.get(ProviderAccountsService).createManualAccount({ displayName: name });
+    print(`Bank transfer account ${created.id} created (test mode).`);
     return 0;
   } catch (e) {
     print(e instanceof Error ? e.message : 'Failed');

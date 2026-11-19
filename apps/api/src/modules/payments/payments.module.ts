@@ -15,6 +15,10 @@ import { PaymentPendingService } from './core/pending.service';
 import { PAYMENT_REMINDER_TEMPLATE, PaymentRemindersService } from './core/reminders.service';
 import { PaymentAdminService } from './admin.service';
 import { adapterOptions, createAdapters } from './adapters';
+import { ManualProvider } from './adapters/manual/manual';
+import { ManualMethodsService } from './core/manual-methods.service';
+import { ManualTransfersService } from './core/manual-transfers.service';
+import { InboundPaymentHooks } from './core/inbound-hooks';
 import { PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
 import { ProviderAccountsService } from './core/accounts.service';
 import { PaymentStateMachine } from './core/attempt-state';
@@ -41,12 +45,12 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   // the configuration is parsed from.
   controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
-    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
+    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
-    SimulatorCheckoutService,
+    SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks,
   ],
-  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
+  exports: [ProviderAccountsService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(

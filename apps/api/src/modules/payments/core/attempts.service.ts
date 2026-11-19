@@ -25,6 +25,8 @@ import { ProviderError } from './provider';
 import { CoverageFailedError } from './coverage.service';
 import { PaymentRouting } from './routing';
 import { TermsService } from './terms.service';
+import { MANUAL_KEY } from '../adapters/manual/manual';
+import { ManualMethodsService, isManualMethod } from './manual-methods.service';
 import { PAYABLE_STATES, PAYMENT_TX_OPTIONS } from './payable-states';
 import { PAYMENT_SETTINGS } from './settings';
 
@@ -77,6 +79,7 @@ export class PaymentAttemptsService {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(TermsService) private readonly terms: TermsService,
+    @Inject(ManualMethodsService) private readonly manual: ManualMethodsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -92,6 +95,8 @@ export class PaymentAttemptsService {
     const paid = new Map(split.items.map((i) => [i.sequence, i.paidMinor]));
     const methods = await this.routing.methods(this.prisma, { currency: b.currency, country: b.residenceCountry });
     const live = await this.prisma.payment.findUnique({ where: { liveBookingId: b.id }, select: { status: true, method: true, amountMinor: true, currency: true } });
+    const intent = await this.prisma.payment.findFirst({ where: { bookingId: b.id, origin: 'manual_intent', status: 'created' }, select: { method: true, amountMinor: true, currency: true, pendingExpiresAt: true } });
+    const manualIntent = intent ? await this.manual.instructionsFor(this.prisma, { method: intent.method, amountMinor: intent.amountMinor, currency: intent.currency, reference: b.reference, expiresAt: intent.pendingExpiresAt }) : null;
     const reason = b.status === 'balance_paid' ? 'nothing_to_pay' : !PAYABLE_STATES.includes(b.status) ? 'booking_not_payable'
       : b.status === 'approved' && b.approvalExpiresAt && b.approvalExpiresAt.getTime() <= Date.now() ? 'approval_expired'
         : !p.next ? 'nothing_to_pay'
@@ -105,6 +110,7 @@ export class PaymentAttemptsService {
       nextPayable: p.next ? { sequence: p.next.sequence, amountMinor: p.next.amountMinor.toString() } : null,
       methods,
       liveAttempt: live ? { status: live.status, method: live.method, amountMinor: live.amountMinor.toString(), currency: live.currency } : null,
+      manualIntent,
     };
   }
 
@@ -135,6 +141,8 @@ export class PaymentAttemptsService {
    * terms must already have been accepted by the signed-in customer. Nothing here accepts terms or replaces an attempt.
    */
   async startViaLink(link: { id: string; bookingId: string; tokenHash: string; targetSequence: number }, method: StartPayment['method'], key: string): Promise<PaymentAttemptView> {
+    // A bank transfer needs the customer's own session (the instructions carry the business's bank details and the reference).
+    if (isManualMethod(method)) throw conflict('no_payment_method_available', 'This payment method is not available for this booking right now');
     const booking = await readBookingForPayments(this.prisma, { id: link.bookingId });
     if (!booking) throw notFound();
     const actor: AuditActor = { type: 'payment_link', id: link.id };
@@ -249,9 +257,40 @@ export class PaymentAttemptsService {
 
         const account = accounts[0];
         if (!account) throw conflict('no_payment_method_available', 'This payment method is not available for this booking right now');
+        const target = items.find((i) => i.sequence === due.sequence)!;
+        // A request to pay by transfer never reaches a gateway and never takes the live-attempt slot (task 3.4, plan section 2).
+        const open = await tx.$queryRaw<Array<{ id: string; method: string; amountMinor: bigint; pendingExpiresAt: Date }>>`
+          SELECT id::text AS id, method::text AS method, "amountMinor", "pendingExpiresAt" FROM payments
+          WHERE "bookingId" = ${b.id}::uuid AND origin = 'manual_intent' AND status = 'created' FOR UPDATE`;
+        const manualOpen = open[0];
+        const wantsManual = account.adapterKey === MANUAL_KEY;
+        if (manualOpen) {
+          // Same request, still in date: resumed with its original expiry (P3). Anything else closes it (a new card attempt, another amount).
+          if (wantsManual && manualOpen.method === body.method && manualOpen.amountMinor === due.amountMinor && manualOpen.pendingExpiresAt.getTime() > at.getTime()) return manualOpen.id;
+          const lockedIntent = await lockPayment(tx, b, manualOpen.id);
+          if (lockedIntent) await this.machine.apply(tx, b, lockedIntent, manualOpen.pendingExpiresAt.getTime() <= at.getTime() ? 'expire_confirmed' : 'cancelled', { source: 'api' });
+        }
         const last = await tx.payment.aggregate({ where: { bookingId: b.id }, _max: { attemptNumber: true } });
         const n = (last._max.attemptNumber ?? 0) + 1;
-        const target = items.find((i) => i.sequence === due.sequence)!;
+        if (wantsManual) {
+          const days = await this.settings.get(PAYMENT_SETTINGS.manualIntentExpiryDays.key, PAYMENT_SETTINGS.manualIntentExpiryDays.fallback);
+          const lapse = at.getTime() + days * 86_400_000;
+          const expiresAt = new Date(b.status === 'approved' && b.approvalExpiresAt ? Math.min(lapse, b.approvalExpiresAt.getTime()) : lapse);
+          const intent = await tx.payment.create({
+            data: {
+              bookingId: b.id, currency: b.currency, origin: 'manual_intent', attemptNumber: n, targetScheduleItemId: target.id, payerCustomerId: b.customerId,
+              providerAccountId: account.id, mode: account.mode, adapterKey: account.adapterKey, method: body.method, amountMinor: due.amountMinor,
+              status: 'created', idempotencyKey: `booking:${b.id}:attempt:${n}`, pendingExpiresAt: expiresAt,
+            },
+            select: { id: true },
+          });
+          await this.audit.record(tx, {
+            actor, action: 'payments.payment.created', entityType: 'Payment', entityId: intent.id, model: 'Payment',
+            after: { status: 'created', method: body.method, amountMinor: due.amountMinor.toString(), currency: b.currency, attemptNumber: n },
+            context: { bookingId: b.id, upToSequence: due.sequence, origin: 'manual_intent' },
+          });
+          return intent.id;
+        }
         const created = await tx.payment.create({
           data: {
             bookingId: b.id, currency: b.currency, origin: 'collection', attemptNumber: n, targetScheduleItemId: target.id, payerCustomerId: b.customerId,
@@ -297,9 +336,9 @@ export class PaymentAttemptsService {
   async drive(paymentId: string): Promise<{ type: 'redirect'; url: string } | undefined> {
     const p = await this.prisma.payment.findUniqueOrThrow({
       where: { id: paymentId },
-      select: { id: true, bookingId: true, paymentLinkId: true, booking: { select: { reference: true } }, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, payerCustomer: { select: { countryOfResidence: true } } },
+      select: { id: true, bookingId: true, origin: true, paymentLinkId: true, booking: { select: { reference: true } }, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, payerCustomer: { select: { countryOfResidence: true } } },
     });
-    if (!LIVE_STATUSES.includes(p.status)) return undefined;
+    if (!LIVE_STATUSES.includes(p.status) || p.origin === 'manual_intent') return undefined;
     let remote: ProviderPayment | null;
     if (p.providerPaymentRef) {
       // The object exists at the gateway: an error reading it never ends the attempt (plan 3.1, 14.3; review G1).
@@ -431,7 +470,10 @@ export class PaymentAttemptsService {
   }
 
   async attemptView(paymentId: string, nextAction?: { type: 'redirect'; url: string }): Promise<PaymentAttemptView> {
-    const p = await this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true, method: true, amountMinor: true, currency: true } });
-    return { status: p.status, method: p.method as PaymentMethod, amountMinor: p.amountMinor.toString(), currency: p.currency, ...(nextAction && p.status === 'requires_action' ? { nextAction } : {}) };
+    const p = await this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true, method: true, origin: true, amountMinor: true, currency: true, pendingExpiresAt: true, booking: { select: { reference: true } } } });
+    const manual = p.origin === 'manual_intent' && p.status === 'created'
+      ? await this.manual.instructionsFor(this.prisma, { method: p.method, amountMinor: p.amountMinor, currency: p.currency, reference: p.booking.reference, expiresAt: p.pendingExpiresAt })
+      : null;
+    return { status: p.status, method: p.method as PaymentMethod, amountMinor: p.amountMinor.toString(), currency: p.currency, ...(nextAction && p.status === 'requires_action' ? { nextAction } : {}), ...(manual ? { manual } : {}) };
   }
 }

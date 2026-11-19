@@ -11,6 +11,8 @@ type Tx = Prisma.TransactionClient;
 export const PAYMENT_ENTITIES: EntityDef[] = [
   { entityType: 'ProviderAccount', model: 'ProviderAccount' },
   { entityType: 'WebhookRejection', model: 'WebhookRejection' },
+  // The business's own payee details: no customer (task 3.4).
+  { entityType: 'PaymentMethodConfig', model: 'PaymentMethodConfig' },
   {
     entityType: 'Payment', model: 'Payment', customerLink: { kind: 'column', column: 'payerCustomerId' },
     handlers: {

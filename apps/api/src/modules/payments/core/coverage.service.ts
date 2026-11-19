@@ -58,9 +58,9 @@ export class PaymentCoverageService {
   }
 
   /** The coverage rule, with the booking locked by the caller (the lock order Booking → Payment is the caller's). */
-  async apply(tx: Tx, booking: LockedBooking, actor: AuditActor): Promise<BookingStatus> {
+  async apply(tx: Tx, booking: LockedBooking, actor: AuditActor, opts: { reopenDeposit?: boolean } = {}): Promise<BookingStatus> {
     const m = await this.money(tx, booking.id);
-    return this.coverage.apply(tx, booking, { depositCovered: m.depositCovered, totalCovered: m.totalCovered }, actor);
+    return this.coverage.apply(tx, booking, { depositCovered: m.depositCovered, totalCovered: m.totalCovered, ...(opts.reopenDeposit ? { reopenDeposit: true } : {}) }, actor);
   }
 
   private async applyById(tx: Tx, bookingId: string, actor: AuditActor): Promise<void> {
