@@ -226,3 +226,38 @@ export const providerAccountStatusSchema = z.strictObject({
 export const providerAccountCredentialsSchema = z.strictObject({ version: z.number().int().min(0), credentials: z.unknown() });
 export const providerAccountWebhookSecretSchema = z.strictObject({ version: z.number().int().min(0), webhookSecret: z.unknown() });
 export const providerAccountVersionSchema = z.strictObject({ version: z.number().int().min(0) });
+
+// ---- Refunds from the app and disputes (task 4.5, plan docs/plans/4.5-refunds-disputes.md) ----
+
+export const REFUND_PURPOSES = ['overpayment_return', 'price_reduction', 'cancellation'] as const;
+export type RefundPurposeName = (typeof REFUND_PURPOSES)[number];
+
+/**
+ * Body of POST /admin/payments/payments/:id/refunds. There is no amount: the API refunds what this payment can give
+ * back now (its overpayment), computed on the server. A manual refund's destination is sent in its own step.
+ */
+export const requestRefundSchema = z.strictObject({
+  paymentVersion: z.number().int().min(0),
+  purpose: z.enum(REFUND_PURPOSES),
+  reason: z.string().trim().min(3).max(500),
+});
+export type RequestRefund = z.infer<typeof requestRefundSchema>;
+
+/** Where a manual refund goes (PUT /admin/payments/refunds/:id/destination). Exactly one of PayID or bank account. */
+export const refundDestinationSchema = z.strictObject({
+  version: z.number().int().min(0),
+  accountName: z.string().trim().min(1).max(140),
+  payId: z.object({ type: z.enum(PAY_ID_TYPES), value: z.string().trim().min(1).max(80) }).nullable().default(null),
+  bank: z.object({ bsb: z.string().trim(), accountNumber: z.string().trim() }).nullable().default(null),
+}).refine((d) => (d.payId === null) !== (d.bank === null), 'Give a PayID or a bank account, not both');
+export type RefundDestinationInput = z.infer<typeof refundDestinationSchema>;
+
+/** Body of POST /admin/payments/refunds/:id/confirm-manual: the movement id of the outgoing transfer on the statement. */
+export const confirmManualRefundSchema = z.strictObject({
+  version: z.number().int().min(0),
+  bankReference: z.string().min(1).max(100).transform(normaliseBankReference).refine((v) => BANK_REFERENCE.test(v), 'Not a bank reference').refine((v) => !BOOKING_REFERENCE_SHAPE.test(v), 'A booking reference is not a bank statement ID'),
+});
+export type ConfirmManualRefund = z.infer<typeof confirmManualRefundSchema>;
+
+/** Body of the refund and dispute actions that only need the version read (cancel, resolve, evidence submitted). */
+export const refundVersionSchema = z.strictObject({ version: z.number().int().min(0) });

@@ -53,7 +53,18 @@ export const PAYMENT_ENTITIES: EntityDef[] = [
       export: (tx: Tx, customerId) => tx.refund.findMany({ where: { payment: { booking: { customerId } } }, select: { bookingId: true, amountMinor: true, currency: true, status: true, origin: true, createdAt: true, succeededAt: true } }),
       anonymise: async (tx: Tx, customerId) => {
         await tx.refund.updateMany({ where: { payment: { booking: { customerId } }, reason: { not: null } }, data: { reason: null } });
+        // Task 4.5 (P13): a manual refund keeps only a masked hint of where it went once it left `requested` (erasure is
+        // refused while one is requested); that hint goes too.
+        await tx.refund.updateMany({ where: { payment: { booking: { customerId } }, destinationHint: { not: null } }, data: { destinationHint: null } });
       },
+    },
+  },
+  {
+    // Task 4.5: a dispute holds codes, amounts and dates only; erasure is refused while one is open (0035).
+    entityType: 'Dispute', model: 'Dispute', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: {
+      export: (tx: Tx, customerId) => tx.dispute.findMany({ where: { payment: { booking: { customerId } } }, select: { bookingId: true, amountMinor: true, currency: true, status: true, reasonCode: true, createdAt: true } }),
+      anonymise: async () => undefined,
     },
   },
   {

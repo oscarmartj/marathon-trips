@@ -15,6 +15,11 @@ export const PAYMENTS_PERMISSIONS = {
   methodManage: 'payments.method.manage',
   confirmTransfer: 'payments.payment.confirmTransfer',
   voidTransfer: 'payments.payment.void',
+  // Task 4.5: refunds from the app and disputes.
+  refundRequest: 'payments.refund.request',
+  refundConfirmManual: 'payments.refund.confirmManual',
+  disputeManage: 'payments.dispute.manage',
+  disputeEvidence: 'payments.dispute.evidence',
 } as const;
 
 const def = (key: string, description: string, requiresStepUp = false): PermissionDef => ({ key, module: 'payments', description, requiresStepUp, apiKeyScopable: false });
@@ -37,6 +42,11 @@ export const paymentsManifest = {
     def(PAYMENTS_PERMISSIONS.methodManage, 'Switch a manual payment method on or off and change its countries, instructions and payee details', true),
     def(PAYMENTS_PERMISSIONS.confirmTransfer, 'Record a bank transfer that arrived (the amount and the bank reference) and apply it to the booking', true),
     def(PAYMENTS_PERMISSIONS.voidTransfer, 'Void a bank transfer that was recorded by mistake (it can then be recorded again)', true),
+    // Task 4.5: money goes back to a customer, or a copy of their data leaves the app: step-up.
+    def(PAYMENTS_PERMISSIONS.refundRequest, "Refund what a payment holds beyond what its booking owes (the amount comes from the app), and settle a refund the gateway did not answer", true),
+    def(PAYMENTS_PERMISSIONS.refundConfirmManual, 'Record where a bank transfer refund goes, see it, and confirm it was sent (with the bank reference) or cancel it', true),
+    def(PAYMENTS_PERMISSIONS.disputeManage, 'Record that the evidence for a payment dispute was submitted at the gateway'),
+    def(PAYMENTS_PERMISSIONS.disputeEvidence, "Download a dispute's evidence package (terms accepted, booking snapshots, payments and emails sent)", true),
   ] satisfies PermissionDef[],
   publishes: Object.values(PAYMENT_EVENTS),
   subscribes: [] as string[],

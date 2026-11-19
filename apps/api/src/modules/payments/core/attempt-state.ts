@@ -72,6 +72,12 @@ export const PAYMENT_EVENTS = {
   refundSucceeded: 'payments.refund.succeeded',
   refundFailed: 'payments.refund.failed',
   refundReversed: 'payments.refund.reversed',
+  // Task 4.5: refunds from the app and disputes.
+  refundRequested: 'payments.refund.requested',
+  disputeOpened: 'payments.dispute.opened',
+  disputeChanged: 'payments.dispute.status_changed',
+  chargebackWithdrawn: 'payments.chargeback.withdrawn',
+  chargebackReinstated: 'payments.chargeback.reinstated',
 } as const;
 
 export interface LockedPayment {

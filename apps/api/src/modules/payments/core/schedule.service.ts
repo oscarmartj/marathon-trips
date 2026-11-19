@@ -13,7 +13,7 @@ import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { PAYMENT_EVENTS } from './attempt-state';
 import { PaymentCoverageService } from './coverage.service';
 import { ProviderGateway } from './gateway';
-import { netCollectedSource } from './payable';
+import { bookingCash } from './payable';
 import { LedgerService } from './ledger.service';
 import { scheduleReallocationKey } from './ledger';
 import { planItems } from './schedule';
@@ -73,7 +73,8 @@ export class PaymentScheduleService {
    */
   async onCancel(tx: Tx, hooked: HookedBooking, ctx: BookingHookContext): Promise<void> {
     const schedule = await tx.paymentSchedule.findUnique({ where: { bookingId: hooked.id }, select: { id: true, version: true, currency: true } });
-    const collected = await netCollectedSource.collected(tx, hooked.id, this.gateway.mode);
+    // The cash held (task 4.5): money promised back by a refund still in flight is still ours until it leaves.
+    const collected = (await bookingCash(tx, hooked.id, this.gateway.mode)).collectedMinor;
     if (collected > 0n) throw conflict('cancellation_needs_payments', 'This booking has payments to settle first. Cancelling it is not available yet.');
     if (!schedule) return;
     await this.supersede(tx, hooked.id, schedule, 'booking_cancelled', ctx);

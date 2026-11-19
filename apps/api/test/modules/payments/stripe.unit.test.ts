@@ -83,7 +83,10 @@ describe('stripe_signature_table', () => {
   });
 
   it('parses only what it knows: unsupported types, broken objects', () => {
-    expect(parseStripeEvent({ id: 'evt_1', object: 'event', type: 'charge.dispute.created', created: 1, data: { object: {} } })?.kind).toBe('unsupported');
+    // Task 4.5 reads disputes (3.3 left them unsupported): a type it does not know stays unsupported, and a dispute event
+    // whose object is not a dispute cannot be read.
+    expect(parseStripeEvent({ id: 'evt_1', object: 'event', type: 'payout.paid', created: 1, data: { object: {} } })?.kind).toBe('unsupported');
+    expect(parseStripeEvent({ id: 'evt_1', object: 'event', type: 'charge.dispute.created', created: 1, data: { object: {} } })).toBeNull();
     expect(parseStripeEvent({ id: 'evt_1', object: 'event', type: 'checkout.session.completed', created: 1, data: { object: { object: 'checkout.session', id: 'cs_1' } } })).toBeNull();
     expect(parseStripeEvent({ id: 'evt_1', object: 'event', type: 'refund.updated', created: 1, data: { object: { object: 'refund', id: 're_1', amount: 1.5, currency: 'aud', status: 'succeeded', payment_intent: 'pi_1' } } })).toBeNull();
     expect(parseStripeEvent({ id: 'bad id!', object: 'event', type: 'x', created: 1 })).toBeNull();
@@ -210,5 +213,38 @@ describe('Stripe adapter against the fake', () => {
     const w = fake.event(key, secret, p.ref, new Date(), { type: 'checkout.session.async_payment_failed' });
     const v = provider.verifyWebhook(ctx, w.body, w.headers, new Date());
     expect(v.ok && v.event.payment?.status).toBe('failed');
+  });
+});
+
+describe('stripe_dispute_events_normalised (task 4.5)', () => {
+  const dispute = (over: Record<string, unknown> = {}) => ({
+    id: 'dp_1', object: 'dispute', amount: 1500, currency: 'aud', payment_intent: 'pi_1', reason: 'product_not_received', status: 'needs_response',
+    evidence_details: { due_by: 1_800_000_000 }, balance_transactions: [], ...over,
+  });
+  const ev = (type: string, object: unknown) => parseStripeEvent({ id: 'evt_1', object: 'event', type, created: 1, data: { object } });
+
+  it.each([
+    ['warning_needs_response', 'open'], ['needs_response', 'open'], ['warning_under_review', 'evidence_submitted'], ['under_review', 'evidence_submitted'],
+    ['won', 'won'], ['lost', 'lost'], ['warning_closed', 'closed'],
+  ])('status %s is %s', (stripe, ours) => {
+    expect(ev('charge.dispute.updated', dispute({ status: stripe }))?.dispute?.status).toBe(ours);
+  });
+
+  it('funds come from the balance transactions, cumulatively; reasons map to the closed list', () => {
+    const none = ev('charge.dispute.created', dispute())!.dispute!;
+    expect([none.fundsWithdrawn, none.fundsReinstated, none.reasonCode, none.paymentRef, none.amount]).toEqual([false, false, 'product_not_received', 'pi_1', { amountMinor: 1500n, currency: 'AUD' }]);
+    expect(none.evidenceDueBy).toEqual(new Date(1_800_000_000_000));
+    const out = ev('charge.dispute.funds_withdrawn', dispute({ balance_transactions: [{ amount: -1500 }] }))!.dispute!;
+    expect([out.fundsWithdrawn, out.fundsReinstated]).toEqual([true, false]);
+    const back = ev('charge.dispute.funds_reinstated', dispute({ status: 'won', balance_transactions: [{ amount: -1500 }, { amount: 1500 }] }))!.dispute!;
+    expect([back.fundsWithdrawn, back.fundsReinstated, back.status]).toEqual([true, true, 'won']);
+    expect(ev('charge.dispute.created', dispute({ reason: 'unrecognized' }))!.dispute!.reasonCode).toBe('unrecognised');
+    expect(ev('charge.dispute.created', dispute({ reason: 'subscription_canceled' }))!.dispute!.reasonCode).toBe('other');
+  });
+
+  it('a dispute it cannot read is null, never a guess', () => {
+    for (const bad of [dispute({ amount: 1.5 }), dispute({ status: 'mystery' }), dispute({ payment_intent: null }), dispute({ currency: 'AUDX' }), dispute({ amount: 0 })]) {
+      expect(ev('charge.dispute.updated', bad)).toBeNull();
+    }
   });
 });

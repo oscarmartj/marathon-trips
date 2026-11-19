@@ -37,6 +37,16 @@ export function simulatorLocalSubject(): ContractSubject {
       const w = provider.currentRefundWebhook(ctx, refundRef, at);
       return { body: w.body, headers: w.headers };
     },
+    async cardholderDisputes(ctx, payment) {
+      return { ref: control.openDispute(ctx.accountId, payment.ref).ref };
+    },
+    async disputeMoves(ctx, ref, to) {
+      control.moveDispute(ctx.accountId, ref, { ...(to.status ? { status: to.status } : {}), ...(to.withdraw ? { fundsWithdrawn: true } : {}), ...(to.reinstate ? { fundsReinstated: true } : {}) });
+    },
+    async disputeWebhookFor(ctx, ref, at) {
+      const w = provider.currentDisputeWebhook(ctx, ref, at);
+      return { body: w.body, headers: w.headers };
+    },
     unsupportedCurrency: 'NZD',
     assertSandboxCredentials() {
       throw new Error('the simulator has no sandbox: it is test-only');

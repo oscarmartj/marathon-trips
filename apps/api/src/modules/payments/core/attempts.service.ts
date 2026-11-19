@@ -221,7 +221,7 @@ export class PaymentAttemptsService {
         const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
         this.assertPayable(b, at);
         // A booking under review after money went out takes no new payment until Oscar closes the task (plan 3.3, 12.3).
-        if (await bookingUnderPaymentReview(tx, b.id)) throw underReview();
+        if (await bookingUnderPaymentReview(tx, b.id, this.gateway.mode)) throw underReview();
         // Through a link: the link must still be active and in date, checked with the booking locked (Booking → PaymentLink).
         // Its target must still be an active item of the plan, at the sequence the caller pays up to: a regenerated plan
         // (superseded items) makes the link not found (review round 1, point 2).

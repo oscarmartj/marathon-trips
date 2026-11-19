@@ -9,7 +9,8 @@ import type { LockedBooking } from '../../bookings';
 import { allocate, coverageFacts } from './allocation';
 import type { Allocation, CoverageFacts } from './allocation';
 import { ProviderGateway } from './gateway';
-import { netCollectedSource } from './payable';
+import { bookingCash } from './payable';
+import type { BookingCash } from './payable';
 
 type Tx = Prisma.TransactionClient;
 
@@ -26,8 +27,10 @@ export class CoverageFailedError extends AppError {
 }
 
 export interface BookingMoney extends CoverageFacts {
+  /** What the plan is filled with: cash less refunds in flight (task 4.5); negative is a receivable. */
   collectedMinor: bigint;
   allocation: Allocation;
+  cash: BookingCash;
 }
 
 /**
@@ -53,14 +56,18 @@ export class PaymentCoverageService {
   /** Active items, what was collected in this environment's mode, its split and the coverage facts. */
   async money(db: Tx, bookingId: string): Promise<BookingMoney> {
     const items = await db.paymentScheduleItem.findMany({ where: { bookingId, state: 'active' }, select: { kind: true, sequence: true, amountMinor: true } });
-    const collected = await netCollectedSource.collected(db, bookingId, this.gateway.mode);
-    return { ...coverageFacts(items, collected), collectedMinor: collected, allocation: allocate(items, collected) };
+    const cash = await bookingCash(db, bookingId, this.gateway.mode);
+    const collected = cash.allocatableMinor;
+    return { ...coverageFacts(items, collected), collectedMinor: collected, allocation: allocate(items, collected), cash };
   }
 
   /** The coverage rule, with the booking locked by the caller (the lock order Booking → Payment is the caller's). */
   async apply(tx: Tx, booking: LockedBooking, actor: AuditActor, opts: { reopenDeposit?: boolean } = {}): Promise<BookingStatus> {
     const m = await this.money(tx, booking.id);
-    return this.coverage.apply(tx, booking, { depositCovered: m.depositCovered, totalCovered: m.totalCovered, ...(opts.reopenDeposit ? { reopenDeposit: true } : {}) }, actor);
+    return this.coverage.apply(tx, booking, {
+      depositCovered: m.depositCovered, totalCovered: m.totalCovered, cash: { collectedMinor: m.cash.collectedMinor, everCollected: m.cash.everCollected },
+      ...(opts.reopenDeposit ? { reopenDeposit: true } : {}),
+    }, actor);
   }
 
   private async applyById(tx: Tx, bookingId: string, actor: AuditActor): Promise<void> {

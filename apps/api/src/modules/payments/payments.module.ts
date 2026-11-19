@@ -47,18 +47,22 @@ import { PaymentLedgerCheckService } from './core/ledger-check.service';
 import { PaymentAmendmentService } from './core/amendment-plan.service';
 import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, ProviderAccountRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
+import { AppRefundsService } from './core/app-refunds.service';
+import { PaymentDisputesService } from './core/disputes.service';
+import { PaymentRefundsAdminController } from './refunds.controller';
 
 @Module({
   imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
-  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
+  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
     ProviderGateway, ProviderHealthService, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
     CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard, RoutingRulesAdminService,
+    AppRefundsService, PaymentDisputesService,
   ],
   exports: [ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
@@ -79,6 +83,7 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
     @Inject(InboundPaymentHooks) private readonly inbound: InboundPaymentHooks,
     @Inject(LedgerService) private readonly ledger: LedgerService,
+    @Inject(ProviderAccountsAdminService) private readonly accountsAdmin: ProviderAccountsAdminService,
   ) {}
 
   /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
@@ -94,6 +99,11 @@ export class PaymentsModule implements OnModuleInit {
     this.inbound.onVoided('payments.ledger', async (tx, p) => void (await this.ledger.postInboundVoided(tx, { id: p.bookingId, currency: p.currency }, p)));
     this.mailTemplates.register({ ...PAYMENT_LINK_TEMPLATE, render: (ctx) => this.links.renderEmail(ctx) });
     this.mailTemplates.register({ ...PAYMENT_REMINDER_TEMPLATE, render: (ctx) => this.reminders.renderEmail(ctx) });
+    // Task 4.5: an account with a dispute still open cannot be archived (plan 4.1, 4.3 hook).
+    this.accountsAdmin.registerArchiveCheck('payments.disputes', async (tx, accountId) => {
+      const open = await tx.dispute.count({ where: { providerAccountId: accountId, status: { in: ['open', 'evidence_submitted'] } } });
+      return open > 0 ? ['open_dispute'] : [];
+    });
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });
   }
 }

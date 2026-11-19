@@ -149,7 +149,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       const b = await readBookingForPayments(tx, { id: bookingId }, true);
       if (!b || !(REMINDABLE_STATES as readonly string[]).includes(b.status)) return 'booking_not_payable';
       // No reminder while the booking is under review after a refund (plan 3.3, 12.3).
-      if (await bookingUnderPaymentReview(tx, b.id)) return 'payment_under_review';
+      if (await bookingUnderPaymentReview(tx, b.id, this.gateway.mode)) return 'payment_under_review';
       const item = await tx.paymentScheduleItem.findUnique({ where: { id: itemId }, select: { id: true, bookingId: true, state: true, kind: true, sequence: true, dueDate: true } });
       if (!item || item.bookingId !== b.id || item.state !== 'active' || !(REMINDABLE_KINDS as readonly string[]).includes(item.kind)) return 'item_changed';
       const offset = reminderOffset(offsets, daysBetween(today, item.dueDate.toISOString().slice(0, 10)));

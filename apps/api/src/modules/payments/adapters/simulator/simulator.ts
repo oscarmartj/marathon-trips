@@ -6,9 +6,10 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { PaymentMethod } from '@mt/shared';
 import {
-  AdapterManifest, CreatePaymentInput, CreateRefundInput, Money, NormalisedEvent, PaymentLookup, PaymentProvider, ProviderContext, ProviderError, ProviderPayment,
-  ProviderPaymentStatus, ProviderRefund, ProviderRefundStatus, RefundLookup, WebhookVerification,
+  AdapterManifest, CreatePaymentInput, CreateRefundInput, DisputeReasonCode, Money, NormalisedEvent, PaymentLookup, PaymentProvider, ProviderContext, ProviderDispute,
+  ProviderDisputeStatus, ProviderError, ProviderPayment, ProviderPaymentStatus, ProviderRefund, ProviderRefundStatus, RefundLookup, WebhookVerification,
 } from '../../core/provider';
+import { DISPUTE_REASON_CODES } from '../../core/provider';
 
 export const SIMULATOR_KEY = 'simulator';
 export const SIMULATOR_SIGNATURE_HEADER = 'x-sim-signature';
@@ -38,7 +39,7 @@ export function simulatorManifest(webOrigin: string): AdapterManifest {
     checkoutOrigin: new URL(webOrigin).origin,
     // Task 4.1: nothing typed; the API key and the webhook secret are made by the server.
     account: { fields: [], generated: [{ key: 'apiKey', prefix: 'sim_test_' }], webhookSecret: { source: 'generated' } },
-    capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed' },
+    capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed', disputes: 'events' },
   };
 }
 
@@ -76,13 +77,27 @@ interface SimRefund {
   failureCode?: string;
 }
 
+/** A dispute at the simulated gateway (task 4.5): opened and moved by tests, as a cardholder's bank would. */
+interface SimDispute {
+  ref: string;
+  paymentRef: string;
+  amount: Money;
+  reasonCode: DisputeReasonCode;
+  status: ProviderDisputeStatus;
+  evidenceDueBy?: Date;
+  fundsWithdrawn: boolean;
+  fundsReinstated: boolean;
+}
+
 class SimAccount {
+  readonly disputes = new Map<string, SimDispute>();
   readonly payments = new Map<string, SimPayment>();
   readonly byKey = new Map<string, string>();
   readonly refunds = new Map<string, SimRefund>();
   readonly refundsByKey = new Map<string, string>();
   readonly nextRefund: Array<'pending' | 'unavailable'> = [];
   readonly nextRefundRetrieve: SimulatorRetrieveFault[] = [];
+  readonly nextDisputeRetrieve: Array<'unavailable'> = [];
   readonly next: SimulatorOutcome[] = [];
   readonly nextCancel: Array<'unavailable'> = [];
   readonly nextRetrieve: SimulatorRetrieveFault[] = [];
@@ -130,6 +145,14 @@ export class SimulatorWorld {
 }
 
 export const SIMULATOR_WORLD = new SimulatorWorld();
+
+const disputeView = (d: SimDispute): ProviderDispute => ({
+  ref: d.ref, paymentRef: d.paymentRef, amount: { ...d.amount }, reasonCode: d.reasonCode, status: d.status, fundsWithdrawn: d.fundsWithdrawn, fundsReinstated: d.fundsReinstated,
+  ...(d.evidenceDueBy ? { evidenceDueBy: new Date(d.evidenceDueBy.getTime()) } : {}),
+});
+
+/** Like Stripe (charge_disputed): a payment with a dispute that is not won or closed cannot be refunded. */
+const disputed = (acc: SimAccount, paymentRef: string): boolean => [...acc.disputes.values()].some((d) => d.paymentRef === paymentRef && (d.status === 'open' || d.status === 'evidence_submitted' || d.status === 'lost'));
 
 const refundView = (r: SimRefund): ProviderRefund => ({
   ref: r.ref, status: r.status, amount: { ...r.amount }, paymentRef: r.paymentRef,
@@ -265,6 +288,7 @@ export class SimulatorProvider implements PaymentProvider {
     if (outcome === 'unavailable') throw new ProviderError('provider_unavailable', true);
     const p = acc.payments.get(input.paymentRef);
     if (!p) throw new ProviderError('provider_not_found', false);
+    if (disputed(acc, p.ref)) throw new ProviderError('provider_rejected', false);
     if (p.status !== 'succeeded' || input.amount.currency !== p.amount.currency || input.amount.amountMinor <= 0n || input.amount.amountMinor > refundable(acc, p)) {
       throw new ProviderError('provider_rejected', false);
     }
@@ -288,6 +312,22 @@ export class SimulatorProvider implements PaymentProvider {
     const ref = 'ref' in by ? by.ref : acc.refundsByKey.get(by.idempotencyKey);
     const r = ref ? acc.refunds.get(ref) : undefined;
     return r ? refundView(r) : null;
+  }
+
+  async retrieveDispute(ctx: ProviderContext, ref: string): Promise<ProviderDispute | null> {
+    checkCredentials(ctx);
+    const acc = this.world.account(ctx.accountId);
+    if (acc.nextDisputeRetrieve.shift() === 'unavailable') throw new ProviderError('provider_unavailable', true);
+    const d = acc.disputes.get(ref);
+    return d ? disputeView(d) : null;
+  }
+
+  /** The webhook the gateway would send now for a dispute of this account, signed at `at` (contract suite). */
+  currentDisputeWebhook(ctx: ProviderContext, ref: string, at: Date): SignedWebhook {
+    checkCredentials(ctx);
+    const d = this.world.account(ctx.accountId).disputes.get(ref);
+    if (!d) throw new ProviderError('provider_not_found', false);
+    return signedDisputeEvent(ctx.webhookSecret, d, { at, signedAt: at });
   }
 
   /** The webhook the gateway would send now for a refund of this account, signed at `at` (contract suite). */
@@ -369,6 +409,7 @@ function parseEvent(body: unknown): NormalisedEvent | null {
   if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(b.type)) return null;
   const base = { providerEventId: b.id, type: b.type, occurredAt: new Date(b.created * 1000) };
   if (b.type === 'refund.updated') return parseRefundEvent(base, b.data);
+  if (b.type === 'dispute.updated') return parseDisputeEvent(base, b.data);
   if (b.type !== 'payment.updated') return { ...base, kind: 'unsupported' };
   const d = b.data as Record<string, unknown> | undefined;
   if (!d || typeof d.ref !== 'string' || !STATUSES.includes(d.status as ProviderPaymentStatus) || typeof d.amountMinor !== 'string' || !/^\d{1,18}$/.test(d.amountMinor) || typeof d.currency !== 'string') return null;
@@ -402,6 +443,39 @@ function parseRefundEvent(base: { providerEventId: string; type: string; occurre
       ...(typeof d.failureCode === 'string' ? { failureCode: d.failureCode } : {}),
     },
   };
+}
+
+const DISPUTE_STATUSES: readonly ProviderDisputeStatus[] = ['open', 'evidence_submitted', 'won', 'lost', 'closed'];
+
+function parseDisputeEvent(base: { providerEventId: string; type: string; occurredAt: Date }, data: unknown): NormalisedEvent | null {
+  const d = data as Record<string, unknown> | undefined;
+  if (!d || typeof d.ref !== 'string' || typeof d.paymentRef !== 'string' || !DISPUTE_STATUSES.includes(d.status as ProviderDisputeStatus)
+    || typeof d.amountMinor !== 'string' || !/^\d{1,18}$/.test(d.amountMinor) || typeof d.currency !== 'string'
+    || typeof d.fundsWithdrawn !== 'boolean' || typeof d.fundsReinstated !== 'boolean') return null;
+  const reason = (DISPUTE_REASON_CODES as readonly string[]).includes(d.reasonCode as string) ? (d.reasonCode as DisputeReasonCode) : 'other';
+  const due = typeof d.evidenceDueBy === 'number' ? new Date(d.evidenceDueBy * 1000) : undefined;
+  return {
+    ...base,
+    kind: 'dispute',
+    dispute: {
+      ref: d.ref, paymentRef: d.paymentRef, amount: { amountMinor: BigInt(d.amountMinor), currency: d.currency }, reasonCode: reason,
+      status: d.status as ProviderDisputeStatus, fundsWithdrawn: d.fundsWithdrawn, fundsReinstated: d.fundsReinstated, ...(due ? { evidenceDueBy: due } : {}),
+    },
+  };
+}
+
+/** The simulated gateway's dispute.updated event, signed with `secret`. */
+function signedDisputeEvent(secret: string, d: SimDispute, opts: EventOptions = {}): SignedWebhook {
+  const eventId = opts.eventId ?? `sim_evt_${randomBytes(10).toString('hex')}`;
+  const created = Math.floor((opts.at ?? new Date()).getTime() / 1000);
+  const body = Buffer.from(JSON.stringify({
+    id: eventId, type: 'dispute.updated', created,
+    data: {
+      ref: d.ref, paymentRef: d.paymentRef, status: d.status, amountMinor: d.amount.amountMinor.toString(), currency: d.amount.currency, reasonCode: d.reasonCode,
+      fundsWithdrawn: d.fundsWithdrawn, fundsReinstated: d.fundsReinstated, ...(d.evidenceDueBy ? { evidenceDueBy: Math.floor(d.evidenceDueBy.getTime() / 1000) } : {}),
+    },
+  }));
+  return { body, eventId, headers: { 'content-type': 'application/json', [SIMULATOR_SIGNATURE_HEADER]: signSimulator(secret, body, opts.signedAt ?? new Date()) } };
 }
 
 /** The simulated gateway's refund.updated event, signed with `secret`. */
@@ -483,6 +557,49 @@ export class SimulatorControl {
     const r: SimRefund = { ref: `sim_ref_${randomBytes(12).toString('hex')}`, paymentRef, status, amount: { amountMinor, currency: p.amount.currency } };
     acc.refunds.set(r.ref, r);
     return refundView(r);
+  }
+
+  /**
+   * A cardholder disputes a payment (task 4.5): the bank opens a dispute for `amountMinor` (default the whole payment),
+   * with evidence due in 14 days. Funds are not taken until withdrawDispute (or `withdrawn: true`).
+   */
+  openDispute(accountId: string, paymentRef: string, opts: { amountMinor?: bigint; reasonCode?: DisputeReasonCode; withdrawn?: boolean; status?: ProviderDisputeStatus } = {}): ProviderDispute {
+    const acc = this.world.account(accountId);
+    const p = acc.payments.get(paymentRef);
+    if (!p || p.status !== 'succeeded') throw new Error('simulator: only a collected payment can be disputed');
+    const d: SimDispute = {
+      ref: `sim_dp_${randomBytes(12).toString('hex')}`, paymentRef, amount: { amountMinor: opts.amountMinor ?? p.amount.amountMinor, currency: p.amount.currency },
+      reasonCode: opts.reasonCode ?? 'fraudulent', status: opts.status ?? 'open', evidenceDueBy: new Date(Math.floor(Date.now() / 1000) * 1000 + 14 * 86_400_000),
+      fundsWithdrawn: opts.withdrawn ?? false, fundsReinstated: false,
+    };
+    acc.disputes.set(d.ref, d);
+    return disputeView(d);
+  }
+
+  /** Moves a dispute on the gateway side: its status and its cumulative funds flags. */
+  moveDispute(accountId: string, ref: string, to: { status?: ProviderDisputeStatus; fundsWithdrawn?: boolean; fundsReinstated?: boolean }): ProviderDispute {
+    const d = this.world.account(accountId).disputes.get(ref);
+    if (!d) throw new Error('simulator: unknown dispute');
+    if (to.status) d.status = to.status;
+    if (to.fundsWithdrawn !== undefined) d.fundsWithdrawn = to.fundsWithdrawn;
+    if (to.fundsReinstated !== undefined) d.fundsReinstated = to.fundsReinstated;
+    return disputeView(d);
+  }
+
+  /** A dispute webhook as the gateway would send it now; `over` changes what it says (not what the gateway holds). */
+  disputeEvent(secret: string, accountId: string, ref: string, over: { status?: ProviderDisputeStatus; fundsWithdrawn?: boolean; fundsReinstated?: boolean; amountMinor?: bigint; currency?: string; eventId?: string } = {}): SignedWebhook {
+    const d = this.world.account(accountId).disputes.get(ref);
+    if (!d) throw new Error('simulator: unknown dispute');
+    const said: SimDispute = {
+      ...d, status: over.status ?? d.status, fundsWithdrawn: over.fundsWithdrawn ?? d.fundsWithdrawn, fundsReinstated: over.fundsReinstated ?? d.fundsReinstated,
+      amount: { amountMinor: over.amountMinor ?? d.amount.amountMinor, currency: over.currency ?? d.amount.currency },
+    };
+    return signedDisputeEvent(secret, said, over.eventId ? { eventId: over.eventId } : {});
+  }
+
+  /** The next retrieveDispute fails as unavailable. */
+  failNextDisputeRetrieve(accountId: string): void {
+    this.world.account(accountId).nextDisputeRetrieve.push('unavailable');
   }
 
   /** Moves a refund on the gateway side (a pending one settles or fails; a succeeded one can fail later). */

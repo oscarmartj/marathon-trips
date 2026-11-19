@@ -11,11 +11,11 @@ import { LEDGER_ACCOUNTS } from './ledger';
 import { PAYMENT_SETTINGS } from './settings';
 import { SettingsService } from '../../../platform/flags/flags.service';
 
-export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction';
+export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'missing_chargeback' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction';
 
 export interface LedgerFinding {
   kind: LedgerFindingKind;
-  entityType: 'Payment' | 'Refund' | 'Booking' | 'ProviderAccount' | 'LedgerTransaction';
+  entityType: 'Payment' | 'Refund' | 'Dispute' | 'Booking' | 'ProviderAccount' | 'LedgerTransaction';
   entityId: string;
 }
 
@@ -103,12 +103,22 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
                OR (r.status = 'reversed' AND NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'refund:' || r.id::text || ':reversed')))
         ORDER BY r.id`;
       for (const r of missingRefunds) out.push({ kind: 'missing_refund_posting', entityType: 'Refund', entityId: r.id });
+      // Task 4.5: every chargeback recorded on a dispute has its posting.
+      const missingChargebacks = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT d.id::text AS id FROM disputes d
+        WHERE d.mode = ${mode}::"PaymentMode" AND (${only}::uuid[] IS NULL OR d."bookingId" = ANY(${only}::uuid[]))
+          AND ((d."fundsWithdrawnAt" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'chargeback:' || d.id::text || ':withdrawn'))
+               OR (d."fundsReinstatedAt" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'chargeback:' || d.id::text || ':reinstated')))
+        ORDER BY d.id`;
+      for (const r of missingChargebacks) out.push({ kind: 'missing_chargeback', entityType: 'Dispute', entityId: r.id });
 
-      const bookings = await tx.$queryRaw<Array<{ id: string; currency: string; net: bigint; funds: bigint; over: bigint; receivable: bigint }>>`
+      const bookings = await tx.$queryRaw<Array<{ id: string; currency: string; net: bigint; reserved: bigint; funds: bigint; over: bigint; receivable: bigint }>>`
         WITH money AS (
           SELECT b.id, b.currency,
             COALESCE((SELECT SUM(p."amountMinor") FROM payments p WHERE p."bookingId" = b.id AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded'), 0)::bigint
-            - COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."bookingId" = b.id AND r.mode = ${mode}::"PaymentMode" AND r.status = 'succeeded'), 0)::bigint AS net
+            - COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."bookingId" = b.id AND r.mode = ${mode}::"PaymentMode" AND r.status = 'succeeded'), 0)::bigint
+            - COALESCE((SELECT SUM(d."amountMinor") FROM disputes d WHERE d."bookingId" = b.id AND d.mode = ${mode}::"PaymentMode" AND d."fundsWithdrawnAt" IS NOT NULL AND d."fundsReinstatedAt" IS NULL), 0)::bigint AS net,
+            COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."bookingId" = b.id AND r.mode = ${mode}::"PaymentMode" AND ((r.origin = 'app' AND r.status IN ('requested', 'pending')) OR (r.origin = 'app' AND r.status = 'failed' AND r."failureCode" = 'late_pending_at_gateway'))), 0)::bigint AS reserved
           FROM bookings b
           WHERE (EXISTS (SELECT 1 FROM payments p WHERE p."bookingId" = b.id AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded')
                  OR EXISTS (SELECT 1 FROM ledger_entries e WHERE e."bookingId" = b.id AND e.mode = ${mode}::"PaymentMode"))
@@ -116,7 +126,7 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
             AND (${after}::uuid IS NULL OR b.id > ${after}::uuid)
           ORDER BY b.id LIMIT ${limit}
         )
-        SELECT m.id::text AS id, m.currency, m.net,
+        SELECT m.id::text AS id, m.currency, m.net, m.reserved,
           COALESCE(-(SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."bookingId" = m.id AND e.mode = ${mode}::"PaymentMode" AND e.currency = m.currency AND e."accountCode" = ${LEDGER_ACCOUNTS.funds}), 0)::bigint AS funds,
           COALESCE(-(SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."bookingId" = m.id AND e.mode = ${mode}::"PaymentMode" AND e.currency = m.currency AND e."accountCode" = ${LEDGER_ACCOUNTS.overpayments}), 0)::bigint AS over,
           COALESCE((SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."bookingId" = m.id AND e.mode = ${mode}::"PaymentMode" AND e.currency = m.currency AND e."accountCode" = ${LEDGER_ACCOUNTS.receivable}), 0)::bigint AS receivable
@@ -128,8 +138,10 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
           continue;
         }
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { sequence: true, amountMinor: true } });
-        const split = b.net >= 0n ? allocate(items, b.net) : null;
-        if (!split || split.items.reduce((s, i) => s + i.paidMinor, 0n) !== b.funds || split.overpaidMinor !== b.over) out.push({ kind: 'booking_split', entityType: 'Booking', entityId: b.id });
+        // Task 4.5: the plan is filled with what is allocatable (refunds in flight keep their money in overpayments), and
+        // money out beyond money in is the receivable.
+        const split = allocate(items, b.net - b.reserved);
+        if (split.items.reduce((s, i) => s + i.paidMinor, 0n) !== b.funds || split.overpaidMinor + b.reserved !== b.over || -split.receivableMinor !== b.receivable) out.push({ kind: 'booking_split', entityType: 'Booking', entityId: b.id });
       }
 
       if (!only) {
@@ -139,6 +151,7 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
             COALESCE((SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."accountCode" = 'provider_clearing:' || a.id::text AND e.mode = a.mode), 0)
             <> COALESCE((SELECT SUM(p."amountMinor") FROM payments p WHERE p."providerAccountId" = a.id AND p.status = 'succeeded'), 0)
              - COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."providerAccountId" = a.id AND r.status = 'succeeded'), 0)
+             - COALESCE((SELECT SUM(d."amountMinor") FROM disputes d WHERE d."providerAccountId" = a.id AND d."fundsWithdrawnAt" IS NOT NULL AND d."fundsReinstatedAt" IS NULL), 0)
           ORDER BY a.id`;
         for (const r of clearing) out.push({ kind: 'clearing', entityType: 'ProviderAccount', entityId: r.id });
         const empty = await tx.$queryRaw<Array<{ id: string }>>`

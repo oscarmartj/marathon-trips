@@ -70,6 +70,9 @@ model User {
   automationRules      AutomationRule[]
   savedReports         SavedReport[]
   customer             Customer?
+  // Task 4.5: staff who confirmed manual refunds and recorded dispute evidence.
+  refundsConfirmed     Refund[]       @relation("RefundConfirmedBy")
+  disputeEvidence      Dispute[]      @relation("DisputeEvidenceSubmittedBy")
 
   @@unique([kind, email])
   @@unique([id, kind])
