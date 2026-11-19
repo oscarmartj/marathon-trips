@@ -9,6 +9,7 @@ import { PaymentAttemptSyncService } from './attempt-sync.service';
 import type { SyncAction } from './attempt-sync.service';
 import { PaymentWebhooksService } from './webhooks.service';
 import { PaymentAmendmentService } from './amendment-plan.service';
+import { ManualTransfersService } from './manual-transfers.service';
 
 export const RAW_BODY_RETENTION_DAYS = 180;
 export const REJECTION_RETENTION_DAYS = 30;
@@ -33,6 +34,7 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     @Inject(PaymentWebhooksService) private readonly webhooks: PaymentWebhooksService,
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
+    @Inject(ManualTransfersService) private readonly transfers: ManualTransfersService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -44,7 +46,7 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     await this.jobs.schedule(QUEUES.paymentsMaintenance, '*/10 * * * *');
   }
 
-  async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; failedFlagged: string[]; bodiesPurged: number; rejectionsPurged: number }> {
+  async run(now: Date = new Date()): Promise<{ expiring: string[]; requeued: string[]; failedFlagged: string[]; bodiesPurged: number; rejectionsPurged: number; manualIntentsClosed: string[] }> {
     // An attempt whose collected money could not be applied waits for Oscar (its task): no loop (plan 3.2, section 11.8).
     const due = await this.prisma.$queryRaw<Array<{ id: string }>>`
       SELECT p.id::text AS id FROM payments p
@@ -82,6 +84,13 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     } catch (err) {
       this.logger.error(`overdue adjustments check failed: ${safeError(err).code}`);
     }
+    // Requests to pay by bank transfer that lapsed, or whose booking can no longer be paid (task 3.4).
+    let manualIntentsClosed: string[] = [];
+    try {
+      manualIntentsClosed = await this.transfers.closeOpenIntents(now);
+    } catch (err) {
+      this.logger.error(`manual intent sweep failed: ${safeError(err).code}`);
+    }
     let bodiesPurged = 0;
     let rejectionsPurged = 0;
     try {
@@ -90,6 +99,6 @@ export class PaymentsMaintenanceService implements OnApplicationBootstrap {
     } catch (err) {
       this.logger.error(`payments retention failed: ${safeError(err).code}`);
     }
-    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), failedFlagged: flagged, bodiesPurged, rejectionsPurged };
+    return { expiring: due.map((d) => d.id), requeued: stuck.map((s) => s.id), failedFlagged: flagged, bodiesPurged, rejectionsPurged, manualIntentsClosed };
   }
 }

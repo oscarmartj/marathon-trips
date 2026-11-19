@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
-import { acceptTermsSchema, paymentLinkPaySchema, paymentLinkTokenSchema, sendPaymentLinkSchema, startPaymentSchema } from '@mt/shared';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { acceptTermsSchema, confirmTransferSchema, manualMethodConfigSchema, voidTransferSchema, paymentLinkPaySchema, paymentLinkTokenSchema, sendPaymentLinkSchema, startPaymentSchema } from '@mt/shared';
 import type { z } from 'zod';
 import { Public, OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
@@ -15,6 +15,8 @@ import { PaymentWebhooksService } from './core/webhooks.service';
 import { PAYMENTS_PERMISSIONS as P } from './manifest';
 import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
 import { PaymentLinksService } from './core/payment-links.service';
+import { ManualMethodsService } from './core/manual-methods.service';
+import { ManualTransfersService } from './core/manual-transfers.service';
 import { PaymentAdminService } from './admin.service';
 
 const uuid = () => new ParseUUIDPipe();
@@ -120,6 +122,8 @@ export class PaymentsAdminController {
   constructor(
     @Inject(PaymentAdminService) private readonly admin: PaymentAdminService,
     @Inject(PaymentLinksService) private readonly links: PaymentLinksService,
+    @Inject(ManualMethodsService) private readonly methods: ManualMethodsService,
+    @Inject(ManualTransfersService) private readonly transfers: ManualTransfersService,
   ) {}
 
   @Get('payments/bookings/:id') @RequirePermission(P.paymentRead)
@@ -136,6 +140,32 @@ export class PaymentsAdminController {
   @Post('payments/payment-links/:id/revoke') @HttpCode(200) @RequirePermission(P.paymentLinkSend)
   revokeLink(@Param('id', uuid()) id: string, @Req() req: ApiRequest) {
     return this.links.revoke(id, actorOf(req));
+  }
+
+  /** Bank transfers (task 3.4): the manual methods' set-up, recording a transfer that arrived, and voiding a mistaken one. */
+  @Get('payments/methods') @RequirePermission(P.methodRead)
+  async manualMethods() {
+    return { items: await this.methods.list() };
+  }
+
+  @Put('payments/methods/:method') @RequirePermission(P.methodManage)
+  putManualMethod(@Param('method') method: string, @Body(new ZodPipe(manualMethodConfigSchema)) b: In<typeof manualMethodConfigSchema>, @Req() req: ApiRequest) {
+    return this.methods.put(method, b, actorOf(req));
+  }
+
+  @Get('payments/methods/:method/test') @RequirePermission(P.methodRead)
+  testManualMethod(@Param('method') method: string) {
+    return this.methods.test(method);
+  }
+
+  @Post('payments/bookings/:id/inbound-payments') @HttpCode(200) @RequirePermission(P.confirmTransfer)
+  confirmTransfer(@Param('id', uuid()) id: string, @Body(new ZodPipe(confirmTransferSchema)) b: In<typeof confirmTransferSchema>, @Req() req: ApiRequest) {
+    return this.transfers.confirm(id, b, actorOf(req));
+  }
+
+  @Post('payments/payments/:id/void') @HttpCode(200) @RequirePermission(P.voidTransfer)
+  voidTransfer(@Param('id', uuid()) id: string, @Body(new ZodPipe(voidTransferSchema)) b: In<typeof voidTransferSchema>, @Req() req: ApiRequest) {
+    return this.transfers.void(id, b, actorOf(req));
   }
 
   @Get('payments/provider-accounts') @RequirePermission(P.accountRead)

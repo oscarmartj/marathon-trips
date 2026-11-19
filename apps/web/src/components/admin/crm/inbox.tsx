@@ -11,6 +11,7 @@ import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
 import { RecordNotes, crmError, formatMoment, fullName, statusLabel } from './crm-kit';
 import { PaymentLinksPanel } from './payment-links';
+import { TransfersPanel } from './transfers';
 import { AmendmentPanel, type AmendmentRow } from './amendments';
 import type { ConfigurationView } from '@/lib/amendments';
 
@@ -198,6 +199,7 @@ export function BookingDetail({ id }: { id: string }) {
       ) : null}
       <Status message={message?.text ?? null} tone={message?.tone ?? 'error'} />
       <PaymentLinksPanel bookingId={id} status={b.status} />
+      <TransfersPanel bookingId={id} onChanged={reload} />
       {b.snapshots ? (
         <AmendmentPanel
           bookingId={id} packageId={b.packageId} status={b.status} version={b.currentSnapshotVersion} currency={b.currency} rows={b.amendments ?? []}

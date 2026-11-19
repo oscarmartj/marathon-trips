@@ -37,6 +37,8 @@ export const BOOKING_EVENTS = {
   amended: 'bookings.booking.amended',
   /** Task 6.3: a change raised the total of a booking paid in full, which goes back from balance paid to confirmed. */
   balanceReopened: 'bookings.booking.balance_reopened',
+  /** Task 3.4: a confirmed transfer was voided and the deposit is no longer covered, so the booking goes back to approved. */
+  depositReopened: 'bookings.booking.deposit_reopened',
 } as const;
 
 export const bookingsManifest = {

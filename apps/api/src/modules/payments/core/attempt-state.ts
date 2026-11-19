@@ -15,6 +15,7 @@ import type { LockedBooking } from '../../bookings';
 import { CoverageFailedError, PaymentCoverageService } from './coverage.service';
 import type { ProviderPaymentStatus } from './provider';
 import { succeededPaymentsSource } from './payable';
+import { InboundPaymentHooks } from './inbound-hooks';
 
 type Tx = Prisma.TransactionClient;
 
@@ -24,6 +25,7 @@ export const PAYMENT_STATUS_PAIRS: ReadonlyArray<readonly [PaymentStatus, Paymen
   ['requires_action', 'pending'], ['requires_action', 'succeeded'], ['requires_action', 'failed'], ['requires_action', 'cancelled'], ['requires_action', 'expired'],
   ['pending', 'succeeded'], ['pending', 'failed'],
   ['failed', 'succeeded'], ['cancelled', 'succeeded'], ['expired', 'succeeded'],
+  ['succeeded', 'voided'],
 ];
 
 /** The task opened when the coverage rule keeps failing for a payment; the sweep leaves such attempts alone. */
@@ -32,7 +34,7 @@ export const coverageTaskRef = (paymentId: string) => `payments:coverage_failed:
 export const LIVE_STATUSES: readonly PaymentStatus[] = ['created', 'requires_action', 'pending'];
 
 /** What happened, as the state machine sees it: a gateway status, or an expiry the gateway confirmed by cancelling. */
-export type AttemptEvent = ProviderPaymentStatus | 'expire_confirmed';
+export type AttemptEvent = ProviderPaymentStatus | 'expire_confirmed' | 'void';
 
 /**
  * The table of plan 3.1, section 5.2: where each event takes each state; null is "no change" (a duplicate, an event
@@ -52,6 +54,8 @@ export function nextStatus(from: PaymentStatus, event: AttemptEvent): PaymentSta
       return from === 'created' || from === 'requires_action' ? 'cancelled' : null;
     case 'expire_confirmed':
       return from === 'created' || from === 'requires_action' ? 'expired' : null;
+    case 'void':
+      return from === 'succeeded' ? 'voided' : null;
   }
 }
 
@@ -61,6 +65,7 @@ export const PAYMENT_EVENTS = {
   failed: 'payments.payment.failed',
   overpaid: 'payments.booking.overpaid',
   lateSucceeded: 'payments.payment.late_succeeded',
+  voided: 'payments.payment.voided',
   scheduleCreated: 'payments.schedule.created',
   scheduleSuperseded: 'payments.schedule.superseded',
 } as const;
@@ -71,6 +76,7 @@ export interface LockedPayment {
   status: PaymentStatus;
   version: number;
   mode: 'test' | 'live';
+  origin: 'collection' | 'manual_intent' | 'inbound';
   amountMinor: bigint;
   currency: string;
   providerPaymentRef: string | null;
@@ -84,7 +90,7 @@ export interface LockedPayment {
  */
 export async function lockPayment(tx: Tx, booking: LockedBooking, paymentId: string): Promise<LockedPayment | null> {
   const rows = await tx.$queryRaw<LockedPayment[]>`
-    SELECT id::text AS id, "bookingId"::text AS "bookingId", status::text AS status, version, mode::text AS mode, "amountMinor", currency,
+    SELECT id::text AS id, "bookingId"::text AS "bookingId", status::text AS status, version, mode::text AS mode, origin::text AS origin, "amountMinor", currency,
            "providerPaymentRef", "providerAccountId"::text AS "providerAccountId", "attemptNumber"
     FROM payments WHERE id = ${paymentId}::uuid FOR UPDATE`;
   const p = rows[0] ?? null;
@@ -109,6 +115,7 @@ export class PaymentStateMachine {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(PaymentCoverageService) private readonly coverage: PaymentCoverageService,
     @Inject(JobsService) private readonly jobs: JobsService,
+    @Inject(InboundPaymentHooks) private readonly inboundHooks: InboundPaymentHooks,
   ) {}
 
   /** Fills in the gateway reference once (the webhook can arrive before the gateway's answer). */
@@ -140,9 +147,9 @@ export class PaymentStateMachine {
       actor: SYSTEM_ACTOR, action: 'payments.payment.status_changed', entityType: 'Payment', entityId: p.id,
       before: { status: from }, after: { status: to }, context: { from, to, source: ctx.source, bookingId: p.bookingId },
     });
-    if (to === 'succeeded' || to === 'failed') {
+    if (to === 'succeeded' || to === 'failed' || to === 'voided') {
       await this.outbox.publish(tx, {
-        type: to === 'succeeded' ? PAYMENT_EVENTS.succeeded : PAYMENT_EVENTS.failed, aggregateType: 'Payment', aggregateId: p.id, aggregateVersion: p.version,
+        type: to === 'succeeded' ? PAYMENT_EVENTS.succeeded : to === 'voided' ? PAYMENT_EVENTS.voided : PAYMENT_EVENTS.failed, aggregateType: 'Payment', aggregateId: p.id, aggregateVersion: p.version,
         payload: { paymentId: p.id, bookingId: p.bookingId }, actorType: 'system',
       });
     }
@@ -156,7 +163,11 @@ export class PaymentStateMachine {
         UPDATE payment_links SET status = 'used', "usedAt" = clock_timestamp()
         WHERE status = 'active' AND id = (SELECT "paymentLinkId" FROM payments WHERE id = ${p.id}::uuid)`;
       await this.checkOverpayment(tx, p, bookingReference);
-      await this.applyCoverage(tx, booking, p);
+      await this.applyCoverage(tx, booking, p, {}, p.origin === 'inbound' ? () => this.inboundHooks.runConfirmed(tx, p) : undefined);
+    }
+    if (to === 'voided') {
+      // Money that was recorded is taken back: the entries follow, then the booking is looked at again (plan 3.4, section 4).
+      await this.applyCoverage(tx, booking, p, { reopenDeposit: true }, () => this.inboundHooks.runVoided(tx, p));
     }
     if (LIVE_STATUSES.includes(from) && ENDED_WITHOUT_MONEY.includes(to)) await this.requeueApprovalExpiry(tx, booking);
     return to;
@@ -167,9 +178,11 @@ export class PaymentStateMachine {
    * whole change is undone: a database retry stays a retry, anything else becomes CoverageFailedError, which the callers
    * turn into a task for Oscar (plan 3.2, section 11, point 8). Once recorded, an earlier such task is closed.
    */
-  private async applyCoverage(tx: Tx, booking: LockedBooking, p: LockedPayment): Promise<void> {
+  private async applyCoverage(tx: Tx, booking: LockedBooking, p: LockedPayment, opts: { reopenDeposit?: boolean } = {}, before?: () => Promise<void>): Promise<void> {
     try {
-      await this.coverage.apply(tx, booking, SYSTEM_ACTOR);
+      // Entries that follow the money (the ledger) come first and fail the same way: nothing is recorded without them.
+      if (before) await before();
+      await this.coverage.apply(tx, booking, SYSTEM_ACTOR, opts);
     } catch (err) {
       if (isRetryableTransactionError(err)) throw err;
       throw new CoverageFailedError(p.id, err);

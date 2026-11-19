@@ -12,6 +12,11 @@ import type { Tx } from './support';
 export interface CoverageFacts {
   depositCovered: boolean;
   totalCovered: boolean;
+  /**
+   * Only a voided transfer sets this (task 3.4): a `deposit_paid` booking whose deposit is no longer covered goes back to
+   * approved. Other callers (a change that raises the deposit) leave it unset and the booking stays `deposit_paid`.
+   */
+  reopenDeposit?: boolean;
 }
 
 /**
@@ -24,6 +29,11 @@ export interface CoverageFacts {
 export function coverageEvents(status: BookingStatus, facts: CoverageFacts, autoConfirm: boolean): CoverageEvent[] {
   const events: CoverageEvent[] = [];
   let s = status;
+  if (s === 'deposit_paid' && facts.reopenDeposit && !facts.depositCovered) {
+    events.push('deposit_uncovered');
+    s = 'approved';
+    return events;
+  }
   if (s === 'approved' && facts.depositCovered) {
     events.push('deposit_covered');
     s = 'deposit_paid';

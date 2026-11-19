@@ -707,6 +707,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     liveBookingId: 'nopii',
     idempotencyKey: 'nopii',
     providerPaymentRef: 'nopii',
+    payerReference: 'nopii',
     failureCode: 'nopii',
     pendingExpiresAt: 'nopii',
     succeededAt: 'nopii',
@@ -726,6 +727,23 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     usedAt: 'nopii',
     revokedAt: 'nopii'
+  },
+  PaymentMethodConfig: {
+    id: 'nopii',
+    method: 'nopii',
+    enabled: 'nopii',
+    countries: 'nopii',
+    displayOrder: 'nopii',
+    instructions: 'nopii',
+    payeeName: 'nopii',
+    payIdType: 'nopii',
+    payId: 'nopii',
+    bsb: 'nopii',
+    accountNumber: 'nopii',
+    version: 'nopii',
+    updatedById: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   PaymentSchedule: {
     id: 'nopii',
