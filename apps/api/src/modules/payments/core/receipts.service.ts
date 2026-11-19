@@ -293,12 +293,12 @@ export class ReceiptsService implements OnApplicationBootstrap {
     const only = opts.bookingIds ?? null;
     const rows = await this.prisma.$queryRaw<Array<{ key: string }>>`
       SELECT t."idempotencyKey" AS key FROM ledger_transactions t
-      WHERE t.mode = ${mode}::"PaymentMode" AND t."createdAt" < ${before}
+      WHERE t.mode = ${mode}::"PaymentMode" AND t."occurredAt" < ${before}
         AND t."idempotencyKey" ~ '^(payment:[0-9a-f-]{36}:succeeded|refund:[0-9a-f-]{36}:(succeeded|reversed)|chargeback:[0-9a-f-]{36}:(withdrawn|reinstated)|inbound:[0-9a-f-]{36}:voided)$'
         AND (${only}::uuid[] IS NULL OR t."bookingId" = ANY(${only}::uuid[]))
         AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r."causeKey" = t."idempotencyKey")
         AND NOT EXISTS (SELECT 1 FROM receipt_notes n WHERE n."causeKey" = t."idempotencyKey")
-      ORDER BY t."createdAt", t.id LIMIT ${opts.limit ?? 500}`;
+      ORDER BY t."occurredAt", t.id LIMIT ${opts.limit ?? 500}`;
     return rows.map((r) => r.key);
   }
 
@@ -310,7 +310,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
         const n = await runTransaction(this.prisma, (tx) => this.issueIn(tx, key), PAYMENT_TX_OPTIONS);
         if (n) issued += 1;
       } catch (err) {
-        this.logger.warn(`receipt sweep: ${key.split(':')[0]} posting not issued (${(err as { code?: string }).code ?? 'error'})`);
+        this.logger.warn(`receipt sweep: ${key.split(":")[0]} posting not issued (${(err as { code?: string }).code ?? "error"})`);
       }
     }
     return issued;

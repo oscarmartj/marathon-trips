@@ -2,6 +2,7 @@
 // section 2 and review R1-R12). Per account: the dispute sweep, the settlement import with its fees, then a read-only
 // comparison of our payments, refunds and disputes with what the gateway says, and of the gateway's activity and
 // payouts with ours. Each difference is a task (the alert: nobody is emailed) and the run is stored, closed once.
+import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { AuditService } from '../../../platform/audit/audit.service';
 import type { AuditActor } from '../../../platform/audit/audit.service';
@@ -35,6 +36,10 @@ export const STALE_RUN_MS = 6 * HOUR;
 export const MANUAL_RUNS_PER_HOUR = 5;
 /** Adapters with no gateway to compare with: their reconciliation is the bank statement (out of scope). */
 const NO_GATEWAY: ReadonlySet<string> = new Set(['manual']);
+
+/** One open task per difference and object (codes only, at most 80 characters: the audit's rule). */
+export const reconciliationTaskRef = (code: string, entityId: string): string =>
+  `payments:recon:${createHash('sha256').update(`${code}:${entityId}`).digest('hex').slice(0, 40)}`;
 
 class CutOff extends Error {
   constructor(readonly code: string) {
@@ -238,7 +243,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
           title: `Reconciliation: ${d.code.replace(/_/g, ' ')}`,
           description: `The daily reconciliation with the payment gateway found a difference (${d.code}) for ${d.entityType} ${d.entityId}. Nothing was changed: compare the app with the gateway's dashboard.`,
           entityType: entityType && isUuid ? entityType : 'ProviderAccount', entityId: entityType && isUuid ? d.entityId : accountId,
-          sourceRef: `payments:reconciliation:${d.code}:${d.entityId}`.slice(0, 300),
+          sourceRef: reconciliationTaskRef(d.code, d.entityId),
         });
       }
       if (status === 'failed') {
@@ -425,7 +430,7 @@ export class ReconciliationService implements OnApplicationBootstrap {
     // Review R12 (d): only payments that have their ledger posting can be missing a receipt.
     const noReceipt = await this.prisma.$queryRaw<Array<{ id: string; amountMinor: bigint; currency: string }>>`
       SELECT p.id::text AS id, p."amountMinor", p.currency FROM payments p JOIN ledger_transactions t ON t."idempotencyKey" = 'payment:' || p.id::text || ':succeeded'
-      WHERE p."providerAccountId" = ${accountId}::uuid AND p.mode = ${mode}::"PaymentMode" AND t."createdAt" < ${w.settled}
+      WHERE p."providerAccountId" = ${accountId}::uuid AND p.mode = ${mode}::"PaymentMode" AND t."occurredAt" < ${w.settled}
         AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r."paymentId" = p.id)
       ORDER BY p.id LIMIT 500`;
     for (const r of noReceipt) out.push({ code: 'receipt_missing', entityType: 'Payment', entityId: r.id, ours: moneySide(r.amountMinor, r.currency, 'succeeded') });

@@ -263,29 +263,39 @@ ALTER TABLE "receipt_notes"
     OR ("kind" = 'void' AND "refundId" IS NULL AND "disputeId" IS NULL)),
   ADD CONSTRAINT "receipt_notes_direction_check" CHECK (("direction" = 'decrease') = ("kind" IN ('refund', 'chargeback', 'void')));
 
--- The number a document uses was taken for that kind and mode.
-CREATE FUNCTION public.mt_receipt_document_insert() RETURNS trigger
+-- The number a document uses was taken for that kind and mode; a note names the receipt of what it is about.
+CREATE FUNCTION public.mt_receipt_insert() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM receipt_numbers n WHERE n.number = NEW."number" AND n.mode = NEW.mode
-                 AND n.kind = CASE WHEN TG_TABLE_NAME = 'receipts' THEN 'receipt' ELSE 'note' END) THEN
-    RAISE EXCEPTION 'a document uses a number taken for its kind and mode' USING ERRCODE = 'check_violation';
+  IF NOT EXISTS (SELECT 1 FROM receipt_numbers n WHERE n.number = NEW."number" AND n.mode = NEW.mode AND n.kind = 'receipt') THEN
+    RAISE EXCEPTION 'a receipt uses a number taken for receipts in its mode' USING ERRCODE = 'check_violation';
   END IF;
-  IF TG_TABLE_NAME = 'receipt_notes' AND NEW."refundId" IS NOT NULL AND NOT EXISTS (
+  RETURN NEW;
+END;
+$$;
+CREATE FUNCTION public.mt_receipt_note_insert() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM receipt_numbers n WHERE n.number = NEW."number" AND n.mode = NEW.mode AND n.kind = 'note') THEN
+    RAISE EXCEPTION 'a note uses a number taken for notes in its mode' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW."refundId" IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM refunds r JOIN receipts c ON c."paymentId" = r."paymentId" WHERE r.id = NEW."refundId" AND c.id = NEW."receiptId") THEN
     RAISE EXCEPTION 'a refund note references the receipt of the refunded payment' USING ERRCODE = 'check_violation';
   END IF;
-  IF TG_TABLE_NAME = 'receipt_notes' AND NEW."disputeId" IS NOT NULL AND NOT EXISTS (
+  IF NEW."disputeId" IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM disputes d JOIN receipts c ON c."paymentId" = d."paymentId" WHERE d.id = NEW."disputeId" AND c.id = NEW."receiptId") THEN
     RAISE EXCEPTION 'a chargeback note references the receipt of the disputed payment' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END;
 $$;
-CREATE TRIGGER receipts_insert BEFORE INSERT ON "receipts" FOR EACH ROW EXECUTE FUNCTION public.mt_receipt_document_insert();
-CREATE TRIGGER receipt_notes_insert BEFORE INSERT ON "receipt_notes" FOR EACH ROW EXECUTE FUNCTION public.mt_receipt_document_insert();
+CREATE TRIGGER receipts_insert BEFORE INSERT ON "receipts" FOR EACH ROW EXECUTE FUNCTION public.mt_receipt_insert();
+CREATE TRIGGER receipt_notes_insert BEFORE INSERT ON "receipt_notes" FOR EACH ROW EXECUTE FUNCTION public.mt_receipt_note_insert();
 
 -- ---- Never changed, never deleted (review R12 f: triggers for every role, and no UPDATE/DELETE for the API role) ----
 CREATE TRIGGER settlements_append_only BEFORE UPDATE OR DELETE ON "settlements" FOR EACH ROW EXECUTE FUNCTION public.mt_reject_modification();
