@@ -132,6 +132,14 @@ describe('formula_injection_neutralised', () => {
     expect(out('Ana;Bea')).toBe('"Ana;Bea"'); // quoted in a comma file too
     expect(lines(renderCsv(intl, [{ ...ana, givenName: 'Ana,Bea' }]))[1]!.startsWith('García-López;"Ana,Bea";')).toBe(true);
   });
+  it('a quote or a line break before a formula is guarded too, so a semicolon file opened with commas is safe (7.fix-5)', () => {
+    // In a column after the first, a comma reader is mid-field at our opening quote: it does not honour it, so a later `"`
+    // opens a field of its own and a line break ends the row. The platform guardCell covers both inside each fragment.
+    const csv = renderCsv(intl, [{ ...ana, givenName: 'Ana\n=1+1', emergencyContactName: 'x,"=1+1;y' }]);
+    expect(csv).toContain(`;"Ana\n'=1+1";`);
+    expect(csv).toContain(`"x,'""=1+1;y"`);
+    for (const part of csv.replace(/^\uFEFF/, '').split(/[,;\r\n]/)) expect([part, /^[^\S\r\n]*"*[=+\-@\t]/.test(part)]).toEqual([part, false]);
+  });
   it('a normal name is untouched, and generated dates, durations and distances never start with a formula character', () => {
     expect(lines(renderCsv(base, [ana]))[1]).toBe('Ana');
     for (const row of lines(renderCsv(intl, [ana])).slice(1)) for (const cell of row.split(';')) expect(cell).not.toMatch(/^[=+\-@]/);
