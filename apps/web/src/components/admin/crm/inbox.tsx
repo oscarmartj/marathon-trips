@@ -13,6 +13,7 @@ import { RecordNotes, crmError, formatMoment, fullName, statusLabel } from './cr
 import { PaymentLinksPanel } from './payment-links';
 import { TransfersPanel } from './transfers';
 import { RefundsPanel } from './refunds';
+import { ReceiptsPanel } from './receipts';
 import { AmendmentPanel, type AmendmentRow } from './amendments';
 import type { ConfigurationView } from '@/lib/amendments';
 import type { CancellationView } from '@mt/shared';
@@ -206,6 +207,7 @@ export function BookingDetail({ id }: { id: string }) {
       <PaymentLinksPanel bookingId={id} status={b.status} />
       <TransfersPanel bookingId={id} onChanged={reload} />
       <RefundsPanel bookingId={id} onChanged={reload} />
+      <ReceiptsPanel bookingId={id} />
       {b.snapshots ? (
         <AmendmentPanel
           bookingId={id} packageId={b.packageId} status={b.status} version={b.currentSnapshotVersion} currency={b.currency} rows={b.amendments ?? []}

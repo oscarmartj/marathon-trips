@@ -2,12 +2,12 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../generated/prisma/client';
 import { AppError } from '../../../platform/errors/safe-error';
 import { allocate } from './allocation';
-import { CUSTOMER_ACCOUNTS, LEDGER_ACCOUNTS, LedgerLine, accountKind, assertBalanced, contentSha256, customerSide } from './ledger';
+import { CUSTOMER_ACCOUNTS, LEDGER_ACCOUNTS, LedgerLine, accountKind, assertBalanced, contentSha256, customerSide, settlementFeeKey } from './ledger';
 import { netCollectedSource } from './payable';
 
 type Tx = Prisma.TransactionClient;
 type Mode = 'test' | 'live';
-type Kind = 'payment' | 'refund' | 'chargeback' | 'adjustment' | 'reversal';
+type Kind = 'payment' | 'refund' | 'chargeback' | 'adjustment' | 'reversal' | 'fee';
 
 /** A key already posted with other content: never a second or different posting (plan 3.3, section 1.3). */
 export class LedgerKeyConflictError extends AppError {
@@ -101,6 +101,21 @@ export class LedgerService {
     return this.post(tx, booking, { key, kind: 'adjustment', mode, description: 'reallocation' });
   }
 
+  /**
+   * Task 4.6: a gateway's fee on one settlement line, `fee:<lineId>` (plan 0.1, P5). An expense against the clearing
+   * account of the gateway account; customer accounts never move. A negative fee (given back) mirrors it. The caller
+   * holds the booking's lock and has checked that the line matched an object of this booking, in its currency.
+   */
+  async postSettlementFee(tx: Tx, booking: BookingRef, f: { lineId: string; providerAccountId: string; feeMinor: bigint; mode: Mode; paymentId?: string; refundId?: string; disputeId?: string }): Promise<string | null> {
+    if (f.feeMinor === 0n) return null;
+    const lines: LedgerLine[] = [
+      { accountCode: LEDGER_ACCOUNTS.fees, amountMinor: f.feeMinor },
+      { accountCode: LEDGER_ACCOUNTS.clearing(f.providerAccountId), amountMinor: -f.feeMinor },
+    ];
+    assertBalanced(lines);
+    return this.insert(tx, booking, { key: settlementFeeKey(f.lineId), kind: 'fee', mode: f.mode, description: 'settlement_fee', paymentId: f.paymentId, refundId: f.refundId, disputeId: f.disputeId }, lines, null);
+  }
+
   /** What the ledger holds for a booking in its customer accounts (liabilities as positive). */
   async customerBalances(tx: Tx, bookingId: string, currency: string, mode: Mode): Promise<{ fundsMinor: bigint; overpaymentsMinor: bigint; receivableMinor: bigint }> {
     const rows = await tx.$queryRaw<Array<{ code: string; total: bigint }>>`
@@ -130,6 +145,11 @@ export class LedgerService {
       if (!original[0]) throw new AppError('ledger_reversal_without_original', 'There is no posting to reverse');
       reversesId = original[0].id;
     }
+    return this.insert(tx, booking, p, lines, reversesId);
+  }
+
+  /** Writes one posting under its key: the same content again returns its id; other content is a conflict. */
+  private async insert(tx: Tx, booking: BookingRef, p: Omit<Posting, 'cash' | 'reversesKey'>, lines: LedgerLine[], reversesId: string | null): Promise<string | null> {
     const sha = contentSha256({
       kind: p.kind, mode: p.mode, currency: booking.currency, bookingId: booking.id, paymentId: p.paymentId ?? null, refundId: p.refundId ?? null,
       disputeId: p.disputeId ?? null, reversesTransactionId: reversesId, description: p.description, lines,

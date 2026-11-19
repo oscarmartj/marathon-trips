@@ -4,7 +4,7 @@ import { PrismaService } from '../../platform/database/prisma.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { AMENDABLE_STATES, AMENDMENT_SETTINGS, BookingCancellationService, CANCELLATION_SETTINGS, customerView } from '../bookings';
 import { SettingsService } from '../../platform/flags/flags.service';
-import { PaymentAttemptsService } from '../payments';
+import { PaymentAttemptsService, ReceiptsService } from '../payments';
 import { TemplatesService } from '../templates';
 import { documentsFor, formatMinor, longDate } from './documents';
 
@@ -28,7 +28,23 @@ export class CustomerAccountService {
     @Inject(TemplatesService) private readonly templates: TemplatesService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(BookingCancellationService) private readonly cancellations: BookingCancellationService,
+    @Inject(ReceiptsService) private readonly receipts: ReceiptsService,
   ) {}
+
+  /** Task 4.6: the receipts and notes of the customer's booking (the route's guard has checked it is theirs). */
+  async receiptList(reference: string) {
+    const b = await this.prisma.booking.findUnique({ where: { reference }, select: { id: true } });
+    if (!b) throw notFound();
+    return { documents: await this.receipts.listForBooking(b.id) };
+  }
+
+  /** Task 4.6: one receipt or note of the booking as a PDF; another booking's number is the same 404. */
+  async receiptPdf(reference: string, number: string): Promise<{ pdf: Buffer; filename: string }> {
+    const b = await this.prisma.booking.findUnique({ where: { reference }, select: { id: true } });
+    const doc = b ? await this.receipts.pdf(number, [b.id]) : null;
+    if (!doc) throw notFound();
+    return doc;
+  }
 
   /** The bookings of the signed-in user's customer, newest request first. A closed account, or none, has nothing. */
   async list(userId: string): Promise<{ items: AccountBookingItem[] }> {

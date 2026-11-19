@@ -49,3 +49,24 @@ export function linkOutcome(view: PaymentLinkRefreshView): 'paid' | 'processing'
 
 /** The link's token is kept only for the trip to the provider and back, in this tab, then deleted. */
 export const PAY_LINK_STORAGE_KEY = 'mt.payLinkToken';
+
+/** Task 4.6: a receipt or note of the customer's booking, as the API lists it. */
+export interface AccountReceipt {
+  number: string;
+  kind: 'receipt' | 'refund' | 'refund_reversal' | 'chargeback' | 'chargeback_reinstatement' | 'void';
+  issuedAt: string;
+  amountMinor: string;
+  currency: string;
+  receiptNumber: string | null;
+}
+
+export const RECEIPT_KINDS: readonly AccountReceipt['kind'][] = ['receipt', 'refund', 'refund_reversal', 'chargeback', 'chargeback_reinstatement', 'void'];
+
+/** The download link of one receipt or note, through the API proxy; null for anything that is not one. */
+export function receiptHref(reference: string, number: string): string | null {
+  if (!/^MT-[0-9A-HJKMNP-TV-Z]{6}$/.test(reference) || !/^MT-[TR]-[1-9][0-9]{0,17}$/.test(number)) return null;
+  return `/api/account/bookings/${reference}/receipts/${number}`;
+}
+
+/** The documents of a kind the page knows how to name. */
+export const knownReceipts = (list: readonly AccountReceipt[]): AccountReceipt[] => list.filter((r) => RECEIPT_KINDS.includes(r.kind));

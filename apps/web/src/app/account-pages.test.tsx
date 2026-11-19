@@ -58,8 +58,27 @@ describe('customer area pages', () => {
     expect(html).toContain('href="/api/account/bookings/MT-4YRAQQ/documents/confirmation"');
     expect(html).toContain('href="/api/account/bookings/MT-4YRAQQ/documents/itinerary"');
     expect(html).not.toContain('documents/receipt');
-    expect(text(html)).toContain('It is not a receipt or a tax invoice.');
+    // Task 4.6: receipts now exist (their own section); the page never uses the words "tax invoice" or "GST" (review R12 g).
+    expect(text(html)).toContain('Each payment has its own receipt under Receipts.');
+    expect(/tax invoice|\bGST\b/i.test(text(html))).toBe(false);
     expect(text(renderToStaticMarkup(<BookingOverview view={detail()} />))).toContain('Your documents appear here once your booking is confirmed.');
+  });
+
+  it('receipts are download links to the API, one per document; unknown numbers or kinds are left out (task 4.6)', () => {
+    const receipts = [
+      { number: 'MT-T-12', kind: 'receipt' as const, issuedAt: '2026-11-20T00:00:00.000Z', amountMinor: '100000', currency: 'AUD', receiptNumber: null },
+      { number: 'MT-T-13', kind: 'refund' as const, issuedAt: '2026-11-21T00:00:00.000Z', amountMinor: '500', currency: 'AUD', receiptNumber: 'MT-T-12' },
+      { number: '../../x', kind: 'receipt' as const, issuedAt: '2026-11-21T00:00:00.000Z', amountMinor: '1', currency: 'AUD', receiptNumber: null },
+    ];
+    const html = renderToStaticMarkup(<BookingOverview view={detail()} receipts={receipts} />);
+    expect(html).toContain('href="/api/account/bookings/MT-4YRAQQ/receipts/MT-T-12"');
+    expect(html).toContain('href="/api/account/bookings/MT-4YRAQQ/receipts/MT-T-13"');
+    expect(html).not.toContain('../../x');
+    expect(text(html)).toContain('Receipt MT-T-12, $1,000.00 (PDF)');
+    expect(text(html)).toContain('Refund note MT-T-13, $5.00 (PDF)');
+    expect(/tax invoice|\bGST\b/i.test(text(html))).toBe(false);
+    expect(text(renderToStaticMarkup(<BookingOverview view={detail()} receipts={[]} />))).toContain('No receipts yet.');
+    expect(renderToStaticMarkup(<BookingOverview view={detail()} />)).not.toContain('receipts-heading');
   });
 
   it('payments received are listed with their method; the plan is a table with headers', () => {

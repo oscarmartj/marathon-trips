@@ -52,12 +52,19 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
 import { AppRefundsService } from './core/app-refunds.service';
 import { PaymentDisputesService } from './core/disputes.service';
 import { PaymentRefundsAdminController } from './refunds.controller';
+import { PaymentReconciliationAdminController } from './reconciliation.controller';
+import { ClientMoneyService } from './core/client-money.service';
+import { DisputeSyncService } from './core/dispute-sync.service';
+import { RECEIPT_EVENTS, ReceiptsService } from './core/receipts.service';
+import { ReconciliationService } from './core/reconciliation.service';
+import { SettlementsService } from './core/settlements.service';
+import { ConsumerRegistry } from '../../platform/events/consumers';
 
 @Module({
   imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule, PricingModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
-  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
+  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, PaymentReconciliationAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
     ProviderGateway, ProviderHealthService, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
@@ -65,8 +72,9 @@ import { PaymentRefundsAdminController } from './refunds.controller';
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
     CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard, RoutingRulesAdminService,
     AppRefundsService, PaymentDisputesService,
+    SettlementsService, DisputeSyncService, ReconciliationService, ReceiptsService, ClientMoneyService,
   ],
-  exports: [ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
+  exports: [ReceiptsService, ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(
@@ -88,6 +96,8 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(InboundPaymentHooks) private readonly inbound: InboundPaymentHooks,
     @Inject(LedgerService) private readonly ledger: LedgerService,
     @Inject(ProviderAccountsAdminService) private readonly accountsAdmin: ProviderAccountsAdminService,
+    @Inject(ConsumerRegistry) private readonly consumers: ConsumerRegistry,
+    @Inject(ReceiptsService) private readonly receipts: ReceiptsService,
   ) {}
 
   /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
@@ -109,6 +119,11 @@ export class PaymentsModule implements OnModuleInit {
     this.accountsAdmin.registerArchiveCheck('payments.disputes', async (tx, accountId) => {
       const open = await tx.dispute.count({ where: { providerAccountId: accountId, status: { in: ['open', 'evidence_submitted'] } } });
       return open > 0 ? ['open_dispute'] : [];
+    });
+    // Task 4.6: every posting that records money in or out gets its receipt or note, in the delivery's transaction.
+    this.consumers.register({
+      name: 'payments.receipts', module: 'payments', events: [...RECEIPT_EVENTS], whenDisabled: 'hold',
+      handle: (event, ctx) => this.receipts.onEvent(event, ctx.tx),
     });
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });
   }

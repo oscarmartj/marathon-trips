@@ -76,6 +76,17 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 1, retryDelay: 300, expireInSeconds: 1800, deleteAfterSeconds: 604800 },
   },
+  // Task 4.6: the daily reconciliation of every gateway account against the gateway, and the hourly receipt sweep.
+  paymentsReconciliation: {
+    name: 'payments.reconciliation',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 0, retryDelay: 300, expireInSeconds: 7200, deleteAfterSeconds: 604800 },
+  },
+  paymentsReceipts: {
+    name: 'payments.receipts',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 1, retryDelay: 120, expireInSeconds: 1800, deleteAfterSeconds: 604800 },
+  },
   // Task 5.6: queues the automatic balance reminders that are due (one email per plan item and offset).
   paymentsReminders: {
     name: 'payments.reminders',

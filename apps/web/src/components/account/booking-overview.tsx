@@ -4,7 +4,8 @@ import { formatMoney } from '@/lib/builder';
 import { localisedText } from '@/lib/catalogue';
 import { formatDate } from '@/lib/catalogue-format';
 import { formatInstant, notPayableKey } from '@/lib/checkout';
-import { documentHref, documentKinds, statusKey } from '@/lib/account';
+import { documentHref, documentKinds, knownReceipts, receiptHref, statusKey } from '@/lib/account';
+import type { AccountReceipt } from '@/lib/account';
 import { t } from '@/lib/i18n';
 import type { CancellationView } from '@mt/shared';
 import { progress, showTravellerSection, travellerHref } from '@/lib/travellers';
@@ -49,7 +50,7 @@ export interface AccountBookingDetail {
  * the API holds them, the payments received and the documents available. "Pay now" appears only when the API says
  * the booking can take a payment; the amount is the plan's, shown at checkout.
  */
-export function BookingOverview({ view, travellers = null }: { view: AccountBookingDetail; travellers?: BookingTravellersView | null }) {
+export function BookingOverview({ view, travellers = null, receipts = null }: { view: AccountBookingDetail; travellers?: BookingTravellersView | null; receipts?: AccountReceipt[] | null }) {
   const { booking: b, plan } = view;
   const cur = b.currency;
   const subtotals = b.price.subtotals ?? {};
@@ -141,8 +142,28 @@ export function BookingOverview({ view, travellers = null }: { view: AccountBook
         )}
       </section>
 
+      {receipts ? <ReceiptsSection reference={b.reference} receipts={receipts} /> : null}
+
       <p><Link href="/account">{t('account.detail.back')}</Link></p>
     </div>
+  );
+}
+
+/** Task 4.6: a receipt for each payment and a note for each refund or chargeback, as PDFs the API builds. */
+function ReceiptsSection({ reference, receipts }: { reference: string; receipts: AccountReceipt[] }) {
+  const known = knownReceipts(receipts);
+  return (
+    <section className="stack" aria-labelledby="receipts-heading">
+      <h2 id="receipts-heading">{t('account.receipts.heading')}</h2>
+      {known.length === 0 ? <p>{t('account.receipts.none')}</p> : (
+        <ul>
+          {known.map((r) => {
+            const href = receiptHref(reference, r.number);
+            return href ? <li key={r.number}><a href={href} download>{t('account.receipts.link', { title: t(`account.receipts.kinds.${r.kind}`), number: r.number, amount: formatMoney(r.amountMinor, r.currency) })}</a></li> : null;
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 

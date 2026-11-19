@@ -7,6 +7,7 @@ import { BookingOverview, type AccountBookingDetail } from '@/components/account
 import { localisedText } from '@/lib/catalogue';
 import { apiBase } from '@/lib/api-proxy';
 import { isBookingReference } from '@/lib/checkout';
+import type { AccountReceipt } from '@/lib/account';
 import { t } from '@/lib/i18n';
 
 type Props = { params: Promise<{ reference: string }> };
@@ -37,15 +38,26 @@ async function loadTravellers(reference: string): Promise<BookingTravellersView 
   }
 }
 
+/** Task 4.6: the booking's receipts and notes; null when they cannot be read, and the section is left out. */
+async function loadReceipts(reference: string): Promise<AccountReceipt[] | null> {
+  try {
+    const cookie = (await cookies()).toString();
+    const res = await fetch(`${apiBase()}/account/bookings/${reference}/receipts`, { headers: { cookie, accept: 'application/json' }, cache: 'no-store' });
+    return res.ok ? ((await res.json()) as { documents: AccountReceipt[] }).documents : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function Page({ params }: Props) {
   const reference = (await params).reference;
   const view = await load(reference);
   if (view) {
-    const travellers = await loadTravellers(reference);
+    const [travellers, receipts] = await Promise.all([loadTravellers(reference), loadReceipts(reference)]);
     return (
       <>
         <PageHeader title={t('account.detail.title')} intro={localisedText(view.booking.package.name)} />
-        <BookingOverview view={view} travellers={travellers} />
+        <BookingOverview view={view} travellers={travellers} receipts={receipts} />
       </>
     );
   }

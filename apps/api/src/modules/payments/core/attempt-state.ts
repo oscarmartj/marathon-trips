@@ -78,6 +78,8 @@ export const PAYMENT_EVENTS = {
   disputeChanged: 'payments.dispute.status_changed',
   chargebackWithdrawn: 'payments.chargeback.withdrawn',
   chargebackReinstated: 'payments.chargeback.reinstated',
+  // Task 4.6: the daily reconciliation found differences (no consumer sends mail: tasks are the alert).
+  reconciliationMismatch: 'payments.reconciliation.mismatch',
 } as const;
 
 export interface LockedPayment {

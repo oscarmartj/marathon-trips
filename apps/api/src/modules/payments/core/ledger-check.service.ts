@@ -11,11 +11,13 @@ import { LEDGER_ACCOUNTS } from './ledger';
 import { PAYMENT_SETTINGS } from './settings';
 import { SettingsService } from '../../../platform/flags/flags.service';
 
-export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'missing_chargeback' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction';
+export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'missing_chargeback' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction'
+  // Task 4.6 (plan review R1): fees are checked against the gateway's settlement lines, never against the ledger itself.
+  | 'missing_fee_posting' | 'fee_without_line';
 
 export interface LedgerFinding {
   kind: LedgerFindingKind;
-  entityType: 'Payment' | 'Refund' | 'Dispute' | 'Booking' | 'ProviderAccount' | 'LedgerTransaction';
+  entityType: 'Payment' | 'Refund' | 'Dispute' | 'Booking' | 'ProviderAccount' | 'LedgerTransaction' | 'SettlementLine';
   entityId: string;
 }
 
@@ -145,15 +147,40 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
       }
 
       if (!only) {
+        // Task 4.6 (plan review R1): per account and currency, the clearing account holds what was collected less refunded,
+        // less chargebacks, less the fees the gateway's own settlement lines report (matched lines only).
         const clearing = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT a.id::text AS id FROM provider_accounts a
-          WHERE a.mode = ${mode}::"PaymentMode" AND
-            COALESCE((SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."accountCode" = 'provider_clearing:' || a.id::text AND e.mode = a.mode), 0)
-            <> COALESCE((SELECT SUM(p."amountMinor") FROM payments p WHERE p."providerAccountId" = a.id AND p.status = 'succeeded'), 0)
-             - COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."providerAccountId" = a.id AND r.status = 'succeeded'), 0)
-             - COALESCE((SELECT SUM(d."amountMinor") FROM disputes d WHERE d."providerAccountId" = a.id AND d."fundsWithdrawnAt" IS NOT NULL AND d."fundsReinstatedAt" IS NULL), 0)
-          ORDER BY a.id`;
+          WITH cur AS (
+            SELECT p."providerAccountId" AS acc, p.currency FROM payments p WHERE p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded'
+            UNION SELECT r."providerAccountId", r.currency FROM refunds r WHERE r.mode = ${mode}::"PaymentMode" AND r.status = 'succeeded'
+            UNION SELECT d."providerAccountId", d.currency FROM disputes d WHERE d.mode = ${mode}::"PaymentMode" AND d."fundsWithdrawnAt" IS NOT NULL
+            UNION SELECT split_part(e."accountCode", ':', 2)::uuid, e.currency FROM ledger_entries e WHERE e.mode = ${mode}::"PaymentMode" AND e."accountCode" LIKE 'provider_clearing:%'
+          )
+          SELECT DISTINCT c.acc::text AS id FROM cur c
+          WHERE COALESCE((SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."accountCode" = 'provider_clearing:' || c.acc::text AND e.mode = ${mode}::"PaymentMode" AND e.currency = c.currency), 0)
+            <> COALESCE((SELECT SUM(p."amountMinor") FROM payments p WHERE p."providerAccountId" = c.acc AND p.currency = c.currency AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded'), 0)
+             - COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."providerAccountId" = c.acc AND r.currency = c.currency AND r.mode = ${mode}::"PaymentMode" AND r.status = 'succeeded'), 0)
+             - COALESCE((SELECT SUM(d."amountMinor") FROM disputes d WHERE d."providerAccountId" = c.acc AND d.currency = c.currency AND d.mode = ${mode}::"PaymentMode" AND d."fundsWithdrawnAt" IS NOT NULL AND d."fundsReinstatedAt" IS NULL), 0)
+             - COALESCE((SELECT SUM(l."feeMinor") FROM settlement_lines l JOIN settlements s ON s.id = l."settlementId" JOIN settlement_line_matches m ON m."lineId" = l.id
+                         WHERE s."providerAccountId" = c.acc AND l.currency = c.currency AND l.mode = ${mode}::"PaymentMode"), 0)
+          ORDER BY 1`;
         for (const r of clearing) out.push({ kind: 'clearing', entityType: 'ProviderAccount', entityId: r.id });
+        const missingFees = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT l.id::text AS id FROM settlement_lines l JOIN settlement_line_matches m ON m."lineId" = l.id
+          WHERE l.mode = ${mode}::"PaymentMode" AND l."feeMinor" <> 0
+            AND NOT EXISTS (SELECT 1 FROM ledger_transactions t WHERE t."idempotencyKey" = 'fee:' || l.id::text)
+          ORDER BY l.id LIMIT 500`;
+        for (const r of missingFees) out.push({ kind: 'missing_fee_posting', entityType: 'SettlementLine', entityId: r.id });
+        // A fee posting must match its line: same amount, same gateway account, a matched line.
+        const strayFees = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT t.id::text AS id FROM ledger_transactions t
+          WHERE t.mode = ${mode}::"PaymentMode" AND t.kind = 'fee' AND NOT EXISTS (
+            SELECT 1 FROM settlement_lines l JOIN settlements s ON s.id = l."settlementId" JOIN settlement_line_matches m ON m."lineId" = l.id
+            WHERE t."idempotencyKey" = 'fee:' || l.id::text AND m."bookingId" = t."bookingId"
+              AND (SELECT e."amountMinor" FROM ledger_entries e WHERE e."transactionId" = t.id AND e."accountCode" = 'payment_fees') = l."feeMinor"
+              AND (SELECT e."amountMinor" FROM ledger_entries e WHERE e."transactionId" = t.id AND e."accountCode" = 'provider_clearing:' || s."providerAccountId"::text) = -l."feeMinor")
+          ORDER BY t.id LIMIT 500`;
+        for (const r of strayFees) out.push({ kind: 'fee_without_line', entityType: 'LedgerTransaction', entityId: r.id });
         const empty = await tx.$queryRaw<Array<{ id: string }>>`
           SELECT t.id::text AS id FROM ledger_transactions t WHERE NOT EXISTS (SELECT 1 FROM ledger_entries e WHERE e."transactionId" = t.id) ORDER BY t.id LIMIT 100`;
         for (const r of empty) out.push({ kind: 'empty_transaction', entityType: 'LedgerTransaction', entityId: r.id });
