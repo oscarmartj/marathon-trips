@@ -372,6 +372,11 @@ export class FakePayPal {
     return json(201, this.orderRepr(a, o));
   }
 
+  /** Test helper: the capture that PayPal reported as already done becomes visible to reads. */
+  captureNow(clientId: string, orderId: string): void {
+    this.capture(this.account(clientId), orderId);
+  }
+
   /** Test helper: a pending capture settles at PayPal. */
   settleCapture(clientId: string, orderId: string, to: 'COMPLETED' | 'DECLINED'): void {
     const a = this.account(clientId);

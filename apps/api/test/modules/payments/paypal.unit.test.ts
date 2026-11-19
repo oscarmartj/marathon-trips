@@ -625,3 +625,13 @@ describe('review round on PR #76', () => {
     expect(parsePayPalEvent({ id: 'WH-1', event_type: 'CUSTOMER.DISPUTE.UPDATED', create_time: at, resource: {} }, 'https://www.sandbox.paypal.com')?.review).toBeUndefined();
   });
 });
+
+describe('cancel when the marker does not land (B1)', () => {
+  it('a refused PATCH on a patchable order is retryable, never "cancelled"', async () => {
+    const { fake, ctx, input } = world();
+    const provider = new PayPalProvider({ transport: async (req) => (req.method === 'PATCH' ? { status: 422, body: '{"name":"UNPROCESSABLE_ENTITY"}' } : fake.transport(req)) });
+    const p = await provider.createPayment(ctx, input());
+    fake.approve(ctx.credentials.clientId!, p.ref, 'good');
+    expect(await code(provider.cancelPayment(ctx, p.ref, 'k'))).toEqual(['provider_unavailable', true]);
+  });
+});

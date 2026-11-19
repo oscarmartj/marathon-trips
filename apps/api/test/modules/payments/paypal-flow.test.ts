@@ -285,10 +285,30 @@ describe('PayPal checkout through the API (plan 4.3)', () => {
       await expireNow(a.p.id);
       await expect(sync.run(a.p.id, 'expire')).rejects.toThrow();
       expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } })).status).toBe('requires_action');
+      // Retried while it keeps failing: past 24 hours the unresolved task shows it (the attempt still blocks the booking).
+      await expireNow(a.p.id, 25 * 60);
+      await expect(sync.run(a.p.id, 'expire')).rejects.toThrow();
+      expect(await t.prisma.task.count({ where: { title: { startsWith: 'Payment attempt unresolved' }, status: 'open', description: { contains: 'still blocks new payments' } } })).toBeGreaterThan(0);
       captureStatus = undefined;
       await sync.run(a.p.id, 'expire');
       expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } })).status).toBe('succeeded');
     }
+  });
+
+  it('ORDER_ALREADY_CAPTURED with a late read at expiry: never cancelled; the next sweep records the success', async () => {
+    const sync = t.app.get(PaymentAttemptSyncService);
+    const a = await checkout();
+    fake.approve(acc.clientId, a.p.providerPaymentRef!, 'good');
+    fake.captureIssue = 'ORDER_ALREADY_CAPTURED';
+    await expireNow(a.p.id);
+    await expect(sync.run(a.p.id, 'expire')).rejects.toThrow();
+    expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } })).status).toBe('requires_action');
+    expect(fake.order(acc.clientId, a.p.providerPaymentRef!)?.customId?.startsWith('mt1:o:')).toBe(true);
+    fake.captureIssue = undefined;
+    // The capture becomes visible: the next sweep reads it and records the success.
+    fake.captureNow(acc.clientId, a.p.providerPaymentRef!);
+    await sync.run(a.p.id, 'expire');
+    expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } })).status).toBe('succeeded');
   });
 
   it('review L1: an order of another amount is never captured; record opens the mismatch task', async () => {

@@ -312,6 +312,9 @@ export class PayPalProvider implements PaymentProvider {
       const patch = [{ op: 'replace', path: "/purchase_units/@reference_id=='default'/custom_id", value: `mt1:c:${marker.ourId}:${marker.digest}` }];
       const r = await this.api(ctx, token, 'PATCH', `/v2/checkout/orders/${ref}`, { body: patch });
       if (!r.ok && r.status === 401) this.fail(r);
+      // The marker did not land on an order PayPal allows to patch: it may be captured by now and the read be late.
+      // Never say "cancelled" then; the next try reads it again.
+      if (!r.ok) throw new ProviderError('provider_unavailable', true);
     }
     const now = await this.getOrder(ctx, token, ref);
     if (!now) throw new ProviderError('provider_not_found', false);
