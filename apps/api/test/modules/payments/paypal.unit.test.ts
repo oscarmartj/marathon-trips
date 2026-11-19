@@ -590,13 +590,32 @@ describe('review round on PR #76', () => {
     expect(await code(provider.retrieveRefund(ctx, { idempotencyKey: 'r:x', paymentRef: p.ref, createdAt: new Date() }))).toEqual(['provider_unavailable', true]);
   });
 
-  it('L6: two concurrent completePayment capture once', async () => {
+  it('L6: two concurrent completePayment are deduplicated by PayPal-Request-Id while the capture is still running', async () => {
     const { provider, ctx, input, fake } = world();
     const p = await provider.createPayment(ctx, input());
     fake.approve(ctx.credentials.clientId!, p.ref, 'good');
-    const [a, b] = await Promise.all([provider.completePayment(ctx, p.ref, 'k'), provider.completePayment(ctx, p.ref, 'k')]);
-    expect([a.status, b.status]).toEqual(['succeeded', 'succeeded']);
+    fake.captureDelayMs = 50;
+    const results = await Promise.allSettled([provider.completePayment(ctx, p.ref, 'k'), provider.completePayment(ctx, p.ref, 'k')]);
+    const ok = results.filter((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{ status: string }>[];
+    const busy = results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason as ProviderError);
+    // Both reads saw APPROVED (the capture was not visible yet); the second capture was stopped by its request ID.
+    expect(ok.map((r) => r.value.status)).toEqual(['succeeded']);
+    expect(busy.map((e) => [e.code, e.retryable])).toEqual([['provider_busy', true]]);
+    const ids = fake.requests.filter((r) => r.url.endsWith('/capture')).map((r) => r.headers['paypal-request-id']);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
     expect(fake.captureExecutions).toBe(1);
+    // The retry finds it done.
+    expect((await provider.completePayment(ctx, p.ref, 'k')).status).toBe('succeeded');
+  });
+
+  it('ORDER_ALREADY_CAPTURED with a read that still says APPROVED: retryable, never "unpaid"', async () => {
+    const { provider, ctx, input, fake } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.approve(ctx.credentials.clientId!, p.ref, 'good');
+    // The capture happened elsewhere and PayPal's read lags behind it.
+    fake.captureIssue = 'ORDER_ALREADY_CAPTURED';
+    expect(await code(provider.completePayment(ctx, p.ref, 'k'))).toEqual(['provider_unavailable', true]);
   });
 
   it('M2: reversals and opened disputes are flagged for review', () => {

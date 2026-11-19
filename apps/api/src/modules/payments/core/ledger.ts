@@ -29,6 +29,8 @@ export interface LedgerLine {
 export interface CustomerBalances {
   fundsMinor: bigint;
   overpaymentsMinor: bigint;
+  /** Task 4.5: what the customer owes beyond the plan (an asset, as a positive number). Absent is 0. */
+  receivableMinor?: bigint;
 }
 
 /**
@@ -39,10 +41,13 @@ export interface CustomerBalances {
  */
 export function customerSide(target: CustomerBalances, balances: CustomerBalances, cashInMinor: bigint): LedgerLine[] {
   const fundsDelta = target.fundsMinor - balances.fundsMinor;
-  const overDelta = cashInMinor - fundsDelta;
+  // Task 4.5: the receivable goes to its target too (a debit when it grows); overpayments still take the rest.
+  const receivableDelta = (target.receivableMinor ?? 0n) - (balances.receivableMinor ?? 0n);
+  const overDelta = cashInMinor - fundsDelta + receivableDelta;
   return [
     { accountCode: LEDGER_ACCOUNTS.funds, amountMinor: -fundsDelta },
     { accountCode: LEDGER_ACCOUNTS.overpayments, amountMinor: -overDelta },
+    { accountCode: LEDGER_ACCOUNTS.receivable, amountMinor: receivableDelta },
   ].filter((l) => l.amountMinor !== 0n);
 }
 
@@ -53,6 +58,8 @@ export interface PostingContent {
   bookingId: string | null;
   paymentId: string | null;
   refundId: string | null;
+  /** Task 4.5; absent (older postings) hashes as before. */
+  disputeId?: string | null;
   reversesTransactionId: string | null;
   description: string;
   lines: readonly LedgerLine[];
@@ -61,7 +68,8 @@ export interface PostingContent {
 /** SHA-256 of the canonical content: a retry gives the same, a different posting under the same key does not. */
 export function contentSha256(c: PostingContent): string {
   const lines = [...c.lines].map((l) => [l.accountCode, l.amountMinor.toString()]).sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0));
-  const canonical = JSON.stringify([c.kind, c.mode, c.currency, c.bookingId, c.paymentId, c.refundId, c.reversesTransactionId, c.description, lines]);
+  // The dispute joins the fingerprint only when there is one, so every posting made before task 4.5 keeps its hash.
+  const canonical = JSON.stringify([c.kind, c.mode, c.currency, c.bookingId, c.paymentId, c.refundId, c.reversesTransactionId, c.description, lines, ...(c.disputeId ? [c.disputeId] : [])]);
   return createHash('sha256').update(canonical).digest('hex');
 }
 

@@ -4,11 +4,11 @@
 // https://api.stripe.com (no option or variable changes that), reads no environment and never logs.
 import type { PaymentMethod } from '@mt/shared';
 import {
-  AdapterManifest, CreatePaymentInput, CreateRefundInput, NormalisedEvent, PaymentLookup, PaymentProvider, ProviderContext, ProviderError, ProviderPayment,
+  AdapterManifest, CreatePaymentInput, CreateRefundInput, NormalisedEvent, PaymentLookup, PaymentProvider, ProviderContext, ProviderDispute, ProviderError, ProviderPayment,
   ProviderRefund, RefundLookup, WebhookVerification,
 } from '../../core/provider';
 import {
-  STRIPE_SIGNATURE_HEADER, parseStripeEvent, refundToProvider, sessionPaymentIntentId, sessionToPayment, stripeError, verifyStripeSignature,
+  STRIPE_SIGNATURE_HEADER, disputeToProvider, parseStripeEvent, refundToProvider, sessionPaymentIntentId, sessionToPayment, stripeError, verifyStripeSignature,
 } from './mapping';
 
 export const STRIPE_KEY = 'stripe';
@@ -90,7 +90,7 @@ export function stripeManifest(): AdapterManifest {
         samples: { valid: `whsec_${SAMPLE}`, rejected: [`sk_test_${SAMPLE}`, `sk_live_${SAMPLE}`, `whsec_${SAMPLE}-x`, 'whsec_'] },
       },
     },
-    capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'stays_payable' },
+    capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'stays_payable', disputes: 'events' },
   };
 }
 
@@ -304,6 +304,19 @@ export class StripeProvider implements PaymentProvider {
     const data = Array.isArray(list.data) ? list.data.filter(isObj) : [];
     const hit = data.find((x) => isObj(x.metadata) && x.metadata.mt_idempotency_key === by.idempotencyKey);
     return hit ? refundToProvider(hit) : null;
+  }
+
+  /** Task 4.5: a dispute as Stripe holds it now (GET /v1/disputes/:id); null if Stripe does not know it. */
+  async retrieveDispute(ctx: ProviderContext, ref: string): Promise<ProviderDispute | null> {
+    this.key(ctx);
+    const r = await this.call(ctx, { method: 'GET', path: `/v1/disputes/${encodeURIComponent(ref)}` });
+    if (!r.ok) {
+      if (r.error !== 'idempotency_error' && r.error.code === 'provider_not_found') return null;
+      throw r.error === 'idempotency_error' ? new ProviderError('provider_rejected', false) : new ProviderError(r.error.code, r.error.retryable);
+    }
+    const dispute = disputeToProvider(r.body);
+    if (!dispute) throw new ProviderError('provider_unavailable', true);
+    return dispute;
   }
 
   verifyWebhook(ctx: ProviderContext, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): WebhookVerification {

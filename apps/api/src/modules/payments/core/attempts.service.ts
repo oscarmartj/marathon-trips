@@ -221,7 +221,7 @@ export class PaymentAttemptsService {
         const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
         this.assertPayable(b, at);
         // A booking under review after money went out takes no new payment until Oscar closes the task (plan 3.3, 12.3).
-        if (await bookingUnderPaymentReview(tx, b.id)) throw underReview();
+        if (await bookingUnderPaymentReview(tx, b.id, this.gateway.mode)) throw underReview();
         // Through a link: the link must still be active and in date, checked with the booking locked (Booking → PaymentLink).
         // Its target must still be an active item of the plan, at the sequence the caller pays up to: a regenerated plan
         // (superseded items) makes the link not found (review round 1, point 2).
@@ -415,9 +415,10 @@ export class PaymentAttemptsService {
     try {
       return (await this.gateway.complete(p.providerAccountId, remote.ref, p.idempotencyKey)) ?? remote;
     } catch (err) {
-      // A definitive refusal to finish it (an unknown 422 at PayPal, review M1) leaves what was read: the attempt still
-      // waits for the customer, and expiry cancels it. A retryable failure records the read first, then goes up.
-      if (err instanceof ProviderError && !err.retryable) return remote;
+      // The gateway refused to finish it (an unknown 422 at PayPal, review M1): what was read stands, the attempt still
+      // waits for the customer and expiry cancels it. Anything else (credentials, an object not found, a retryable
+      // failure) records the read first and goes up, so the sweep tries again and its 24-hour task shows it.
+      if (err instanceof ProviderError && err.code === 'provider_rejected') return remote;
       await this.record(paymentId, remote, source);
       throw err;
     }

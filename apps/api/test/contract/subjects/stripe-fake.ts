@@ -38,7 +38,21 @@ interface Refund extends Obj {
   created: number;
 }
 
+/** Task 4.5: a dispute as Stripe's API returns it (charge.dispute.* events, GET /v1/disputes/:id). */
+interface Dispute extends Obj {
+  id: string;
+  object: 'dispute';
+  amount: number;
+  currency: string;
+  payment_intent: string;
+  reason: string;
+  status: 'warning_needs_response' | 'needs_response' | 'under_review' | 'won' | 'lost' | 'warning_closed';
+  evidence_details: { due_by: number };
+  balance_transactions: Array<{ id: string; amount: number }>;
+}
+
 class FakeAccount {
+  readonly disputes = new Map<string, Dispute>();
   readonly sessions = new Map<string, Session>();
   readonly intents = new Map<string, Intent>();
   readonly refunds = new Map<string, Refund>();
@@ -133,6 +147,10 @@ export class FakeStripe {
       const data = [...acc.refunds.values()].filter((r) => !pi || r.payment_intent === pi).reverse();
       return json(200, { object: 'list', data, has_more: false });
     }
+    if ((m = /^\/v1\/disputes\/([^/]+)$/.exec(req.path)) && req.method === 'GET') {
+      const d = acc.disputes.get(decodeURIComponent(m[1]!));
+      return d ? json(200, d) : error(404, 'invalid_request_error', 'resource_missing');
+    }
     if ((m = /^\/v1\/refunds\/([^/]+)$/.exec(req.path)) && req.method === 'GET') {
       const r = acc.refunds.get(decodeURIComponent(m[1]!));
       return r ? json(200, r) : error(404, 'invalid_request_error', 'resource_missing');
@@ -187,6 +205,8 @@ export class FakeStripe {
     const pi = acc.intents.get(String(f.payment_intent ?? ''));
     if (!pi) return error(404, 'invalid_request_error', 'resource_missing');
     if (pi.status !== 'succeeded') return error(400, 'invalid_request_error', 'charge_not_refundable');
+    // A disputed charge cannot be refunded while the dispute stands (Stripe's charge_disputed).
+    if ([...acc.disputes.values()].some((d) => d.payment_intent === pi.id && !['won', 'warning_closed'].includes(d.status))) return error(400, 'invalid_request_error', 'charge_disputed');
     const amount = f.amount === undefined ? this.left(acc, pi) : Number(f.amount);
     if (!Number.isSafeInteger(amount) || amount <= 0 || amount > this.left(acc, pi)) return error(400, 'invalid_request_error', 'amount_too_large');
     const r: Refund = { id: id('re'), object: 'refund', status: acc.nextRefund.shift() ?? 'succeeded', amount, currency: pi.currency, payment_intent: pi.id, metadata: { ...((f.metadata as Record<string, string>) ?? {}) }, created: this.seconds() };
@@ -253,15 +273,40 @@ export class FakeStripe {
     r.status = status;
   }
 
-  /** The event Stripe would send now for a session or a refund, as raw bytes and its signature header. */
+  /** A cardholder disputes the session's payment (task 4.5): needs_response, evidence due in 14 days, no funds taken yet. */
+  openDispute(key: string, sessionId: string, opts: { amount?: number; reason?: string } = {}): Dispute {
+    const acc = this.account(key);
+    const s = acc.sessions.get(sessionId);
+    const pi = s?.payment_intent ? acc.intents.get(s.payment_intent) : undefined;
+    if (!pi || pi.status !== 'succeeded') throw new Error('fake stripe: only a paid session can be disputed');
+    const d: Dispute = {
+      id: id('dp'), object: 'dispute', amount: opts.amount ?? pi.amount, currency: pi.currency, payment_intent: pi.id, reason: opts.reason ?? 'fraudulent',
+      status: 'needs_response', evidence_details: { due_by: this.seconds() + 14 * 86_400 }, balance_transactions: [], livemode: false,
+    };
+    acc.disputes.set(d.id, d);
+    return d;
+  }
+
+  /** Moves a dispute: its status, and the funds taken (a negative balance transaction) or given back (a positive one). */
+  moveDispute(key: string, disputeId: string, to: { status?: Dispute['status']; withdraw?: boolean; reinstate?: boolean }): Dispute {
+    const d = this.account(key).disputes.get(disputeId);
+    if (!d) throw new Error('fake stripe: unknown dispute');
+    if (to.status) d.status = to.status;
+    if (to.withdraw) d.balance_transactions.push({ id: id('txn'), amount: -d.amount });
+    if (to.reinstate) d.balance_transactions.push({ id: id('txn'), amount: d.amount });
+    return d;
+  }
+
+  /** The event Stripe would send now for a session, a refund or a dispute, as raw bytes and its signature header. */
   event(key: string, webhookSecret: string, objectId: string, at: Date, opts: { type?: string; eventId?: string } = {}): { body: Buffer; headers: Record<string, string>; eventId: string } {
     const acc = this.account(key);
     const s = acc.sessions.get(objectId);
     const r = acc.refunds.get(objectId);
-    if (!s && !r) throw new Error('fake stripe: unknown object');
+    const dp = acc.disputes.get(objectId);
+    if (!s && !r && !dp) throw new Error('fake stripe: unknown object');
     if (s) this.expireIfDue(s);
-    const type = opts.type ?? (s ? (s.status === 'expired' ? 'checkout.session.expired' : 'checkout.session.completed') : r!.status === 'failed' ? 'refund.failed' : 'refund.updated');
-    const object = s ? { ...s } : { ...r };
+    const type = opts.type ?? (dp ? 'charge.dispute.updated' : s ? (s.status === 'expired' ? 'checkout.session.expired' : 'checkout.session.completed') : r!.status === 'failed' ? 'refund.failed' : 'refund.updated');
+    const object = dp ? { ...dp, balance_transactions: [...dp.balance_transactions] } : s ? { ...s } : { ...r };
     delete (object as Obj).pi_metadata;
     const eventId = opts.eventId ?? id('evt');
     const body = Buffer.from(JSON.stringify({ id: eventId, object: 'event', api_version: '2026-10-28.endive', type, created: Math.floor(at.getTime() / 1000), livemode: false, data: { object } }));

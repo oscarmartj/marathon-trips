@@ -292,7 +292,9 @@ export class PayPalProvider implements PaymentProvider {
       const again = await this.getOrder(ctx, token, ref);
       if (!again) throw new ProviderError('provider_unavailable', true);
       const p = this.toPayment(again);
-      if (p.status === 'requires_action' && r.issue !== 'ORDER_ALREADY_CAPTURED') return { ...p, failureCode: r.issue!.toLowerCase() };
+      // PayPal says it is captured but the read is late: never let the core treat it as unpaid (and cancel it).
+      if (r.issue === 'ORDER_ALREADY_CAPTURED' && p.status === 'requires_action') throw new ProviderError('provider_unavailable', true);
+      if (p.status === 'requires_action') return { ...p, failureCode: r.issue!.toLowerCase() };
       return p;
     }
     return this.fail(r);

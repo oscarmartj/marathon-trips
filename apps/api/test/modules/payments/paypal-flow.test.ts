@@ -30,7 +30,10 @@ const fake = new FakePayPal();
 let loseNextCreateAnswer = false;
 /** A test sets this: every read of an order fails with a 500 (review L2). */
 let failOrderReads = false;
+/** A test sets this: the capture call answers with this HTTP status. */
+let captureStatus: number | undefined;
 const transport: PayPalTransport = async (req) => {
+  if (captureStatus && req.url.endsWith('/capture')) return { status: captureStatus, body: '{}' };
   if (failOrderReads && req.method === 'GET' && /\/v2\/checkout\/orders\//.test(req.url)) return { status: 500, body: '{}' };
   const res = await fake.transport(req);
   if (loseNextCreateAnswer && req.method === 'POST' && req.url.endsWith('/v2/checkout/orders') && !req.body?.includes('"purchase_units":[]')) {
@@ -90,6 +93,7 @@ beforeEach(async () => {
   fake.certDown = false;
   fake.captureIssue = undefined;
   failOrderReads = false;
+  captureStatus = undefined;
 });
 afterAll(async () => {
   if (registered) (t.app.get(PaymentAdapterRegistry) as unknown as { byKey: Map<string, PaymentProvider> }).byKey.set('paypal', registered);
@@ -269,6 +273,22 @@ describe('PayPal checkout through the API (plan 4.3)', () => {
     expect([ended.status, ended.liveBookingId]).toEqual(['expired', null]);
     fake.captureIssue = undefined;
     expect((await c.pay(a.reference, { method: 'card' })).status).toBe(201);
+  });
+
+  it('a capture refused for credentials or a missing object is not "definitive": the read is recorded and the sweep tries again', async () => {
+    const sync = t.app.get(PaymentAttemptSyncService);
+    for (const status of [401, 404]) {
+      const a = await checkout();
+      fake.approve(acc.clientId, a.p.providerPaymentRef!, 'good');
+      captureStatus = status;
+      await expect(sync.run(a.p.id, 'sync')).rejects.toThrow();
+      await expireNow(a.p.id);
+      await expect(sync.run(a.p.id, 'expire')).rejects.toThrow();
+      expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } })).status).toBe('requires_action');
+      captureStatus = undefined;
+      await sync.run(a.p.id, 'expire');
+      expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: a.p.id } })).status).toBe('succeeded');
+    }
   });
 
   it('review L1: an order of another amount is never captured; record opens the mismatch task', async () => {

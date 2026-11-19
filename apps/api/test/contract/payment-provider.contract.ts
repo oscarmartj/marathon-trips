@@ -10,7 +10,7 @@ import { PAYMENT_METHODS } from '@mt/shared';
 import { CONTRACT_CLAUSES } from '../../src/modules/payments/core/contract-clauses';
 import type { ContractClause } from '../../src/modules/payments/core/contract-clauses';
 import { PROVIDER_ERROR_CODES, ProviderError } from '../../src/modules/payments/core/provider';
-import type { CreatePaymentInput, PaymentLookup, PaymentProvider, ProviderContext, ProviderPayment, ProviderPaymentStatus, ProviderRefund, WebhookVerification } from '../../src/modules/payments/core/provider';
+import type { CreatePaymentInput, PaymentLookup, PaymentProvider, ProviderContext, ProviderDispute, ProviderPayment, ProviderPaymentStatus, ProviderRefund, WebhookVerification } from '../../src/modules/payments/core/provider';
 import { manifestProblems } from '../../src/modules/payments/core/registry';
 
 export interface SignedBody {
@@ -38,6 +38,13 @@ export interface ContractSubject {
   gatewayRefunds(ctx: ProviderContext, payment: ProviderPayment, amountMinor: bigint): Promise<ProviderRefund>;
   /** The webhook the gateway would send now for this refund, signed at `at` with ctx.webhookSecret. */
   refundWebhookFor(ctx: ProviderContext, refundRef: string, at: Date): Promise<SignedBody>;
+  /**
+   * Task 4.5, required when the manifest declares `disputes`: a cardholder disputes a collected payment (the whole
+   * amount, no funds taken yet), the dispute moves at the gateway, and the webhook the gateway would send now.
+   */
+  cardholderDisputes?(ctx: ProviderContext, payment: ProviderPayment): Promise<{ ref: string }>;
+  disputeMoves?(ctx: ProviderContext, ref: string, to: { status?: 'lost' | 'won'; withdraw?: boolean; reinstate?: boolean }): Promise<void>;
+  disputeWebhookFor?(ctx: ProviderContext, ref: string, at: Date): Promise<SignedBody>;
   /** A currency the gateway refuses for this account. */
   unsupportedCurrency: string;
   /** Throws unless the environment holds test-mode credentials for this gateway (checked before any network call). */
@@ -602,6 +609,65 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     expect((await h.retrieve(ctx, { ref: ev.paymentRef }))?.ref).toBe(p.ref);
   },
 
+  async dispute_webhook_verifies_and_resolves_payment(h) {
+    const d = disputeSubject(h);
+    if (!d) return;
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    const { ref } = await d.open(ctx, p);
+    const at = now();
+    const w = await d.webhook(ctx, ref, at);
+    const v = await h.value('verifyWebhook (dispute)', () => h.verify(ctx, w.body, w.headers, at));
+    if (!v.ok) expect.fail(`verifyWebhook refused a valid dispute webhook: ${v.code}`);
+    expect(v.event.kind).toBe('dispute');
+    const ev = expectDispute(v.event.dispute ?? null, p);
+    expect([ev.ref, ev.status, ev.fundsWithdrawn, ev.fundsReinstated]).toEqual([ref, 'open', false, false]);
+    expect((await h.retrieve(ctx, { ref: ev.paymentRef }))?.ref, 'the core finds the payment through the gateway name').toBe(p.ref);
+    expect(await h.value('parseEvent (dispute)', () => h.p.parseEvent(w.body))).toEqual(v.event);
+  },
+
+  async dispute_retrieve_matches_webhook(h) {
+    const d = disputeSubject(h);
+    if (!d) return;
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    const { ref } = await d.open(ctx, p);
+    const got = expectDispute(await h.value('retrieveDispute', () => h.p.retrieveDispute!(ctx, ref)), p);
+    const at = now();
+    const w = await d.webhook(ctx, ref, at);
+    const v = await h.value('verifyWebhook (dispute)', () => h.verify(ctx, w.body, w.headers, at));
+    if (!v.ok) expect.fail(`verifyWebhook refused a valid dispute webhook: ${v.code}`);
+    expect(v.event.dispute).toEqual(got);
+    const unknown = await h.call('retrieveDispute (unknown)', () => h.p.retrieveDispute!(ctx, `contract_unknown_${randomBytes(8).toString('hex')}`));
+    if (unknown.ok) expect(unknown.value).toBeNull();
+    else expect([unknown.error.code, unknown.error.retryable]).toEqual(['provider_not_found', false]);
+  },
+
+  async dispute_funds_flags_are_cumulative(h) {
+    const d = disputeSubject(h);
+    if (!d) return;
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    const { ref } = await d.open(ctx, p);
+    await d.move(ctx, ref, { withdraw: true });
+    const withdrawn = expectDispute(await h.value('retrieveDispute (withdrawn)', () => h.p.retrieveDispute!(ctx, ref)), p);
+    expect([withdrawn.fundsWithdrawn, withdrawn.fundsReinstated]).toEqual([true, false]);
+    await d.move(ctx, ref, { status: 'won', reinstate: true });
+    const won = expectDispute(await h.value('retrieveDispute (won)', () => h.p.retrieveDispute!(ctx, ref)), p);
+    expect([won.status, won.fundsWithdrawn, won.fundsReinstated], 'reinstated keeps the withdrawal').toEqual(['won', true, true]);
+  },
+
+  async refund_of_disputed_payment_refused(h) {
+    const d = disputeSubject(h);
+    if (!d || h.refunds === 'none') return;
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    await d.open(ctx, p);
+    const input = h.refundInput(p, p.amount.amountMinor);
+    const e = await h.error('createRefund (disputed)', () => h.p.createRefund(ctx, input));
+    expect([e.code, e.retryable], 'a disputed payment is not refunded twice').toEqual(['provider_rejected', false]);
+  },
+
   async no_secret_in_results_or_errors(h) {
     // Its own sweep (so the clause stands alone), plus everything the earlier clauses saw.
     const ctx = await h.ctx();
@@ -639,6 +705,31 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     }
   },
 };
+
+/**
+ * The dispute side of a subject (task 4.5): null when the adapter does not declare disputes (and then it must not
+ * implement retrieveDispute half-way); otherwise the subject must bring every dispute member.
+ */
+function disputeSubject(h: Harness) {
+  if (h.p.manifest.capabilities.disputes !== 'events') {
+    expect(typeof h.p.retrieveDispute, 'retrieveDispute without the disputes capability').not.toBe('function');
+    return null;
+  }
+  const s = h.s;
+  expect(typeof h.p.retrieveDispute, 'retrieveDispute').toBe('function');
+  expect(Boolean(s.cardholderDisputes && s.disputeMoves && s.disputeWebhookFor), 'the subject brings disputes').toBe(true);
+  return { open: s.cardholderDisputes!.bind(s), move: s.disputeMoves!.bind(s), webhook: s.disputeWebhookFor!.bind(s) };
+}
+
+function expectDispute(d: ProviderDispute | null, p: ProviderPayment): ProviderDispute {
+  expect(d, 'dispute').not.toBeNull();
+  const q = d!;
+  expect(typeof q.ref === 'string' && q.ref.length > 0, 'dispute ref').toBe(true);
+  expect(['open', 'evidence_submitted', 'won', 'lost', 'closed'], 'dispute status').toContain(q.status);
+  expect(q.amount, 'disputed amount').toEqual(p.amount);
+  expect(typeof q.fundsWithdrawn === 'boolean' && typeof q.fundsReinstated === 'boolean', 'funds flags').toBe(true);
+  return q;
+}
 
 /** Registers the whole suite for one subject: one `it` per clause, named exactly as in CONTRACT_CLAUSES. */
 export function describePaymentProviderContract(name: string, subject: ContractSubject): void {

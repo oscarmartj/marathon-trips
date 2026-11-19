@@ -144,6 +144,17 @@ export class ProviderGateway {
     return this.call(accountId, 'complete', (p, ctx) => p.completePayment!(ctx, ref, idempotencyKey));
   }
 
+  /**
+   * The rules of a call without making one (task 4.5): a manual refund never reaches a gateway, but it is still bound
+   * by mode and environment like any refund. Returns the adapter's manifest; refuses as `call` would (409, audited).
+   */
+  async assertAllowed(accountId: string, op: GatewayOperation): Promise<{ account: AccountForCall; manifest: AdapterManifest }> {
+    const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
+    if (!account) throw new ApiError(409, 'provider_account_missing', 'The payment account no longer exists');
+    const provider = await this.allow(account, op);
+    return { account, manifest: provider.manifest };
+  }
+
   private async noteFailure(accountId: string, code: string): Promise<void> {
     if (countsForBreaker(code)) await this.health?.failure(accountId, code);
   }

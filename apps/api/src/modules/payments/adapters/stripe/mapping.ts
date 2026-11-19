@@ -1,7 +1,7 @@
 // Pure parts of the Stripe adapter (plan docs/plans/3.3-stripe-adapter-ledger.md, sections 5.3 to 5.5): status and error
 // mapping, the webhook signature and the event parser. No network, no clock of their own, never Stripe's messages.
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { NormalisedEvent, ProviderErrorCode, ProviderPayment, ProviderPaymentStatus, ProviderRefund, ProviderRefundStatus } from '../../core/provider';
+import type { DisputeReasonCode, NormalisedEvent, ProviderDispute, ProviderDisputeStatus, ProviderErrorCode, ProviderPayment, ProviderPaymentStatus, ProviderRefund, ProviderRefundStatus } from '../../core/provider';
 
 export const STRIPE_SIGNATURE_HEADER = 'stripe-signature';
 export const STRIPE_TOLERANCE_SECONDS = 300;
@@ -104,6 +104,38 @@ export function refundToProvider(o: unknown): ProviderRefund | null {
   };
 }
 
+/** Stripe's dispute statuses as ours (task 4.5): inquiries (warning_*) count as open until they become a chargeback. */
+const DISPUTE_STATUS: Readonly<Record<string, ProviderDisputeStatus>> = {
+  warning_needs_response: 'open', needs_response: 'open', warning_under_review: 'evidence_submitted', under_review: 'evidence_submitted',
+  won: 'won', lost: 'lost', warning_closed: 'closed', prevented: 'closed',
+};
+const DISPUTE_REASON: Readonly<Record<string, DisputeReasonCode>> = {
+  fraudulent: 'fraudulent', product_not_received: 'product_not_received', product_unacceptable: 'product_unacceptable', duplicate: 'duplicate',
+  credit_not_processed: 'credit_not_processed', unrecognized: 'unrecognised', general: 'general',
+};
+
+/**
+ * A Stripe Dispute object as our ProviderDispute (task 4.5). The funds flags come from its balance transactions: a
+ * negative one is the withdrawal, a positive one the reinstatement (both cumulative, whatever event carries them).
+ */
+export function disputeToProvider(o: unknown): ProviderDispute | null {
+  if (!isObj(o) || o.object !== 'dispute' || !ID.test(str(o.id) ?? '')) return null;
+  const amount = stripeAmount(o.amount);
+  const currency = str(o.currency);
+  const status = DISPUTE_STATUS[str(o.status) ?? ''];
+  const pi = isObj(o.payment_intent) ? str(o.payment_intent.id) : str(o.payment_intent);
+  if (amount === null || amount === 0n || !currency || !/^[a-z]{3}$/.test(currency) || !status || !pi || !ID.test(pi)) return null;
+  const txs = Array.isArray(o.balance_transactions) ? o.balance_transactions.filter(isObj) : [];
+  const amounts = txs.map((t) => (typeof t.amount === 'number' && Number.isSafeInteger(t.amount) ? t.amount : 0));
+  const due = isObj(o.evidence_details) && typeof o.evidence_details.due_by === 'number' && Number.isSafeInteger(o.evidence_details.due_by) ? new Date(o.evidence_details.due_by * 1000) : undefined;
+  return {
+    ref: o.id as string, paymentRef: pi, amount: { amountMinor: amount, currency: currency.toUpperCase() }, reasonCode: DISPUTE_REASON[str(o.reason) ?? ''] ?? 'other', status,
+    fundsWithdrawn: amounts.some((a) => a < 0), fundsReinstated: amounts.some((a) => a > 0), ...(due ? { evidenceDueBy: due } : {}),
+  };
+}
+
+const DISPUTE_EVENTS = new Set(['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed', 'charge.dispute.funds_withdrawn', 'charge.dispute.funds_reinstated']);
+
 /** Event types the adapter reads (plan 3.3, 5.3); everything else is `unsupported`. */
 const SESSION_EVENTS: Readonly<Record<string, ProviderPaymentStatus | undefined>> = {
   'checkout.session.completed': undefined,
@@ -128,6 +160,10 @@ export function parseStripeEvent(body: unknown): NormalisedEvent | null {
   if (REFUND_EVENTS.has(type)) {
     const refund = refundToProvider(object);
     return refund ? { ...base, kind: 'refund', refund } : null;
+  }
+  if (DISPUTE_EVENTS.has(type)) {
+    const dispute = disputeToProvider(object);
+    return dispute ? { ...base, kind: 'dispute', dispute } : null;
   }
   return { ...base, kind: 'unsupported' };
 }

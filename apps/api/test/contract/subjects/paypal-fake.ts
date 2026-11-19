@@ -55,6 +55,8 @@ export class FakePayPal {
   certDown = false;
   /** A test sets this: every capture is refused with this 422 issue (an issue the adapter does not know, review M1). */
   captureIssue: string | undefined;
+  /** A test sets this: a capture takes this long, and its request ID is "in progress" meanwhile (PayPal "might fail the second"). */
+  captureDelayMs = 0;
 
   constructor(private readonly opts: FakePayPalOptions = {}) {}
 
@@ -248,6 +250,7 @@ export class FakePayPal {
     }
     if (req.method === 'POST' && (m = /^\/v2\/checkout\/orders\/([A-Z0-9]+)\/capture$/.exec(path))) {
       const id = m[1]!;
+      if (this.captureDelayMs > 0) return this.slowCapture(a, id, requestId, req.body ?? '');
       return this.idempotent(a, 'orders.capture', requestId, req.body ?? '', () => this.capture(a, id));
     }
     if (req.method === 'GET' && (m = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(path))) {
@@ -301,6 +304,25 @@ export class FakePayPal {
     // An order answer is the order (capture answers too); keep the order id for capture replays.
     a.idem.set(key, { bodyText, reply });
     return first;
+  }
+
+  private readonly inProgress = new Set<string>();
+
+  /** A capture that takes time: a second request with the same ID meanwhile gets PREVIOUS_REQUEST_IN_PROGRESS. */
+  private async slowCapture(a: Account, id: string, requestId: string | undefined, bodyText: string): Promise<PayPalResponse> {
+    const key = `orders.capture:${requestId}`;
+    if (requestId && this.inProgress.has(key)) return issue(422, 'UNPROCESSABLE_ENTITY', 'PREVIOUS_REQUEST_IN_PROGRESS');
+    if (requestId && a.idem.has(key)) return this.idempotent(a, 'orders.capture', requestId, bodyText, () => this.capture(a, id));
+    const o = this.liveOrder(a, id);
+    if (!o || o.status !== 'APPROVED') return this.idempotent(a, 'orders.capture', requestId, bodyText, () => this.capture(a, id));
+    if (requestId) this.inProgress.add(key);
+    // The order still reads APPROVED while the capture runs: a second caller without the same ID would capture again.
+    await new Promise((r) => setTimeout(r, this.captureDelayMs));
+    try {
+      return this.idempotent(a, 'orders.capture', requestId, bodyText, () => this.capture(a, id));
+    } finally {
+      this.inProgress.delete(key);
+    }
   }
 
   private createOrder(a: Account, body: unknown): PayPalResponse {

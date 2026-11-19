@@ -33,7 +33,7 @@ export const BOOKING_STATUS_PAIRS: ReadonlyArray<readonly [BookingStatus, Bookin
  * expiry and the coverage events, which only `applyCoverage` uses (no route takes them: plan 3.2, section 1.3).
  */
 export type BookingEvent = 'approve' | 'decline' | 'cancel' | 'expire_request' | 'confirm' | 'expire_approval' | CoverageEvent;
-export type CoverageEvent = 'deposit_covered' | 'auto_confirm' | 'total_covered' | 'total_uncovered' | 'deposit_uncovered';
+export type CoverageEvent = 'deposit_covered' | 'auto_confirm' | 'total_covered' | 'total_uncovered' | 'deposit_uncovered' | 'fully_refunded' | 'money_returned';
 /** The events the panel's routes may ask for. */
 export type StaffBookingEvent = 'approve' | 'decline' | 'cancel' | 'confirm';
 
@@ -52,6 +52,9 @@ export const BOOKING_EVENT_TABLE: Readonly<Record<BookingEvent, Partial<Record<B
   total_uncovered: { balance_paid: 'confirmed' },
   // Task 3.4: a confirmed bank transfer was voided and the deposit is no longer covered (plan 3.4, section 4).
   deposit_uncovered: { deposit_paid: 'approved' },
+  // Task 4.5: everything collected for a cancelled booking went back, or some came back again (plan 0.1, 6.2, rule C).
+  fully_refunded: { cancelled: 'refunded' },
+  money_returned: { refunded: 'cancelled' },
 };
 
 /** Events that are "no change" instead of a 409 when they do not apply (the expiry sweeps). */
@@ -74,7 +77,16 @@ const STATUS_EVENT: Partial<Record<BookingStatus, string>> = {
  * Events whose transition publishes its own event instead of the status's (task 6.3, plan review m3): a change that
  * reopens the balance of a paid booking is not a second confirmation for automations or outbound webhooks.
  */
-const EVENT_TYPE: Partial<Record<BookingEvent, string>> = { total_uncovered: BOOKING_EVENTS.balanceReopened, deposit_uncovered: BOOKING_EVENTS.depositReopened };
+const EVENT_TYPE: Partial<Record<BookingEvent, string>> = {
+  total_uncovered: BOOKING_EVENTS.balanceReopened, deposit_uncovered: BOOKING_EVENTS.depositReopened,
+  // Task 4.5: a refunded booking is not a new cancellation when money comes back to it.
+  fully_refunded: BOOKING_EVENTS.refunded, money_returned: BOOKING_EVENTS.refundReversed,
+};
+/**
+ * Task 4.5: `refunded → cancelled` is money coming back, not a cancellation: nothing is released again (it was released
+ * when the booking was cancelled) and the caller holds payment locks, which never come before pools (plan 0.1, 6.3).
+ */
+const NO_RELEASE: ReadonlySet<BookingEvent> = new Set(['money_returned']);
 
 const RELEASING: ReadonlySet<BookingStatus> = new Set(['declined', 'cancelled', 'expired']);
 const TIME_COLUMN: Partial<Record<BookingStatus, string>> = { approved: 'approvedAt', declined: 'declinedAt', cancelled: 'cancelledAt', expired: 'expiredAt' };
@@ -148,7 +160,7 @@ export class BookingStateMachine {
     if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, { actor: input.actor, at, approvalExpiresAt });
 
     // Going back to approved after a voided transfer is not a new approval: its date stays (the window to pay starts again).
-    const column = event === 'deposit_uncovered' ? undefined : TIME_COLUMN[to];
+    const column = event === 'deposit_uncovered' || NO_RELEASE.has(event) ? undefined : TIME_COLUMN[to];
     const reason = input.reason ?? null;
     // Compare-and-set: the row is locked, so 0 rows here means a bug, never a race; still a 409, never a silent write.
     // The payment states have no time column of their own: the audit log and the event carry the time.
@@ -156,12 +168,12 @@ export class BookingStateMachine {
       `UPDATE bookings SET status = $2::"BookingStatus", version = version + 1, "updatedAt" = $3,
          ${column ? `"${column}" = $3,` : ''} "approvalExpiresAt" = COALESCE($4, "approvalExpiresAt"), "statusReason" = COALESCE($5, "statusReason")
        WHERE id = $1::uuid AND status = $6::"BookingStatus" AND version = $7`,
-      b.id, to, at, approvalExpiresAt, RELEASING.has(to) ? reason : null, b.status, b.version,
+      b.id, to, at, approvalExpiresAt, RELEASING.has(to) && !NO_RELEASE.has(event) ? reason : null, b.status, b.version,
     );
     if (updated !== 1) throw conflict('booking_state_changed', 'This booking changed. Reload and try again.');
 
     let released = { places: 0, promo: false };
-    if (RELEASING.has(to)) {
+    if (RELEASING.has(to) && !NO_RELEASE.has(event)) {
       released = await this.release(tx, b.id, input.actor, at);
       // Places came back: the first person on the package's waiting list they fit is offered them, in this transaction (task 6.5).
       if (released.places > 0) await this.offers.promoteIn(tx, b.packageId, input.actor, at);
