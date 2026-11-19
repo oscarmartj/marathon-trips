@@ -8,6 +8,7 @@ import { t } from '@/lib/i18n';
 import { Status } from '../../auth/field';
 import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { ActionButton, EntityForm, type FieldDef, Section, formatDay, outcome, useLoad } from '../catalogue/kit';
+import { SupplierPayments } from './supplier-payments';
 import { supplierBody, supplierFields } from './suppliers-panel';
 
 interface Contact { id: string; name: string; email: string | null; phone: string | null; role: string }
@@ -254,6 +255,8 @@ export function SupplierDetail({ id }: { id: string }) {
           }}
         />
       </Section>
+
+      <SupplierPayments supplierId={s.id} costs={costs.data?.items ?? []} contracts={s.contracts} onChange={() => void costs.reload()} />
     </div>
   );
 }
