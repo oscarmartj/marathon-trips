@@ -16,6 +16,10 @@ export const PAYMENT_SETTINGS = {
   ledgerCheckCursor: { key: 'paymentLedgerCheckCursor', fallback: '', schema: z.union([z.literal(''), z.string().uuid()]), description: 'Internal: the booking the daily ledger check continues from (the check keeps it; no need to change it)', internal: true },
   // Task 4.1: how long after its last payment or refund a retired gateway account may still receive a dispute (plan 0.1, 6.4).
   disputeWindowDays: { key: 'paymentDisputeWindowDays', fallback: 180, schema: z.number().int().min(60).max(540), description: 'Days after its last payment or refund before a retired gateway account can be archived (disputes can arrive until then)' },
+  // Task 4.2: when a gateway account counts as not answering (plan docs/plans/4.2-routing-rules.md, sections 3 and 15).
+  breakerFailures: { key: 'paymentGatewayBreakerFailures', fallback: 3, schema: z.number().int().min(2).max(20), description: 'Failed calls in a row, within the window, after which a gateway account takes no new payments for a while (its backups take them)' },
+  breakerWindowSeconds: { key: 'paymentGatewayBreakerWindowSeconds', fallback: 300, schema: z.number().int().min(60).max(3600), description: 'Seconds within which failed calls to a gateway account count together' },
+  breakerCooldownSeconds: { key: 'paymentGatewayBreakerCooldownSeconds', fallback: 120, schema: z.number().int().min(30).max(3600), description: 'Seconds a gateway account that stopped answering is skipped before one new payment tries it again' },
 } as const;
 
 export function definePaymentSettings(settings: SettingsService): void {

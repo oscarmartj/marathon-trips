@@ -31,6 +31,11 @@ export class CollectionCoverageGuard {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('payments.collection_coverage'))`;
   }
 
+  salesCountries(): Promise<string[]> {
+    return this.settings.get<string[]>(SALES_COUNTRIES.key, SALES_COUNTRIES.fallback);
+  }
+
+  /** Built on `route` itself, health ignored, no amount (plan 4.2, 15.1): a rule change is seen through `tx`. */
   async coverage(tx: Tx, excludeAccountIds: readonly string[] = []): Promise<Coverage> {
     const countries = await this.settings.get<string[]>(SALES_COUNTRIES.key, SALES_COUNTRIES.fallback);
     return this.routing.coverage(tx, { countries, currency: COVERAGE_CURRENCY }, excludeAccountIds);

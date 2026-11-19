@@ -17,7 +17,7 @@ import { SettingsService } from '../../../platform/flags/flags.service';
 import { readBookingForPayments } from '../../bookings';
 import type { BookingForPayments, LockedBooking } from '../../bookings';
 import { LIVE_STATUSES, LockedPayment, PAYMENT_EVENTS, PaymentStateMachine, lockPayment } from './attempt-state';
-import { ProviderGateway } from './gateway';
+import { ACCOUNT_PUBLIC_SELECT, ProviderGateway } from './gateway';
 import { allocate } from './allocation';
 import { payable, netCollectedSource } from './payable';
 import type { ProviderPayment } from './provider';
@@ -94,7 +94,8 @@ export class PaymentAttemptsService {
     const p = payable(items, collected);
     const split = allocate(items, collected);
     const paid = new Map(split.items.map((i) => [i.sequence, i.paidMinor]));
-    const methods = await this.routing.methods(this.prisma, { currency: b.currency, country: b.residenceCountry });
+    // At the amount of the next item (plan 4.2, 2.1): a larger `upToSequence` may still find no method (limits).
+    const methods = await this.routing.methods(this.prisma, { currency: b.currency, country: b.residenceCountry, amountMinor: p.next?.amountMinor ?? null });
     const live = await this.prisma.payment.findUnique({ where: { liveBookingId: b.id }, select: { status: true, method: true, amountMinor: true, currency: true } });
     const intent = await this.prisma.payment.findFirst({ where: { bookingId: b.id, origin: 'manual_intent', status: 'created' }, select: { method: true, amountMinor: true, currency: true, pendingExpiresAt: true } });
     const manualIntent = intent ? await this.manual.instructionsFor(this.prisma, { method: intent.method, amountMinor: intent.amountMinor, currency: intent.currency, reference: b.reference, expiresAt: intent.pendingExpiresAt }) : null;
@@ -238,7 +239,6 @@ export class PaymentAttemptsService {
         const due = payable(items, collected, body.upToSequence).next;
         if (!due) throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
 
-        const accounts = await this.routing.candidates(tx, { method: body.method, currency: b.currency, country: b.residenceCountry });
         const live = await tx.$queryRaw<Array<{ id: string; status: string; method: string; amountMinor: bigint; pendingExpiresAt: Date; providerAccountId: string; paymentLinkId: string | null }>>`
           SELECT id::text AS id, status::text AS status, method::text AS method, "amountMinor", "pendingExpiresAt", "providerAccountId"::text AS "providerAccountId",
                  "paymentLinkId"::text AS "paymentLinkId"
@@ -247,8 +247,10 @@ export class PaymentAttemptsService {
         if (current) {
           // Past its expiry but not swept yet: not resumable; its sweep is queued after this transaction (plan 3.1, 14.9).
           if (current.pendingExpiresAt.getTime() <= at.getTime()) return { expiredLive: current.id };
-          // Resumed only with the same account (still able to take charges), method and amount (plan 3.1, 5.1).
-          const sameAccount = accounts.some((a) => a.id === current.providerAccountId);
+          // Resumed only with the same account (still able to take charges), method and amount (plan 3.1, 5.1). Whatever
+          // the routing rules or the gateway's health say now: a retry keeps its key on its account (plan 4.2, 4.3).
+          const currentAccount = await tx.providerAccount.findUnique({ where: { id: current.providerAccountId }, select: ACCOUNT_PUBLIC_SELECT });
+          const sameAccount = this.routing.canResumeOn(currentAccount);
           // Never across paths (task 5.1, review G2): checkout resumes only its own attempts and a link only the attempts it
           // started, so the return address and the holder always match the attempt.
           const samePath = (current.paymentLinkId ?? null) === viaLink;
@@ -258,8 +260,12 @@ export class PaymentAttemptsService {
           throw conflict('payment_attempt_in_progress', 'A payment for this booking is already in progress');
         }
 
-        const account = accounts[0];
-        if (!account) throw conflict('no_payment_method_available', 'This payment method is not available for this booking right now');
+        // A new attempt: the rules choose its account for the server's due amount (plan 4.2, section 2); a half-open
+        // account is taken only with its probe claimed in this transaction (plan 4.2, 15.2).
+        const chosen = await this.routing.choose(tx, { method: body.method, currency: b.currency, country: b.residenceCountry, amountMinor: due.amountMinor });
+        if (!chosen) throw conflict('no_payment_method_available', 'This payment method is not available for this booking right now');
+        const account = chosen.account;
+        const routed = { routingRuleId: chosen.choice.ruleId, ...(chosen.choice.backupFor ? { backupFor: chosen.choice.backupFor } : {}) };
         const target = items.find((i) => i.sequence === due.sequence)!;
         // A request to pay by transfer never reaches a gateway and never takes the live-attempt slot (task 3.4, plan section 2).
         const open = await tx.$queryRaw<Array<{ id: string; method: string; amountMinor: bigint; pendingExpiresAt: Date }>>`
@@ -290,7 +296,7 @@ export class PaymentAttemptsService {
           await this.audit.record(tx, {
             actor, action: 'payments.payment.created', entityType: 'Payment', entityId: intent.id, model: 'Payment',
             after: { status: 'created', method: body.method, amountMinor: due.amountMinor.toString(), currency: b.currency, attemptNumber: n },
-            context: { bookingId: b.id, upToSequence: due.sequence, origin: 'manual_intent' },
+            context: { bookingId: b.id, upToSequence: due.sequence, origin: 'manual_intent', ...routed },
           });
           return intent.id;
         }
@@ -306,7 +312,7 @@ export class PaymentAttemptsService {
         await this.audit.record(tx, {
           actor, action: 'payments.payment.created', entityType: 'Payment', entityId: created.id, model: 'Payment',
           after: { status: 'created', method: body.method, amountMinor: due.amountMinor.toString(), currency: b.currency, attemptNumber: n },
-          context: { bookingId: b.id, upToSequence: due.sequence },
+          context: { bookingId: b.id, upToSequence: due.sequence, ...routed },
         });
         await this.outbox.publish(tx, { type: PAYMENT_EVENTS.created, aggregateType: 'Payment', aggregateId: created.id, aggregateVersion: 0, payload: { paymentId: created.id, bookingId: b.id }, actorType: actor.type, actorId: actor.id ?? undefined });
         return created.id;

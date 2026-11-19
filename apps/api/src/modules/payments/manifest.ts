@@ -9,6 +9,7 @@ export const PAYMENTS_PERMISSIONS = {
   accountRead: 'payments.providerAccount.read',
   accountManage: 'payments.providerAccount.manage',
   accountManageCredentials: 'payments.providerAccount.manageCredentials',
+  routingRuleManage: 'payments.routingRule.manage',
   paymentLinkSend: 'payments.paymentLink.send',
   methodRead: 'payments.method.read',
   methodManage: 'payments.method.manage',
@@ -28,6 +29,8 @@ export const paymentsManifest = {
     // Task 4.1: what an account offers and to whom, and its secrets; step-up on both.
     def(PAYMENTS_PERMISSIONS.accountManage, 'Rename a payment gateway account, pause, activate, retire or archive it, and run its connection test', true),
     def(PAYMENTS_PERMISSIONS.accountManageCredentials, "Create a payment gateway account and change its credentials, webhook secret or webhook address (never shown again once saved)", true),
+    // Task 4.2: which account takes which payments, and its backups; step-up.
+    def(PAYMENTS_PERMISSIONS.routingRuleManage, 'Create, change and remove payment routing rules: which gateway account takes each method, country, currency and amount, in what order, and which account backs up which', true),
     def(PAYMENTS_PERMISSIONS.paymentLinkSend, "Email a customer a single-use link to pay the next item of their booking's plan, and revoke such links"),
     def(PAYMENTS_PERMISSIONS.methodRead, 'See how the manual payment methods (bank transfer, PayID) are set up, including the business payee details'),
     // Money moves (or is taken back) on these, and the payee details tell customers where to send it: step-up (task 3.4).

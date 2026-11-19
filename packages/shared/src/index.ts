@@ -15,6 +15,7 @@ export * from './schemas/bookings';
 export * from './schemas/waitlist';
 export * from './schemas/custom-fields';
 export * from './schemas/payments';
+export * from './schemas/routing';
 export * from './schemas/customer-area';
 export * from './schemas/crm';
 export * from './schemas/templates';
