@@ -72,7 +72,7 @@ export const DOCUMENT_TITLES: Readonly<Record<'receipt' | NoteKind, string>> = {
   refund_reversal: 'Refund reversal note',
   chargeback: 'Chargeback note',
   chargeback_reinstatement: 'Chargeback reversal note',
-  void: 'Receipt cancelled',
+  void: 'Receipt voided',
 };
 
 const METHOD_WORDS: Readonly<Record<string, string>> = { card: 'card', apple_pay: 'Apple Pay', google_pay: 'Google Pay', payid_transfer: 'bank transfer', bank_transfer: 'bank transfer', payto: 'PayTo', becs: 'direct debit', bpay: 'BPAY', bnpl: 'pay later', manual_other: 'other' };
@@ -269,7 +269,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
       refund_reversal: `Refund reversed by the payment provider for booking ${reference}`,
       chargeback: `Payment taken back by the card issuer for booking ${reference}`,
       chargeback_reinstatement: `Payment returned by the card issuer for booking ${reference}`,
-      void: `Receipt ${receipt.number} is cancelled: the bank transfer was recorded by mistake`,
+      void: `Receipt ${receipt.number} is voided: the bank transfer was recorded by mistake`,
     };
     const content: DocumentContent = {
       title: DOCUMENT_TITLES[cause.kind], number, issuedOn: todayInBrisbane(new Date()), issuer: brand.name, bookingReference: reference, trip,
