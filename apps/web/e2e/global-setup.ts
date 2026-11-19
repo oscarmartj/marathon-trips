@@ -45,4 +45,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_28 = create();
   // Security headers and the page policy with the panel signed in (security-headers.spec.ts, task 8.5): an owner.
   process.env.E2E_STAFF_29 = create();
+  // Payment gateway accounts in the panel (admin-gateways.spec.ts, task 4.1): an owner.
+  process.env.E2E_STAFF_30 = create();
 }
