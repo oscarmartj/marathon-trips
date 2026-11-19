@@ -214,7 +214,7 @@ export class CardSessionProvider implements PaymentProvider {
     return this.view(await this.settle(ctx, found.session));
   }
 
-  async cancelPayment(ctx: ProviderContext, ref: string): Promise<ProviderPayment> {
+  async cancelPayment(ctx: ProviderContext, ref: string, _idempotencyKey?: string): Promise<ProviderPayment> {
     await this.gateway.probe(ctx);
     const found = await this.sessionOf(ctx, ref);
     if (!found) throw new ProviderError('provider_not_found', false);
