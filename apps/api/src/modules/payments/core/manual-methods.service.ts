@@ -61,7 +61,11 @@ export class ManualMethodsService {
     return MANUAL_PAYMENT_METHODS.map((m) => view(m, rows.find((r) => r.method === m)));
   }
 
-  async put(method: string, input: ManualMethodConfigInput, actor: AuditActor): Promise<ReturnType<typeof view>> {
+  /**
+   * `guard` (task 4.1, plan 15.5) wraps the change in the same transaction: the coverage check of CollectionCoverageGuard,
+   * which takes the advisory lock first and rolls the change back if it would leave a country without a way to pay.
+   */
+  async put(method: string, input: ManualMethodConfigInput, actor: AuditActor, guard?: (tx: Prisma.TransactionClient, change: () => Promise<void>) => Promise<unknown>): Promise<ReturnType<typeof view>> {
     if (!isManualMethod(method)) throw notFound('payment_method_not_found', 'No such manual payment method');
     const problems = configProblems({ enabled: input.enabled, countries: input.countries, payeeName: input.payeeName, payId: input.payId, bank: input.bank });
     // Saved details may be incomplete while the method is off; a method that is on needs valid ones.
@@ -71,32 +75,37 @@ export class ManualMethodsService {
       if (p.length > 0) throw unprocessable('payee_details_invalid', `The payment details are not valid: ${p.join(', ')}`);
     }
     if (input.instructions && !input.instructions['en-AU']) throw unprocessable('instructions_need_en_au', 'The instructions need an en-AU text');
-    const data = {
-      enabled: input.enabled, countries: [...new Set(input.countries)].sort(), displayOrder: input.displayOrder,
-      payeeName: input.payeeName, payIdType: input.payId?.type ?? null, payId: input.payId?.value ?? null,
-      bsb: input.bank ? bsbDigits(input.bank.bsb) : null, accountNumber: input.bank?.accountNumber ?? null,
-    };
+    const data = methodData(input);
     return runTransaction(this.prisma, async (tx) => {
-      const before = (await tx.paymentMethodConfig.findUnique({ where: { method }, select: SELECT })) as ConfigRow | null;
-      if (!before && input.version !== 0) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
-      let after: ConfigRow;
-      if (!before) {
-        after = (await tx.paymentMethodConfig.create({ data: { method, ...data, instructions: (input.instructions ?? Prisma.DbNull) as Prisma.InputJsonValue, updatedById: actor.id }, select: SELECT })) as ConfigRow;
-      } else {
-        const n = await tx.paymentMethodConfig.updateMany({
-          where: { method, version: input.version },
-          data: { ...data, instructions: (input.instructions ?? Prisma.DbNull) as Prisma.InputJsonValue, version: { increment: 1 }, updatedById: actor.id },
-        });
-        if (n.count !== 1) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
-        after = (await tx.paymentMethodConfig.findUniqueOrThrow({ where: { method }, select: SELECT })) as ConfigRow;
-      }
-      await this.audit.record(tx, {
-        actor, action: 'payments.methodConfig.updated', entityType: 'PaymentMethodConfig', entityId: after.id, model: 'PaymentMethodConfig',
-        before: before ? { ...before } : null, after: { ...after },
-        context: { method, enabled: after.enabled },
+      if (!guard) return this.change(tx, method, input, data, actor);
+      let out: ReturnType<typeof view> | undefined;
+      await guard(tx, async () => {
+        out = await this.change(tx, method, input, data, actor);
       });
-      return view(method, after);
+      return out!;
     });
+  }
+
+  private async change(tx: Prisma.TransactionClient, method: ManualPaymentMethod, input: ManualMethodConfigInput, data: ReturnType<typeof methodData>, actor: AuditActor): Promise<ReturnType<typeof view>> {
+    const before = (await tx.paymentMethodConfig.findUnique({ where: { method }, select: SELECT })) as ConfigRow | null;
+    if (!before && input.version !== 0) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
+    let after: ConfigRow;
+    if (!before) {
+      after = (await tx.paymentMethodConfig.create({ data: { method, ...data, instructions: (input.instructions ?? Prisma.DbNull) as Prisma.InputJsonValue, updatedById: actor.id }, select: SELECT })) as ConfigRow;
+    } else {
+      const n = await tx.paymentMethodConfig.updateMany({
+        where: { method, version: input.version },
+        data: { ...data, instructions: (input.instructions ?? Prisma.DbNull) as Prisma.InputJsonValue, version: { increment: 1 }, updatedById: actor.id },
+      });
+      if (n.count !== 1) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
+      after = (await tx.paymentMethodConfig.findUniqueOrThrow({ where: { method }, select: SELECT })) as ConfigRow;
+    }
+    await this.audit.record(tx, {
+      actor, action: 'payments.methodConfig.updated', entityType: 'PaymentMethodConfig', entityId: after.id, model: 'PaymentMethodConfig',
+      before: before ? { ...before } : null, after: { ...after },
+      context: { method, enabled: after.enabled },
+    });
+    return view(method, after);
   }
 
   /** The "connection test" of a manual method: is it set up well enough for a customer to pay with it. */
@@ -105,6 +114,12 @@ export class ManualMethodsService {
     const row = (await this.prisma.paymentMethodConfig.findUnique({ where: { method }, select: SELECT })) as ConfigRow | null;
     const problems = row ? configProblems({ enabled: true, countries: row.countries, ...payeeOf(row) }) : ['not_configured'];
     return problems.length === 0 ? { ok: true } : { ok: false, problems };
+  }
+
+  /** The connection test of a manual account (task 4.1): at least one manual method is on and set up well enough. */
+  async anyReady(): Promise<boolean> {
+    const rows = (await this.prisma.paymentMethodConfig.findMany({ where: { enabled: true }, select: SELECT })) as ConfigRow[];
+    return rows.some((r) => isManualMethod(r.method) && configProblems({ enabled: true, countries: r.countries, ...payeeOf(r) }).length === 0);
   }
 
   /** Whether this manual method is offered to a customer living in `country`: on, listed, and with valid details. */
@@ -127,6 +142,12 @@ export class ManualMethodsService {
     };
   }
 }
+
+const methodData = (input: ManualMethodConfigInput) => ({
+  enabled: input.enabled, countries: [...new Set(input.countries)].sort(), displayOrder: input.displayOrder,
+  payeeName: input.payeeName, payIdType: input.payId?.type ?? null, payId: input.payId?.value ?? null,
+  bsb: input.bank ? bsbDigits(input.bank.bsb) : null, accountNumber: input.bank?.accountNumber ?? null,
+});
 
 function view(method: ManualPaymentMethod, r: ConfigRow | undefined) {
   const base = r ? payeeOf(r) : { payeeName: null, payId: null, bank: null };

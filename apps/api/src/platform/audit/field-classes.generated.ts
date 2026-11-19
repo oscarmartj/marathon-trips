@@ -904,6 +904,8 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     credentialsKeyVersion: 'nopii',
     webhookSecretCiphertext: 'secret',
     webhookKeyVersion: 'nopii',
+    credentialsChangedAt: 'nopii',
+    pauseReasonCode: 'nopii',
     webhookPathTokenHash: 'secret',
     lastConnectionTestAt: 'nopii',
     lastConnectionTestResult: 'nopii',

@@ -54,7 +54,7 @@ export interface SimAccount {
 export async function simulatorAccount(t: TestApp): Promise<SimAccount> {
   const { id, webhookUrl } = await t.app.get(ProviderAccountsService).createSimulatorAccount({ displayName: `Sim ${id8()}` });
   const row = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } });
-  return { id, pathToken: webhookUrl.split('/').pop()!, secret: t.box.decrypt(row.webhookSecretCiphertext, row.webhookKeyVersion, webhookSecretAad(id)) };
+  return { id, pathToken: webhookUrl.split('/').pop()!, secret: t.box.decrypt(row.webhookSecretCiphertext!, row.webhookKeyVersion!, webhookSecretAad(id)) };
 }
 
 const id8 = () => Math.random().toString(36).slice(2, 10);

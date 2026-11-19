@@ -68,8 +68,11 @@ export class ManualTransfersService {
         if (!RECEIVING.includes(b.status)) throw conflict('booking_cannot_receive_payment', 'This booking cannot take a payment in its current state');
         // The statement ID names the bank movement. The booking's own reference would collide on a second transfer.
         if (input.reference === b.reference.toUpperCase()) throw unprocessable('reference_is_booking_reference', 'Enter the bank statement transaction ID, not the booking reference');
-        const accounts = await tx.providerAccount.findMany({ where: { adapterKey: MANUAL_KEY, status: 'active', mode: this.gateway.mode }, select: { id: true, adapterKey: true, mode: true, status: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
-        const account = accounts.find((a) => callBlockReason(a, this.gateway.registry.get(a.adapterKey)?.manifest, 'create', this.gateway.env) === null);
+        // Money that already arrived is not a new charge (task 4.1, plan 15.3): the oldest active manual account of this
+        // environment's mode, or else the newest paused or retired one; never an archived one.
+        const accounts = await tx.providerAccount.findMany({ where: { adapterKey: MANUAL_KEY, status: { in: ['active', 'paused', 'retired'] }, mode: this.gateway.mode }, select: { id: true, adapterKey: true, mode: true, status: true, createdAt: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+        const usable = accounts.filter((a) => callBlockReason({ ...a, status: 'active' }, this.gateway.registry.get(a.adapterKey)?.manifest, 'create', this.gateway.env) === null);
+        const account = usable.find((a) => a.status === 'active') ?? [...usable].reverse().find((a) => a.status !== 'active');
         if (!account) throw conflict('no_manual_account', 'There is no bank transfer account set up for this environment');
         if (!this.gateway.registry.get(MANUAL_KEY)!.manifest.currencies.includes(b.currency)) throw conflict('currency_not_supported', 'Bank transfers are not available in this currency');
 

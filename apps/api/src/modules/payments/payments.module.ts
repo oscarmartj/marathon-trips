@@ -19,7 +19,9 @@ import { ManualProvider } from './adapters/manual/manual';
 import { ManualMethodsService } from './core/manual-methods.service';
 import { ManualTransfersService } from './core/manual-transfers.service';
 import { InboundPaymentHooks } from './core/inbound-hooks';
-import { PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
+import { PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController } from './controllers';
+import { ProviderAccountsAdminService, ProviderAccountsBootCheck } from './core/account-admin.service';
+import { CollectionCoverageGuard } from './core/coverage-guard';
 import { ProviderAccountsService } from './core/accounts.service';
 import { PaymentStateMachine } from './core/attempt-state';
 import { PaymentAttemptSyncService } from './core/attempt-sync.service';
@@ -40,21 +42,22 @@ import { PaymentRefundStateMachine } from './core/refunds.service';
 import { PaymentRefundSyncService } from './core/refund-sync.service';
 import { PaymentLedgerCheckService } from './core/ledger-check.service';
 import { PaymentAmendmentService } from './core/amendment-plan.service';
-import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
+import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, ProviderAccountRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
 
 @Module({
   imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
-  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
+  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
+    CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard,
   ],
-  exports: [ProviderAccountsService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
+  exports: [ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(

@@ -349,7 +349,8 @@
       "keydates": "Key dates",
       "triplists": "Trip lists",
       "reports": "Reports",
-      "waitlist": "Waiting list"
+      "waitlist": "Waiting list",
+      "gateways": "Payment gateways"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -1677,6 +1678,157 @@
       "newHook": "New webhook",
       "createHook": "Create webhook",
       "invalid": "Check the details: the address must be public and use https, and you can only choose permissions and events you have."
+    },
+    "gateways": {
+      "title": "Payment gateways",
+      "intro": "The gateways installed in the code and your accounts with them. Accounts are in test mode: no real money can be taken until a gateway passes its tests against the real sandbox. Every change needs your authenticator code and is recorded in the audit log.",
+      "unnamed": "an account",
+      "catalogue": {
+        "title": "Available gateways",
+        "intro": "Each gateway lists what it can take. Its status comes from the code: only a verified gateway could ever take real money.",
+        "name": "Gateway",
+        "adapterStatus": "Status",
+        "methods": "Methods",
+        "currencies": "Currencies",
+        "availability": "Here",
+        "creatable": "You can add a test account",
+        "reason": {
+          "live_mode_not_available": "Real-money accounts are not available yet",
+          "adapter_unknown": "Not installed",
+          "adapter_unavailable": "Not available yet",
+          "account_mode_not_for_environment": "Test accounts are not added in this environment",
+          "test_adapter_blocked_in_environment": "Only for development and testing"
+        }
+      },
+      "adapterStatus": {
+        "verified": "Verified",
+        "experimental": "Experimental",
+        "planned": "Planned",
+        "unknown": "Missing from the code"
+      },
+      "accounts": {
+        "title": "Your accounts",
+        "none": "No accounts yet.",
+        "name": "Account",
+        "gateway": "Gateway",
+        "mode": "Mode",
+        "status": "Status",
+        "lastTest": "Last connection test",
+        "webhook": "Webhook",
+        "actions": "Actions",
+        "testMode": "Test",
+        "liveMode": "Live",
+        "webhookReceived": "Last event {at}",
+        "webhookNone": "No events yet",
+        "webhookRejected": "Last delivery rejected ({reason})",
+        "webhookSecretMissing": "Webhook secret not set",
+        "current": "covers the current details",
+        "stale": "run it again: the details changed since"
+      },
+      "status": {
+        "active": "Active",
+        "paused": "Paused",
+        "retired": "Retired",
+        "archived": "Archived"
+      },
+      "action": {
+        "active": "Activate",
+        "paused": "Pause",
+        "retired": "Retire",
+        "archived": "Archive",
+        "test": "Test connection",
+        "rename": "Rename",
+        "credentials": "Change credentials",
+        "webhookSecret": "Set webhook secret",
+        "webhookUrl": "New webhook address"
+      },
+      "create": {
+        "title": "Add an account",
+        "intro": "The account starts paused. It is tested before anything is saved, and you can activate it once a connection test passes. Credentials are encrypted and never shown again.",
+        "gateway": "Gateway",
+        "name": "Account name",
+        "submit": "Add account",
+        "created": "Account added.",
+        "secretAfter": "Register the webhook address below with the gateway, then set the webhook secret the gateway gives you."
+      },
+      "credentials": {
+        "title": "Change credentials of {account}",
+        "intro": "Fill in only what changes. The new details are tested first; if the test fails nothing changes and the old details keep working.",
+        "submit": "Save credentials",
+        "saved": "Credentials changed and tested.",
+        "cancel": "Cancel"
+      },
+      "webhookSecret": {
+        "title": "Webhook secret of {account}",
+        "submit": "Save webhook secret",
+        "saved": "Webhook secret saved."
+      },
+      "rename": {
+        "label": "New name",
+        "submit": "Save name"
+      },
+      "url": {
+        "label": "Webhook address of {account}",
+        "copyNow": "Copy it now and register it with the gateway: it will not be shown again. You can make a new one, which stops the old one at once."
+      },
+      "confirm": {
+        "title": "Customers would lose a way to pay",
+        "intro": "If you go ahead, customers in these countries can no longer pay with: {lost}.",
+        "proceed": "Go ahead anyway",
+        "cancel": "Keep it as it is"
+      },
+      "lostPair": "{method} ({country})",
+      "test": {
+        "never": "Never tested",
+        "ok": "Passed",
+        "provider_unavailable": "The gateway did not answer",
+        "provider_timeout": "The gateway took too long",
+        "provider_busy": "The gateway was busy; try again",
+        "provider_rejected": "The gateway refused the request",
+        "provider_auth_failed": "The credentials were not accepted",
+        "provider_not_found": "The gateway did not find the account",
+        "webhook_secret_missing": "The webhook secret is not set",
+        "manual_instructions_invalid": "No bank transfer method is switched on with valid details",
+        "credentials_unreadable": "The saved credentials cannot be read with the current encryption key",
+        "notRecorded": "The details changed while it ran, so this result was not saved."
+      },
+      "pauseReason": {
+        "staff": "paused by staff",
+        "boot_adapter_missing": "its gateway is missing from the code",
+        "boot_adapter_planned": "its gateway is only planned"
+      },
+      "warning": {
+        "title": "Warnings",
+        "no_method_for_country": "Customers in {country} have no way to pay at the moment.",
+        "active_without_current_test": "{account} is active but its last connection test did not pass with the current details.",
+        "paused_by_system": "{account} was paused when the system started: {reason}.",
+        "webhook_rejected_since_change": "{account} rejected a webhook since its details last changed. Check the webhook secret.",
+        "webhook_secret_missing": "{account} has no webhook secret yet.",
+        "adapter_missing": "The gateway of {account} is missing from the code.",
+        "adapter_planned_with_account": "The gateway of {account} is only planned.",
+        "unknown": "Something about {account} needs a look."
+      },
+      "method": {
+        "card": "Card",
+        "apple_pay": "Apple Pay",
+        "google_pay": "Google Pay",
+        "payto": "PayTo",
+        "becs": "BECS direct debit",
+        "payid_transfer": "PayID or bank transfer",
+        "bpay": "BPAY",
+        "bnpl": "Buy now, pay later",
+        "manual_other": "Other manual method"
+      },
+      "errors": {
+        "credentials_invalid": "Some details are not valid: {fields}.",
+        "connection_test_failed": "The new details did not pass the connection test ({result}). Nothing was changed.",
+        "connection_test_required": "Run a connection test that passes with the current details first.",
+        "archive_blocked": "This account still has payments, refunds or a dispute window open.",
+        "status_transition_not_allowed": "That change is not possible from the current status.",
+        "version_conflict": "Someone else changed this account. Reload and try again.",
+        "live_mode_not_available": "Real-money accounts are not available yet.",
+        "unknownField": "an unknown field"
+      }
     },
     "customFields": {
       "title": "Custom fields",

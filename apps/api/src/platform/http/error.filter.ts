@@ -21,7 +21,7 @@ export class ApiErrorFilter implements ExceptionFilter {
   }
 
   private describe(err: unknown): { status: number; body: Record<string, unknown>; headers: Record<string, string> } {
-    if (err instanceof ApiError) return { status: err.status, body: { code: err.code, message: err.message }, headers: err.headers };
+    if (err instanceof ApiError) return { status: err.status, body: { ...err.details, code: err.code, message: err.message }, headers: err.headers };
     if (err instanceof ZodError) {
       const fields = [...new Set(err.issues.map((i) => i.path.join('.') || '(body)'))];
       return { status: 422, body: { code: 'validation_failed', message: 'Some fields are not valid', fields }, headers: {} };

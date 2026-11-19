@@ -117,15 +117,16 @@ enum ProviderWebhookRejectionReason {
   malformed
 }
 
-/// An account with a payment gateway (plan 0.1, 5.5; minimal in 3.1). Credentials and the webhook secret are encrypted
-/// at rest and only ProviderGateway reads them. Test mode only until a task manages live accounts. Never deleted.
+/// An account with a payment gateway (plan 0.1, 5.5; managed from the panel since 4.1). Credentials and the webhook secret
+/// are encrypted at rest and only ProviderGateway decrypts them. Test mode only (CHECK) until a later task, gated on a
+/// verified adapter and Oscar's approval, lifts it. Never deleted.
 model ProviderAccount {
   id                       String                @id @default(uuid(7)) @db.Uuid
   /// @nopii key of the adapter in the code registry
   adapterKey               String
   /// @pii free text typed by staff
   displayName              String
-  /// @nopii test or live; never changes (trigger); test only in 3.1 (CHECK)
+  /// @nopii test or live; never changes (trigger); test only (CHECK, kept by 4.1)
   mode                     PaymentMode
   /// @nopii
   status                   ProviderAccountStatus @default(active)
@@ -133,10 +134,15 @@ model ProviderAccount {
   credentialsCiphertext    String
   /// @nopii version of APP_ENCRYPTION_KEY that encrypted the credentials
   credentialsKeyVersion    Int
-  /// @secret AES-256-GCM ciphertext of the webhook signing secret (AAD provider_account:<id>:webhook_secret)
-  webhookSecretCiphertext  String
-  /// @nopii version of APP_ENCRYPTION_KEY that encrypted the webhook secret
-  webhookKeyVersion        Int
+  /// @secret AES-256-GCM ciphertext of the webhook signing secret (AAD provider_account:<id>:webhook_secret); null until
+  /// entered for an adapter whose gateway issues it (Stripe), task 4.1
+  webhookSecretCiphertext  String?
+  /// @nopii version of APP_ENCRYPTION_KEY that encrypted the webhook secret; null with it
+  webhookKeyVersion        Int?
+  /// @nopii when the credentials or the webhook secret last changed: a connection test counts only if not older (4.1)
+  credentialsChangedAt     DateTime              @default(now()) @db.Timestamptz(3)
+  /// @nopii why a paused account is paused: staff, boot_adapter_missing or boot_adapter_planned (CHECK); null otherwise
+  pauseReasonCode          String?
   /// @secret HMAC of the webhook path token with AUTH_HMAC_KEY; the full URL is shown once
   webhookPathTokenHash     String                @unique @db.Char(64)
   /// @nopii

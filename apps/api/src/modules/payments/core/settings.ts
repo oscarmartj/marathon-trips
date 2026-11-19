@@ -12,9 +12,12 @@ export const PAYMENT_SETTINGS = {
     description: 'Days before a balance or instalment falls due on which the customer gets an automatic reminder (an empty list turns reminders off)',
   },
   // Task 3.3: where the daily ledger check continues from (a booking id, or empty for the first). Kept by the check.
-  ledgerCheckCursor: { key: 'paymentLedgerCheckCursor', fallback: '', schema: z.union([z.literal(''), z.string().uuid()]), description: 'Internal: the booking the daily ledger check continues from (the check keeps it; no need to change it)' },
+  // Internal (task 4.1, from 3.3's review): never listed or changed in the panel.
+  ledgerCheckCursor: { key: 'paymentLedgerCheckCursor', fallback: '', schema: z.union([z.literal(''), z.string().uuid()]), description: 'Internal: the booking the daily ledger check continues from (the check keeps it; no need to change it)', internal: true },
+  // Task 4.1: how long after its last payment or refund a retired gateway account may still receive a dispute (plan 0.1, 6.4).
+  disputeWindowDays: { key: 'paymentDisputeWindowDays', fallback: 180, schema: z.number().int().min(60).max(540), description: 'Days after its last payment or refund before a retired gateway account can be archived (disputes can arrive until then)' },
 } as const;
 
 export function definePaymentSettings(settings: SettingsService): void {
-  for (const s of Object.values(PAYMENT_SETTINGS)) settings.define(s.key, s.schema, 1, { description: s.description });
+  for (const s of Object.values(PAYMENT_SETTINGS)) settings.define(s.key, s.schema, 1, { description: s.description, internal: 'internal' in s && s.internal });
 }
