@@ -5,7 +5,7 @@ import { Field, Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
 import { t } from '@/lib/i18n';
-import { canMarkEvidence, canRequest, canResolve, destinationBody, manualStep, newIdempotencyKey, refundBody } from '@/lib/refunds-panel';
+import { canMarkEvidence, canRequest, canResolve, destinationBody, isLatePending, manualStep, newIdempotencyKey, refundBody } from '@/lib/refunds-panel';
 import type { DisputeRow, RefundRow, RefundableRow } from '@/lib/refunds-panel';
 import { Section, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
@@ -162,6 +162,7 @@ export function RefundsPanel({ bookingId, onChanged }: { bookingId: string; onCh
               <li key={r.id}>
                 {t('admin.crm.refunds.row', { amount: amountOf(r.amountMinor, r.currency), state: t(`admin.crm.refunds.states.${r.status}`), origin: t(`admin.crm.refunds.origins.${r.origin}`), when: formatMoment(r.createdAt) })}
                 {r.destinationHint ? <> {t('admin.crm.refunds.hint', { hint: r.destinationHint })}</> : null}
+                {isLatePending(r) ? <> {t('admin.crm.refunds.latePending')}</> : null}
                 {canResolve(r) ? <> <button className="link-button" type="button" disabled={busy} onClick={() => void run(() => api(`/admin/payments/refunds/${r.id}/resolve`, { method: 'POST', body: { version: r.version } }), 'admin.crm.refunds.resolved')}>{t('admin.crm.refunds.resolve')}</button></> : null}
                 {step === 'destination' ? (
                   <form className="stack form" onSubmit={(e) => void destination(e, r)}>

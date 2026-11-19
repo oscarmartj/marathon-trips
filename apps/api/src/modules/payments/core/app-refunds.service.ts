@@ -115,7 +115,7 @@ export class AppRefundsService {
       const p = payments.find((x) => x.id === r.paymentId)!;
       const manual = p.adapterKey === MANUAL_KEY;
       const caps = this.gateway.registry.get(p.adapterKey)?.manifest.capabilities.refunds ?? 'none';
-      const blockedReason = r.blocked === 'disputed' ? 'payment_disputed' : r.blocked === 'booking_disputed' ? 'booking_dispute_open' : r.blocked === 'external_refund_in_progress' ? 'external_refund_in_progress'
+      const blockedReason = r.blocked === 'disputed' ? 'payment_disputed' : r.blocked === 'booking_disputed' ? 'booking_dispute_open' : r.blocked === 'external_refund_in_progress' ? 'external_refund_in_progress' : r.blocked === 'late_refund_in_progress' ? 'late_refund_in_progress'
         : r.refundableMinor === 0n ? 'nothing_to_refund'
           : !manual && caps === 'none' ? 'refunds_not_supported'
             : !manual && caps === 'full' && r.refundableMinor < r.netMinor ? 'partial_refund_not_supported' : null;
@@ -173,6 +173,7 @@ export class AppRefundsService {
       if (!entry) throw conflict('payment_not_refundable', 'Only a payment that went through can be refunded');
       if (entry.blocked === 'disputed') throw conflict('refund_of_disputed_payment_rejected', 'This payment is disputed by the cardholder: it cannot be refunded while the dispute stands.');
       if (entry.blocked === 'booking_disputed') throw conflict('booking_dispute_open', 'A payment of this booking is disputed: nothing is refunded from here until the dispute ends.');
+      if (entry.blocked === 'late_refund_in_progress') throw conflict('late_refund_in_progress', 'A refund of this booking that was marked as not made is still being processed by the payment gateway. Resolve it first.');
       if (entry.blocked === 'external_refund_in_progress') throw conflict('external_refund_in_progress', 'A refund made at the payment gateway is still in progress on this booking. Wait for it to settle.');
       if (entry.refundableMinor <= 0n) throw conflict('nothing_to_refund', 'Nothing paid on this payment is beyond what the booking owes.');
       if (!manual && manifest.capabilities.refunds === 'full' && entry.refundableMinor < entry.netMinor) throw conflict('partial_refund_not_supported', 'This payment gateway only refunds a payment in full.');

@@ -2720,7 +2720,8 @@
           "refunds_not_supported": "This gateway cannot refund from here: refund it at the gateway.",
           "partial_refund_not_supported": "This gateway only refunds a payment in full.",
           "external_refund_in_progress": "A refund made at the gateway is still in progress on this booking: wait for it to settle.",
-          "booking_dispute_open": "A payment of this booking is disputed: nothing is refunded from here until the dispute ends."
+          "booking_dispute_open": "A payment of this booking is disputed: nothing is refunded from here until the dispute ends.",
+          "late_refund_in_progress": "One of our refunds on this booking, marked as not made, is still being processed by the gateway: check it with the gateway first."
         },
         "request": "Refund it",
         "gatewayWarning": "{amount} goes back to the customer through the payment gateway. This cannot be undone.",
@@ -2823,8 +2824,10 @@
           "refund_state_changed": "This refund changed. Reload and try again.",
           "external_refund_in_progress": "A refund made at the gateway is still in progress on this booking. Wait for it to settle.",
           "refund_send_in_progress": "This refund is being sent to the gateway right now. Try again in a few minutes.",
-          "booking_dispute_open": "A payment of this booking is disputed. Nothing is refunded from here until the dispute ends."
-        }
+          "booking_dispute_open": "A payment of this booking is disputed. Nothing is refunded from here until the dispute ends.",
+          "late_refund_in_progress": "One of our refunds on this booking is still being processed by the gateway. Check it with the gateway first."
+        },
+        "latePending": "This is our refund: it was marked as not made, but the payment gateway is still processing it. No other refund can be made on this booking until it settles. Check with the gateway to settle it."
       }
     },
     "templates": {

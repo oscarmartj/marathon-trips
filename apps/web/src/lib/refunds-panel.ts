@@ -54,8 +54,15 @@ export function manualStep(r: RefundRow): 'destination' | 'transfer' | null {
   return r.hasDestination ? 'transfer' : 'destination';
 }
 
-/** A gateway refund the gateway has not settled: staff can ask the app to settle it. */
-export const canResolve = (r: RefundRow): boolean => r.origin === 'app' && !r.manualRefund && (r.status === 'requested' || r.status === 'pending');
+/**
+ * A gateway refund the gateway has not settled: staff can ask the app to settle it. That includes one of ours marked
+ * as not made that the gateway was still processing (late_pending_at_gateway): resolving is its way out.
+ */
+export const canResolve = (r: RefundRow): boolean => r.origin === 'app' && !r.manualRefund
+  && (r.status === 'requested' || r.status === 'pending' || (r.status === 'failed' && r.failureCode === 'late_pending_at_gateway'));
+
+/** Ours, marked as not made, still being processed by the gateway: shown with its own explanation. */
+export const isLatePending = (r: RefundRow): boolean => r.status === 'failed' && r.failureCode === 'late_pending_at_gateway';
 
 /** The destination body: a PayID or a bank account, never both; spaces trimmed. */
 export function destinationBody(version: number, form: { accountName: string; kind: 'payid' | 'bank'; payIdType: string; payId: string; bsb: string; accountNumber: string }) {

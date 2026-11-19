@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canMarkEvidence, canRequest, canResolve, destinationBody, manualStep, refundBody } from './refunds-panel';
+import { canMarkEvidence, canRequest, canResolve, destinationBody, isLatePending, manualStep, refundBody } from './refunds-panel';
 import type { DisputeRow, RefundRow } from './refunds-panel';
 
 const refund = (over: Partial<RefundRow> = {}): RefundRow => ({
@@ -31,6 +31,11 @@ describe('refunds panel rules (task 4.5)', () => {
     expect(canResolve(refund({ manualRefund: true }))).toBe(false);
     expect(canResolve(refund({ origin: 'external' }))).toBe(false);
     expect(canResolve(refund({ status: 'succeeded' }))).toBe(false);
+    // Our refund marked as not made that the gateway was still processing: resolving is its way out.
+    expect(canResolve(refund({ status: 'failed', failureCode: 'late_pending_at_gateway', providerRefundRef: 're_1' }))).toBe(true);
+    expect(isLatePending(refund({ status: 'failed', failureCode: 'late_pending_at_gateway' }))).toBe(true);
+    expect(canResolve(refund({ status: 'failed', failureCode: 'resolved_by_staff' }))).toBe(false);
+    expect(canResolve(refund({ status: 'failed', failureCode: 'late_pending_at_gateway', manualRefund: true }))).toBe(false);
   });
 
   it('sends a PayID or a bank account, never both', () => {

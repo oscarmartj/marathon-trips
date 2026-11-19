@@ -531,10 +531,11 @@ describe('review of the code (H1, H2, M2)', () => {
     const spy = vi.spyOn(disputes, 'applyRemote').mockImplementation(async (...args) => {
       const out = await real(...args);
       // Barrier: with the booking locked by this transaction, the refund request starts and must wait for the lock.
+      const [{ pid }] = await (args[0] as { $queryRawUnsafe: (q: string) => Promise<Array<{ pid: number }>> }).$queryRawUnsafe('SELECT pg_backend_pid() AS pid') as [{ pid: number }];
       request = ask(late.id, { paymentVersion: late.version });
       for (let i = 0; i < 100 && !waited; i++) {
-        // Only a backend of this database waiting on the booking lock (other test files run in parallel).
-        const [w] = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database() AND pid <> pg_backend_pid() AND query ILIKE '%FROM bookings b WHERE%FOR UPDATE OF b%'`);
+        // Only a backend blocked by THIS transaction counts (other test files run in parallel).
+        const [w] = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))`, pid);
         waited = (w?.n ?? 0n) > 0n;
         if (!waited) await new Promise((r) => setTimeout(r, 50));
       }
@@ -568,8 +569,9 @@ describe('review of the code (H1, H2, M2)', () => {
     expect(made.status).toBe('pending');
     expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, made.ref))).outcome).toBe('processed');
     expect(await t.prisma.refund.findUniqueOrThrow({ where: { id: r!.id } })).toMatchObject({ status: 'failed', failureCode: 'late_pending_at_gateway', providerRefundRef: made.ref });
-    expect(await refundableOf(bookingId, late.id)).toMatchObject({ refundableMinor: '0', blockedReason: 'external_refund_in_progress' });
-    expect((await ask(late.id)).body.code).toBe('external_refund_in_progress');
+    // Our own refund, still processing at the gateway: its own reason, not the dashboard one (round 4).
+    expect(await refundableOf(bookingId, late.id)).toMatchObject({ refundableMinor: '0', blockedReason: 'late_refund_in_progress' });
+    expect((await ask(late.id)).body.code).toBe('late_refund_in_progress');
     expect(await t.prisma.task.count({ where: { sourceRef: refundReviewTaskRef(r!.id), status: 'open' } })).toBe(1);
     // It goes through at the gateway: recorded as made, the cap taken.
     sim.settleRefund(acc.id, made.ref, 'succeeded');
