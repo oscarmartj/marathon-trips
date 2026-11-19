@@ -50,6 +50,16 @@ export function stripeLocalSubject(fake = new FakeStripe()): ContractSubject {
       const w = fake.event(keyOf(ctx), ctx.webhookSecret, refundRef, at);
       return { body: w.body, headers: w.headers };
     },
+    async cardholderDisputes(ctx, payment) {
+      return { ref: fake.openDispute(keyOf(ctx), sessionIdOf(payment.ref)).id };
+    },
+    async disputeMoves(ctx, ref, to) {
+      fake.moveDispute(keyOf(ctx), ref, { ...(to.status ? { status: to.status } : {}), ...(to.withdraw ? { withdraw: true } : {}), ...(to.reinstate ? { reinstate: true } : {}) });
+    },
+    async disputeWebhookFor(ctx, ref, at) {
+      const w = fake.event(keyOf(ctx), ctx.webhookSecret, ref, at);
+      return { body: w.body, headers: w.headers };
+    },
     unsupportedCurrency: 'USD',
     assertSandboxCredentials() {
       throw new Error('the local Stripe subject uses the fake: run the sandbox subject');

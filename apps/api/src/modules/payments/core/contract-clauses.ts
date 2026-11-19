@@ -33,6 +33,11 @@ export const CONTRACT_CLAUSES = [
   'refund_retrieve_by_ref_and_key_agree',
   'refund_webhook_verifies_and_resolves_payment',
   'gateway_refund_has_no_our_id',
+  // Task 4.5: they apply when the manifest declares `disputes`; otherwise each checks that nothing dispute-like is claimed.
+  'dispute_webhook_verifies_and_resolves_payment',
+  'dispute_retrieve_matches_webhook',
+  'dispute_funds_flags_are_cumulative',
+  'refund_of_disputed_payment_refused',
   'no_secret_in_results_or_errors',
 ] as const;
 
