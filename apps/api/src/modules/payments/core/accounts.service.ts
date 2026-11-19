@@ -16,6 +16,8 @@ import { checkCredentials, creationBlockReason, secretsChangeAcceptable, webhook
 import { ProviderGateway, TEST_ADAPTER_ENVS, credentialsAad, webhookSecretAad } from './gateway';
 import type { ConnectionTestCode } from './gateway';
 import { ManualMethodsService } from './manual-methods.service';
+import { ProviderHealthService } from './provider-health.service';
+import { insertDefaultRules } from './routing-admin.service';
 import { WEBHOOK_PATH_PREFIX, webhookPathTokenHash } from './webhooks.service';
 
 /** What the panel and the console may see of an account: never a secret column. */
@@ -38,6 +40,7 @@ export class ProviderAccountsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ProviderGateway) private readonly gateway: ProviderGateway,
     @Inject(ManualMethodsService) private readonly manualMethods: ManualMethodsService,
+    @Inject(ProviderHealthService) private readonly health: ProviderHealthService,
   ) {}
 
   // ---- The panel (task 4.1, plan docs/plans/4.1-provider-accounts-panel.md, sections 4.1 and 4.4) ----
@@ -72,7 +75,7 @@ export class ProviderAccountsService {
     const secret = webhookSecret === null ? null : this.box.encrypt(webhookSecret, webhookSecretAad(id));
     await runTransaction(this.prisma, async (tx) => {
       const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT now() AS now` as [{ now: Date }];
-      await tx.providerAccount.create({
+      const created = await tx.providerAccount.create({
         data: {
           id, adapterKey: manifest!.key, displayName: input.displayName, mode: 'test', status: 'paused', pauseReasonCode: 'staff',
           credentialsCiphertext: creds.ciphertext, credentialsKeyVersion: creds.keyVersion,
@@ -80,7 +83,10 @@ export class ProviderAccountsService {
           webhookPathTokenHash: webhookPathTokenHash(this.config.AUTH_HMAC_KEY, pathToken), createdById: actor.id ?? null,
           credentialsChangedAt: now, lastConnectionTestAt: now, lastConnectionTestResult: result,
         },
+        select: { adapterKey: true, createdAt: true },
       });
+      // Its default routing rules, with its createdAt so the order of task 3.1 holds (plan 4.2, sections 6 and 15.7).
+      await insertDefaultRules(tx, id, this.gateway.registry.get(created.adapterKey)!.manifest, created.createdAt);
       await this.audit.record(tx, {
         actor, action: 'payments.providerAccount.created', entityType: 'ProviderAccount', entityId: id, model: 'ProviderAccount',
         after: {
@@ -132,6 +138,8 @@ export class ProviderAccountsService {
         data: { ...prepared.sealed, credentialsChangedAt: now, lastConnectionTestAt: now, lastConnectionTestResult: prepared.result, version: { increment: 1 } },
       });
       if (n.count !== 1) throw conflict('version_conflict', 'Someone else changed this account. Reload and try again.');
+      // New details that tested ok: the account's health starts clean (plan 4.2, 15.6); the test itself wrote none.
+      if (prepared.result === 'ok') await this.health.reset(tx, id);
       await this.audit.record(tx, {
         actor, action, entityType: 'ProviderAccount', entityId: id, model: 'ProviderAccount',
         before: { credentialsCiphertext: 'a', ...(patch.webhookSecret !== undefined ? { webhookSecretCiphertext: 'a' } : {}), lastConnectionTestResult: null },
@@ -158,14 +166,17 @@ export class ProviderAccountsService {
     const tested = await this.gateway.testCandidate(MANUAL_KEY, 'test', { credentials: {}, webhookSecret: 'unused' });
     await this.prisma.$transaction(async (tx) => {
       const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT now() AS now` as [{ now: Date }];
-      await tx.providerAccount.create({
+      const created = await tx.providerAccount.create({
         data: {
           id, adapterKey: MANUAL_KEY, displayName, mode: 'test', status: 'active', credentialsChangedAt: now, lastConnectionTestAt: now, lastConnectionTestResult: tested,
           credentialsCiphertext: creds.ciphertext, credentialsKeyVersion: creds.keyVersion,
           webhookSecretCiphertext: secret.ciphertext, webhookKeyVersion: secret.keyVersion,
           webhookPathTokenHash: webhookPathTokenHash(this.config.AUTH_HMAC_KEY, randomBytes(32).toString('base64url')), createdById: input.actor?.id ?? null,
         },
+        select: { adapterKey: true, createdAt: true },
       });
+      // Its default routing rules, with its createdAt so the order of task 3.1 holds (plan 4.2, sections 6 and 15.7).
+      await insertDefaultRules(tx, id, this.gateway.registry.get(created.adapterKey)!.manifest, created.createdAt);
       await this.audit.record(tx, {
         actor: input.actor ?? SYSTEM_ACTOR, action: 'payments.providerAccount.created', entityType: 'ProviderAccount', entityId: id, model: 'ProviderAccount',
         after: { adapterKey: MANUAL_KEY, displayName, mode: 'test', status: 'active', credentialsCiphertext: creds.ciphertext, webhookSecretCiphertext: secret.ciphertext, webhookPathTokenHash: 'x' },
@@ -187,14 +198,17 @@ export class ProviderAccountsService {
     const tested = await this.gateway.testCandidate(SIMULATOR_KEY, 'test', { credentials: { apiKey }, webhookSecret });
     await this.prisma.$transaction(async (tx) => {
       const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT now() AS now` as [{ now: Date }];
-      await tx.providerAccount.create({
+      const created = await tx.providerAccount.create({
         data: {
           id, adapterKey: SIMULATOR_KEY, displayName, mode: 'test', status: 'active', credentialsChangedAt: now, lastConnectionTestAt: now, lastConnectionTestResult: tested,
           credentialsCiphertext: creds.ciphertext, credentialsKeyVersion: creds.keyVersion,
           webhookSecretCiphertext: secret.ciphertext, webhookKeyVersion: secret.keyVersion,
           webhookPathTokenHash: webhookPathTokenHash(this.config.AUTH_HMAC_KEY, pathToken), createdById: input.actor?.id ?? null,
         },
+        select: { adapterKey: true, createdAt: true },
       });
+      // Its default routing rules, with its createdAt so the order of task 3.1 holds (plan 4.2, sections 6 and 15.7).
+      await insertDefaultRules(tx, id, this.gateway.registry.get(created.adapterKey)!.manifest, created.createdAt);
       await this.audit.record(tx, {
         actor: input.actor ?? SYSTEM_ACTOR, action: 'payments.providerAccount.created', entityType: 'ProviderAccount', entityId: id, model: 'ProviderAccount',
         after: { adapterKey: SIMULATOR_KEY, displayName, mode: 'test', status: 'active', credentialsCiphertext: creds.ciphertext, webhookSecretCiphertext: secret.ciphertext, webhookPathTokenHash: 'x' },
@@ -218,14 +232,17 @@ export class ProviderAccountsService {
     const secret = this.box.encrypt(input.webhookSecret, webhookSecretAad(id));
     const displayName = (input.displayName ?? 'Stripe (test mode)').slice(0, 100);
     await this.prisma.$transaction(async (tx) => {
-      await tx.providerAccount.create({
+      const created = await tx.providerAccount.create({
         data: {
           id, adapterKey: STRIPE_KEY, displayName, mode: 'test', status: 'active',
           credentialsCiphertext: creds.ciphertext, credentialsKeyVersion: creds.keyVersion,
           webhookSecretCiphertext: secret.ciphertext, webhookKeyVersion: secret.keyVersion,
           webhookPathTokenHash: webhookPathTokenHash(this.config.AUTH_HMAC_KEY, pathToken), createdById: input.actor?.id ?? null,
         },
+        select: { adapterKey: true, createdAt: true },
       });
+      // Its default routing rules, with its createdAt so the order of task 3.1 holds (plan 4.2, sections 6 and 15.7).
+      await insertDefaultRules(tx, id, this.gateway.registry.get(created.adapterKey)!.manifest, created.createdAt);
       await this.audit.record(tx, {
         actor: input.actor ?? SYSTEM_ACTOR, action: 'payments.providerAccount.created', entityType: 'ProviderAccount', entityId: id, model: 'ProviderAccount',
         after: { adapterKey: STRIPE_KEY, displayName, mode: 'test', status: 'active', credentialsCiphertext: creds.ciphertext, webhookSecretCiphertext: secret.ciphertext, webhookPathTokenHash: 'x' },

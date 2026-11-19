@@ -8,6 +8,9 @@ import type { AccountStatus, AccountView, AdapterView, Warning } from '@/lib/gat
 import { Field, Status } from '../auth/field';
 import { errorMessage, useStepUp } from './step-up';
 
+/** Sent after the accounts were (re)loaded, so the routing rules section shows the same state. */
+export const ACCOUNTS_CHANGED = 'mt:payment-accounts-changed';
+
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-AU') : '');
 const items = <T,>(r: ApiResult): T[] => (r.status === 200 ? ((r.body as { items?: T[] }).items ?? []) : []);
 
@@ -66,6 +69,8 @@ export function GatewaysPanel() {
     setAccounts(items<AccountView>(b));
     setWarnings(items<Warning>(w));
     setChosen((c) => c || list.find((x) => x.creatable)?.key || '');
+    // The routing rules section (task 4.2) reloads too: a new account comes with its rules, a status changes routing.
+    window.dispatchEvent(new Event(ACCOUNTS_CHANGED));
   }
   useEffect(() => {
     void load();

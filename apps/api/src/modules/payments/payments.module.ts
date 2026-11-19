@@ -30,6 +30,9 @@ import { ProviderGateway } from './core/gateway';
 import { PaymentsMaintenanceService } from './core/maintenance.service';
 import { PaymentAdapterRegistry } from './core/registry';
 import { PaymentRouting } from './core/routing';
+import { ProviderHealthService } from './core/provider-health.service';
+import { RoutingRulesAdminService } from './core/routing-admin.service';
+import { RoutingRulesAdminController } from './routing.controller';
 import { PaymentScheduleService } from './core/schedule.service';
 import { PaymentCoverageService } from './core/coverage.service';
 import { definePaymentSettings } from './core/settings';
@@ -49,13 +52,13 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
-  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
+  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
-    ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
+    ProviderGateway, ProviderHealthService, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
-    CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard,
+    CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard, RoutingRulesAdminService,
   ],
   exports: [ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })

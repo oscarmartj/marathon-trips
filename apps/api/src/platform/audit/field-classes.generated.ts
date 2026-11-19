@@ -914,6 +914,17 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  ProviderAccountHealth: {
+    providerAccountId: 'nopii',
+    consecutiveFailures: 'nopii',
+    lastFailureAt: 'nopii',
+    lastFailureCode: 'nopii',
+    openedAt: 'nopii',
+    openUntil: 'nopii',
+    probeUntil: 'nopii',
+    lastSuccessAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   Quote: {
     id: 'nopii',
     reference: 'nopii',
@@ -1081,6 +1092,24 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     pricePerPersonMinor: 'nopii',
     extraNightPerPersonMinor: 'nopii',
     createdAt: 'nopii'
+  },
+  RoutingRule: {
+    id: 'nopii',
+    providerAccountId: 'nopii',
+    method: 'nopii',
+    countries: 'nopii',
+    anyCountry: 'nopii',
+    currency: 'nopii',
+    minAmountMinor: 'nopii',
+    maxAmountMinor: 'nopii',
+    priority: 'nopii',
+    enabled: 'nopii',
+    fallbackForRuleId: 'nopii',
+    version: 'nopii',
+    createdById: 'nopii',
+    updatedById: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
   },
   SavedReport: {
     id: 'nopii',

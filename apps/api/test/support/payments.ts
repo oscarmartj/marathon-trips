@@ -60,6 +60,14 @@ export async function simulatorAccount(t: TestApp): Promise<SimAccount> {
 const id8 = () => Math.random().toString(36).slice(2, 10);
 
 /** Pauses every other active account so routing picks `keep` (tests share one database). */
+/**
+ * Gateway health (task 4.2) is per account and outlives a test: a test that makes the simulator fail on purpose would
+ * open the breaker for the next test on the same account. Suites that share an account reset it before each test.
+ */
+export async function resetGatewayHealth(t: TestApp): Promise<void> {
+  await t.prisma.$executeRawUnsafe(`UPDATE provider_account_health SET "consecutiveFailures" = 0, "lastFailureAt" = NULL, "lastFailureCode" = NULL, "openedAt" = NULL, "openUntil" = NULL, "probeUntil" = NULL`);
+}
+
 export async function onlyAccount(t: TestApp, keep: string | null): Promise<void> {
   await t.prisma.providerAccount.updateMany({ where: { status: 'active', ...(keep ? { id: { not: keep } } : {}) }, data: { status: 'paused' } });
 }
