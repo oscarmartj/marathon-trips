@@ -114,7 +114,8 @@ export class ProviderGateway {
     const { ctx } = await this.context(account);
     // Health (plan 4.2, 15.6 and review M1, B2, B3): only creates count, on the database clock.
     const tracked = HEALTH_OPS.includes(op);
-    const startedAt = tracked ? await this.health?.dbNow() : undefined;
+    // If even the clock cannot be read, the create still goes ahead and health is simply not recorded for it.
+    const startedAt = tracked ? await this.health?.dbNow().catch(() => undefined) : undefined;
     try {
       const result = await withTimeout(fn(provider, ctx), CALL_TIMEOUT_MS);
       if (startedAt) await this.health?.success(account.id, startedAt);
@@ -122,7 +123,7 @@ export class ProviderGateway {
     } catch (err) {
       // Never the gateway's message: it can carry credentials or the payer's details.
       const e = err instanceof ProviderError ? err : new ProviderError('provider_unavailable', true);
-      if (tracked) await this.noteFailure(account.id, e.code);
+      if (startedAt) await this.noteFailure(account.id, e.code);
       throw e;
     }
   }
@@ -161,11 +162,11 @@ export class ProviderGateway {
     } catch {
       return { result: 'credentials_unreadable', credentialsChangedAt: row.credentialsChangedAt };
     }
-    const startedAt = await this.health?.dbNow();
+    const startedAt = await this.health?.dbNow().catch(() => undefined);
     const result = await this.runTest(provider, ctx);
     // A stored account's test feeds its health (plan 4.2, 15.6); candidate tests below never do.
     if (result === 'ok' && startedAt) await this.health?.success(account.id, startedAt);
-    else await this.noteFailure(account.id, result);
+    else if (startedAt) await this.noteFailure(account.id, result);
     return { result, credentialsChangedAt: row.credentialsChangedAt };
   }
 

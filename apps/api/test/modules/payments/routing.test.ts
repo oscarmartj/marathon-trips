@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProviderAccountsService } from '../../../src/modules/payments/core/accounts.service';
 import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
+import { PaymentRouting } from '../../../src/modules/payments/core/routing';
+import { RoutingRulesAdminService } from '../../../src/modules/payments/core/routing-admin.service';
 import { ProviderHealthService } from '../../../src/modules/payments/core/provider-health.service';
 import { AUTH_FAILED_OPEN_UNTIL } from '../../../src/modules/payments/core/routing-rules';
 import { PAYMENTS_PERMISSIONS } from '../../../src/modules/payments/manifest';
@@ -12,19 +14,19 @@ import { CATALOGUE_AND_PRICING, closeCatalogue, staffClient } from '../../suppor
 import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import {
-  ALL_PAYMENT_PERMISSIONS, PayingCustomer, SimAccount, approvedBooking, cleanPayments, onlyAccount, payingCustomer, paymentsStaff, resetGatewayHealth, sim, simulatorAccount,
+  ALL_PAYMENT_PERMISSIONS, PayingCustomer, SimAccount, approvedBooking, cleanPayments, onlyAccount, payingCustomer, resetGatewayHealth, sim, simulatorAccount,
 } from '../../support/payments';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 let t: TestApp;
-let admin: Awaited<ReturnType<typeof paymentsStaff>> & { staff?: { id: string } };
+let admin: Awaited<ReturnType<typeof staffClient>>;
 let c: PayingCustomer;
 const RULES = '/admin/payments/routing-rules';
 
 beforeAll(async () => {
   t = await makeApp();
-  admin = await paymentsStaff(t);
+  admin = await staffClient(t, [...CATALOGUE_AND_PRICING, ...ALL_BOOKING_PERMISSIONS, ...ALL_PAYMENT_PERMISSIONS]);
   c = await payingCustomer(t);
 });
 beforeEach(async () => {
@@ -248,6 +250,78 @@ describe('breaker (plan 3 and 15.2 to 15.6)', () => {
     expect(await health(A!.id)).toMatchObject({ openUntil: before.openUntil, consecutiveFailures: 3, lastSuccessAt: null });
     // The simulated checkout page goes through the webhook operation: paying there leaves health alone too.
     expect(await t.prisma.auditLog.count({ where: { action: 'payments.providerAccount.reachable', entityId: A!.id } })).toBe(0);
+  });
+
+  it('the breaker runs on the database clock: an instance clock 90 s behind still lets the probe in once the database says the cooldown is over (review B2)', async () => {
+    const [A, B] = await accounts(2);
+    await setPriority((await cardRule(B!.id)).id, 200);
+    await outage(A!);
+    await t.prisma.$executeRawUnsafe(`UPDATE provider_account_health SET "openUntil" = clock_timestamp() - interval '1 second', "probeUntil" = NULL WHERE "providerAccountId" = $1::uuid`, A!.id);
+    const b = await fresh();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() - 90_000));
+    try {
+      // An instance clock would still see the breaker open; the database says half-open: A takes the one probe.
+      sim.queue(A!.id, 'timeout');
+      expect((await c.pay(b.reference, { method: 'card' })).status).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect((await paymentsOf(b.bookingId))[0]!.providerAccountId).toBe(A!.id);
+    // The failed probe reopened it for the cooldown, measured on the database clock.
+    const db = (await t.prisma.$queryRawUnsafe<Array<{ db: Date }>>(`SELECT clock_timestamp() AS db`))[0]!.db;
+    const h = (await health(A!.id))!;
+    expect(Math.abs(h.openUntil!.getTime() - (db.getTime() + 120_000))).toBeLessThan(10_000);
+    expect(Math.abs(h.lastFailureAt!.getTime() - db.getTime())).toBeLessThan(10_000);
+  });
+
+  it('the probe holds for 60 s of the database clock, whatever the instance clock says (review B2)', async () => {
+    const [A] = await accounts(1);
+    await outage(A!);
+    await t.prisma.$executeRawUnsafe(`UPDATE provider_account_health SET "openUntil" = clock_timestamp() - interval '1 second', "probeUntil" = NULL WHERE "providerAccountId" = $1::uuid`, A!.id);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() + 3_600_000));
+    try {
+      // The probe claimed (and committed) with the instance clock an hour ahead.
+      await t.prisma.$transaction((tx) => t.app.get(PaymentRouting).choose(tx, { method: 'card', currency: 'AUD', country: 'AU', amountMinor: 100n }));
+    } finally {
+      vi.useRealTimers();
+    }
+    const db = (await t.prisma.$queryRawUnsafe<Array<{ db: Date }>>(`SELECT clock_timestamp() AS db`))[0]!.db;
+    const h = (await health(A!.id))!;
+    expect(Math.abs(h.probeUntil!.getTime() - (db.getTime() + 60_000))).toBeLessThan(10_000);
+  });
+
+  it('routing warnings use the database clock: an instance clock 90 s ahead still shows the unreachable account and its stuck bookings (review B2)', async () => {
+    const [A] = await accounts(1);
+    const stuck = await outage(A!);
+    await t.prisma.$executeRawUnsafe(`UPDATE provider_account_health SET "openUntil" = clock_timestamp() + interval '60 seconds' WHERE "providerAccountId" = $1::uuid`, A!.id);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() + 90_000));
+    let items: Array<{ code: string; accountId?: string; bookingIds?: string[] }>;
+    try {
+      items = (await t.app.get(RoutingRulesAdminService).warnings()).items as typeof items;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(items.some((x) => x.code === 'account_unreachable' && x.accountId === A!.id)).toBe(true);
+    expect(items.find((x) => x.code === 'live_attempts_on_unreachable_account' && x.accountId === A!.id)!.bookingIds).toEqual(expect.arrayContaining(stuck.map((s2) => s2.bookingId)));
+  });
+
+  it('health_clock_failure_keeps_the_create: if the database clock cannot be read, the payment still starts and nothing is recorded', async () => {
+    const [A] = await accounts(1);
+    const svc = t.app.get(ProviderHealthService);
+    const spy = vi.spyOn(svc, 'dbNow').mockRejectedValue(new Error('clock'));
+    try {
+      const b = await fresh();
+      expect((await c.pay(b.reference, { method: 'card' })).status).toBe(201);
+      sim.queue(A!.id, 'unavailable');
+      const b2 = await fresh();
+      expect((await c.pay(b2.reference, { method: 'card' })).status).toBe(503);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await health(A!.id)).toBeNull();
   });
 
   it('slow_success_does_not_close_newer_failure (integration, database clock)', async () => {
@@ -513,8 +587,9 @@ describe('routing rules, more (review B1)', () => {
     expect(changes[2]).toMatch(/"before":8/);
     expect(changes[3]).toContain('"added"');
     for (const c2 of changes) expect(c2).not.toMatch(/Ciphertext|credentials|sim_test_|whsec_|secret/i);
-    expect(new Set(logs.map((l) => l.actorId)).size).toBe(1);
-    expect(logs[0]!.actorId).not.toBeNull();
+    // The real admin, looked up by email: every change is audited under them.
+    const me = await t.prisma.user.findFirstOrThrow({ where: { email: admin.staff.email, kind: 'staff' }, select: { id: true } });
+    expect(logs.map((l) => l.actorId)).toEqual(logs.map(() => me.id));
   });
 
   it('routing_preview_explains_exclusions: every reason, from the database', async () => {

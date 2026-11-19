@@ -158,7 +158,8 @@ export class RoutingRulesAdminService {
   async warnings(): Promise<{ items: RoutingWarning[] }> {
     const out: RoutingWarning[] = [];
     const countries = await this.coverage.salesCountries();
-    const now = new Date();
+    // The database clock, as routing and the health writes use (review B2): never this instance's clock.
+    const [{ now }] = await this.prisma.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now` as [{ now: Date }];
     const health = await this.prisma.providerAccountHealth.findMany({ where: { openUntil: { not: null } }, select: { providerAccountId: true, openUntil: true, lastFailureCode: true } });
     for (const h of health) {
       if (h.openUntil!.getTime() >= AUTH_FAILED_OPEN_UNTIL.getTime()) out.push({ code: 'account_auth_failed', accountId: h.providerAccountId });
