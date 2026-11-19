@@ -29,6 +29,11 @@ export interface AdapterManifest {
   countries: readonly string[] | 'any';
   /** Where its redirect URLs may point; anything else is never handed to a customer. */
   checkoutOrigin: string;
+  /**
+   * Task 4.4: the gateway's hosted card fields, for an adapter whose card is typed into the gateway's iframes on our own
+   * card page (plan docs/plans/4.4-au-card-gateway.md, section 5.1). Fixed in code; only the mode selects.
+   */
+  cardFields?: CardFieldsConfig;
   /** How an account of this adapter is set up from the panel (task 4.1). Test mode only: no live pattern exists. */
   account: AccountSetup;
   capabilities: {
@@ -50,7 +55,26 @@ export interface AdapterManifest {
      * listSettlements. Absent means neither: the reconciliation then compares our own objects one by one.
      */
     reconciliation?: { activity: boolean; settlements: boolean };
+    /**
+     * Task 4.4 (plan 4.4, sections 12.2 and 18 M1): the payment waits for a card on our own page and has no counterpart
+     * at the gateway until the card is submitted, so the gateway has no event for it yet. Only CardSessionProvider sets
+     * it (checked by the registry); never an adapter's own manifest.
+     */
+    preCardSession?: true;
+    /**
+     * Task 4.4 (plan 4.4, section 7): the gateway's refund events carry no id of ours (Pin has no refund metadata); our
+     * refund id comes from retrieveRefund, which the core calls before recording a refund as external. Only with
+     * preCardSession (a CardSessionProvider keeps the refund intents that back it).
+     */
+    refundEventOurId?: 'via_retrieve';
   };
+}
+
+/** Task 4.4: the hosted card fields of a gateway (script, iframe origins, 3-D Secure challenge origins by mode). */
+export interface CardFieldsConfig {
+  scriptUrl: string;
+  frameOrigins: readonly string[];
+  challengeOrigins: Readonly<Record<PaymentModeName, readonly string[]>>;
 }
 
 /** A credential staff type in the panel: its value is validated against `pattern` (anchored), encrypted and never shown. */
@@ -59,6 +83,11 @@ export interface CredentialField {
   label: string;
   /** Anchored regular expression source for a test-mode value. */
   pattern: string;
+  /**
+   * Task 4.4 (plan 4.4, D4): a key the gateway designs for the browser (Pin's publishable key). Still encrypted and never
+   * returned by the panel; only the card page of an open session of that account receives it. Only with `cardFields`.
+   */
+  exposure?: 'card_page';
   /**
    * Checked by manifestProblems (plan 4.1, section 2): `valid` must match the pattern, and every `rejected` one (a live key,
    * another kind of key) must not. Built in code, never a real key.
@@ -293,4 +322,90 @@ export class ProviderError extends Error {
     super(`payment provider error: ${code}`);
     this.name = 'ProviderError';
   }
+}
+
+// ---- Task 4.4: gateways whose card is tokenised by hosted fields on our page (plan docs/plans/4.4-au-card-gateway.md) ----
+
+/** Our card session reference: the bearer value in the card page's URL. */
+export const CARD_SESSION_REF = /^cs_[0-9a-f]{32}$/;
+
+/** Why a card was not charged, from a closed list (plan 4.4, section 6.3). */
+export const CARD_DECLINE_CODES = ['card_declined', 'insufficient_funds', 'expired_card', 'card_not_authenticated', 'processing_error', 'suspected_fraud'] as const;
+export type CardDeclineCode = (typeof CARD_DECLINE_CODES)[number];
+
+/** A charge as the gateway reports it. `pending`: a 3-D Secure challenge is still open. */
+export interface GatewayCharge {
+  token: string;
+  success: boolean;
+  captured: boolean;
+  /** Still in progress: a 3-D Secure challenge open, or successful but not yet captured. */
+  pending: boolean;
+  /** Ended without money, said explicitly by the gateway (never inferred from an unknown state: review M1). */
+  failed: boolean;
+  amount: Money;
+  /** Our session reference and payment id from the charge's metadata, when present and well formed. */
+  sessionRef?: string;
+  ourPaymentId?: string;
+  failureCode?: CardDeclineCode;
+}
+
+/** One charge of a card token. Payer details are required by the gateway (plan 4.4, D10) and sent nowhere else. */
+export interface CardChargeRequest {
+  amount: Money;
+  cardToken: string;
+  payer: { email: string; ipAddress: string };
+  sessionRef: string;
+  paymentId: string;
+  /** Where the gateway sends the customer back after 3-D Secure. */
+  callbackUrl: string;
+}
+
+/**
+ * What a charge request gave. An unknown outcome (timeout, 5xx, 409) is not a value: the gateway throws a retryable
+ * ProviderError and the charge may or may not exist.
+ */
+export type CardChargeOutcome =
+  | { kind: 'charged'; charge: GatewayCharge }
+  | { kind: 'challenge'; charge: GatewayCharge; redirectUrl?: string }
+  | { kind: 'declined'; code: CardDeclineCode; chargeToken?: string }
+  | { kind: 'refused'; code: 'provider_rejected' | 'provider_auth_failed' | 'provider_busy' };
+
+export interface GatewayRefund {
+  token: string;
+  status: ProviderRefundStatus;
+  amount: Money;
+  chargeToken: string;
+  createdAt: Date;
+  failureCode?: string;
+}
+
+/** An unknown outcome throws a retryable ProviderError; `rate_limited` means nothing was created (plan 4.4, A18). */
+export type GatewayRefundOutcome = { kind: 'created'; refund: GatewayRefund } | { kind: 'refused' } | { kind: 'rate_limited' };
+
+/**
+ * Task 4.4 (plan 4.4, section 4.2): the narrow interface of a gateway that charges card tokens from hosted fields. It is
+ * stateless like every adapter; the core's CardSessionProvider keeps the state before a card is submitted and exposes
+ * the result as a PaymentProvider. Its manifest never declares `preCardSession`.
+ */
+export interface CardTokenGateway {
+  readonly manifest: AdapterManifest;
+  /** Whether the gateway's refund events carry our refund id; if not, CardSessionProvider declares refundEventOurId. */
+  readonly refundEventsCarryOurId: boolean;
+  readonly signatureHeaders: readonly string[];
+  /** One authenticated read that moves nothing: bad credentials throw provider_auth_failed. */
+  probe(ctx: ProviderContext): Promise<void>;
+  testConnection(ctx: ProviderContext): Promise<{ ok: true } | { ok: false; code: string }>;
+  charge(ctx: ProviderContext, req: CardChargeRequest): Promise<CardChargeOutcome>;
+  /** The charge a 3-D Secure session token belongs to, once the customer is back; null if unknown. */
+  verifyAuthentication(ctx: ProviderContext, sessionToken: string): Promise<GatewayCharge | null>;
+  retrieveCharge(ctx: ProviderContext, token: string): Promise<GatewayCharge | null>;
+  /** Every charge whose metadata names this session (plan 4.4, section 6.3 step 5). */
+  chargesOfSession(ctx: ProviderContext, sessionRef: string): Promise<GatewayCharge[]>;
+  /** Pending refunds of a charge are part of `refunds`; `refunded` is the gateway's own total. */
+  refundState(ctx: ProviderContext, chargeToken: string): Promise<{ charge: GatewayCharge; refunded: bigint } | null>;
+  createRefund(ctx: ProviderContext, chargeToken: string, amount: Money): Promise<GatewayRefundOutcome>;
+  retrieveRefund(ctx: ProviderContext, token: string): Promise<GatewayRefund | null>;
+  listRefunds(ctx: ProviderContext, chargeToken: string): Promise<GatewayRefund[]>;
+  verifyWebhook(ctx: ProviderContext, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): WebhookVerification;
+  parseEvent(rawBody: Buffer): NormalisedEvent | null;
 }

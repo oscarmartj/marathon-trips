@@ -164,6 +164,9 @@ model ProviderAccount {
   routingRules             RoutingRule[]
   settlements              Settlement[]
   reconciliationRuns       ReconciliationRun[]
+  cardSessions             CardSession[]
+  cardSessionCharges       CardSessionCharge[]
+  cardRefundIntents        CardRefundIntent[]
   health                   ProviderAccountHealth?
 
   @@unique([id, mode])
@@ -1018,4 +1021,104 @@ model ReceiptNote {
   @@index([receiptId])
   @@index([bookingId])
   @@map("receipt_notes")
+}
+
+// ---- Task 4.4: card sessions of gateways with hosted fields on our page (plan docs/plans/4.4-au-card-gateway.md, 11) ----
+// Transition triggers, CHECKs and grants live in migration 0039. No email, IP or card data in any of these tables.
+
+/// The state of one payment before and around its single charge: the gateway has nothing until the card is submitted.
+model CardSession {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  /// @nopii our bearer reference (cs_ + 32 hex) in the card page's URL
+  ref               String          @unique
+  providerAccountId String          @db.Uuid
+  providerAccount   ProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the account's (trigger)
+  mode              PaymentMode
+  /// @nopii the attempt's idempotency key (booking:<id>:attempt:<n>)
+  idempotencyKey    String
+  /// No foreign key: contract subjects run on this table without payment rows (plan 4.4, section 11).
+  paymentId         String          @db.Uuid
+  bookingId         String          @db.Uuid
+  /// @nopii ISO 4217
+  currency          String          @db.Char(3)
+  amountMinor       BigInt
+  /// @nopii built by the core from WEB_ORIGIN and a fixed path
+  returnUrl         String
+  /// @nopii open, submitting, authenticating, succeeded, failed or cancelled (CHECK and trigger)
+  status            String          @default("open")
+  /// @nopii the gateway's charge reference, set once
+  chargeRef         String?
+  /// What the bound charge collected, when succeeded.
+  chargedMinor      BigInt?
+  /// @nopii closed list (CHECK)
+  failureCode       String?
+  /// @nopii set once, when the one charge request was sent
+  submittedAt       DateTime?       @db.Timestamptz(3)
+  verifyCalls       Int             @default(0)
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
+  /// @nopii the attempt's pendingExpiresAt + 30 min
+  expiresAt         DateTime        @db.Timestamptz(3)
+  updatedAt         DateTime        @default(now()) @db.Timestamptz(3)
+  version           Int             @default(1)
+  charges           CardSessionCharge[]
+
+  @@unique([providerAccountId, idempotencyKey])
+  @@unique([providerAccountId, chargeRef])
+  @@unique([id, providerAccountId, mode])
+  @@map("card_sessions")
+}
+
+/// Every charge the gateway reported under a session, the bound one included (plan 4.4, 18 M2). Append-only by trigger
+/// (migration 0039); it references its session, which is never deleted either (review m2).
+model CardSessionCharge {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  sessionId         String          @db.Uuid
+  providerAccountId String          @db.Uuid
+  /// @nopii the session's (the foreign key below includes it)
+  mode              PaymentMode
+  session           CardSession     @relation(fields: [sessionId, providerAccountId, mode], references: [id, providerAccountId, mode], onDelete: Restrict, onUpdate: Restrict)
+  providerAccount   ProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the gateway's charge reference
+  chargeRef         String          @unique
+  success           Boolean
+  amountMinor       BigInt
+  /// @nopii ISO 4217
+  currency          String          @db.Char(3)
+  seenAt            DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@index([sessionId])
+  @@map("card_session_charges")
+}
+
+/// A refund requested from a card-session gateway, standing in for its missing idempotency key and metadata.
+model CardRefundIntent {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  providerAccountId String          @db.Uuid
+  providerAccount   ProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the account's
+  mode              PaymentMode
+  /// @nopii our refund's idempotency key
+  idempotencyKey    String
+  /// No foreign key: contract subjects run on this table without refund rows.
+  refundId          String          @db.Uuid
+  /// @nopii the gateway's charge reference
+  chargeRef         String
+  amountMinor       BigInt
+  /// @nopii ISO 4217
+  currency          String          @db.Char(3)
+  /// @nopii new, submitting, bound or refused (CHECK and trigger)
+  status            String          @default("new")
+  /// @nopii the gateway's refund reference, set once
+  refundRef         String?
+  /// @nopii rate_limited or auth_failed: why a request went back to new
+  lastAnswer        String?
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime        @default(now()) @db.Timestamptz(3)
+  version           Int             @default(1)
+
+  @@unique([providerAccountId, idempotencyKey])
+  @@unique([providerAccountId, refundRef])
+  @@index([providerAccountId, chargeRef])
+  @@map("card_refund_intents")
 }

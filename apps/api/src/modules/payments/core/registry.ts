@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppError } from '../../../platform/errors/safe-error';
 import { CONTRACT_CLAUSES } from './contract-clauses';
+import { CardSessionProvider } from './card-sessions/provider';
 import type { AdapterManifest, PaymentProvider } from './provider';
 
 const HTTPS_ORIGIN = /^https:\/\/[a-z0-9.-]+$/;
@@ -39,8 +40,12 @@ export function manifestProblems(manifests: readonly AdapterManifest[], repoRoot
     if (seen.has(m.key)) problems.push(`${m.key}: duplicate adapter key`);
     seen.add(m.key);
     if (m.cardDataHandling !== 'hosted_only') problems.push(`${m.key}: card data must stay on the gateway's hosted page`);
-    if (!(m.testOnly ? TEST_ONLY_ORIGIN : HTTPS_ORIGIN).test(m.checkoutOrigin)) problems.push(`${m.key}: checkout origin must be an https origin`);
+    // Task 4.4: a card page of our own is served at WEB_ORIGIN, whose shape adapterOptions guards by environment (an
+    // inert https origin outside development, test and ci unless WEB_ORIGIN is a plain https origin).
+    const localPage = m.testOnly || m.capabilities.preCardSession === true;
+    if (!(localPage ? TEST_ONLY_ORIGIN : HTTPS_ORIGIN).test(m.checkoutOrigin)) problems.push(`${m.key}: checkout origin must be an https origin`);
     problems.push(...accountSetupProblems(m));
+    problems.push(...cardFieldsProblems(m));
     if (m.status === 'verified') {
       if (m.testOnly) problems.push(`${m.key}: a test-only adapter cannot be verified`);
       if (!m.evidence || !/^docs\/done\/[\w.-]+\.md$/.test(m.evidence)) problems.push(`${m.key}: verified without sandbox evidence (docs/done/…)`);
@@ -55,6 +60,29 @@ export function manifestProblems(manifests: readonly AdapterManifest[], repoRoot
 }
 
 const FIELD_KEY = /^[a-z][A-Za-z0-9]{1,40}$/;
+
+/**
+ * Task 4.4 (plan 4.4, sections 5.1, 5.2 and 18 M1): hosted card fields have https origins without paths and a script
+ * under one of them; `preCardSession` needs them; a browser-exposed key needs them too, and there is at most one;
+ * `refundEventOurId` only comes with `preCardSession`.
+ */
+export function cardFieldsProblems(m: AdapterManifest): string[] {
+  const problems: string[] = [];
+  const f = m.cardFields;
+  if (f) {
+    const origins = [...f.frameOrigins, ...f.challengeOrigins.test, ...f.challengeOrigins.live];
+    if (f.frameOrigins.length === 0) problems.push(`${m.key}: card fields need a frame origin`);
+    for (const o of origins) if (!HTTPS_ORIGIN.test(o)) problems.push(`${m.key}: card field origin ${o} must be an https origin`);
+    if (!f.frameOrigins.some((o) => f.scriptUrl.startsWith(`${o}/`))) problems.push(`${m.key}: card field script must be served from a frame origin`);
+  }
+  if (m.capabilities.preCardSession && !f) problems.push(`${m.key}: preCardSession needs card fields`);
+  if (m.capabilities.refundEventOurId && !m.capabilities.preCardSession) problems.push(`${m.key}: refundEventOurId needs preCardSession`);
+  const exposed = (m.account?.fields ?? []).filter((x) => x.exposure !== undefined);
+  if (exposed.length > 0 && !f) problems.push(`${m.key}: a browser-exposed key needs card fields`);
+  if (exposed.length > 1) problems.push(`${m.key}: at most one browser-exposed key`);
+  for (const x of exposed) if (x.exposure !== 'card_page') problems.push(`${m.key}: unknown exposure of ${x.key}`);
+  return problems;
+}
 
 /**
  * Whether `source` compiles and is anchored at both ends for every alternative: `^a|b$` is not (its `b$` alternative
@@ -119,6 +147,16 @@ export function accountSetupProblems(m: AdapterManifest): string[] {
   return problems;
 }
 
+/** A provider declares preCardSession exactly when it is a CardSessionProvider (plan 4.4, 18 M1). */
+export function preCardSessionProblems(a: PaymentProvider): string[] {
+  const declares = a.manifest.capabilities.preCardSession === true;
+  const isCardSession = a instanceof CardSessionProvider;
+  if (declares && !isCardSession) return [`${a.manifest.key}: preCardSession without CardSessionProvider`];
+  if (!declares && isCardSession) return [`${a.manifest.key}: CardSessionProvider without preCardSession`];
+  if (isCardSession && a.gateway.manifest.capabilities.preCardSession) return [`${a.manifest.key}: a gateway manifest declares preCardSession`];
+  return [];
+}
+
 /** The adapters the API can use, from the static list in adapters/index.ts, checked when the API starts. */
 export class PaymentAdapterRegistry {
   private readonly byKey = new Map<string, PaymentProvider>();
@@ -127,6 +165,8 @@ export class PaymentAdapterRegistry {
     const problems = manifestProblems(adapters.map((a) => a.manifest));
     // Task 4.5: an adapter that reads disputes must be able to ask the gateway for one.
     for (const a of adapters) if (a.manifest.capabilities.disputes === 'events' && typeof a.retrieveDispute !== 'function') problems.push(`${a.manifest.key}: declares disputes without retrieveDispute`);
+    // Task 4.4 (plan 4.4, 18 M1): the marker of a session with no gateway counterpart belongs to CardSessionProvider only.
+    for (const a of adapters) problems.push(...preCardSessionProblems(a));
     if (problems.length > 0) throw new AppError('payment_adapters_invalid', `Payment adapter manifests are invalid: ${problems.join('; ')}`);
     for (const a of adapters) this.byKey.set(a.manifest.key, a);
   }

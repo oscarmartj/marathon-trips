@@ -5,6 +5,7 @@ import { createAdapters } from '../../../src/modules/payments/adapters';
 import type { PaymentProvider } from '../../../src/modules/payments/core/provider';
 import type { ContractSubject, SubjectFactory } from '../payment-provider.contract';
 import { paypalLocalSubject, paypalSandboxSubject } from './paypal';
+import { pinLocalSubject, pinSandboxSubject } from './pin';
 import { simulatorLocalSubject } from './simulator';
 import { stripeLocalSubject, stripeSandboxSubject } from './stripe';
 
@@ -12,12 +13,14 @@ export const LOCAL_SUBJECTS: Readonly<Record<string, SubjectFactory>> = {
   simulator: simulatorLocalSubject,
   stripe: () => stripeLocalSubject(),
   paypal: () => paypalLocalSubject(),
+  pin_payments: () => pinLocalSubject(),
 };
 
 /** Stripe's sandbox (task 3.3) and PayPal's (task 4.3): unverified until Oscar's sandbox keys exist. */
 export const SANDBOX_SUBJECTS: Readonly<Record<string, SubjectFactory>> = {
   stripe: stripeSandboxSubject,
   paypal: paypalSandboxSubject,
+  pin_payments: pinSandboxSubject,
 };
 
 /** The adapters as the API builds them (the web origin only shapes the simulator's hosted page). */
