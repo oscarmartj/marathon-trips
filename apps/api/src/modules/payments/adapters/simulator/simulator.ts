@@ -80,6 +80,7 @@ class SimAccount {
   readonly refunds = new Map<string, SimRefund>();
   readonly refundsByKey = new Map<string, string>();
   readonly nextRefund: Array<'pending' | 'unavailable'> = [];
+  readonly nextRefundRetrieve: SimulatorRetrieveFault[] = [];
   readonly next: SimulatorOutcome[] = [];
   readonly nextCancel: Array<'unavailable'> = [];
   readonly nextRetrieve: SimulatorRetrieveFault[] = [];
@@ -277,9 +278,11 @@ export class SimulatorProvider implements PaymentProvider {
   async retrieveRefund(ctx: ProviderContext, by: RefundLookup): Promise<ProviderRefund | null> {
     checkCredentials(ctx);
     const acc = this.world.account(ctx.accountId);
-    const fault = acc.nextRetrieve.shift();
+    const fault = acc.nextRefundRetrieve.shift();
     if (fault === 'unavailable') throw new ProviderError('provider_unavailable', true);
     if (fault === 'auth_failed') throw new ProviderError('provider_auth_failed', false);
+    if (fault === 'not_found') return null;
+    if (fault === 'not_found_error') throw new ProviderError('provider_not_found', false);
     const ref = 'ref' in by ? by.ref : acc.refundsByKey.get(by.idempotencyKey);
     const r = ref ? acc.refunds.get(ref) : undefined;
     return r ? refundView(r) : null;
@@ -492,6 +495,11 @@ export class SimulatorControl {
   findRefund(accountId: string, ref: string): ProviderRefund | null {
     const r = this.world.account(accountId).refunds.get(ref);
     return r ? refundView(r) : null;
+  }
+
+  /** The next retrieveRefund fails this way (its own queue: retrievePayment has another). */
+  failNextRefundRetrieve(accountId: string, how: SimulatorRetrieveFault = 'unavailable'): void {
+    this.world.account(accountId).nextRefundRetrieve.push(how);
   }
 
   /** The next createRefund answers pending, or fails as unavailable. */

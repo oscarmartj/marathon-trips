@@ -6,7 +6,7 @@ import { bossDb } from '../../../platform/database/boss-db';
 import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
 import { hmacHex, sha256Hex } from '../../../platform/crypto/hmac';
-import { safeError } from '../../../platform/errors/safe-error';
+import { AppError, safeError } from '../../../platform/errors/safe-error';
 import { ApiError, notFound } from '../../../platform/http/api-error';
 import { JobsService } from '../../../platform/jobs/jobs.service';
 import { QUEUES } from '../../../platform/jobs/queues';
@@ -191,9 +191,14 @@ export class PaymentWebhooksService {
   private async processRefund(ev: { id: string; providerAccountId: string }, said: ProviderRefund): Promise<ProcessOutcome> {
     const accountId = ev.providerAccountId;
     const remotePayment = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { ref: said.paymentRef }));
-    const remote = said.status === 'failed' || said.status === 'cancelled'
-      ? (await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrieveRefund(ctx, { ref: said.ref }))) ?? said
-      : said;
+    let remote = said;
+    if (said.status === 'failed' || said.status === 'cancelled') {
+      // A failure is believed only when the gateway confirms it (plan 0.1, 6.2): if it does not know the refund, the event
+      // stays failed and is retried (fail closed), never applied on its own word.
+      const confirmed = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrieveRefund(ctx, { ref: said.ref }));
+      if (!confirmed) throw new AppError('refund_not_confirmed_by_gateway', 'The gateway does not confirm this refund');
+      remote = confirmed;
+    }
     const match = remotePayment ? await this.matchPayment(accountId, remotePayment) : null;
     if (!match || !remotePayment) return this.unknownPayment(ev.id);
     // Refunds of this payment still open here: their real state first, so a stale one never blocks a real refund.
@@ -223,6 +228,11 @@ export class PaymentWebhooksService {
         await this.machine.apply(tx, b, p, 'succeeded', { source: 'webhook' });
       }
       if (p.status !== 'succeeded') return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_of_uncollected_payment');
+      // The refunded object must be this payment's own (as for payment events): another session carrying our id is not it.
+      if (p.providerPaymentRef !== remotePayment.ref) {
+        await this.attempts.mismatchTask(tx, p, b.reference);
+        return this.ignoreIn(tx, ev.id, 'reference_mismatch');
+      }
       for (const f of refreshed) {
         const r = await lockRefund(tx, p, f.id);
         if (r) await this.refunds.apply(tx, b, p, r, f.event, { source: 'webhook', failureCode: f.failureCode });

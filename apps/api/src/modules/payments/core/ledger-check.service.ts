@@ -8,6 +8,8 @@ import { QUEUES } from '../../../platform/jobs/queues';
 import { allocate } from './allocation';
 import { ProviderGateway } from './gateway';
 import { LEDGER_ACCOUNTS } from './ledger';
+import { PAYMENT_SETTINGS } from './settings';
+import { SettingsService } from '../../../platform/flags/flags.service';
 
 export type LedgerFindingKind = 'missing_payment_posting' | 'missing_refund_posting' | 'booking_total' | 'booking_split' | 'clearing' | 'empty_transaction';
 
@@ -17,8 +19,15 @@ export interface LedgerFinding {
   entityId: string;
 }
 
-/** Bookings examined per run (oldest money first); the rest wait for the next day. */
-const MAX_BOOKINGS = 5000;
+/** Bookings examined per run, in id order from where the last run stopped (a cursor that wraps round). */
+export const MAX_BOOKINGS = 5000;
+const LEDGER_CHECK_CURSOR = PAYMENT_SETTINGS.ledgerCheckCursor;
+
+export interface LedgerCheckPage {
+  findings: LedgerFinding[];
+  /** The last booking examined when the page was full (the next run continues after it); null when it reached the end. */
+  next: string | null;
+}
 
 /**
  * The internal ledger check (plan 3.3, section 4), daily at 03:40 Brisbane time. It reads everything in one REPEATABLE
@@ -35,6 +44,7 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -44,9 +54,16 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
     await this.jobs.schedule(QUEUES.paymentsLedger, '40 17 * * *');
   }
 
-  /** Runs the check and opens a task per finding. `bookingIds` narrows it (tests). */
-  async run(opts: { bookingIds?: string[] } = {}): Promise<LedgerFinding[]> {
-    const findings = await this.check(opts);
+  /**
+   * Runs the check and opens a task per finding. Bookings are taken in id order from the stored cursor, MAX_BOOKINGS at a
+   * time, so with many bookings every one is checked in turn. `bookingIds` and `limit` narrow it (tests).
+   */
+  async run(opts: { bookingIds?: string[]; limit?: number } = {}): Promise<LedgerFinding[]> {
+    // A run narrowed to some bookings (tests) neither reads nor moves the cursor.
+    const narrowed = !!opts.bookingIds;
+    const after = narrowed ? '' : await this.settings.get<string>(LEDGER_CHECK_CURSOR.key, LEDGER_CHECK_CURSOR.fallback);
+    const { findings, next } = await this.checkPage({ ...opts, after: after || null });
+    if (!narrowed) await this.settings.set(LEDGER_CHECK_CURSOR.key, next ?? '');
     for (const f of findings) {
       await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
         title: `Payment ledger check: ${f.kind.replace(/_/g, ' ')}`,
@@ -58,10 +75,17 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
     return findings;
   }
 
-  /** The findings, read in one consistent snapshot. */
-  check(opts: { bookingIds?: string[] } = {}): Promise<LedgerFinding[]> {
+  /** The findings for the first page of bookings (tests narrow it to their own bookings). */
+  async check(opts: { bookingIds?: string[] } = {}): Promise<LedgerFinding[]> {
+    return (await this.checkPage(opts)).findings;
+  }
+
+  /** One page of the check, read in one consistent snapshot: bookings after `after`, at most `limit`. */
+  checkPage(opts: { bookingIds?: string[]; after?: string | null; limit?: number } = {}): Promise<LedgerCheckPage> {
     const mode = this.gateway.mode;
     const only = opts.bookingIds ?? null;
+    const after = opts.after ?? null;
+    const limit = opts.limit ?? MAX_BOOKINGS;
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET TRANSACTION READ ONLY`;
       const out: LedgerFinding[] = [];
@@ -88,13 +112,14 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
           WHERE (EXISTS (SELECT 1 FROM payments p WHERE p."bookingId" = b.id AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded')
                  OR EXISTS (SELECT 1 FROM ledger_entries e WHERE e."bookingId" = b.id AND e.mode = ${mode}::"PaymentMode"))
             AND (${only}::uuid[] IS NULL OR b.id = ANY(${only}::uuid[]))
-          ORDER BY b.id LIMIT ${MAX_BOOKINGS}
+            AND (${after}::uuid IS NULL OR b.id > ${after}::uuid)
+          ORDER BY b.id LIMIT ${limit}
         )
         SELECT m.id::text AS id, m.currency, m.net,
           COALESCE(-(SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."bookingId" = m.id AND e.mode = ${mode}::"PaymentMode" AND e.currency = m.currency AND e."accountCode" = ${LEDGER_ACCOUNTS.funds}), 0)::bigint AS funds,
           COALESCE(-(SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."bookingId" = m.id AND e.mode = ${mode}::"PaymentMode" AND e.currency = m.currency AND e."accountCode" = ${LEDGER_ACCOUNTS.overpayments}), 0)::bigint AS over,
           COALESCE((SELECT SUM(e."amountMinor") FROM ledger_entries e WHERE e."bookingId" = m.id AND e.mode = ${mode}::"PaymentMode" AND e.currency = m.currency AND e."accountCode" = ${LEDGER_ACCOUNTS.receivable}), 0)::bigint AS receivable
-        FROM money m`;
+        FROM money m ORDER BY m.id`;
       for (const b of bookings) {
         // The customer money the ledger holds for the booking is what was collected less refunded (plan 0.1, P8).
         if (b.funds + b.over - b.receivable !== b.net) {
@@ -119,7 +144,7 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
           SELECT t.id::text AS id FROM ledger_transactions t WHERE NOT EXISTS (SELECT 1 FROM ledger_entries e WHERE e."transactionId" = t.id) ORDER BY t.id LIMIT 100`;
         for (const r of empty) out.push({ kind: 'empty_transaction', entityType: 'LedgerTransaction', entityId: r.id });
       }
-      return out;
+      return { findings: out, next: bookings.length === limit ? bookings[bookings.length - 1]!.id : null };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 120_000, maxWait: 10_000 });
   }
 }

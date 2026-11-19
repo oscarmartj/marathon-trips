@@ -11,6 +11,8 @@ export const PAYMENT_SETTINGS = {
     schema: z.array(z.number().int().min(0).max(90)).max(5).refine((a) => new Set(a).size === a.length, 'Each offset can appear once'),
     description: 'Days before a balance or instalment falls due on which the customer gets an automatic reminder (an empty list turns reminders off)',
   },
+  // Task 3.3: where the daily ledger check continues from (a booking id, or empty for the first). Kept by the check.
+  ledgerCheckCursor: { key: 'paymentLedgerCheckCursor', fallback: '', schema: z.union([z.literal(''), z.string().uuid()]), description: 'Internal: the booking the daily ledger check continues from (the check keeps it; no need to change it)' },
 } as const;
 
 export function definePaymentSettings(settings: SettingsService): void {

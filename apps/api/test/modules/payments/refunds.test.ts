@@ -7,6 +7,8 @@ import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/le
 import { PaymentRemindersService } from '../../../src/modules/payments/core/reminders.service';
 import { PaymentWebhooksService } from '../../../src/modules/payments/core/webhooks.service';
 import { coverageLostTaskRef } from '../../../src/modules/payments/core/refunds.service';
+import { ErasureService } from '../../../src/modules/privacy';
+import { SYSTEM_ACTOR } from '../../../src/platform/audit/audit.service';
 import { TestApp, makeApp } from '../../support/auth';
 import { closeCatalogue } from '../../support/catalogue';
 import { cleanBookingEvents } from '../../support/bookings';
@@ -234,5 +236,101 @@ describe('refund events that are not posted (plan 3.3, 3.3 and 12.6)', () => {
     expect((await t.prisma.webhookEvent.findUniqueOrThrow({ where: { id: ev.id } })).status).toBe('failed');
     expect(await t.app.get(PaymentWebhooksService).process(ev.id)).toBe('processed');
     expect(await t.prisma.refund.count({ where: { bookingId } })).toBe(1);
+  });
+});
+
+describe('erasure and refunds (tasks 5.5 and 6.3, plan 3.3, 3.1)', () => {
+  /** Sets a booking's status as the tables' owner, with the bookings triggers off for that one transaction (as 5.5's tests). */
+  async function forceStatus(bookingId: string, status: 'completed'): Promise<void> {
+    const db = await connect('owner');
+    try {
+      await db.query('BEGIN');
+      await db.query('ALTER TABLE bookings DISABLE TRIGGER USER');
+      await db.query(`UPDATE bookings SET status = $2::"BookingStatus" WHERE id = $1::uuid`, [bookingId, status]);
+      await db.query('ALTER TABLE bookings ENABLE TRIGGER USER');
+      await db.query('COMMIT');
+    } catch (err) {
+      await db.query('ROLLBACK');
+      throw err;
+    } finally {
+      await db.end();
+    }
+  }
+  const reason = (customerId: string) => t.app.get(ErasureService).blockedBy(t.prisma, customerId);
+  const customerOf = async (bookingId: string) => (await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).customerId;
+
+  it('pending_refund_blocks_erasure, then erasure_keeps_ledger_and_clears_refund_reason once it settles', async () => {
+    const keepC = c;
+    c = await payingCustomer(t); // only this booking can block the erasure
+    try {
+      const { bookingId, p } = await paidDeposit();
+      const r = sim.gatewayRefund(acc.id, p.providerPaymentRef!, 1000n, 'pending');
+      await deliver(t, acc, refundEvent(r.ref));
+      await forceStatus(bookingId, 'completed');
+      const customerId = await customerOf(bookingId);
+      // Only the refund in progress blocks it now (the booking is closed and collected no more than its total).
+      expect(await reason(customerId)).toBe('live_payment');
+      await expect(t.app.get(ErasureService).erase(customerId, SYSTEM_ACTOR)).rejects.toMatchObject({ code: 'erasure_rejected_with_active_trip' });
+      sim.settleRefund(acc.id, r.ref, 'succeeded');
+      await deliver(t, acc, refundEvent(r.ref));
+      expect(await reason(customerId)).toBeNull();
+      const ledgerBefore = await ledgerOf(t, bookingId);
+      expect((await t.app.get(ErasureService).erase(customerId, SYSTEM_ACTOR)).status).toBe('completed');
+      // The ledger is kept as it was; the refund keeps its money facts and has no reason left.
+      expect(await ledgerOf(t, bookingId)).toEqual(ledgerBefore);
+      expect(await t.prisma.refund.findFirstOrThrow({ where: { bookingId } })).toMatchObject({ status: 'succeeded', amountMinor: 1000n, reason: null });
+    } finally {
+      c = keepC;
+    }
+  });
+
+  it('a credit is what was collected net of refunds: a dashboard refund of the overpaid part lets erasure go ahead', async () => {
+    const keepC = c;
+    c = await payingCustomer(t);
+    try {
+      const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+      expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
+      const first = await t.prisma.payment.findFirstOrThrow({ where: { bookingId } });
+      await deliver(t, acc, await eventFor(t, acc, first.id, { status: 'failed' }));
+      expect((await c.pay(reference, { method: 'card' })).status).toBe(201);
+      const second = (await t.prisma.payment.findMany({ where: { bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
+      sim.settle(acc.id, second.providerPaymentRef!, 'succeeded');
+      await deliver(t, acc, await eventFor(t, acc, second.id));
+      sim.settle(acc.id, first.providerPaymentRef!, 'succeeded');
+      await deliver(t, acc, await eventFor(t, acc, first.id));
+      const total = (await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).totalMinor;
+      const over = first.amountMinor + second.amountMinor - total;
+      expect(over).toBeGreaterThan(0n);
+      await forceStatus(bookingId, 'completed');
+      const customerId = await customerOf(bookingId);
+      expect(await reason(customerId)).toBe('refund_may_be_due');
+      // Part of the credit back: still owed.
+      const part = sim.gatewayRefund(acc.id, first.providerPaymentRef!, over - 1n);
+      await deliver(t, acc, refundEvent(part.ref));
+      expect(await reason(customerId)).toBe('refund_may_be_due');
+      // The rest: nothing is owed any more.
+      const rest = sim.gatewayRefund(acc.id, first.providerPaymentRef!, 1n);
+      await deliver(t, acc, refundEvent(rest.ref));
+      expect(await reason(customerId)).toBeNull();
+    } finally {
+      c = keepC;
+    }
+  });
+});
+
+describe('refund failures are believed only when the gateway confirms them (plan 0.1, 6.2)', () => {
+  it('a "failed" event for a refund the gateway does not know leaves the event failed and the refund as it was', async () => {
+    const { bookingId, p } = await paidDeposit();
+    const r = sim.gatewayRefund(acc.id, p.providerPaymentRef!, 800n);
+    await deliver(t, acc, refundEvent(r.ref));
+    const w = refundEvent(r.ref, { status: 'failed' });
+    expect((await sendWebhook(t, acc, w)).status).toBe(200);
+    const ev = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: acc.id, providerEventId: w.eventId } } });
+    // The gateway answers "no such refund" to the confirmation.
+    sim.failNextRefundRetrieve(acc.id, 'not_found');
+    await expect(t.app.get(PaymentWebhooksService).process(ev.id)).rejects.toBeTruthy();
+    expect((await t.prisma.webhookEvent.findUniqueOrThrow({ where: { id: ev.id } })).status).toBe('failed');
+    expect((await t.prisma.refund.findFirstOrThrow({ where: { bookingId } })).status).toBe('succeeded');
+    expect(await ledgerOf(t, bookingId)).toHaveLength(2);
   });
 });

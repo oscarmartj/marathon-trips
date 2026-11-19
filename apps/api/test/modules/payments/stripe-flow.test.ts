@@ -9,7 +9,7 @@ import { ProviderAccountsService } from '../../../src/modules/payments';
 import { PaymentWebhooksService } from '../../../src/modules/payments/core/webhooks.service';
 import { PaymentAdapterRegistry } from '../../../src/modules/payments/core/registry';
 import { ProviderError } from '../../../src/modules/payments/core/provider';
-import type { PaymentProvider } from '../../../src/modules/payments/core/provider';
+import type { CreatePaymentInput, PaymentProvider } from '../../../src/modules/payments/core/provider';
 import { TestApp, makeApp } from '../../support/auth';
 import { closeCatalogue } from '../../support/catalogue';
 import { cleanBookingEvents } from '../../support/bookings';
@@ -36,6 +36,8 @@ const transport: StripeTransport = async (req) => {
   return res;
 };
 let registered: PaymentProvider | undefined;
+/** Every createPayment input the adapter received, for the createdAt check. */
+const creates: CreatePaymentInput[] = [];
 interface StripeAccount extends SimAccount { key: string }
 let acc: StripeAccount;
 
@@ -50,7 +52,10 @@ beforeAll(async () => {
   t = await makeApp();
   const byKey = (t.app.get(PaymentAdapterRegistry) as unknown as { byKey: Map<string, PaymentProvider> }).byKey;
   registered = byKey.get('stripe');
-  byKey.set('stripe', new StripeProvider({ transport, now: () => fake.now() }));
+  const stripe = new StripeProvider({ transport, now: () => fake.now() });
+  const create = stripe.createPayment.bind(stripe);
+  stripe.createPayment = (ctx, input) => (creates.push(input), create(ctx, input));
+  byKey.set('stripe', stripe);
   admin = await paymentsStaff(t);
   acc = await stripeAccount();
   await onlyAccount(t, acc.id);
@@ -171,5 +176,41 @@ describe('Stripe checkout through the API (plan 3.3, 5)', () => {
     expect(await deliverTo(acc, event(acc, r2.id))).toBe('processed');
     expect((await t.prisma.refund.findFirstOrThrow({ where: { providerRefundRef: r2.id } })).status).toBe('failed');
     expect(await t.prisma.ledgerTransaction.count({ where: { bookingId } })).toBe(2);
+  });
+
+  it('create_retry_uses_row_createdAt (through the API): the retry of a lost create sends the attempt row\'s createdAt again', async () => {
+    const { reference, bookingId } = await approvedBooking(t, admin, await pricedWorld(admin), c);
+    creates.length = 0;
+    loseNextCreateAnswer = true;
+    expect((await c.pay(reference, { method: 'card' })).status).toBe(503);
+    await new Promise((r) => setTimeout(r, 1100));
+    // The customer tries again: the same attempt is resumed and created again under its key.
+    const again = await c.pay(reference, { method: 'card' });
+    expect(again.status).toBe(201);
+    const p = await t.prisma.payment.findFirstOrThrow({ where: { bookingId } });
+    expect(await t.prisma.payment.count({ where: { bookingId } })).toBe(1);
+    const mine = creates.filter((i) => i.metadata.paymentId === p.id);
+    expect(mine).toHaveLength(2);
+    for (const i of mine) expect(i.createdAt.getTime()).toBe(p.createdAt.getTime());
+    expect(fake.account(acc.key).sessions.size).toBeGreaterThan(0);
+    expect([...fake.account(acc.key).sessions.values()].filter((x) => x.metadata.mt_payment_id === p.id)).toHaveLength(1);
+  });
+
+  it('a refund of another session that carries our payment id is not posted against our payment (reference_mismatch)', async () => {
+    const { bookingId } = await checkout();
+    const p = await t.prisma.payment.findFirstOrThrow({ where: { bookingId } });
+    fake.pay(acc.key, p.providerPaymentRef!);
+    expect(await deliverTo(acc, event(acc, p.providerPaymentRef!))).toBe('processed');
+    const orig = fake.account(acc.key).sessions.get(p.providerPaymentRef!)!;
+    const twin = { ...orig, id: `cs_test_${randomBytes(8).toString('hex')}`, status: 'open' as const, payment_status: 'unpaid' as const, payment_intent: null };
+    fake.account(acc.key).sessions.set(twin.id, twin);
+    fake.pay(acc.key, twin.id);
+    const r = fake.dashboardRefund(acc.key, twin.id, 500);
+    const w = event(acc, r.id);
+    expect(await deliverTo(acc, w)).toBe('ignored');
+    const ev = await t.prisma.webhookEvent.findUniqueOrThrow({ where: { providerAccountId_providerEventId: { providerAccountId: acc.id, providerEventId: w.eventId } } });
+    expect(ev.errorCode).toBe('reference_mismatch');
+    expect(await t.prisma.refund.count({ where: { bookingId } })).toBe(0);
+    expect(await t.prisma.ledgerTransaction.count({ where: { bookingId } })).toBe(1);
   });
 });

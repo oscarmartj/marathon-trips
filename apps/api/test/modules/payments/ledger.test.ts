@@ -106,7 +106,7 @@ describe('ledger rules in the database (plan 3.3, 1.1 and 12.2)', () => {
   it('unbalanced_transaction_rejected_at_commit, single_entry_transaction_rejected, transaction_without_entries_rejected', async () => {
     const { bookingId } = await postedBooking();
     const db = await connect('app');
-    await db.query(`INSERT INTO ledger_accounts (id, code, kind, currency, mode) VALUES (gen_random_uuid(), 'customer_funds', 'liability', 'AUD', 'test'), (gen_random_uuid(), 'customer_overpayments', 'liability', 'AUD', 'test') ON CONFLICT DO NOTHING`);
+    await db.query(`INSERT INTO ledger_accounts (id, code, kind, currency, mode) VALUES (gen_random_uuid(), 'customer_funds', 'liability', 'AUD', 'test'), (gen_random_uuid(), 'customer_overpayments', 'liability', 'AUD', 'test'), (gen_random_uuid(), 'customer_overpayments', 'liability', 'NZD', 'test') ON CONFLICT DO NOTHING`);
     const newTx = (key: string) => [`INSERT INTO ledger_transactions (id, kind, mode, "bookingId", "idempotencyKey", description, "contentSha256") VALUES ($1::uuid, 'adjustment', 'test', $2::uuid, $3, 'test', repeat('a', 64))`, [key, bookingId, `test:${randomUUID()}`]] as [string, unknown[]];
     const entry = (txId: string, code: string, amount: number) => [`INSERT INTO ledger_entries (id, "transactionId", mode, "accountCode", currency, "amountMinor", "bookingId") VALUES (gen_random_uuid(), $1::uuid, 'test', $2, 'AUD', $3, $4::uuid)`, [txId, code, amount, bookingId]] as [string, unknown[]];
     try {
@@ -115,6 +115,8 @@ describe('ledger rules in the database (plan 3.3, 1.1 and 12.2)', () => {
         ['single entry', (id: string) => [entry(id, 'customer_funds', 500)]],
         ['no entries', () => []],
         ['zero entry', (id: string) => [entry(id, 'customer_funds', 0), entry(id, 'customer_overpayments', 0)]],
+        // Balanced in total but not per currency: +100 AUD, −100 NZD.
+        ['other currency', (id: string) => [entry(id, 'customer_funds', 100), [`INSERT INTO ledger_entries (id, "transactionId", mode, "accountCode", currency, "amountMinor", "bookingId") VALUES (gen_random_uuid(), $1::uuid, 'test', 'customer_overpayments', 'NZD', -100, $2::uuid)`, [id, bookingId]] as [string, unknown[]]]],
       ] as const) {
         const id = randomUUID();
         const [sql, params] = newTx(id);
@@ -158,6 +160,20 @@ describe('ledger rules in the database (plan 3.3, 1.1 and 12.2)', () => {
       // An entry with another booking than its transaction.
       x = ins({ paymentId: null });
       expect(await txError(db, [x.sql, entry(x.id, 'customer_funds', 100, 'test', 'AUD', b.bookingId), entry(x.id, 'customer_overpayments', -100, 'test', 'AUD', b.bookingId)]), 'entry booking').toBe('23514');
+    } finally {
+      await db.end();
+    }
+  });
+
+  it('app_refund_rejected_by_check_until_4_5: only refunds made at the gateway can be stored before task 4.5', async () => {
+    const { p } = await postedBooking();
+    const db = await connect('app');
+    try {
+      const insert = (origin: string, purpose: string | null) => [`INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, purpose, status, "idempotencyKey", "providerRefundRef", "updatedAt")
+        VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'test', 'AUD', 100, $4::"RefundOrigin", $5::"RefundPurpose", 'requested', $6, NULL, now())`, [p.id, p.bookingId, p.providerAccountId, origin, purpose, `refund:test:${randomUUID()}`]] as [string, unknown[]];
+      expect(await txError(db, [insert('app', 'overpayment_return')])).toBe('23514');
+      // The same row as an external refund is accepted only with a gateway reference.
+      expect(await txError(db, [insert('external', null)])).toBe('23514');
     } finally {
       await db.end();
     }
@@ -251,7 +267,58 @@ describe('ledger_postings_table (plan 3.3, 1.4)', () => {
   });
 });
 
+describe('postings under concurrency (plan 3.3, 1.2)', () => {
+  it('concurrent_payment_and_amendment_post_consistently: a webhook and a change of the same booking at once leave a consistent ledger', async () => {
+    const world = await amendWorld(admin);
+    const b = await requestIn(t, c.cookie, world, { rooms: [{ roomOptionId: world.doubleId, travellers: [runner(world), supporter] }] });
+    expect((await admin.post(`/admin/bookings/${b.bookingId}/approve`, { version: (await row(b.bookingId)).version })).status).toBe(200);
+    await acceptCurrentTerms(t, c, b.reference);
+    await payNext(b.reference, b.bookingId);
+    // A balance attempt fails; its money arrives late (no attempt is live, so a change is allowed) while staff lower the total.
+    expect((await c.pay(b.reference, { method: 'card' })).status).toBe(201);
+    const bal = (await t.prisma.payment.findMany({ where: { bookingId: b.bookingId }, orderBy: { attemptNumber: 'desc' } }))[0]!;
+    expect((await deliver(t, acc, await eventFor(t, acc, bal.id, { status: 'failed' }))).outcome).toBe('processed');
+    sim.settle(acc.id, bal.providerPaymentRef!, 'succeeded');
+    const body = keep(world, 1, { rooms: [{ roomOptionId: world.doubleId, travellers: [{ keepSlot: 1 }] }], reasonCode: 'correction' });
+    const preview = await admin.post(`/admin/bookings/${b.bookingId}/amendments/preview`, body);
+    expect(preview.status).toBe(200);
+    const late = await eventFor(t, acc, bal.id);
+    const [delivered, amended] = await Promise.all([
+      deliver(t, acc, late),
+      admin.post(`/admin/bookings/${b.bookingId}/amendments`, { ...body, previewDigest: preview.body.previewDigest }).set('Idempotency-Key', randomUUID()),
+    ]);
+    expect(delivered.outcome).toBe('processed');
+    // The change may lose to the money (its preview no longer matches); whichever order won, the ledger agrees with it.
+    expect([201, 409]).toContain(amended.status);
+    expect(await check(b.bookingId)).toEqual([]);
+    const collected = (await t.prisma.payment.aggregate({ where: { bookingId: b.bookingId, status: 'succeeded' }, _sum: { amountMinor: true } }))._sum.amountMinor!;
+    const bal2 = await balancesOf(t, b.bookingId);
+    expect(bal2.fundsMinor + bal2.overpaymentsMinor).toBe(collected);
+  });
+});
+
 describe('ledger check (plan 3.3, 4)', () => {
+  it('ledger_check_rotates_through_bookings: pages continue after the last booking checked and wrap round', async () => {
+    const x = await postedBooking();
+    const y = await postedBooking();
+    const ids = [x.bookingId, y.bookingId].sort();
+    const svc = t.app.get(PaymentLedgerCheckService);
+    const first = await svc.checkPage({ bookingIds: ids, limit: 1 });
+    expect(first.next).toBe(ids[0]);
+    const second = await svc.checkPage({ bookingIds: ids, after: first.next, limit: 1 });
+    expect(second.next).toBe(ids[1]);
+    expect((await svc.checkPage({ bookingIds: ids, after: second.next, limit: 1 })).next).toBeNull();
+    // The daily run keeps its cursor between runs and wraps round when a page is not full.
+    await svc.run({ limit: 1 });
+    const c1 = await t.prisma.setting.findUnique({ where: { key: 'paymentLedgerCheckCursor' } });
+    await svc.run({ limit: 1 });
+    const c2 = await t.prisma.setting.findUnique({ where: { key: 'paymentLedgerCheckCursor' } });
+    expect(typeof c1?.value).toBe('string');
+    expect(c2?.value).not.toEqual(c1?.value);
+    await svc.run({ limit: 100_000 });
+    expect((await t.prisma.setting.findUnique({ where: { key: 'paymentLedgerCheckCursor' } }))?.value).toBe('');
+  });
+
   it('ledger_check_flags_injected_difference: a balanced adjustment by the owner is found, and a task opened once', async () => {
     const { bookingId } = await postedBooking();
     expect(await check(bookingId)).toEqual([]);
