@@ -357,7 +357,8 @@ CREATE CONSTRAINT TRIGGER ledger_entries_balanced AFTER INSERT ON "ledger_entrie
 REVOKE UPDATE, DELETE, TRUNCATE ON "ledger_accounts", "ledger_transactions", "ledger_entries" FROM mt_app;
 REVOKE DELETE, TRUNCATE ON "refunds" FROM mt_app;
 
--- ---- Erasure (task 5.5): a refund still in progress blocks it like an unfinished payment (plan 3.3, 3.1) ----
+-- ---- Erasure (tasks 5.5 and 6.3): a refund still in progress blocks it like an unfinished payment, and a credit is what
+-- was collected net of refunds (plan 3.3, 3.1). Replaces the 0029 version, which it keeps otherwise. ----
 CREATE OR REPLACE FUNCTION public.privacy_active_trip_reason(p_customer uuid) RETURNS text
   LANGUAGE sql
   STABLE
@@ -374,14 +375,17 @@ AS $$
       OR EXISTS (SELECT 1 FROM public.refunds r JOIN public.payments p ON p.id = r."paymentId"
                   WHERE (p."payerCustomerId" = p_customer OR r."bookingId" IN (SELECT b.id FROM public.bookings b WHERE b."customerId" = p_customer))
                     AND r.status IN ('requested', 'pending')) THEN 'live_payment'
-    -- Money collected on a closed booking may be owed back: the customer's own bookings, and any booking where the
-    -- customer is the payer (review m5).
     WHEN EXISTS (SELECT 1 FROM public.bookings b JOIN public.payments p ON p."bookingId" = b.id
                   WHERE (b."customerId" = p_customer OR p."payerCustomerId" = p_customer)
                     AND b.status IN ('cancelled', 'declined', 'expired') AND p.status = 'succeeded') THEN 'refund_may_be_due'
+    -- Task 6.3: paid beyond the booking's (changed) total, whatever its status: a credit is pending (net of refunds, 3.3).
+    WHEN EXISTS (SELECT 1 FROM public.bookings b
+                  WHERE (b."customerId" = p_customer OR EXISTS (SELECT 1 FROM public.payments q WHERE q."bookingId" = b.id AND q."payerCustomerId" = p_customer))
+                    AND (SELECT COALESCE(sum(p."amountMinor"), 0) FROM public.payments p WHERE p."bookingId" = b.id AND p.status = 'succeeded')
+                        - (SELECT COALESCE(sum(r."amountMinor"), 0) FROM public.refunds r WHERE r."bookingId" = b.id AND r.status = 'succeeded') > b."totalMinor") THEN 'refund_may_be_due'
   END
 $$;
-GRANT SELECT (id, "paymentId", "bookingId", status) ON "refunds" TO mt_privacy;
+GRANT SELECT (id, "paymentId", "bookingId", status, "amountMinor") ON "refunds" TO mt_privacy;
 
 -- Queue (pg-boss), as declared in src/platform/jobs/queues.ts: the daily ledger check.
 SELECT pgboss.create_queue('payments.ledger', '{"policy":"short","retryLimit":1,"retryDelay":300,"expireInSeconds":1800,"deleteAfterSeconds":604800}'::jsonb);

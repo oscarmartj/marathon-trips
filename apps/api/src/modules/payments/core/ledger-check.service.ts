@@ -63,7 +63,7 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
     const mode = this.gateway.mode;
     const only = opts.bookingIds ?? null;
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe('SET TRANSACTION READ ONLY');
+      await tx.$executeRaw`SET TRANSACTION READ ONLY`;
       const out: LedgerFinding[] = [];
       const missingPayments = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT p.id::text AS id FROM payments p

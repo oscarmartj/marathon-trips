@@ -59,7 +59,10 @@ export const PAYMENT_ENTITIES: EntityDef[] = [
     entityType: 'LedgerTransaction', model: 'LedgerTransaction', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
     handlers: { export: async () => [], anonymise: async () => undefined },
   },
-  { entityType: 'LedgerEntry', model: 'LedgerEntry' },
+  {
+    entityType: 'LedgerEntry', model: 'LedgerEntry', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: { export: async () => [], anonymise: async () => undefined },
+  },
   { entityType: 'LedgerAccount', model: 'LedgerAccount' },
   {
     // Task 5.1: a link holds no personal data, but it is a way into the customer's booking: erasure revokes it and drops
