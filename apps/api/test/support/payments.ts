@@ -112,7 +112,7 @@ export async function acceptCurrentTerms(t: TestApp, c: { cookie: string }, refe
   if (!(await t.prisma.contentPage.findUnique({ where: { locale_slug: { locale: 'en-AU', slug: 'terms' } }, select: { status: true } }))?.status) await ensureTerms(t);
   const view = await t.http().get(`/booking-requests/${reference}/checkout-terms`).set('Cookie', c.cookie);
   if (view.status !== 200) throw new Error(`terms failed: ${view.status} ${JSON.stringify(view.body)}`);
-  const ok = await t.http().post(`/booking-requests/${reference}/terms-acceptance`).set(STATE_HEADERS).set('Cookie', c.cookie).send({ version: view.body.version, digest: view.body.digest });
+  const ok = await t.http().post(`/booking-requests/${reference}/terms-acceptance`).set(STATE_HEADERS).set('Cookie', c.cookie).send({ version: view.body.version, digest: view.body.digest, cancellationPolicyDigest: view.body.cancellationPolicy?.digest ?? null });
   if (ok.status !== 200) throw new Error(`accept failed: ${ok.status} ${JSON.stringify(ok.body)}`);
 }
 

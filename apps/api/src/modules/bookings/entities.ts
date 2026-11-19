@@ -60,6 +60,24 @@ export const BOOKING_ENTITIES: EntityDef[] = [
       anonymise: async () => undefined,
     },
   },
+  {
+    // Task 6.4: a cancellation holds no personal data (codes, dates and amounts); export lists it, erasure leaves it.
+    entityType: 'Cancellation', model: 'Cancellation', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: {
+      export: (tx: Tx, customerId) => tx.cancellation.findMany({
+        where: { booking: { customerId } },
+        select: { bookingId: true, requestedBy: true, basis: true, businessDate: true, daysBeforeDeparture: true, policyPenaltyMinor: true, penaltyMinor: true, waivedMinor: true, refundableMinor: true, currency: true, createdAt: true },
+      }),
+      anonymise: async () => undefined,
+    },
+  },
+  {
+    entityType: 'CancellationRequest', model: 'CancellationRequest', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: {
+      export: (tx: Tx, customerId) => tx.cancellationRequest.findMany({ where: { booking: { customerId } }, select: { bookingId: true, requestedBy: true, businessDate: true, blockedReason: true, createdAt: true } }),
+      anonymise: async () => undefined,
+    },
+  },
   ...(['BookingSnapshot', 'BookingRoom', 'BookingExtra', 'InventoryClaim'] as const).map((model): EntityDef => ({
     entityType: model, model, customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
     handlers: {

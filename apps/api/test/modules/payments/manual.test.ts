@@ -11,7 +11,7 @@ import { TestApp, makeApp } from '../../support/auth';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { balancesOf, ledgerOf } from '../../support/ledger';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
-import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, requestBody } from '../../support/bookings';
+import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, requestBody, staffCancel } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import { PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, expireNow, onlyAccount, payingCustomer, paymentsStaff, sim, simulatorAccount } from '../../support/payments';
 
@@ -210,9 +210,10 @@ describe('the customer asks to pay by transfer (section 2)', () => {
     // A booking that can no longer be paid.
     const other = await booked();
     await c.pay(other.reference, { method: 'payid_transfer' });
-    expect((await admin.post(`/admin/bookings/${other.bookingId}/cancel`, { version: (await bookingRow(other.bookingId)).version, reason: 'test' })).status).toBe(200);
-    expect((await t.app.get(PaymentsMaintenanceService).run()).manualIntentsClosed).toContain((await paymentsOf(other.bookingId))[0]!.id);
+    expect((await staffCancel(admin, other.bookingId, { version: (await bookingRow(other.bookingId)).version, reason: 'test' })).status).toBe(200);
+    // Task 6.4 (review m7): the cancellation itself closes the open transfer request (P2), so the sweep has nothing left.
     expect((await paymentsOf(other.bookingId))[0]!.status).toBe('cancelled');
+    expect((await t.app.get(PaymentsMaintenanceService).run()).manualIntentsClosed).not.toContain((await paymentsOf(other.bookingId))[0]!.id);
   });
 
   it('a live card attempt blocks a transfer request the same way it blocks another card', async () => {
@@ -376,12 +377,12 @@ describe('staff confirm a transfer (section 3)', () => {
     await refused(requested.id);
     // Refunded: a cancelled booking whose money has been given back.
     const gone = await booked(false);
-    expect((await admin.post(`/admin/bookings/${gone.bookingId}/cancel`, { version: (await bookingRow(gone.bookingId)).version, reason: 'test' })).status).toBe(200);
+    expect((await staffCancel(admin, gone.bookingId, { version: (await bookingRow(gone.bookingId)).version, reason: 'test' })).status).toBe(200);
     await t.prisma.$executeRawUnsafe(`UPDATE bookings SET status = 'refunded', version = version + 1 WHERE id = $1::uuid`, gone.bookingId);
     await refused(gone.bookingId);
     // Cancelled and expired: the money did arrive, so it is recorded; all of it is an overpayment for staff to give back.
     const cancelled = await booked(false);
-    expect((await admin.post(`/admin/bookings/${cancelled.bookingId}/cancel`, { version: (await bookingRow(cancelled.bookingId)).version, reason: 'test' })).status).toBe(200);
+    expect((await staffCancel(admin, cancelled.bookingId, { version: (await bookingRow(cancelled.bookingId)).version, reason: 'test' })).status).toBe(200);
     const late = await booked(false);
     await t.prisma.$executeRawUnsafe(`UPDATE bookings SET "approvalExpiresAt" = clock_timestamp() - interval '1 minute' WHERE id = $1::uuid`, late.bookingId);
     await t.app.get(BookingExpiryService).run();

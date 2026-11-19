@@ -11,7 +11,7 @@ import { PaymentAttemptsService } from '../../../src/modules/payments';
 import { BookingStateMachine } from '../../../src/modules/bookings';
 import { SYSTEM_ACTOR } from '../../../src/platform/audit/audit.service';
 import { STATE_HEADERS, TestApp, makeApp } from '../../support/auth';
-import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
+import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, staffCancel } from '../../support/bookings';
 import { CATALOGUE_AND_PRICING, staffClient } from '../../support/catalogue';
 import { closeCatalogue } from '../../support/catalogue';
 import { walkTo } from '../../support/customer-portal';
@@ -52,7 +52,7 @@ const sql = (q: string, ...v: unknown[]) => t.prisma.$executeRawUnsafe(q, ...v);
 /** Staff cancel through the state machine (the plan follows the booking). */
 async function cancel(bookingId: string) {
   const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, select: { version: true } });
-  const res = await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: b.version, reason: 'Test' });
+  const res = await staffCancel(admin, bookingId, { version: b.version, reason: 'Test' });
   if (res.status !== 200) throw new Error(`cancel failed: ${res.status} ${JSON.stringify(res.body)}`);
 }
 /** The deposit deadline passes, and the approval expiry runs through the state machine. */

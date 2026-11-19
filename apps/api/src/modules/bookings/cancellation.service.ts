@@ -55,7 +55,7 @@ interface Loaded {
   currentSnapshotVersion: number;
   departureDate: string;
   totalMinor: bigint;
-  configuration: { rooms: Array<{ travellers: unknown[] }> };
+  configuration: { rooms?: Array<{ travellers?: unknown[] }> };
   cancellationPolicyId: string | null;
 }
 
@@ -146,6 +146,8 @@ export class BookingCancellationService {
   private async cancelIn(tx: Tx, where: { id: string } | { reference: string }, by: CancelledBy, input: { version?: number; reason: string; quoteDigest: string; operatorCancelled: boolean }, actor: AuditActor, customerEnabled: boolean): Promise<string> {
     const b = await this.load(tx, where, true);
     if (!b) throw notFound('booking_not_found', 'Booking not found');
+    // The state first (as the state machine answers it), then the version the panel read.
+    if (!['requested', 'approved', 'deposit_paid', 'confirmed', 'balance_paid'].includes(b.status)) throw conflict('transition_not_allowed', MESSAGES.transition_not_allowed!);
     if (input.version !== undefined && input.version !== b.version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
     if (input.operatorCancelled && by !== 'staff') throw conflict('transition_not_allowed', MESSAGES.transition_not_allowed!);
     const c = await this.compute(tx, b, by, input.operatorCancelled, customerEnabled);
@@ -214,7 +216,8 @@ export class BookingCancellationService {
     const held = reqDate !== null && daysBetween(reqDate, today) <= CANCELLATION_REQUEST_HOLD_DAYS;
     const effectiveDate = held ? reqDate! : today;
     const heldMinor = facts.collectedMinor - facts.disputedMinor;
-    const places = b.configuration.rooms.reduce((n, r) => n + r.travellers.length, 0);
+    // Places of the current snapshot: its configuration's travellers (runners and supporters alike, decision 12).
+    const places = (b.configuration.rooms ?? []).reduce((n, r) => n + (r.travellers?.length ?? 0), 0);
     const cancellable = ['requested', 'approved', 'deposit_paid', 'confirmed', 'balance_paid'].includes(b.status);
     let quote: CancellationQuote | null = null;
     try {
