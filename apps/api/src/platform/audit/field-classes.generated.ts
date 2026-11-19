@@ -1296,6 +1296,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     id: 'nopii',
     lineId: 'nopii',
     mode: 'nopii',
+    kind: 'nopii',
     paymentId: 'nopii',
     refundId: 'nopii',
     disputeId: 'nopii',
