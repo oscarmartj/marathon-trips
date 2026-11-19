@@ -20,6 +20,7 @@ Todo eso lo hace el núcleo: guardas de modo y entorno, descifrado de credencial
    - `cardDataHandling: 'hosted_only'`: los datos de tarjeta se quedan siempre en la página o los campos alojados de la pasarela.
    - Métodos, monedas, países y `checkoutOrigin` en `https`.
    - `capabilities.lookupByIdempotencyKey: true`: el adaptador debe poder encontrar un objeto por nuestra clave.
+   - `account` (4.1): los campos de credenciales que se escriben en el panel (`key`, `label` y un `pattern` anclado, solo de modo prueba), los que genera el servidor (`generated`) y de dónde sale el secreto del webhook: `generated` (lo hace el servidor) o `entered` (lo da la pasarela cuando se registra la URL; se pone después de crear la cuenta). `manifestProblems` lo comprueba.
 2. **Contrato de la interfaz.** Los comentarios de `core/provider.ts` mandan.
    - Solo se lanza `ProviderError`, con un código de la lista.
    - Un error no reintentable de `createPayment` significa que con esa clave no hay ni habrá objeto.
@@ -63,5 +64,14 @@ Adaptador `stripe`, `experimental`: Checkout Sessions (la página alojada de Str
 Para probarlo con un sandbox de Stripe (cuando Oscar tenga las claves de prueba):
 
 1. En el panel de Stripe (modo de prueba), crear un endpoint de webhook con la **misma versión de la API** que `STRIPE_API_VERSION` y los eventos `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `refund.created`, `refund.updated` y `refund.failed`.
-2. Cuenta en la API, solo en pruebas: `STRIPE_TEST_SECRET_KEY=sk_test_… STRIPE_TEST_WEBHOOK_SECRET=whsec_… pnpm api:cli payments:stripe-test-account`. Las claves se leen solo del entorno; una clave real se rechaza. Imprime una vez la URL del webhook, que se pone en el endpoint del paso 1.
+2. Cuenta en la API, solo en pruebas, desde el panel (4.1, "Payment gateways"): añadir una cuenta Stripe con la clave secreta de prueba; nace pausada, sin secreto de webhook, y enseña una vez la URL del webhook, que se pone en el endpoint del paso 1. Después, "Set webhook secret" con el `whsec_…` que da Stripe, probar la conexión y activar. También por consola: `STRIPE_TEST_SECRET_KEY=sk_test_… STRIPE_TEST_WEBHOOK_SECRET=whsec_… pnpm api:cli payments:stripe-test-account`. Las claves se leen solo del entorno; una clave real se rechaza. Imprime una vez la URL del webhook, que se pone en el endpoint del paso 1.
 3. Batería contra el sandbox: añadir antes `playwright` como dependencia de desarrollo de `@mt/api` (el cliente paga en la página de Checkout con la tarjeta de prueba) y ejecutar `SANDBOX_ADAPTER=stripe STRIPE_SANDBOX_SECRET_KEY=… STRIPE_SANDBOX_WEBHOOK_SECRET=… pnpm --filter @mt/api test:sandbox`. Solo con todas las cláusulas en verde y su línea en `docs/done/` puede el manifiesto pasar a `verified`, en un PR revisado.
+
+## Cuentas en el panel (4.1)
+
+Página "Payment gateways" (`/admin/gateways`), con los permisos `payments.providerAccount.manage` y `payments.providerAccount.manageCredentials`, los dos con segundo factor. Solo modo prueba: `CHECK (mode = 'test')` sigue en `provider_accounts` y la API rechaza `live` antes de nada. Quitarlo será una migración futura, solo con un adaptador `verified` y la aprobación de Oscar (plan 4.1, sección 14).
+
+- Una cuenta nace **pausada**; se activa cuando pasa una prueba de conexión de sus credenciales actuales (lo exige también un disparador).
+- Cambiar credenciales o secreto: se prueban antes y, si la prueba falla, no cambia nada. Nunca se vuelven a enseñar.
+- Pausar o retirar la última cuenta que atiende un método en un país de venta pide confirmación (`coverage_loss_unconfirmed`); apagar un método manual también.
+- Archivar exige que no queden cobros vivos ni reembolsos en curso y que haya pasado `paymentDisputeWindowDays` (180) desde el último cobro o reembolso. No se borra ninguna cuenta.
