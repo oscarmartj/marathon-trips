@@ -135,6 +135,11 @@ export interface NormalisedEvent {
   payment?: ProviderPayment;
   refund?: ProviderRefund;
   dispute?: ProviderDispute;
+  /**
+   * Task 4.3: an `unsupported` event in which money moved without us (a capture reversal, a dispute opened): the core
+   * opens a task for staff to review instead of only ignoring it.
+   */
+  review?: 'reversal' | 'dispute';
 }
 
 /** Why a cardholder disputed a payment, normalised (task 4.5); a gateway's code outside the list is `other`. */
@@ -201,6 +206,17 @@ export interface PaymentProvider {
   retrieveRefund(ctx: ProviderContext, by: RefundLookup): Promise<ProviderRefund | null>;
   /** Task 4.5: required when `capabilities.disputes` is declared. Null if the gateway does not know it. */
   retrieveDispute?(ctx: ProviderContext, ref: string): Promise<ProviderDispute | null>;
+  /**
+   * Optional (task 4.3, plan 4.3 section 5.3): finishes a payment the customer approved at the gateway (PayPal's
+   * capture). The core calls it only for a live attempt of a payable booking on an active account (sync, drive and
+   * expire), never to cancel, replace, close an orphan or process a refund. Answers as retrievePayment would after it.
+   */
+  completePayment?(ctx: ProviderContext, ref: string, idempotencyKey: string): Promise<ProviderPayment>;
+  /**
+   * Optional (task 4.3, plan 4.3 section 7.3): fetches from the gateway, and caches, what verifyWebhook needs to check this
+   * delivery offline (PayPal's signing certificate). Called by the gateway wrapper before verifyWebhook; never throws.
+   */
+  prepareWebhook?(ctx: ProviderContext, headers: Readonly<Record<string, string>>): Promise<void>;
   /** No network: checks the signature over the raw body with this account's secret, and the timestamp. */
   verifyWebhook(ctx: ProviderContext, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): WebhookVerification;
   /** Reads a body that already passed verifyWebhook (when it was received), for processing later and on retries. */

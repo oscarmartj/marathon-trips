@@ -27,6 +27,7 @@ Todo eso lo hace el núcleo: guardas de modo y entorno, descifrado de credencial
    - `failed` es terminal en la pasarela.
    - `verifyWebhook` no usa la red y compara en tiempo constante.
    - `verifyWebhook` rechaza (`stale_timestamp`) una firma a más de 300 s del momento actual, hacia atrás o hacia delante. La batería prueba 299 s (aceptada), 301 s y una hora (rechazadas).
+   - Opcionales (4.3): `prepareWebhook` trae de la pasarela lo que `verifyWebhook` necesita para verificar sin red (el certificado de PayPal); la pasarela de pagos y la batería lo llaman antes de cada verificación. `completePayment` termina un pago que el cliente aprobó en la pasarela (la captura de PayPal); el núcleo lo llama solo en `sync`, `drive` y `expire`, con el intento vivo, la reserva pagable y la cuenta activa. `retrievePayment` nunca mueve dinero.
 3. **Registro.** Una línea en `adapters/index.ts` (`createAdapters`). Si la pasarela tenía ficha `planned` en `adapters/planned.ts` (4.2), se borra esa ficha en el mismo PR (`planned_catalogue_keys_unique_and_unregistered` falla si una clave está en los dos). Cada cuenta nueva recibe sus reglas de enrutado por defecto (todos los métodos del manifiesto salvo `bnpl`, en AUD, cualquier país, sin límites, prioridad 100).
 4. **Sujeto local** en `apps/api/test/contract/subjects/<clave>.ts`, añadido a `LOCAL_SUBJECTS`. La pasarela se simula en memoria o con respuestas grabadas de su documentación. La batería completa (`CONTRACT_CLAUSES`) corre con él en CI. Sin sujeto local, CI falla (`every_adapter_has_a_local_contract_subject`).
 5. **Sujeto de sandbox**, añadido a `SANDBOX_SUBJECTS`.
@@ -66,6 +67,17 @@ Para probarlo con un sandbox de Stripe (cuando Oscar tenga las claves de prueba)
 1. En el panel de Stripe (modo de prueba), crear un endpoint de webhook con la **misma versión de la API** que `STRIPE_API_VERSION` y los eventos `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `refund.created`, `refund.updated` y `refund.failed`.
 2. Cuenta en la API, solo en pruebas, desde el panel (4.1, "Payment gateways"): añadir una cuenta Stripe con la clave secreta de prueba; nace pausada, sin secreto de webhook, y enseña una vez la URL del webhook, que se pone en el endpoint del paso 1. Después, "Set webhook secret" con el `whsec_…` que da Stripe, probar la conexión y activar. También por consola: `STRIPE_TEST_SECRET_KEY=sk_test_… STRIPE_TEST_WEBHOOK_SECRET=whsec_… pnpm api:cli payments:stripe-test-account`. Las claves se leen solo del entorno; una clave real se rechaza. Imprime una vez la URL del webhook, que se pone en el endpoint del paso 1.
 3. Batería contra el sandbox: añadir antes `playwright` como dependencia de desarrollo de `@mt/api` (el cliente paga en la página de Checkout con la tarjeta de prueba) y ejecutar `SANDBOX_ADAPTER=stripe STRIPE_SANDBOX_SECRET_KEY=… STRIPE_SANDBOX_WEBHOOK_SECRET=… pnpm --filter @mt/api test:sandbox`. Solo con todas las cláusulas en verde y su línea en `docs/done/` puede el manifiesto pasar a `verified`, en un PR revisado.
+
+## PayPal (4.3)
+
+Adaptador `paypal`, `experimental`: Orders v2 con la página de aprobación de PayPal, captura solo con `completePayment`, reembolsos y webhooks verificados sin red con el certificado de PayPal (descargado antes por `prepareWebhook`, solo de `api(-m).sandbox.paypal.com`, con cadena hasta el almacén raíz de Node). En modo prueba solo habla con `https://api-m.sandbox.paypal.com`: las credenciales de PayPal no distinguen sandbox de real, así que lo que protege es el host. En CI pasa la batería contra un PayPal falso (`test/contract/subjects/paypal-fake.ts`). Plan y supuestos por confirmar: `docs/plans/4.3-paypal-adapter.md`.
+
+Para probarlo con el sandbox (cuando Oscar tenga la app):
+
+1. En developer.paypal.com, una app REST de sandbox de una cuenta business australiana con AUD como moneda de cobro, y una cuenta compradora de sandbox.
+2. En el panel ("Payment gateways"), cuenta PayPal con el client ID y el secret de la app; nace pausada y enseña una vez la URL del webhook.
+3. En la app de PayPal, un webhook a esa URL con los eventos `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.PENDING`, `PAYMENT.CAPTURE.DECLINED`, `PAYMENT.CAPTURE.REFUNDED`, `PAYMENT.REFUND.PENDING` y `PAYMENT.REFUND.FAILED`. Su ID va en "Set webhook secret"; después, probar la conexión y activar.
+4. Grabar una entrega real de captura y otra de reembolso (cabeceras y cuerpo en base64, en un JSON `[{ headers, bodyBase64 }]`) y ejecutar, con `playwright` añadido antes: `SANDBOX_ADAPTER=paypal PAYPAL_SANDBOX_CLIENT_ID=… PAYPAL_SANDBOX_CLIENT_SECRET=… PAYPAL_SANDBOX_WEBHOOK_ID=… PAYPAL_SANDBOX_BUYER_EMAIL=… PAYPAL_SANDBOX_BUYER_PASSWORD=… PAYPAL_SANDBOX_RECORDED_DELIVERY=<ruta> pnpm --filter @mt/api test:sandbox`. Sin las entregas grabadas falla. Los casos de tarjeta rechazada piden las pruebas negativas del sandbox de PayPal y se completan en esa sesión.
 
 ## Cuentas en el panel (4.1)
 
