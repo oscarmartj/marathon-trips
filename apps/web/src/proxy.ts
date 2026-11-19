@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { contentSecurityPolicy, newNonce, usesNonce } from '@/lib/csp';
+import { contentSecurityPolicy, newNonce, usesCardFields, usesNonce } from '@/lib/csp';
 import { findRedirect, loadRedirects } from '@/lib/redirects';
 import { routeLocale } from '@/lib/locale-routing';
 import { LOCALE_COOKIE, enabledLocales, localePath, splitLocale } from '@/lib/locales';
@@ -19,7 +19,7 @@ const isAdmin = (pathname: string): boolean => pathname === '/admin' || pathname
 function security(request: NextRequest, pathWithoutLocale: string): { csp: string; requestHeaders?: Headers } {
   const dev = process.env.NODE_ENV !== 'production';
   if (!usesNonce(pathWithoutLocale)) return { csp: contentSecurityPolicy({ dev }) };
-  const csp = contentSecurityPolicy({ nonce: newNonce(), dev });
+  const csp = contentSecurityPolicy({ nonce: newNonce(), dev, cardFields: usesCardFields(pathWithoutLocale) });
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('content-security-policy', csp);
   return { csp, requestHeaders };
