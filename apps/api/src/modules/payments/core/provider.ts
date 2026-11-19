@@ -49,6 +49,16 @@ export interface CredentialField {
   label: string;
   /** Anchored regular expression source for a test-mode value. */
   pattern: string;
+  /**
+   * Checked by manifestProblems (plan 4.1, section 2): `valid` must match the pattern, and every `rejected` one (a live key,
+   * another kind of key) must not. Built in code, never a real key.
+   */
+  samples: CredentialSamples;
+}
+
+export interface CredentialSamples {
+  valid: string;
+  rejected: readonly string[];
 }
 
 /**
@@ -59,7 +69,7 @@ export interface CredentialField {
 export interface AccountSetup {
   fields: readonly CredentialField[];
   generated?: readonly { key: string; prefix: string }[];
-  webhookSecret: { source: 'entered'; label: string; pattern: string } | { source: 'generated' };
+  webhookSecret: { source: 'entered'; label: string; pattern: string; samples: CredentialSamples } | { source: 'generated' };
 }
 
 /** What the gateway wrapper hands an adapter for one call. Credentials are decrypted only for that call. */

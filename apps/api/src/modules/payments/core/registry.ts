@@ -56,15 +56,44 @@ export function manifestProblems(manifests: readonly AdapterManifest[], repoRoot
 
 const FIELD_KEY = /^[a-z][A-Za-z0-9]{1,40}$/;
 
-/** Whether `source` compiles and is anchored at both ends. */
-function anchoredPattern(source: string): boolean {
-  if (!source.startsWith('^') || !source.endsWith('$')) return false;
+/**
+ * Whether `source` compiles and is anchored at both ends for every alternative: `^a|b$` is not (its `b$` alternative
+ * matches anywhere before the end), so a `|` outside any group or character class is refused (plan 4.1, review).
+ */
+export function anchoredPattern(source: string): boolean {
+  if (!source.startsWith('^') || !source.endsWith('$') || source.endsWith('\\$')) return false;
   try {
     new RegExp(source);
-    return true;
   } catch {
     return false;
   }
+  let depth = 0;
+  let inClass = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (ch === ']') inClass = false;
+      continue;
+    }
+    if (ch === '[') inClass = true;
+    else if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === '|' && depth === 0) return false;
+  }
+  return true;
+}
+
+function sampleProblems(key: string, label: string, pattern: string, samples: { valid: string; rejected: readonly string[] } | undefined): string[] {
+  if (!samples || typeof samples.valid !== 'string' || !Array.isArray(samples.rejected) || samples.rejected.length === 0) return [`${key}: ${label} needs a valid sample and at least one rejected sample`];
+  const re = new RegExp(pattern);
+  const out: string[] = [];
+  if (!re.test(samples.valid)) out.push(`${key}: the valid sample of ${label} does not match its pattern`);
+  for (const r of samples.rejected) if (re.test(r)) out.push(`${key}: a rejected sample of ${label} matches its pattern`);
+  return out;
 }
 
 /** The account descriptor of a manifest (plan 4.1, section 2): unique field keys, anchored patterns, a secret source. */
@@ -78,9 +107,15 @@ export function accountSetupProblems(m: AdapterManifest): string[] {
     if (keys.has(f.key)) problems.push(`${m.key}: duplicate credential key ${f.key}`);
     keys.add(f.key);
   }
-  for (const f of setup.fields) if (!anchoredPattern(f.pattern)) problems.push(`${m.key}: pattern of ${f.key} must compile and be anchored`);
+  for (const f of setup.fields) {
+    if (!anchoredPattern(f.pattern)) problems.push(`${m.key}: pattern of ${f.key} must compile and be anchored`);
+    else problems.push(...sampleProblems(m.key, f.key, f.pattern, f.samples));
+  }
   for (const g of setup.generated ?? []) if (!/^[a-z0-9_]{1,20}$/.test(g.prefix)) problems.push(`${m.key}: prefix of ${g.key} is not plain`);
-  if (setup.webhookSecret.source === 'entered' && !anchoredPattern(setup.webhookSecret.pattern)) problems.push(`${m.key}: webhook secret pattern must compile and be anchored`);
+  if (setup.webhookSecret.source === 'entered') {
+    if (!anchoredPattern(setup.webhookSecret.pattern)) problems.push(`${m.key}: webhook secret pattern must compile and be anchored`);
+    else problems.push(...sampleProblems(m.key, 'the webhook secret', setup.webhookSecret.pattern, setup.webhookSecret.samples));
+  }
   return problems;
 }
 

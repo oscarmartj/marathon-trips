@@ -12,11 +12,14 @@ import type { AdapterManifest, PaymentProvider } from '../../../src/modules/paym
 import { ProviderGateway, webhookSecretAad } from '../../../src/modules/payments/core/gateway';
 import { PaymentRouting } from '../../../src/modules/payments/core/routing';
 import { ProviderAccountsBootCheck } from '../../../src/modules/payments/core/account-admin.service';
+import { CollectionCoverageGuard } from '../../../src/modules/payments/core/coverage-guard';
+import { INTEGRATIONS_PERMISSIONS as IP } from '../../../src/platform/integrations/permissions';
+import { CATALOGUE_PERMISSIONS } from '../../../src/modules/catalogue/manifest';
 import { ProviderAccountsService } from '../../../src/modules/payments/core/accounts.service';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { TasksService } from '../../../src/platform/common/tasks/tasks.service';
 import { SettingsService } from '../../../src/platform/flags/flags.service';
-import { TestApp, createStaff, makeApp, signInStaff } from '../../support/auth';
+import { STATE_HEADERS, TestApp, createStaff, makeApp, signInStaff } from '../../support/auth';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
 import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
@@ -560,5 +563,82 @@ describe("3.3's review notes (plan 4.1, section 9)", () => {
       page.mockRestore();
       tasks.mockRestore();
     }
+  });
+});
+
+describe('review of the code (PR #73)', () => {
+  it('unreadable_credentials_result_tied_to_the_ciphertexts_read: a rotation after the read is never marked unreadable', async () => {
+    const { id } = await t.app.get(ProviderAccountsService).createSimulatorAccount({ displayName: name('Sim') });
+    await t.prisma.providerAccount.update({ where: { id }, data: { status: 'paused' } });
+    // Unreadable: a key version that is not configured (the change time moves with it, as the trigger wants).
+    const row = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } });
+    await t.prisma.providerAccount.update({ where: { id }, data: { credentialsKeyVersion: row.credentialsKeyVersion + 7, credentialsChangedAt: new Date(row.credentialsChangedAt.getTime() + 1000) } });
+    const unreadableAt = (await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } })).credentialsChangedAt;
+    const gateway = t.app.get(ProviderGateway);
+    const original = gateway.testConnection.bind(gateway);
+    // Right after the gateway's read, a rotation (readable again) commits before the result is stored.
+    const spy = vi.spyOn(gateway, 'testConnection').mockImplementation(async (accountId: string) => {
+      const out = await original(accountId);
+      await t.prisma.providerAccount.update({ where: { id }, data: { credentialsKeyVersion: row.credentialsKeyVersion, credentialsChangedAt: new Date(unreadableAt.getTime() + 1000), lastConnectionTestResult: 'ok', lastConnectionTestAt: new Date(unreadableAt.getTime() + 2000) } });
+      return out;
+    });
+    try {
+      const r = await admin.post(`${ACCOUNTS}/${id}/connection-test`);
+      expect([r.status, r.body.result, r.body.recorded]).toEqual([200, 'credentials_unreadable', false]);
+      const [first] = await spy.mock.results.map((x) => x.value as Promise<{ credentialsChangedAt: Date }>);
+      expect((await first!).credentialsChangedAt.getTime()).toBe(unreadableAt.getTime());
+      expect((await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } })).lastConnectionTestResult).toBe('ok');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('api_key_rejected_on_account_routes: a key never reaches a gateway account route', async () => {
+    const staff = await createStaff(t, { permissions: [...new Set([...PERMS, CATALOGUE_PERMISSIONS.raceRead, IP.apiKeyRead, IP.apiKeyManage])] });
+    const cookie = await signInStaff(t, staff);
+    const made = await t.http().post('/admin/integrations/api-keys').set(STATE_HEADERS).set('Cookie', cookie).send({ name: 'Gateway probe', scopes: [CATALOGUE_PERMISSIONS.raceRead] });
+    expect(made.status).toBe(201);
+    const bearer = `Bearer ${made.body.token as string}`;
+    const id = (await panelSim()).id;
+    const calls = [
+      t.http().get('/admin/payments/adapters'), t.http().get(ACCOUNTS), t.http().get(`${ACCOUNTS}/warnings`),
+      t.http().post(ACCOUNTS).send({ adapterKey: 'simulator', displayName: name(), mode: 'test' }),
+      t.http().patch(`${ACCOUNTS}/${id}`).send({ version: 0, displayName: 'x' }),
+      t.http().post(`${ACCOUNTS}/${id}/status`).send({ version: 0, status: 'active' }),
+      t.http().post(`${ACCOUNTS}/${id}/connection-test`),
+      t.http().put(`${ACCOUNTS}/${id}/credentials`).send({ version: 0, credentials: {} }),
+      t.http().put(`${ACCOUNTS}/${id}/webhook-secret`).send({ version: 0, webhookSecret: whsec() }),
+      t.http().post(`${ACCOUNTS}/${id}/webhook-url`).send({ version: 0 }),
+    ];
+    for (const r of await Promise.all(calls.map((c) => c.set('Authorization', bearer)))) expect(r.status).toBe(403);
+    expect((await t.prisma.providerAccount.findUniqueOrThrow({ where: { id } })).version).toBe(0);
+    expect((await t.http().post(`/admin/integrations/api-keys/${made.body.id as string}/revoke`).set(STATE_HEADERS).set('Cookie', cookie)).status).toBe(204);
+  });
+
+  it('method_switch_and_account_pause_share_the_coverage_lock', async () => {
+    const guard = t.app.get(CollectionCoverageGuard);
+    let release!: () => void;
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const held = t.prisma.$transaction(async (tx) => {
+      await guard.lock(tx);
+      locked();
+      await new Promise<void>((r) => (release = r));
+    }, { timeout: 60_000 });
+    await isLocked;
+    const list = await admin.get('/admin/payments/methods');
+    const version = (list.body.items as Array<{ method: string; version: number }>).find((m) => m.method === 'manual_other')!.version;
+    const made = await panelSim();
+    const finished: string[] = [];
+    const put = admin.put('/admin/payments/methods/manual_other', { version, enabled: false, countries: [], displayOrder: 0, instructions: null, payeeName: null, payId: null, bank: null }).then((r) => (finished.push('method'), r));
+    const pause = admin.post(`${ACCOUNTS}/${made.id}/status`, { version: 0, status: 'retired' }).then((r) => (finished.push('account'), r));
+    await new Promise((r) => setTimeout(r, 800));
+    expect(finished).toEqual([]);
+    release();
+    await held;
+    const [rm, ra] = await Promise.all([put, pause]);
+    expect([200, 409]).toContain(rm.status);
+    expect(ra.status).toBe(200);
+    expect(finished.sort()).toEqual(['account', 'method']);
   });
 });

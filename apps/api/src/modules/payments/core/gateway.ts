@@ -132,15 +132,15 @@ export class ProviderGateway {
     const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
     if (!account) throw new ApiError(404, 'provider_account_not_found', 'Payment account not found');
     const provider = await this.allow(account, 'test_connection');
-    let read: { ctx: ProviderContext; credentialsChangedAt: Date };
+    // One read: the change time that goes with the result is the one of the ciphertexts tried, even when they fail.
+    const row = await this.readSecrets(account.id);
+    let ctx: ProviderContext;
     try {
-      read = await this.context(account);
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      const at = await this.prisma.providerAccount.findUniqueOrThrow({ where: { id: accountId }, select: { credentialsChangedAt: true } });
-      return { result: 'credentials_unreadable', credentialsChangedAt: at.credentialsChangedAt };
+      ctx = this.open(account, row);
+    } catch {
+      return { result: 'credentials_unreadable', credentialsChangedAt: row.credentialsChangedAt };
     }
-    return { result: await this.runTest(provider, read.ctx), credentialsChangedAt: read.credentialsChangedAt };
+    return { result: await this.runTest(provider, ctx), credentialsChangedAt: row.credentialsChangedAt };
   }
 
   /**
@@ -215,14 +215,22 @@ export class ProviderGateway {
 
   /** Decrypts the account's secrets for one call; `credentialsChangedAt` comes from the same row read (plan 4.1, 15.4). */
   private async context(account: AccountForCall): Promise<{ ctx: ProviderContext; credentialsChangedAt: Date }> {
-    const secrets = await this.prisma.providerAccount.findUniqueOrThrow({
-      where: { id: account.id },
+    const secrets = await this.readSecrets(account.id);
+    return { ctx: this.open(account, secrets), credentialsChangedAt: secrets.credentialsChangedAt };
+  }
+
+  private readSecrets(accountId: string) {
+    return this.prisma.providerAccount.findUniqueOrThrow({
+      where: { id: accountId },
       select: { credentialsCiphertext: true, credentialsKeyVersion: true, webhookSecretCiphertext: true, webhookKeyVersion: true, credentialsChangedAt: true },
     });
+  }
+
+  private open(account: AccountForCall, secrets: Awaited<ReturnType<ProviderGateway['readSecrets']>>): ProviderContext {
     const credentials = JSON.parse(this.box.decrypt(secrets.credentialsCiphertext, secrets.credentialsKeyVersion, credentialsAad(account.id))) as Record<string, string>;
     const webhookSecret = secrets.webhookSecretCiphertext === null || secrets.webhookKeyVersion === null
       ? ''
       : this.box.decrypt(secrets.webhookSecretCiphertext, secrets.webhookKeyVersion, webhookSecretAad(account.id));
-    return { ctx: { accountId: account.id, mode: account.mode, credentials: Object.freeze(credentials), webhookSecret }, credentialsChangedAt: secrets.credentialsChangedAt };
+    return { accountId: account.id, mode: account.mode, credentials: Object.freeze(credentials), webhookSecret };
   }
 }

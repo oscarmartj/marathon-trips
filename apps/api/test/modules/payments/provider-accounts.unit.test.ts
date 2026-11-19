@@ -12,7 +12,7 @@ import {
 } from '../../../src/modules/payments/core/account-rules';
 import type { AccountStatus } from '../../../src/modules/payments/core/account-rules';
 import { CONNECTION_TEST_CODES, normaliseTestCode } from '../../../src/modules/payments/core/gateway';
-import { accountSetupProblems, manifestProblems } from '../../../src/modules/payments/core/registry';
+import { accountSetupProblems, anchoredPattern, manifestProblems } from '../../../src/modules/payments/core/registry';
 import type { AdapterManifest } from '../../../src/modules/payments/core/provider';
 import { simulatorManifest } from '../../../src/modules/payments/adapters/simulator/simulator';
 import { stripeManifest } from '../../../src/modules/payments/adapters/stripe/stripe';
@@ -101,12 +101,36 @@ describe('manifest_account_descriptor_problems', () => {
   });
   it('duplicate keys, unanchored or broken patterns, odd names and prefixes are reported', () => {
     const bad = (account: AdapterManifest['account']) => accountSetupProblems({ ...stripe, account });
-    expect(bad({ fields: [{ key: 'a1', label: 'x', pattern: '^x$' }, { key: 'a1', label: 'y', pattern: '^y$' }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('duplicate')]);
-    expect(bad({ fields: [{ key: 'key', label: 'x', pattern: 'x' }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('anchored')]);
-    expect(bad({ fields: [{ key: 'key', label: 'x', pattern: '^(x$' }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('anchored')]);
-    expect(bad({ fields: [{ key: 'Bad-Key', label: 'x', pattern: '^x$' }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('plain name')]);
+    const sx = { valid: 'x', rejected: ['z'] };
+    const sy = { valid: 'y', rejected: ['z'] };
+    expect(bad({ fields: [{ key: 'a1', label: 'x', pattern: '^x$', samples: sx }, { key: 'a1', label: 'y', pattern: '^y$', samples: sy }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('duplicate')]);
+    expect(bad({ fields: [{ key: 'key', label: 'x', pattern: 'x', samples: sx }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('anchored')]);
+    expect(bad({ fields: [{ key: 'key', label: 'x', pattern: '^(x$', samples: sx }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('anchored')]);
+    expect(bad({ fields: [{ key: 'key', label: 'x', pattern: '^x|y$', samples: sx }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('anchored')]);
+    expect(bad({ fields: [{ key: 'Bad-Key', label: 'x', pattern: '^x$', samples: sx }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('plain name')]);
     expect(bad({ fields: [], generated: [{ key: 'apiKey', prefix: 'Bad Prefix' }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('prefix')]);
-    expect(bad({ fields: [], webhookSecret: { source: 'entered', label: 'x', pattern: 'whsec' } })).toEqual([expect.stringContaining('webhook secret')]);
+    expect(bad({ fields: [], webhookSecret: { source: 'entered', label: 'x', pattern: 'whsec', samples: sx } })).toEqual([expect.stringContaining('webhook secret')]);
+  });
+
+  it('samples: a valid one must match, every rejected (live-looking) one must not, for fields and an entered webhook secret', () => {
+    const bad = (account: AdapterManifest['account']) => accountSetupProblems({ ...stripe, account });
+    const live = `sk_live_${'x'.repeat(24)}`;
+    const loose = '^(sk|rk)_[A-Za-z]+_[A-Za-z0-9]{10,250}$';
+    expect(bad({ fields: [{ key: 'secretKey', label: 'k', pattern: loose, samples: { valid: `sk_test_${'x'.repeat(24)}`, rejected: [live] } }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('rejected sample')]);
+    expect(bad({ fields: [{ key: 'secretKey', label: 'k', pattern: '^sk_test_x+$', samples: { valid: 'sk_live_x', rejected: [live] } }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('valid sample')]);
+    expect(bad({ fields: [{ key: 'secretKey', label: 'k', pattern: '^sk_test_x+$', samples: { valid: 'sk_test_x', rejected: [] } }], webhookSecret: { source: 'generated' } })).toEqual([expect.stringContaining('at least one rejected')]);
+    expect(bad({ fields: [], webhookSecret: { source: 'entered', label: 'w', pattern: '^whsec_.*$', samples: { valid: 'whsec_x', rejected: ['whsec_'] } } })).toEqual([expect.stringContaining('rejected sample of the webhook secret')]);
+    // The real descriptors: Stripe's samples are checked, and its webhook secret pattern refuses keys and live values.
+    const w = stripe.account.webhookSecret;
+    if (w.source !== 'entered') throw new Error('stripe enters its webhook secret');
+    expect(new RegExp(w.pattern).test(w.samples.valid)).toBe(true);
+    for (const r of [...w.samples.rejected, live, `sk_test_${'x'.repeat(24)}`]) expect(new RegExp(w.pattern).test(r)).toBe(false);
+    expect(stripe.account.fields[0]!.samples.rejected).toEqual(expect.arrayContaining([live, `rk_live_${'x'.repeat(24)}`]));
+  });
+
+  it('anchoredPattern refuses a top-level alternation and a missing anchor', () => {
+    for (const ok of ['^x$', '^(a|b)$', '^[|]x$', '^a\\|b$', '^(sk|rk)_test_[A-Za-z0-9]{10,250}$']) expect(anchoredPattern(ok)).toBe(true);
+    for (const no of ['^a|b$', 'a$', '^a', '^(a|b)|c$', '^x\\$', '^(x$']) expect(anchoredPattern(no)).toBe(false);
   });
 });
 

@@ -416,31 +416,30 @@ describe('staff confirm a transfer (section 3)', () => {
   });
 
   it('transfer_recorded_on_paused_or_retired_manual_account', async () => {
-    const b = await booked(false);
-    await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'paused' } });
+    // Self-contained: its own manual accounts are the newest, so the choice is known. Accounts are never deleted, so
+    // they are left paused and archived, which routing never offers.
+    const svc = t.app.get(ProviderAccountsService);
+    const usedBy = async (bookingId: string) => (await t.prisma.payment.findFirstOrThrow({ where: { bookingId, origin: 'inbound' }, select: { providerAccountId: true } })).providerAccountId;
+    const paused = (await svc.createManualAccount({ displayName: 'Paused transfers' })).id;
+    const others = await t.prisma.providerAccount.findMany({ where: { adapterKey: 'manual', status: 'active', id: { not: paused } }, select: { id: true } });
+    await t.prisma.providerAccount.updateMany({ where: { id: { in: [paused, ...others.map((o) => o.id)] } }, data: { status: 'paused' } });
     try {
-      const r = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference: uniq() });
-      expect(r.status).toBe(200);
-      const statusOf = async (bookingId: string) => {
-        const p = await t.prisma.payment.findFirstOrThrow({ where: { bookingId, origin: 'inbound' }, select: { providerAccountId: true } });
-        return { id: p.providerAccountId, status: (await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: p.providerAccountId } })).status };
-      };
-      // No active manual account: the newest paused or retired one (other tests leave paused ones behind).
-      expect(['paused', 'retired']).toContain((await statusOf(b.bookingId)).status);
-      // A newer retired manual account is preferred to an older paused one; an archived one is never used.
-      const retired = (await t.app.get(ProviderAccountsService).createManualAccount({ displayName: 'Retired transfers' })).id;
+      const b = await booked(false);
+      expect((await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference: uniq() })).status).toBe(200);
+      expect(await usedBy(b.bookingId)).toBe(paused);
+      // A newer retired manual account is preferred to an older paused one.
+      const retired = (await svc.createManualAccount({ displayName: 'Retired transfers' })).id;
       await t.prisma.providerAccount.update({ where: { id: retired }, data: { status: 'retired' } });
       const b2 = await booked(false);
       expect((await confirm(b2.bookingId, { amountMinor: b2.depositMinor.toString(), reference: uniq() })).status).toBe(200);
-      expect((await statusOf(b2.bookingId)).id).toBe(retired);
+      expect(await usedBy(b2.bookingId)).toBe(retired);
+      // An archived one is never used.
       await t.prisma.providerAccount.update({ where: { id: retired }, data: { status: 'archived' } });
       const b3 = await booked(false);
       expect((await confirm(b3.bookingId, { amountMinor: b3.depositMinor.toString(), reference: uniq() })).status).toBe(200);
-      const third = await statusOf(b3.bookingId);
-      expect(third.id).not.toBe(retired);
-      expect(['paused', 'retired']).toContain(third.status);
+      expect(await usedBy(b3.bookingId)).toBe(paused);
     } finally {
-      await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'active' } });
+      await t.prisma.providerAccount.updateMany({ where: { id: { in: others.map((o) => o.id) } }, data: { status: 'active' } });
     }
   });
 

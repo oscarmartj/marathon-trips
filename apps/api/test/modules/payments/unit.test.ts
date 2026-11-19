@@ -177,6 +177,11 @@ describe('gateway_guard_matrix (plan 3.1, 2.4)', () => {
     for (const env of APP_ENVS) {
       const gw = new ProviderGateway(prisma as never, box as never, { APP_ENV: env } as never, audit as never, registry);
       await expect(gw.call('a', 'retrieve', async () => 'called')).rejects.toMatchObject({ status: 409 });
+      // Task 4.1: the panel's connection test and a change of secrets go through the same guard first.
+      if (env !== 'production') {
+        await expect(gw.testConnection('a')).rejects.toMatchObject({ status: 409, code: 'live_call_blocked_outside_production' });
+        await expect(gw.prepareSecretsChange('a', { credentials: { apiKey: 'x' } })).rejects.toMatchObject({ status: 409, code: 'live_call_blocked_outside_production' });
+      }
     }
     expect(reads).toEqual([]);
   });

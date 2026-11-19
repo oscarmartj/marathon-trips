@@ -63,6 +63,9 @@ export const fetchTransport: StripeTransport = async (req) => {
   return { status: res.status, headers, body: await res.text() };
 };
 
+/** Filler for the descriptor's samples (plan 4.1, section 2): shapes only, never a key. */
+const SAMPLE = 'x'.repeat(24);
+
 export function stripeManifest(): AdapterManifest {
   return {
     key: STRIPE_KEY,
@@ -78,8 +81,14 @@ export function stripeManifest(): AdapterManifest {
     // Task 4.1: the secret key is typed in the panel; the webhook signing secret is issued by Stripe once the account's
     // webhook URL is registered, so it is entered afterwards. Test-mode patterns only.
     account: {
-      fields: [{ key: 'secretKey', label: 'Secret key (test mode, sk_test_… or rk_test_…)', pattern: '^(sk|rk)_test_[A-Za-z0-9]{10,250}$' }],
-      webhookSecret: { source: 'entered', label: 'Webhook signing secret (whsec_…)', pattern: '^whsec_[A-Za-z0-9]{10,250}$' },
+      fields: [{
+        key: 'secretKey', label: 'Secret key (test mode, sk_test_… or rk_test_…)', pattern: '^(sk|rk)_test_[A-Za-z0-9]{10,250}$',
+        samples: { valid: `sk_test_${SAMPLE}`, rejected: [`sk_live_${SAMPLE}`, `rk_live_${SAMPLE}`, `pk_test_${SAMPLE}`, `pk_live_${SAMPLE}`, `whsec_${SAMPLE}`] },
+      }],
+      webhookSecret: {
+        source: 'entered', label: 'Webhook signing secret (whsec_…)', pattern: '^whsec_[A-Za-z0-9]{10,250}$',
+        samples: { valid: `whsec_${SAMPLE}`, rejected: [`sk_test_${SAMPLE}`, `sk_live_${SAMPLE}`, `whsec_${SAMPLE}-x`, 'whsec_'] },
+      },
     },
     capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'stays_payable' },
   };
