@@ -7,6 +7,7 @@ import { formatInstant, notPayableKey } from '@/lib/checkout';
 import { documentHref, documentKinds, knownReceipts, receiptHref, statusKey } from '@/lib/account';
 import type { AccountReceipt } from '@/lib/account';
 import { t } from '@/lib/i18n';
+import type { CancellationView } from '@mt/shared';
 import { progress, showTravellerSection, travellerHref } from '@/lib/travellers';
 import { DeadlineNote } from '@/components/account/traveller-forms';
 import type { ConfigurationView } from '@/lib/amendments';
@@ -37,6 +38,8 @@ export interface AccountBookingDetail {
   };
   /** Task 6.3: the changes made (history) and whether the customer can change nights and extras online. */
   changes?: { items: AccountChange[]; customerChangesEnabled: boolean };
+  /** Task 6.4: the cancellation record, and whether the customer may cancel online now. */
+  cancellation?: { record: CancellationView | null; customerCancellationsEnabled: boolean };
   plan: PaymentPlanView;
   payments: AccountPaymentRecord[];
   documents: string[];
@@ -123,6 +126,7 @@ export function BookingOverview({ view, travellers = null, receipts = null }: { 
       </section>
 
       <ChangesSection view={view} />
+      <CancellationSection view={view} />
 
       {showTravellerSection(travellers) ? <TravellerSummary reference={b.reference} travellers={travellers} /> : null}
 
@@ -205,4 +209,42 @@ function ChangesSection({ view }: { view: AccountBookingDetail }) {
       ) : <p>{t('amendments.contactUs')}</p>}
     </section>
   );
+}
+
+/**
+ * Task 6.4: a cancelled booking shows what was kept and what goes back, as recorded; a booking that can be cancelled
+ * online links to the page that shows the API's quote first.
+ */
+function CancellationSection({ view }: { view: AccountBookingDetail }) {
+  const c = view.cancellation;
+  if (!c) return null;
+  if (c.record) {
+    const money = moneyIn(c.record.currency);
+    return (
+      <section className="stack" aria-labelledby="cancellation-heading">
+        <h2 id="cancellation-heading">{t('cancellation.page.cancelled')}</h2>
+        <dl>
+          <dt>{t('cancellation.page.kept')}</dt>
+          <dd>{money(c.record.penaltyMinor)}</dd>
+          {c.record.waivedMinor !== '0' ? (
+            <>
+              <dt>{t('cancellation.page.notCharged')}</dt>
+              <dd>{money(c.record.waivedMinor)}</dd>
+            </>
+          ) : null}
+          <dt>{t('cancellation.page.refund')}</dt>
+          <dd>{money(c.record.refundableMinor)}</dd>
+        </dl>
+      </section>
+    );
+  }
+  if (!c.customerCancellationsEnabled) return null;
+  return <p><Link href={`/account/bookings/${encodeURIComponent(view.booking.reference)}/cancel`}>{t('cancellation.page.link')}</Link></p>;
+}
+
+/** Formats the API's amounts in one currency (formatting only: nothing is added up). */
+function moneyIn(currency: string) {
+  return function format(minor: string): string {
+    return formatMoney(minor, currency);
+  };
 }

@@ -11,7 +11,7 @@ import { TestApp, makeApp } from '../../support/auth';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { balancesOf, ledgerOf } from '../../support/ledger';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
-import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, requestBody } from '../../support/bookings';
+import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, requestBody, staffCancel } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import { PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, expireNow, onlyAccount, payingCustomer, paymentsStaff, sim, simulatorAccount } from '../../support/payments';
 
@@ -210,9 +210,30 @@ describe('the customer asks to pay by transfer (section 2)', () => {
     // A booking that can no longer be paid.
     const other = await booked();
     await c.pay(other.reference, { method: 'payid_transfer' });
-    expect((await admin.post(`/admin/bookings/${other.bookingId}/cancel`, { version: (await bookingRow(other.bookingId)).version, reason: 'test' })).status).toBe(200);
-    expect((await t.app.get(PaymentsMaintenanceService).run()).manualIntentsClosed).toContain((await paymentsOf(other.bookingId))[0]!.id);
+    expect((await staffCancel(admin, other.bookingId, { version: (await bookingRow(other.bookingId)).version, reason: 'test' })).status).toBe(200);
+    // Task 6.4 (review m7): the cancellation itself closes the open transfer request (P2), so the sweep has nothing left.
     expect((await paymentsOf(other.bookingId))[0]!.status).toBe('cancelled');
+    expect((await t.app.get(PaymentsMaintenanceService).run()).manualIntentsClosed).not.toContain((await paymentsOf(other.bookingId))[0]!.id);
+  });
+
+  it('cancellation_cancels_open_manual_intent (task 6.4, review m7): the cancellation ends the open transfer request at once, without calling anyone', async () => {
+    const b = await booked();
+    expect((await c.pay(b.reference, { method: 'payid_transfer' })).status).toBe(201);
+    const [intent] = await paymentsOf(b.bookingId);
+    expect([intent!.origin, intent!.status]).toEqual(['manual_intent', 'created']);
+    // "Without calling anyone" (P2): no gateway call and no job queued for the intent while the booking is cancelled.
+    const gateway = t.app.get(ProviderGateway);
+    const calls = vi.spyOn(gateway, 'call');
+    const jobsBefore = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pgboss.job WHERE data->>'paymentId' = $1`, intent!.id);
+    const res = await staffCancel(admin, b.bookingId, { version: (await bookingRow(b.bookingId)).version, reason: 'Changed plans' });
+    expect([res.status, res.body.status]).toEqual([200, 'cancelled']);
+    expect(calls).not.toHaveBeenCalled();
+    calls.mockRestore();
+    const jobsAfter = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pgboss.job WHERE data->>'paymentId' = $1`, intent!.id);
+    expect(jobsAfter[0]!.n).toBe(jobsBefore[0]!.n);
+    const after = await t.prisma.payment.findUniqueOrThrow({ where: { id: intent!.id } });
+    expect([after.status, after.version > intent!.version]).toEqual(['cancelled', true]);
+    expect(await t.prisma.auditLog.count({ where: { entityId: intent!.id, action: { contains: 'status' } } })).toBeGreaterThan(0);
   });
 
   it('a live card attempt blocks a transfer request the same way it blocks another card', async () => {
@@ -376,12 +397,12 @@ describe('staff confirm a transfer (section 3)', () => {
     await refused(requested.id);
     // Refunded: a cancelled booking whose money has been given back.
     const gone = await booked(false);
-    expect((await admin.post(`/admin/bookings/${gone.bookingId}/cancel`, { version: (await bookingRow(gone.bookingId)).version, reason: 'test' })).status).toBe(200);
+    expect((await staffCancel(admin, gone.bookingId, { version: (await bookingRow(gone.bookingId)).version, reason: 'test' })).status).toBe(200);
     await t.prisma.$executeRawUnsafe(`UPDATE bookings SET status = 'refunded', version = version + 1 WHERE id = $1::uuid`, gone.bookingId);
     await refused(gone.bookingId);
     // Cancelled and expired: the money did arrive, so it is recorded; all of it is an overpayment for staff to give back.
     const cancelled = await booked(false);
-    expect((await admin.post(`/admin/bookings/${cancelled.bookingId}/cancel`, { version: (await bookingRow(cancelled.bookingId)).version, reason: 'test' })).status).toBe(200);
+    expect((await staffCancel(admin, cancelled.bookingId, { version: (await bookingRow(cancelled.bookingId)).version, reason: 'test' })).status).toBe(200);
     const late = await booked(false);
     await t.prisma.$executeRawUnsafe(`UPDATE bookings SET "approvalExpiresAt" = clock_timestamp() - interval '1 minute' WHERE id = $1::uuid`, late.bookingId);
     await t.app.get(BookingExpiryService).run();

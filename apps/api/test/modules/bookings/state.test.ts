@@ -11,7 +11,7 @@ import { runTransaction } from '../../../src/platform/database/transaction';
 import { TestApp, makeApp } from '../../support/auth';
 import { CATALOGUE_AND_PRICING, closeCatalogue, staffClient } from '../../support/catalogue';
 import { createCode, freshCode } from '../../support/adjustments';
-import { bookingStaff, cleanBookingEvents, customerClient, makeBookingFor, requestBody } from '../../support/bookings';
+import { bookingStaff, cleanBookingEvents, customerClient, makeBookingFor, requestBody, staffCancel, insertBareCancellation } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
 import { allRoutes } from '../../support/routes';
@@ -76,6 +76,12 @@ const walk = async (id: string, to: State) => {
       await t.prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(STEP_SQL, id, s);
         await insertValidSchedule(tx, id);
+      });
+    } else if (s === 'cancelled') {
+      // Task 6.4: a cancellation has its record (deferred trigger of 0038).
+      await t.prisma.$transaction(async (tx) => {
+        await insertBareCancellation(tx, id);
+        await tx.$executeRawUnsafe(STEP_SQL, id, s);
       });
     } else await t.prisma.$executeRawUnsafe(STEP_SQL, id, s);
   }
@@ -142,7 +148,9 @@ describe('booking_state_event_matrix: the cells that move no money, through the 
   const EXPECTED: Record<'approve' | 'decline' | 'cancel' | 'expire', Record<State, Expect>> = {
     approve: { requested: { to: 'approved' }, approved: { code: 'transition_not_allowed' }, deposit_paid: { code: 'transition_not_allowed' }, confirmed: { code: 'transition_not_allowed' }, balance_paid: { code: 'transition_not_allowed' }, completed: { code: 'transition_not_allowed' }, declined: { code: 'transition_not_allowed' }, expired: { code: 'transition_not_allowed' }, cancelled: { code: 'transition_not_allowed' }, refunded: { code: 'transition_not_allowed' } },
     decline: { requested: { to: 'declined' }, approved: { code: 'transition_not_allowed' }, deposit_paid: { code: 'transition_not_allowed' }, confirmed: { code: 'transition_not_allowed' }, balance_paid: { code: 'transition_not_allowed' }, completed: { code: 'transition_not_allowed' }, declined: { code: 'transition_not_allowed' }, expired: { code: 'transition_not_allowed' }, cancelled: { code: 'transition_not_allowed' }, refunded: { code: 'transition_not_allowed' } },
-    cancel: { requested: { to: 'cancelled' }, approved: { to: 'cancelled' }, deposit_paid: { code: 'cancellation_needs_payments' }, confirmed: { code: 'cancellation_needs_payments' }, balance_paid: { code: 'cancellation_needs_payments' }, completed: { code: 'transition_not_allowed' }, declined: { code: 'transition_not_allowed' }, expired: { code: 'transition_not_allowed' }, cancelled: { code: 'transition_not_allowed' }, refunded: { code: 'transition_not_allowed' } },
+    // Task 6.4 (plan docs/plans/6.4-cancellation-policies.md, section 10): the paid states, a 409 until cancellation
+    // policies existed, now cancel with the penalty of their policy (here none: no policy, nothing held).
+    cancel: { requested: { to: 'cancelled' }, approved: { to: 'cancelled' }, deposit_paid: { to: 'cancelled' }, confirmed: { to: 'cancelled' }, balance_paid: { to: 'cancelled' }, completed: { code: 'transition_not_allowed' }, declined: { code: 'transition_not_allowed' }, expired: { code: 'transition_not_allowed' }, cancelled: { code: 'transition_not_allowed' }, refunded: { code: 'transition_not_allowed' } },
     expire: { requested: { to: 'expired' }, approved: 'no_change', deposit_paid: 'no_change', confirmed: 'no_change', balance_paid: 'no_change', completed: 'no_change', declined: 'no_change', expired: 'no_change', cancelled: 'no_change', refunded: 'no_change' },
   };
   const cells = (Object.keys(EXPECTED) as Array<keyof typeof EXPECTED>).flatMap((event) => STATES.map((s) => [event, s] as const));
@@ -158,7 +166,7 @@ describe('booking_state_event_matrix: the cells that move no money, through the 
       if (expected === 'no_change') expect(r).toEqual({ changed: false, status: state });
       else expect(r).toMatchObject({ changed: true, from: state, to: (expected as { to: State }).to });
     } else {
-      const res = await admin.post(`/admin/bookings/${bookingId}/${event}`, { version: before, reason: 'Matrix' });
+      const res = event === 'cancel' ? await staffCancel(admin, bookingId, { version: before, reason: 'Matrix' }) : await admin.post(`/admin/bookings/${bookingId}/${event}`, { version: before, reason: 'Matrix' });
       if (typeof expected === 'object' && 'to' in expected) expect([res.status, res.body.status]).toEqual([200, expected.to]);
       else expect([res.status, res.body.code]).toEqual([409, (expected as { code: string }).code]);
     }
@@ -280,7 +288,7 @@ describe('permissions and the panel', () => {
     const { bookingId } = await makeBookingFor(t, w);
     const routes = allRoutes(t.app).filter((r) => r.path.startsWith('/admin/bookings'));
     expect(routes.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
-      'GET /admin/bookings', 'GET /admin/bookings/:id', 'GET /admin/bookings/summary', 'POST /admin/bookings/:id/amendments', 'POST /admin/bookings/:id/amendments/preview', 'POST /admin/bookings/:id/approve', 'POST /admin/bookings/:id/cancel', 'POST /admin/bookings/:id/confirm', 'POST /admin/bookings/:id/decline',
+      'GET /admin/bookings', 'GET /admin/bookings/:id', 'GET /admin/bookings/:id/cancellation-quote', 'GET /admin/bookings/summary', 'POST /admin/bookings/:id/amendments', 'POST /admin/bookings/:id/amendments/preview', 'POST /admin/bookings/:id/approve', 'POST /admin/bookings/:id/cancel', 'POST /admin/bookings/:id/confirm', 'POST /admin/bookings/:id/decline',
     ]);
     for (const r of routes) {
       const path = r.path.replace(':id', bookingId);
@@ -294,7 +302,7 @@ describe('permissions and the panel', () => {
     const staff = await bookingStaff(t);
     const { bookingId } = await makeBookingFor(t, w);
     await t.prisma.session.updateMany({ where: { userId: staff.staff.id, revokedAt: null }, data: { mfaVerifiedAt: new Date(Date.now() - 6 * 60_000) } });
-    const res = await staff.post(`/admin/bookings/${bookingId}/cancel`, { version: 0, reason: 'Late' });
+    const res = await staffCancel(staff, bookingId, { version: 0, reason: 'Late' });
     expect([res.status, res.body.code]).toEqual([403, 'step_up_required']);
     // declining needs no step-up
     expect((await staff.post(`/admin/bookings/${bookingId}/decline`, { version: 0, reason: 'Full' })).status).toBe(200);
@@ -312,7 +320,7 @@ describe('permissions and the panel', () => {
   it('declining and cancelling need a reason; the list filters by status; the detail never shows the request hashes', async () => {
     const { bookingId } = await makeBookingFor(t, w);
     expect((await admin.post(`/admin/bookings/${bookingId}/decline`, { version: 0 })).status).toBe(422);
-    expect((await admin.post(`/admin/bookings/${bookingId}/cancel`, { version: 0, reason: '' })).status).toBe(422);
+    expect((await staffCancel(admin, bookingId, { version: 0, reason: '' })).status).toBe(422);
     const list = await admin.get(`/admin/bookings?status=requested&packageId=${w.pkg.id}`);
     expect(list.status).toBe(200);
     expect(list.body.items.some((i: { id: string }) => i.id === bookingId)).toBe(true);

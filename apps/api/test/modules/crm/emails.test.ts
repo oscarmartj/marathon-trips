@@ -7,7 +7,7 @@ import { EventsService } from '../../../src/platform/events/events.service';
 import { MailService } from '../../../src/platform/mail/mail.service';
 import { TestApp, makeApp } from '../../support/auth';
 import { closeCatalogue } from '../../support/catalogue';
-import { cleanBookingEvents, requestBody } from '../../support/bookings';
+import { cleanBookingEvents, requestBody, staffCancel } from '../../support/bookings';
 import { acceptQuote, crmStaff, linkedCustomer, makeQuote, sendQuote } from '../../support/crm';
 import { pricedWorld } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
@@ -66,7 +66,7 @@ describe('state_change_sends_one_email_each', () => {
     expect(approved!.text).not.toMatch(/booking is confirmed|confirmed booking|pay now|payment link/i);
 
     const c = await bookingOf(req.reference);
-    expect((await admin.post(`/admin/bookings/${c.id}/cancel`, { version: c.version, reason: 'SECRET-REASON-cancel' })).status).toBe(200);
+    expect((await staffCancel(admin, c.id, { version: c.version, reason: 'SECRET-REASON-cancel' })).status).toBe(200);
     const [cancelled] = await deliverAndSend(a.customerId);
     expect(cancelled!.subject).toContain('cancelled');
     expect(cancelled!.text).not.toContain('SECRET-REASON');

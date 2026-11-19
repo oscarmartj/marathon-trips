@@ -12,7 +12,7 @@ const plan = (over: Partial<PaymentPlanView> = {}): PaymentPlanView => ({
   collectedMinor: '0', outstandingMinor: '132500', overpaidMinor: '0', depositDueBy: '2026-12-01T13:59:59.000Z', nextPayable: { sequence: 1, amountMinor: '100000' },
   methods: ['card', 'payid_transfer'], liveAttempt: null, manualIntent: null, ...over,
 });
-const terms = (over: Partial<CheckoutTermsView> = {}): CheckoutTermsView => ({ slug: 'terms', version: 7, digest: 'a'.repeat(64), title: 'Terms of booking', intro: 'Read first.', body: 'One clause.\n\nAnother clause.', acceptedAt: null, ...over });
+const terms = (over: Partial<CheckoutTermsView> = {}): CheckoutTermsView => ({ slug: 'terms', version: 7, digest: 'a'.repeat(64), title: 'Terms of booking', intro: 'Read first.', body: 'One clause.\n\nAnother clause.', acceptedAt: null, cancellationPolicy: null, ...over });
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
 describe('checkout page', () => {

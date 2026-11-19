@@ -75,3 +75,27 @@ export async function cleanBookingEvents(t: TestApp): Promise<void> {
   await t.prisma.$executeRawUnsafe(`DELETE FROM event_deliveries WHERE "eventId" IN (SELECT id FROM outbox_events WHERE type LIKE 'bookings.%')`);
   await t.prisma.$executeRawUnsafe(`DELETE FROM outbox_events WHERE type LIKE 'bookings.%'`);
 }
+
+/**
+ * Task 6.4: a staff cancellation as the panel makes it, reading the quote first and sending its digest (the cancel route
+ * requires it). A quote that fails (no permission, unknown booking) sends a dummy digest, so the cancel answers its own error.
+ */
+export async function staffCancel(admin: Pick<Client, 'get' | 'post'>, bookingId: string, body: { version: number; reason: string; operatorCancelled?: boolean }): Promise<Awaited<ReturnType<Client['post']>>> {
+  const q = await admin.get(`/admin/bookings/${bookingId}/cancellation-quote${body.operatorCancelled ? '?operatorCancelled=true' : ''}`);
+  const quoteDigest = q.status === 200 ? (q.body as { quoteDigest: string }).quoteDigest : '0'.repeat(64);
+  return admin.post(`/admin/bookings/${bookingId}/cancel`, { ...body, quoteDigest });
+}
+
+/**
+ * Task 6.4: a booking moved into `cancelled` by SQL (the matrices' walks) needs its cancellation record in the same
+ * transaction (deferred trigger of 0038). Written as staff would, with penalty 0 and everything held refundable.
+ */
+export async function insertBareCancellation(tx: { $executeRawUnsafe: (sql: string, ...values: unknown[]) => Promise<number> }, bookingId: string): Promise<void> {
+  await tx.$executeRawUnsafe(`
+    INSERT INTO cancellations (id, "bookingId", currency, "requestedBy", "requestedById", "bookingStatus", "snapshotVersion", basis, "businessDate", "processedDate",
+      "daysBeforeDeparture", "policySnapshot", "baseTotalMinor", places, "collectedMinor", "policyPenaltyMinor", "penaltyMinor", "waivedMinor", "refundableMinor")
+    SELECT gen_random_uuid(), b.id, b.currency, 'staff', gen_random_uuid(), b.status, b."currentSnapshotVersion",
+      CASE WHEN b.status IN ('requested', 'approved') THEN 'not_contracted'::"CancellationBasis" ELSE 'operator_cancelled'::"CancellationBasis" END,
+      (now() AT TIME ZONE 'Australia/Brisbane')::date, (now() AT TIME ZONE 'Australia/Brisbane')::date, 0, '{}'::jsonb, b."totalMinor", 1, 0, 0, 0, 0, 0
+    FROM bookings b WHERE b.id = $1::uuid`, bookingId);
+}

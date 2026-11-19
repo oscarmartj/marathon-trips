@@ -9,7 +9,7 @@ import { TRANSACTION_RETRIES } from '../../../src/platform/database/transaction'
 import { TestApp, makeApp, signInCustomer } from '../../support/auth';
 import { announceEdition, buildWorld, closeCatalogue, pricePackageFully, setSale } from '../../support/catalogue';
 import { createCode, freshCode } from '../../support/adjustments';
-import { bookingStaff, cleanBookingEvents, contact, customerClient, makeCustomer, requestBody } from '../../support/bookings';
+import { bookingStaff, cleanBookingEvents, contact, customerClient, makeCustomer, requestBody, staffCancel } from '../../support/bookings';
 import type { CustomerClient } from '../../support/bookings';
 import { must, pricedWorld, text } from '../../support/pricing';
 import type { PricedWorld } from '../../support/pricing';
@@ -188,7 +188,7 @@ describe('transitions racing each other', () => {
       const before = [(await poolOf(w.roomPoolId)).consumed, (await poolOf(w.entryPoolId)).consumed];
       const b = await fresh(await customerClient(t), code.code);
       await expire(b.id);
-      const [run, cancel] = await Promise.all([t.app.get(BookingExpiryService).run(), admin.post(`/admin/bookings/${b.id}/cancel`, { version: b.version, reason: 'Race' })]);
+      const [run, cancel] = await Promise.all([t.app.get(BookingExpiryService).run(), staffCancel(admin, b.id, { version: b.version, reason: 'Race' })]);
       const final = (await t.prisma.booking.findUniqueOrThrow({ where: { id: b.id } })).status;
       expect(['expired', 'cancelled']).toContain(final);
       if (final === 'cancelled') expect(cancel.status).toBe(200);
@@ -205,7 +205,7 @@ describe('transitions racing each other', () => {
     const b = await fresh(await customerClient(t));
     const rs = await Promise.all([
       admin.post(`/admin/bookings/${b.id}/decline`, { version: b.version, reason: 'Full' }),
-      admin.post(`/admin/bookings/${b.id}/cancel`, { version: b.version, reason: 'Duplicate' }),
+      staffCancel(admin, b.id, { version: b.version, reason: 'Duplicate' }),
     ]);
     const o = outcomes(rs);
     expect(o.filter((x) => x === '200')).toHaveLength(1);

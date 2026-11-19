@@ -3,6 +3,7 @@ import type { BookingStatus } from '@mt/shared';
 import { STATE_HEADERS } from './auth';
 import type { TestApp } from './auth';
 import { insertValidSchedule } from './payments';
+import { insertBareCancellation } from './bookings';
 
 /** How a booking reaches each status by SQL as the API role (the same steps as payments' booking_money_cells_matrix). */
 export const PATH_TO: Record<BookingStatus, BookingStatus[]> = {
@@ -24,6 +25,8 @@ export async function walkTo(t: TestApp, bookingId: string, to: BookingStatus, f
   const done = new Set(PATH_TO[from]);
   for (const s of PATH_TO[to].filter((x) => !done.has(x))) {
     await t.prisma.$transaction(async (tx) => {
+      // Task 6.4: a cancellation has its record (deferred trigger of 0038).
+      if (s === 'cancelled') await insertBareCancellation(tx, bookingId);
       await tx.$executeRawUnsafe(STEP, bookingId, s);
       if (s === 'approved') await insertValidSchedule(tx, bookingId);
       if (s === 'expired') {

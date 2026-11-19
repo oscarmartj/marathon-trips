@@ -79,8 +79,8 @@ describe('booking_event_table_within_status_pairs (section 1.3)', () => {
     expect(BOOKING_EVENT_TABLE.total_uncovered).toEqual({ balance_paid: 'confirmed' });
     expect(BOOKING_EVENT_TABLE.deposit_uncovered).toEqual({ deposit_paid: 'approved' });
     expect(BOOKING_EVENT_TABLE.expire_approval).toEqual({ approved: 'expired' });
-    // Cancelling a paid booking stays a 409 until refunds exist.
-    expect(BOOKING_EVENT_TABLE.cancel).toEqual({ requested: 'cancelled', approved: 'cancelled' });
+    // Task 6.4: paid bookings cancel too, with the penalty of their policy (plan 0.1, 6.2, row "Cancelación").
+    expect(BOOKING_EVENT_TABLE.cancel).toEqual({ requested: 'cancelled', approved: 'cancelled', deposit_paid: 'cancelled', confirmed: 'cancelled', balance_paid: 'cancelled' });
   });
 });
 

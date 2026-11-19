@@ -70,6 +70,8 @@ export async function checkOwnedRoutes(t: TestApp, fixtures: Record<string, Owne
     // whatever happened above.
     const { setCustomerAmendments } = await import('./amendments');
     await setCustomerAmendments(t, false);
+    const { setCustomerCancellations } = await import('./cancellations');
+    await setCustomerCancellations(t, false);
   }
   return { problems, checked };
 }

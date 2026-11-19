@@ -1,13 +1,13 @@
 import { Body, Controller, Delete, Get, Header, Headers, HttpCode, Inject, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { customerAmendmentPreviewSchema, customerAmendmentSchema, travellerDetailsSchema } from '@mt/shared';
-import type { CustomerAmendment, CustomerAmendmentPreview, TravellerDetailsInput } from '@mt/shared';
+import { customerAmendmentPreviewSchema, customerAmendmentSchema, customerCancelBookingSchema, travellerDetailsSchema } from '@mt/shared';
+import type { CustomerAmendment, CustomerAmendmentPreview, CustomerCancelBooking, TravellerDetailsInput } from '@mt/shared';
 import { OwnedBy } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
 import { notFound, unprocessable } from '../../platform/http/api-error';
 import type { ApiRequest } from '../../platform/http/request-context';
 import { ZodPipe } from '../../platform/http/zod.pipe';
-import { ownsBookingReference } from '../bookings';
+import { BookingCancellationService, ownsBookingReference } from '../bookings';
 import { CustomerAccountService } from './account.service';
 import { isDocumentKind } from './documents';
 import { CustomerAmendmentsService } from './amendments';
@@ -25,6 +25,7 @@ export class CustomerAccountController {
     @Inject(CustomerAccountService) private readonly account: CustomerAccountService,
     @Inject(TravellerDetailsService) private readonly travellers: TravellerDetailsService,
     @Inject(CustomerAmendmentsService) private readonly amendments: CustomerAmendmentsService,
+    @Inject(BookingCancellationService) private readonly cancellations: BookingCancellationService,
   ) {}
 
   @Get()
@@ -112,6 +113,27 @@ export class CustomerAccountController {
     // 201 for the change made now; 200 for a replay of one already made (plan section 5, step 2).
     if (!r.created) res.status(200);
     return { created: r.created, ...(await this.account.detail(reference)) };
+  }
+
+  // Cancellations (task 6.4): the penalty and the refund come from the API; the customer only confirms the quote seen.
+
+  @Get(':reference/cancellation-quote')
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'account-booking-cancellation-quote', owns: (ctx) => ownsBookingReference(ctx) })
+  @UseGuards(AmendmentRateLimitGuard)
+  @Header('Cache-Control', 'no-store')
+  cancellationQuote(@Param('reference') reference: string) {
+    return this.cancellations.quote({ reference }, 'customer');
+  }
+
+  @Post(':reference/cancel')
+  @OwnedBy({ kind: 'customer', resource: 'booking', fixture: 'account-booking-cancel', owns: (ctx) => ownsBookingReference(ctx) })
+  @UseGuards(AmendmentRateLimitGuard)
+  @Header('Cache-Control', 'no-store')
+  async cancel(@Param('reference') reference: string, @Body(new ZodPipe(customerCancelBookingSchema)) body: CustomerCancelBooking, @Headers('idempotency-key') key: string | undefined, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
+    if (!key || !IDEMPOTENCY_KEY.test(key)) throw unprocessable('idempotency_key_required', 'Send an Idempotency-Key header (16 to 64 letters, digits or hyphens)');
+    const r = await this.cancellations.cancelByCustomer(reference, body, key, actorOf(req));
+    if (!r.created) res.status(200);
+    return { created: r.created, cancelled: r.cancellation, ...(await this.account.detail(reference)) };
   }
 }
 

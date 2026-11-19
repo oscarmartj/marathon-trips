@@ -20,6 +20,8 @@ enum PaymentScheduleItemKind {
   balance
   instalment
   adjustment
+  /// task 6.4: what a cancelled booking keeps owing
+  penalty
 }
 
 enum PaymentScheduleItemState {
@@ -391,6 +393,8 @@ model TermsAcceptance {
   intro          String
   /// @nopii editorial text as accepted
   body           String
+  /// @nopii digest of the cancellation policy shown with the terms (task 6.4); null when the booking has none
+  cancellationPolicyDigest String? @db.Char(64)
   /// @nopii timestamp
   acceptedAt     DateTime @default(now()) @db.Timestamptz(3)
 
@@ -447,6 +451,9 @@ model Refund {
   origin            RefundOrigin
   /// @nopii null for an external refund
   purpose           RefundPurpose?
+  /// the cancellation a refund with purpose cancellation belongs to (task 6.4; same booking by the foreign key)
+  cancellationId    String?           @db.Uuid
+  cancellation      Cancellation?     @relation(fields: [cancellationId, bookingId], references: [id, bookingId], onDelete: Restrict, onUpdate: Restrict, map: "refunds_cancellation_fkey")
   /// @pii free text from staff (task 4.5); erased with the customer
   reason            String?
   /// @nopii
@@ -492,6 +499,7 @@ model Refund {
   @@unique([providerAccountId, providerRefundRef])
   @@index([paymentId])
   @@index([bookingId])
+  @@index([cancellationId])
   @@index([status, updatedAt])
   @@index([nextAttemptAt])
   @@map("refunds")

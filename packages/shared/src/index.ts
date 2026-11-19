@@ -28,3 +28,4 @@ export * from './schemas/amendments';
 export * from './schemas/privacy';
 export * from './schemas/trip-ops';
 export * from './schemas/organiser-exports';
+export * from './schemas/cancellations';

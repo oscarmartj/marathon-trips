@@ -8,3 +8,7 @@ export type { RedeemInput } from './promo-redemption.service';
 export { PromoAttemptGuard } from './promo-attempt.guard';
 export { ENGINE_VERSION, PricingError, priceDifference } from './engine';
 export type { PriceBreakdown, PricedConfiguration } from './engine';
+export { CancellationPolicyService, cancellationPolicyDigest, publicPolicyView, tierView } from './cancellation-policy.service';
+export type { FrozenCancellationPolicy } from './cancellation-policy.service';
+export { quoteCancellation, CANCELLABLE_STATES, CONTRACTED_STATES, daysBetween, addDays } from './engine';
+export type { CancellationBasis, CancellationQuote, CancellationTierInput } from './engine';

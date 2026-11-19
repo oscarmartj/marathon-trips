@@ -56,6 +56,8 @@ describe('booking terms with version and date', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       slug: 'terms', version: page.version, title: 'Terms of booking', intro: 'Read these before you pay.', body: 'One.\n\nTwo.', acceptedAt: null,
+      // Task 6.4: the booking's cancellation policy is shown with the terms (none for this package).
+      cancellationPolicy: null,
       digest: termsDigest({ slug: 'terms', locale: 'en-AU', title: 'Terms of booking', intro: 'Read these before you pay.', body: 'One.\n\nTwo.' }),
     });
   });

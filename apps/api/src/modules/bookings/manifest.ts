@@ -43,6 +43,8 @@ export const BOOKING_EVENTS = {
   refunded: 'bookings.booking.refunded',
   /** Task 4.5: money came back to a refunded booking (a refund reversed, a chargeback reinstated): refunded → cancelled. */
   refundReversed: 'bookings.booking.refund_reversed',
+  /** Task 6.4: the cancellation record of a booking (penalty, refundable, basis), next to bookings.booking.cancelled. */
+  cancellationRecorded: 'bookings.cancellation.recorded',
 } as const;
 
 export const bookingsManifest = {
@@ -59,7 +61,7 @@ export const bookingsManifest = {
     // A change moves what the customer owes, takes or gives back stock and cannot be undone except by another change:
     // step-up, owner only by default, never an API key scope (task 6.3).
     def(BOOKINGS_PERMISSIONS.amend, 'Change a booking after its deposit (rooms, travellers, nights, extras); the new price comes from the pricing engine and what is owed changes', true),
-    def(BOOKINGS_PERMISSIONS.cancel, 'Cancel a request or an approved booking, which gives its stock and promo code back; cannot be undone', true),
+    def(BOOKINGS_PERMISSIONS.cancel, 'Cancel a booking with the penalty of its cancellation policy (or none, when we cancel it), which gives its stock and promo code back; cannot be undone', true),
     def(BOOKINGS_CRM_PERMISSIONS.annotate, 'Add notes and tags to a booking'),
     def(BOOKINGS_CRM_PERMISSIONS.customerRead, 'See customers with their contact details and history of bookings, quotes and emails'),
     def(BOOKINGS_CRM_PERMISSIONS.customerWrite, 'Add a customer and change a customer\'s contact details'),

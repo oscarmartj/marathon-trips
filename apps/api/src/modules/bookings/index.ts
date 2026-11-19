@@ -29,4 +29,8 @@ export { BookingAmendmentService, AMENDABLE_STATES } from './amendment.service';
 export type { AmendmentRequest, BookingRef } from './amendment.service';
 export { AMENDMENT_SETTINGS } from './settings';
 export { CustomerService } from './customer.service';
+export { BookingCancellationHooks } from './cancellation-hooks';
+export type { CancellationMoneyFacts, CancellationMoneyPort } from './cancellation-hooks';
+export { BookingCancellationService, CANCELLATION_REQUEST_HOLD_DAYS } from './cancellation.service';
+export { CANCELLATION_SETTINGS } from './settings';
 export type { LockedCustomer } from './customer.service';

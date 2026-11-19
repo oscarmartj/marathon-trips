@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ISO_COUNTRY_CODES } from '../iso-countries';
 import { uuidSchema, versionSchema } from './catalogue';
 import { quoteRequestSchema } from './pricing';
+import { cancellationPolicyRefSchema } from './cancellations';
 
 // Booking requests (task 2.4, plan docs/plans/2.4-booking-requests.md). A request carries a configuration and the lead
 // contact, never an amount, a currency, a date or a status: the API prices it with its engine and stores the result.
@@ -28,7 +29,8 @@ export const bookingContactSchema = z.strictObject({
 export type BookingContact = z.infer<typeof bookingContactSchema>;
 
 /** A booking request: exactly a quote request (strict at every level) plus the contact. */
-export const bookingRequestSchema = quoteRequestSchema.extend({ contact: bookingContactSchema }).strict();
+/** Task 6.4 (plan section 13, M2): the cancellation policy the customer was shown; null when the package showed none. */
+export const bookingRequestSchema = quoteRequestSchema.extend({ contact: bookingContactSchema, cancellationPolicy: cancellationPolicyRefSchema.nullable().default(null) }).strict();
 export type BookingRequest = z.infer<typeof bookingRequestSchema>;
 
 const staffReason = z.string().trim().min(1).max(500);

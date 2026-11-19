@@ -15,7 +15,7 @@ export interface PlanInput {
 }
 
 export interface PlannedItem {
-  kind: 'deposit' | 'balance' | 'instalment' | 'adjustment';
+  kind: 'deposit' | 'balance' | 'instalment' | 'adjustment' | 'penalty';
   sequence: number;
   amountMinor: bigint;
   /** YYYY-MM-DD in the business time zone. */

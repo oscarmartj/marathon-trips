@@ -11,7 +11,7 @@ import { ProviderAccountsService } from '../../../src/modules/payments/core/acco
 import { ErasureService } from '../../../src/modules/privacy';
 import { SYSTEM_ACTOR } from '../../../src/platform/audit/audit.service';
 import { TestApp, makeApp } from '../../support/auth';
-import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
+import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, staffCancel } from '../../support/bookings';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
 import { balancesOf, connect, ledgerOf, txError } from '../../support/ledger';
 import { pricedWorld } from '../../support/pricing';
@@ -391,7 +391,7 @@ describe('the evidence package (plan 4.5, section 6) and erasure (plan review, 7
       const payer = await payingCustomer(t);
       const theirs = await approvedBooking(t, admin, await pricedWorld(admin), payer);
       const tb = await t.prisma.booking.findUniqueOrThrow({ where: { id: theirs.bookingId } });
-      expect((await admin.post(`/admin/bookings/${tb.id}/cancel`, { version: tb.version, reason: 'Not needed' })).status).toBe(200);
+      expect((await staffCancel(admin, tb.id, { version: tb.version, reason: 'Not needed' })).status).toBe(200);
       const payerId = tb.customerId;
       expect(await reason(payerId)).toBeNull();
       const owner = await connect('owner');

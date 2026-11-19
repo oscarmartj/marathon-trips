@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, 
 import {
   adminQuoteRequestSchema, archiveSchema, createPriceRuleSchema, createPriceVersionSchema, createPromoCodeSchema, publishPriceVersionSchema,
   quoteRequestSchema, setRatesSchema, updatePriceRuleSchema, updatePromoCodeSchema, withdrawPriceVersionSchema,
+  assignPackageCancellationPolicySchema, cancellationPolicyVersionSchema, createCancellationPolicySchema, setCancellationTiersSchema, updateCancellationPolicySchema,
 } from '@mt/shared';
 import { z } from 'zod';
 import { Public, RequirePermission } from '../../platform/access/access.decorators';
@@ -15,6 +16,7 @@ import { PromoCodeService } from './promo-code.service';
 import { QuoteRateLimitGuard } from './quote-rate-limit.guard';
 import { PriceRuleService } from './rule.service';
 import { QuoteService } from './quote.service';
+import { CancellationPolicyService } from './cancellation-policy.service';
 
 const uuid = () => new ParseUUIDPipe();
 type In<T extends z.ZodType> = z.infer<T>;
@@ -120,10 +122,73 @@ export class PricingAdjustmentsController {
 /** The public quote: a configuration in, the API's total and breakdown out. No amount is ever accepted. */
 @Controller('pricing')
 export class PricingPublicController {
-  constructor(@Inject(QuoteService) private readonly quotes: QuoteService) {}
+  constructor(
+    @Inject(QuoteService) private readonly quotes: QuoteService,
+    @Inject(CancellationPolicyService) private readonly policies: CancellationPolicyService,
+  ) {}
+
+  /** Task 6.4 (plan section 13, M2): the cancellation policy a request for this package is sold under now. */
+  @Get('packages/:packageId/cancellation-policy')
+  @Public('cancellation policy a package sells under now: tiers and description, the digest a request sends back')
+  cancellationPolicy(@Param('packageId', uuid()) packageId: string) { return this.policies.publicForPackage(packageId); }
 
   @Post('quotes') @HttpCode(200)
   @Public('price of a configuration of an open package: total, breakdown, deposit; no stock numbers, no rule details')
   @UseGuards(QuoteRateLimitGuard, PromoAttemptGuard)
   quote(@Body(new ZodPipe(quoteRequestSchema)) b: In<typeof quoteRequestSchema>) { return this.quotes.quotePublic(b); }
 }
+
+/** Task 6.4: cancellation policies in the panel. Activating, archiving and assigning need a recent TOTP check. */
+@Controller('admin/pricing')
+export class CancellationPoliciesController {
+  constructor(@Inject(CancellationPolicyService) private readonly policies: CancellationPolicyService) {}
+
+  @Get('cancellation-policies') @RequirePermission(P.cancellationPolicyRead)
+  list() { return this.policies.list(); }
+
+  @Get('cancellation-policies/:id') @RequirePermission(P.cancellationPolicyRead)
+  get(@Param('id', uuid()) id: string) { return this.policies.get(id); }
+
+  @Post('cancellation-policies') @RequirePermission(P.cancellationPolicyManage)
+  create(@Body(new ZodPipe(createCancellationPolicySchema)) b: In<typeof createCancellationPolicySchema>, @Req() req: ApiRequest) {
+    return this.policies.create(staff(req), b);
+  }
+
+  @Patch('cancellation-policies/:id') @RequirePermission(P.cancellationPolicyManage)
+  update(@Param('id', uuid()) id: string, @Body(new ZodPipe(updateCancellationPolicySchema)) b: In<typeof updateCancellationPolicySchema>, @Req() req: ApiRequest) {
+    return this.policies.update(staff(req), id, b);
+  }
+
+  @Put('cancellation-policies/:id/tiers') @RequirePermission(P.cancellationPolicyManage)
+  setTiers(@Param('id', uuid()) id: string, @Body(new ZodPipe(setCancellationTiersSchema)) b: In<typeof setCancellationTiersSchema>, @Req() req: ApiRequest) {
+    return this.policies.setTiers(staff(req), id, b);
+  }
+
+  @Post('cancellation-policies/:id/delete') @HttpCode(204) @RequirePermission(P.cancellationPolicyManage)
+  async remove(@Param('id', uuid()) id: string, @Body(new ZodPipe(cancellationPolicyVersionSchema)) b: In<typeof cancellationPolicyVersionSchema>, @Req() req: ApiRequest) {
+    await this.policies.remove(staff(req), id, b.version);
+  }
+
+  @Post('cancellation-policies/:id/duplicate') @RequirePermission(P.cancellationPolicyManage)
+  duplicate(@Param('id', uuid()) id: string, @Req() req: ApiRequest) { return this.policies.duplicate(staff(req), id); }
+
+  @Post('cancellation-policies/:id/activate') @HttpCode(200) @RequirePermission(P.cancellationPolicyPublish)
+  activate(@Param('id', uuid()) id: string, @Body(new ZodPipe(cancellationPolicyVersionSchema)) b: In<typeof cancellationPolicyVersionSchema>, @Req() req: ApiRequest) {
+    return this.policies.activate(staff(req), id, b.version);
+  }
+
+  @Post('cancellation-policies/:id/archive') @HttpCode(200) @RequirePermission(P.cancellationPolicyPublish)
+  archive(@Param('id', uuid()) id: string, @Body(new ZodPipe(cancellationPolicyVersionSchema)) b: In<typeof cancellationPolicyVersionSchema>, @Req() req: ApiRequest) {
+    return this.policies.archive(staff(req), id, b.version);
+  }
+
+  @Get('packages/:packageId/cancellation-policy') @RequirePermission(P.cancellationPolicyRead)
+  packagePolicy(@Param('packageId', uuid()) packageId: string) { return this.policies.packagePolicy(packageId); }
+
+  @Put('packages/:packageId/cancellation-policy') @RequirePermission(P.cancellationPolicyPublish)
+  assign(@Param('packageId', uuid()) packageId: string, @Body(new ZodPipe(assignPackageCancellationPolicySchema)) b: In<typeof assignPackageCancellationPolicySchema>, @Req() req: ApiRequest) {
+    return this.policies.assign(staff(req), packageId, b);
+  }
+}
+
+const staff = (req: ApiRequest) => actorOf(req) as ReturnType<typeof actorOf> & { id: string };

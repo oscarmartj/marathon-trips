@@ -410,7 +410,8 @@ describe('permissions', () => {
 
   it('price_version_routes_require_permission: 401 without a session, 403 without the permission', async () => {
     const nobody = await staffClient(t, [P.packageRead]);
-    expect(routes().length).toBe(18);
+    // Task 6.4: eleven cancellation policy routes join the eighteen of tasks 2.1 and 2.2.
+    expect(routes().length).toBe(29);
     for (const r of routes()) {
       const method = r.method.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
       expect((await t.http()[method](fill(r.path)).set(STATE_HEADERS).send({})).status, `${r.method} ${r.path}`).toBe(401);
@@ -422,6 +423,7 @@ describe('permissions', () => {
   it('each admin route names one pricing permission and every pricing permission is used; the quote route is public', () => {
     const used = new Set(routes().map((r) => (r.marks[0] as { key: string }).key));
     expect([...used].sort()).toEqual(Object.values(PP).sort());
-    expect(allRoutes(t.app).filter((r) => r.path.startsWith('/pricing')).map((r) => r.marks[0]?.type)).toEqual(['public']);
+    // Task 6.4: the cancellation policy a package sells under is public too (what a customer reads before booking).
+    expect(allRoutes(t.app).filter((r) => r.path.startsWith('/pricing')).map((r) => r.marks[0]?.type)).toEqual(['public', 'public']);
   });
 });

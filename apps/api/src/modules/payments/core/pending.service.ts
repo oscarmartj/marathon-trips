@@ -12,7 +12,7 @@ const dayMs = 86_400_000;
 export interface PendingCollection {
   bookingId: string;
   reference: string;
-  kind: 'deposit' | 'balance' | 'instalment' | 'adjustment';
+  kind: 'deposit' | 'balance' | 'instalment' | 'adjustment' | 'penalty';
   sequence: number;
   /** YYYY-MM-DD */
   dueDate: string;

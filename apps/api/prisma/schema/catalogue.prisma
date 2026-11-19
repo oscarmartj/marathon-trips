@@ -306,6 +306,7 @@ model Package {
   extras               Extra[]
   costItems            CostItem[]
   priceVersions        PriceVersion[]
+  cancellationPolicies PackageCancellationPolicy[]
   priceRules           PriceRule[]
   promoCodes           PromoCode[]
   bookings             Booking[]
