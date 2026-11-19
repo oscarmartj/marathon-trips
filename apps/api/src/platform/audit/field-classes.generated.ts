@@ -198,6 +198,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     currency: 'nopii',
     priceVersionId: 'nopii',
     engineVersion: 'nopii',
+    cancellationPolicyId: 'nopii',
     createdAt: 'nopii'
   },
   BookingTraveller: {
@@ -219,6 +220,64 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     status: 'nopii',
     results: 'nopii',
     createdById: 'nopii',
+    createdAt: 'nopii'
+  },
+  Cancellation: {
+    id: 'nopii',
+    bookingId: 'nopii',
+    currency: 'nopii',
+    requestedBy: 'nopii',
+    requestedById: 'nopii',
+    bookingStatus: 'nopii',
+    snapshotVersion: 'nopii',
+    basis: 'nopii',
+    cancellationPolicyId: 'nopii',
+    cancellationRequestId: 'nopii',
+    businessDate: 'nopii',
+    processedDate: 'nopii',
+    daysBeforeDeparture: 'pii',
+    tierMinDays: 'nopii',
+    policySnapshot: 'nopii',
+    baseTotalMinor: 'nopii',
+    places: 'nopii',
+    collectedMinor: 'pii',
+    policyPenaltyMinor: 'nopii',
+    penaltyMinor: 'nopii',
+    waivedMinor: 'nopii',
+    refundableMinor: 'nopii',
+    createdAt: 'nopii'
+  },
+  CancellationPolicy: {
+    id: 'nopii',
+    name: 'nopii',
+    description: 'nopii',
+    status: 'nopii',
+    currency: 'nopii',
+    activatedAt: 'nopii',
+    activatedById: 'nopii',
+    archivedAt: 'nopii',
+    version: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
+  CancellationRequest: {
+    id: 'nopii',
+    bookingId: 'nopii',
+    requestedBy: 'nopii',
+    requestedById: 'nopii',
+    businessDate: 'nopii',
+    blockedReason: 'nopii',
+    quoteDigest: 'nopii',
+    createdAt: 'nopii'
+  },
+  CancellationTier: {
+    id: 'nopii',
+    policyId: 'nopii',
+    minDaysBeforeDeparture: 'nopii',
+    penaltyMode: 'nopii',
+    penaltyBps: 'nopii',
+    penaltyMinor: 'nopii',
+    currency: 'nopii',
     createdAt: 'nopii'
   },
   Complaint: {
@@ -712,6 +771,15 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     createdAt: 'nopii',
     updatedAt: 'nopii'
   },
+  PackageCancellationPolicy: {
+    packageId: 'nopii',
+    currency: 'nopii',
+    policyId: 'nopii',
+    version: 'nopii',
+    updatedById: 'nopii',
+    createdAt: 'nopii',
+    updatedAt: 'nopii'
+  },
   PackageEntryOption: {
     id: 'nopii',
     packageId: 'nopii',
@@ -1057,6 +1125,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     amountMinor: 'nopii',
     origin: 'nopii',
     purpose: 'nopii',
+    cancellationId: 'nopii',
     reason: 'pii',
     status: 'nopii',
     idempotencyKey: 'nopii',
@@ -1306,6 +1375,7 @@ export const FIELD_CLASSES: Readonly<Record<string, Readonly<Record<string, Fiel
     title: 'nopii',
     intro: 'nopii',
     body: 'nopii',
+    cancellationPolicyDigest: 'nopii',
     acceptedAt: 'nopii'
   },
   Traveller: {

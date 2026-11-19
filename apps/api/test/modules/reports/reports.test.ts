@@ -12,7 +12,7 @@ import { MailService } from '../../../src/platform/mail/mail.service';
 import { STATE_HEADERS, TestApp, makeApp, signInCustomer } from '../../support/auth';
 import { Client, CATALOGUE_AND_PRICING, World, announceEdition, buildWorld, closeCatalogue, staffClient } from '../../support/catalogue';
 import { insertValidSchedule } from '../../support/payments';
-import { makeBookingFor } from '../../support/bookings';
+import { makeBookingFor, insertBareCancellation } from '../../support/bookings';
 import { must } from '../../support/suppliers';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -63,6 +63,8 @@ async function booking(w: World, versionId: string, state: 'requested' | (typeof
     if (state === 'requested') return;
     if (state === 'declined' || state === 'cancelled' || state === 'expired') {
       const col = { declined: 'declinedAt', cancelled: 'cancelledAt', expired: 'expiredAt' }[state];
+      // Task 6.4: a cancellation has its record (deferred trigger of 0038).
+      if (state === 'cancelled') await insertBareCancellation(tx, bookingId);
       await tx.$executeRawUnsafe(`UPDATE bookings SET version = version + 1, status = '${state}'::"BookingStatus", "${col}" = now() WHERE id = '${bookingId}'::uuid`);
       return;
     }

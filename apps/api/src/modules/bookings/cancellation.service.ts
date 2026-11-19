@@ -264,16 +264,17 @@ export class BookingCancellationService {
   }
 
   private async load(tx: Tx, where: { id: string } | { reference: string }, lock: boolean): Promise<Loaded | null> {
-    const byId = 'id' in where;
-    const value = byId ? where.id : where.reference;
-    if (lock) await tx.$queryRawUnsafe(`SELECT b.id FROM bookings b WHERE ${byId ? 'b.id = $1::uuid' : 'b.reference = $1'} FOR UPDATE OF b`, value);
-    const rows = await tx.$queryRawUnsafe<Array<Omit<Loaded, 'departureDate'> & { departureDate: Date }>>(
-      `SELECT b.id::text AS id, b.reference, b."customerId"::text AS "customerId", b.status::text AS status, b.version, b.currency, b."currentSnapshotVersion",
-              b."departureDate", s."totalMinor", s.configuration, s."cancellationPolicyId"::text AS "cancellationPolicyId"
-         FROM bookings b JOIN booking_snapshots s ON s."bookingId" = b.id AND s.version = b."currentSnapshotVersion"
-        WHERE ${byId ? 'b.id = $1::uuid' : 'b.reference = $1'}`,
-      value,
-    );
+    // The booking row is locked on its own first (as read.ts does): a join locked with it would re-check an old snapshot.
+    const id = 'id' in where
+      ? where.id
+      : (await tx.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM bookings WHERE reference = ${where.reference}`)[0]?.id;
+    if (!id) return null;
+    if (lock) await tx.$queryRaw`SELECT id FROM bookings WHERE id = ${id}::uuid FOR UPDATE`;
+    const rows = await tx.$queryRaw<Array<Omit<Loaded, 'departureDate'> & { departureDate: Date }>>`
+      SELECT b.id::text AS id, b.reference, b."customerId"::text AS "customerId", b.status::text AS status, b.version, b.currency, b."currentSnapshotVersion",
+             b."departureDate", s."totalMinor", s.configuration, s."cancellationPolicyId"::text AS "cancellationPolicyId"
+        FROM bookings b JOIN booking_snapshots s ON s."bookingId" = b.id AND s.version = b."currentSnapshotVersion"
+       WHERE b.id = ${id}::uuid`;
     const r = rows[0];
     return r ? { ...r, departureDate: r.departureDate.toISOString().slice(0, 10) } : null;
   }
