@@ -11,6 +11,21 @@ Secciones: 1 convenciones · 2 monorepo · 3 módulos · 4 plataforma · 5 model
 
 ## Aparcado: dinero (decisión de Oscar, 2026-11-12)
 
+> **Levantado el 2026-11-19 (decisión de Oscar).** El dinero deja de estar aparcado: 3.3, 3.4, 4.1 a 4.6, 6.2, 6.4, 6.6 y 9.1 a 9.4 se arrancan según la tabla de `docs/autonomous.md`, y los requisitos vinculantes de abajo (P1–P12, las celdas con dinero de 6.2, la tabla de padres de 1.1 y los 8 hallazgos) se aplican a la tarea que construye cada cosa. Siguen en pie las reglas de "Lo que no cambia nunca": sin modo real, sin claves reales, sin cuentas externas; un adaptador no probado contra un sandbox real se queda en `experimental` (el sandbox lo aporta Oscar: `docs/BLOCKED.md`). El texto de abajo se conserva como estaba el 2026-11-12.
+>
+> | Hallazgo | Tarea que lo cumple | Nota |
+> |---|---|---|
+> | 1. Reembolso manual/PayID (P13) | 3.4 (confirmación manual, referencia bancaria y dónde viven los datos bancarios de destino) y 4.5 (el reembolso manual: confirmado una sola vez, con paso de verificación reforzada y destino borrado con el cliente, 5.5) | pruebas `manual_refund_*` |
+> | 2. Webhook casado por id interno, filtrado por la cuenta que lo recibe | 3.3 (webhooks de Stripe); lo repiten 4.1 (cuentas), 4.3, 4.4 y 9.x en cada adaptador nuevo | `webhook_metadata_id_from_other_account_not_matched` |
+> | 3. `rateE9` en unidades mayores y exponentes por moneda | 6.2 (pagos a proveedores en otra moneda) y 6.6 (resultado y previsión de caja); 4.6 si el informe de dinero de clientes convierte monedas | `fx_conversion_respects_currency_exponents` (JPY/AUD); `ExchangeRate` ya existe desde 6.1 |
+> | 4. Descuento acotado al componente; total nunca bajo 0 | Ya cumplido por 2.1; 3.2, 4.5 y 6.4 no deben romperlo (reembolsos y penalizaciones parten de la instantánea) | `discount_capped_at_component`, `total_never_negative`: no se reescriben |
+> | 5. Cancelación del cliente → 409 hasta que existan políticas | 6.4 (retira el 409 solo cuando existen políticas y su cálculo); mientras, sigue en pie | `customer_cancellation_rejected_until_policies_exist` |
+> | 6. GST acumulado por recibo, con nota de ajuste en reembolsos | 4.6 (recibos), con 4.5 (reembolsos) como origen del ajuste | `receipt_gst_sums_to_booking_gst` |
+> | 7. Penalización mayor que lo cobrado | 6.4 (decide qué ocurre con lo no cobrado: no se cobra tras cancelar), con 4.5 para lo ya cobrado | Prueba nombrada por 6.4 al planificar |
+> | 8. Criterio de la fase 6 sin prueba | Ya cumplido por 6.3 (`amendment_records_difference_and_keeps_original_snapshot`, `docs/done/6.3.md`); 6.4 y 6.6 no deben romperlo | |
+>
+> Las 3.3, 3.4 y 4.x escriben primero las pruebas de P1–P12 que les tocan; 6.2, 6.4 y 6.6 las de 6.2 y 6.4 (sección 8).
+
 **Aparcado**, sin fecha: cobros reales, libro contable real, reembolsos, contracargos, conciliación, recibos y GST, divisas, pagos a proveedores y cancelación con penalización. Etiquetas "aparcada"/"parcial" en la tabla de `docs/autonomous.md`.
 
 **Sí queda listo**, sin modo real: modelos y tipos con dinero en unidades menores enteras y moneda (1.1); motor de precios en la API (el frontend solo muestra lo que devuelve); `PaymentProvider` con simulador y batería de contrato (3.6), adaptadores en `experimental`; plan de depósito y saldo, endpoints y pantallas de pago (checkout, área del cliente, enlaces) contra el simulador.
