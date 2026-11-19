@@ -3264,6 +3264,120 @@
         "refund_may_be_due": "Cannot erase yet: a closed booking has money paid that may need to be refunded."
       },
       "ownerOnly": "Only an owner can do this."
+    },
+    "routing": {
+      "title": "Routing rules",
+      "intro": "Which account takes a new payment, by method, customer's country, currency and amount. Lower priority goes first. A backup takes the payments of its rule whenever that rule's account cannot. Rules never change what a customer pays.",
+      "none": "No routing rules yet.",
+      "anyCountry": "Any country",
+      "noLimits": "Any amount",
+      "noMin": "no minimum",
+      "noMax": "no maximum",
+      "limitsRange": "{min} to {max}",
+      "columns": {
+        "method": "Method",
+        "account": "Account",
+        "countries": "Countries",
+        "limits": "Amount",
+        "priority": "Priority",
+        "backup": "Backup for",
+        "state": "State",
+        "actions": "Actions"
+      },
+      "state": {
+        "on": "On",
+        "off": "Off",
+        "outside": "Outside what the gateway supports"
+      },
+      "backupOf": "Backup for the {method} rule of {account}",
+      "primary": "Main rule",
+      "action": {
+        "enable": "Turn on",
+        "disable": "Turn off",
+        "delete": "Remove",
+        "defaults": "Restore default rules"
+      },
+      "form": {
+        "title": "Add a rule",
+        "account": "Account",
+        "method": "Method",
+        "countries": "Countries (two-letter codes, empty for any)",
+        "currency": "Currency",
+        "min": "Minimum amount (A$, optional)",
+        "max": "Maximum amount (A$, optional)",
+        "priority": "Priority (0 to 1000)",
+        "backup": "Backup for",
+        "noBackup": "None: a main rule",
+        "enabled": "On",
+        "submit": "Add rule",
+        "badAmount": "Type the amount in dollars and cents, for example 1500.00."
+      },
+      "saved": "Routing rule saved.",
+      "removed": "Routing rule removed.",
+      "defaultsAdded": "{count} default rules added.",
+      "backupsServing": "Its backups now take its payments.",
+      "confirm": {
+        "title": "Customers would lose a way to pay",
+        "intro": "This change leaves no way to pay for: {lost}. Go ahead anyway?",
+        "proceed": "Make the change",
+        "cancel": "Keep things as they are"
+      },
+      "preview": {
+        "title": "Who would take this payment?",
+        "method": "Method",
+        "country": "Country",
+        "amount": "Amount (A$, optional)",
+        "submit": "Check",
+        "takes": "Takes the payment",
+        "nobody": "No account would take this payment.",
+        "order": "In this order:"
+      },
+      "reason": {
+        "disabled": "rule is off",
+        "method": "another method",
+        "currency": "another currency",
+        "country": "another country",
+        "below_min": "below its minimum",
+        "above_max": "above its maximum",
+        "outside_adapter": "outside what the gateway supports",
+        "account_not_active": "account is not active",
+        "adapter_blocked": "gateway cannot take payments here",
+        "manual_off": "method is switched off",
+        "unreachable": "gateway is not answering",
+        "primary_serving": "its main rule is taking the payment",
+        "primary_not_matching": "its main rule would not take this payment",
+        "unknown": "not used"
+      },
+      "warning": {
+        "title": "Routing warnings",
+        "account_unreachable": "{account} is not answering: new payments go to other accounts for now.",
+        "account_auth_failed": "{account} refused its credentials. It takes no new payments until a connection test passes.",
+        "method_unreachable_now": "{method} for {country} cannot be offered right now: every account for it is not answering.",
+        "method_limited_by_amount": "{method} for {country} is not available for some amounts: {gaps}.",
+        "active_account_without_rules": "{account} is active but has no routing rules, so it takes no payments.",
+        "rule_outside_adapter_capabilities": "A routing rule asks for something its gateway no longer supports; it is not used.",
+        "fallback_target_disabled": "A main rule is off, so its backups take its payments.",
+        "live_attempts_on_unreachable_account": "{count} bookings have a payment waiting on {account}, which is not answering. They can pay once it answers again.",
+        "unknown": "Check the routing rules."
+      },
+      "errors": {
+        "rule_method_not_supported": "That gateway does not offer this method.",
+        "rule_currency_not_supported": "That currency cannot be used here.",
+        "rule_country_not_supported": "That gateway does not serve one of these countries.",
+        "rule_countries_invalid": "Use two-letter country codes, each once.",
+        "rule_amount_invalid": "The amounts must be whole cents between nothing and A$10,000,000,000.",
+        "rule_limits_inverted": "The minimum is above the maximum.",
+        "rule_priority_invalid": "Priority goes from 0 to 1000.",
+        "fallback_target_missing": "The rule it would back up no longer exists.",
+        "fallback_target_is_fallback": "A backup cannot back up another backup.",
+        "fallback_mismatch": "A backup needs the same method and currency as its rule.",
+        "fallback_same_account": "A backup must send payments to another account.",
+        "fallback_self": "A rule cannot back up itself.",
+        "rule_is_fallback_target": "Other rules back this one up: it keeps its method and currency and cannot become a backup.",
+        "rule_has_fallbacks": "Other rules back this one up. Remove or change them first.",
+        "account_not_accepting_charges": "That account takes no new payments.",
+        "version_conflict": "Someone else changed this rule. Reload and try again."
+      }
     }
   },
   "auth": {
