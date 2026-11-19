@@ -246,6 +246,23 @@ describe('the token', () => {
 });
 
 describe('paying through a link', () => {
+  it('payment_links_respect_rules (task 4.2): the link offers what the rules allow for its amount, and paying follows them', async () => {
+    const l = await linked();
+    const due = BigInt((await view(l.token)).body.amountDueMinor);
+    const card = await t.prisma.routingRule.findFirstOrThrow({ where: { providerAccountId: acc.id, method: 'card' } });
+    await t.prisma.routingRule.update({ where: { id: card.id }, data: { maxAmountMinor: due - 1n } });
+    try {
+      const res = await view(l.token);
+      expect(res.status).toBe(200);
+      expect(res.body.methods).not.toContain('card');
+      const r = await pay(l.token);
+      expect([r.status, r.body.code]).toEqual([409, 'no_payment_method_available']);
+    } finally {
+      await t.prisma.routingRule.update({ where: { id: card.id }, data: { maxAmountMinor: card.maxAmountMinor } });
+    }
+    expect((await view(l.token)).body.methods).toContain('card');
+  });
+
   it('link_payment_body_with_amount_or_sequence_422: the strict body takes only the token and the method', async () => {
     const l = await linked();
     for (const extra of [{ amountMinor: '1' }, { upToSequence: 2 }, { replaceLiveAttempt: true }, { reference: 'MT-000000' }]) {
