@@ -91,7 +91,9 @@ export class PaymentAttemptSyncService {
     if (action === 'expire' && p.pendingExpiresAt.getTime() > now.getTime()) return 'not_due';
 
     if (action === 'sync') {
-      const remote = await this.retrieve(p);
+      const read = await this.retrieve(p);
+      // Task 4.3: an approved payment is finished (captured) only on sync, drive and expire.
+      const remote = read ? await this.attempts.completeIfDue(p.id, read, 'sweep') : null;
       if (remote) await this.attempts.record(p.id, remote, 'sweep');
       return remote ? 'applied' : 'unresolved';
     }
@@ -140,8 +142,10 @@ export class PaymentAttemptSyncService {
   }
 
   private async settle(p: { id: string; providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string; pendingExpiresAt: Date; createdAt: Date }, action: 'cancel' | 'expire', now: Date): Promise<SyncOutcome> {
-    const remote = await this.gw(() => this.retrieve(p));
-    if (!remote) return this.unresolved(p.id, p.pendingExpiresAt, now);
+    const read = await this.gw(() => this.retrieve(p));
+    if (!read) return this.unresolved(p.id, p.pendingExpiresAt, now);
+    // Task 4.3: at expiry an approved payment is finished first (never when the booking is cancelled or replaced).
+    const remote = action === 'expire' ? await this.gw(() => this.attempts.completeIfDue(p.id, read, 'sweep')) : read;
     if (remote.status === 'requires_action') {
       const after = await this.gw(() => this.gateway.call(p.providerAccountId, 'cancel', (provider, ctx) => provider.cancelPayment(ctx, remote.ref, `${p.idempotencyKey}:cancel`)));
       return this.finish(p.id, after, action, p.pendingExpiresAt, now);

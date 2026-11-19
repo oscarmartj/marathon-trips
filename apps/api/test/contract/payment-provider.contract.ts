@@ -10,7 +10,7 @@ import { PAYMENT_METHODS } from '@mt/shared';
 import { CONTRACT_CLAUSES } from '../../src/modules/payments/core/contract-clauses';
 import type { ContractClause } from '../../src/modules/payments/core/contract-clauses';
 import { PROVIDER_ERROR_CODES, ProviderError } from '../../src/modules/payments/core/provider';
-import type { CreatePaymentInput, PaymentLookup, PaymentProvider, ProviderActivity, ProviderContext, ProviderDispute, ProviderPayment, ProviderPaymentStatus, ProviderRefund } from '../../src/modules/payments/core/provider';
+import type { CreatePaymentInput, PaymentLookup, PaymentProvider, ProviderActivity, ProviderContext, ProviderDispute, ProviderPayment, ProviderPaymentStatus, ProviderRefund, WebhookVerification } from '../../src/modules/payments/core/provider';
 import { manifestProblems } from '../../src/modules/payments/core/registry';
 
 export interface SignedBody {
@@ -100,6 +100,12 @@ class Harness {
 
   get p(): PaymentProvider {
     return this.s.provider;
+  }
+
+  /** verifyWebhook as the gateway wrapper calls it: the adapter's optional prepareWebhook first (task 4.3). */
+  async verify(ctx: ProviderContext, body: Buffer, headers: Record<string, string>, when: Date): Promise<WebhookVerification> {
+    await this.p.prepareWebhook?.(ctx, headers);
+    return this.p.verifyWebhook(ctx, body, headers, when);
   }
 
   /** Runs an adapter call: a value, or a ProviderError with a listed code. Any other exception fails, naming its type only. */
@@ -419,7 +425,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const at = now();
     const w = await h.s.webhookFor(ctx, p.ref, at);
     for (const name of h.p.signatureHeaders) expect(Object.keys(w.headers).map((k) => k.toLowerCase()), 'signature header present').toContain(name);
-    const v = await h.value('verifyWebhook', () => h.p.verifyWebhook(ctx, w.body, w.headers, at));
+    const v = await h.value('verifyWebhook', () => h.verify(ctx, w.body, w.headers, at));
     if (!v.ok) expect.fail(`verifyWebhook refused a valid webhook: ${v.code}`);
     const ev = v.event;
     expect(ev.kind).toBe('payment');
@@ -441,9 +447,9 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const before = await h.s.webhookFor(ctx, p.ref, now());
     await h.s.customerCompletes(ctx, p, 'pay');
     const after = await h.s.webhookFor(ctx, p.ref, now());
-    const v1 = await h.value('verifyWebhook (previous state)', () => h.p.verifyWebhook(ctx, before.body, before.headers, now()));
-    const v2 = await h.value('verifyWebhook (current state)', () => h.p.verifyWebhook(ctx, after.body, after.headers, now()));
-    const v2again = await h.value('verifyWebhook (same body again)', () => h.p.verifyWebhook(ctx, after.body, after.headers, now()));
+    const v1 = await h.value('verifyWebhook (previous state)', () => h.verify(ctx, before.body, before.headers, now()));
+    const v2 = await h.value('verifyWebhook (current state)', () => h.verify(ctx, after.body, after.headers, now()));
+    const v2again = await h.value('verifyWebhook (same body again)', () => h.verify(ctx, after.body, after.headers, now()));
     if (!v1.ok || !v2.ok || !v2again.ok) expect.fail('a valid webhook was refused');
     expect(v1.event.payment?.status, 'an older event keeps its own state').toBe(p.status);
     expect(v2.event.payment?.status).toBe('succeeded');
@@ -457,7 +463,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const p = await h.create(ctx, h.input());
     const at = now();
     const w = await h.s.webhookFor(ctx, p.ref, at);
-    const verify = (label: string, c: ProviderContext, body: Buffer, headers: Record<string, string>, when: Date) => h.value(label, () => h.p.verifyWebhook(c, body, headers, when));
+    const verify = (label: string, c: ProviderContext, body: Buffer, headers: Record<string, string>, when: Date) => h.value(label, () => h.verify(c, body, headers, when));
     const tampered = Buffer.from(w.body);
     const mid = Math.floor(tampered.length / 2);
     tampered[mid] = tampered[mid]! ^ 0x01;
@@ -479,11 +485,11 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const w = await h.s.webhookFor(ctx, p.ref, now());
     const bodies = [Buffer.alloc(0), Buffer.from('not json'), Buffer.from([0xff, 0xfe, 0x00, 0xc3, 0x28]), Buffer.alloc(256 * 1024, 0x7b), Buffer.from('null'), Buffer.from('[]'), Buffer.from('{"id":1}')];
     for (const body of bodies) {
-      expect((await h.value('verifyWebhook (garbage)', () => h.p.verifyWebhook(ctx, body, w.headers, now()))).ok).toBe(false);
+      expect((await h.value('verifyWebhook (garbage)', () => h.verify(ctx, body, w.headers, now()))).ok).toBe(false);
       expect(await h.value('parseEvent (garbage)', () => h.p.parseEvent(body))).toBeNull();
     }
     const huge = Object.fromEntries(h.p.signatureHeaders.map((n) => [n, 'x'.repeat(10 * 1024)]));
-    expect((await h.value('verifyWebhook (huge header)', () => h.p.verifyWebhook(ctx, w.body, { ...w.headers, ...huge }, now()))).ok).toBe(false);
+    expect((await h.value('verifyWebhook (huge header)', () => h.verify(ctx, w.body, { ...w.headers, ...huge }, now()))).ok).toBe(false);
   },
 
   async test_connection_reports_not_throws(h) {
@@ -579,7 +585,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const r = await h.value('createRefund', () => h.p.createRefund(ctx, input));
     const at = now();
     const w = await h.s.refundWebhookFor(ctx, r.ref, at);
-    const v = await h.value('verifyWebhook (refund)', () => h.p.verifyWebhook(ctx, w.body, w.headers, at));
+    const v = await h.value('verifyWebhook (refund)', () => h.verify(ctx, w.body, w.headers, at));
     if (!v.ok) expect.fail(`verifyWebhook refused a valid refund webhook: ${v.code}`);
     expect(v.event.kind).toBe('refund');
     const ev = h.expectRefund(v.event.refund ?? null, p.amount.amountMinor);
@@ -598,7 +604,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const r = await h.s.gatewayRefunds(ctx, p, 400n);
     const at = now();
     const w = await h.s.refundWebhookFor(ctx, r.ref, at);
-    const v = await h.value('verifyWebhook (dashboard refund)', () => h.p.verifyWebhook(ctx, w.body, w.headers, at));
+    const v = await h.value('verifyWebhook (dashboard refund)', () => h.verify(ctx, w.body, w.headers, at));
     if (!v.ok) expect.fail(`verifyWebhook refused a valid refund webhook: ${v.code}`);
     const ev = h.expectRefund(v.event.refund ?? null, 400n);
     expect(ev.ourRefundId, 'a dashboard refund carries no id of ours').toBeUndefined();
@@ -613,7 +619,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const { ref } = await d.open(ctx, p);
     const at = now();
     const w = await d.webhook(ctx, ref, at);
-    const v = await h.value('verifyWebhook (dispute)', () => h.p.verifyWebhook(ctx, w.body, w.headers, at));
+    const v = await h.value('verifyWebhook (dispute)', () => h.verify(ctx, w.body, w.headers, at));
     if (!v.ok) expect.fail(`verifyWebhook refused a valid dispute webhook: ${v.code}`);
     expect(v.event.kind).toBe('dispute');
     const ev = expectDispute(v.event.dispute ?? null, p);
@@ -631,7 +637,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const got = expectDispute(await h.value('retrieveDispute', () => h.p.retrieveDispute!(ctx, ref)), p);
     const at = now();
     const w = await d.webhook(ctx, ref, at);
-    const v = await h.value('verifyWebhook (dispute)', () => h.p.verifyWebhook(ctx, w.body, w.headers, at));
+    const v = await h.value('verifyWebhook (dispute)', () => h.verify(ctx, w.body, w.headers, at));
     if (!v.ok) expect.fail(`verifyWebhook refused a valid dispute webhook: ${v.code}`);
     expect(v.event.dispute).toEqual(got);
     const unknown = await h.call('retrieveDispute (unknown)', () => h.p.retrieveDispute!(ctx, `contract_unknown_${randomBytes(8).toString('hex')}`));
@@ -683,7 +689,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const r = await h.call('createRefund', () => h.p.createRefund(ctx, h.refundInput(paid, 100n)));
     if (r.ok) await h.call('retrieveRefund', () => h.p.retrieveRefund(ctx, { ref: r.value.ref }));
     const w = await h.s.webhookFor(ctx, p.ref, now());
-    await h.call('verifyWebhook (other secret)', () => h.p.verifyWebhook(bad.webhookSecret === ctx.webhookSecret ? { ...bad, webhookSecret: randomBytes(32).toString('hex') } : bad, w.body, w.headers, now()));
+    await h.call('verifyWebhook (other secret)', () => h.verify(bad.webhookSecret === ctx.webhookSecret ? { ...bad, webhookSecret: randomBytes(32).toString('hex') } : bad, w.body, w.headers, now()));
     const haystack = h.seen.map(serialise).join('\n');
     // The secrets of every context handed out in this suite (C3 to C19 used their own accounts), each field once.
     const fields = new Map<string, string>();
