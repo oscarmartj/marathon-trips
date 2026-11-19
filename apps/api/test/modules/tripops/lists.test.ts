@@ -113,7 +113,8 @@ describe('a list opened with semicolons as the separator (7.fix-5)', () => {
   // Hotel, room and transfer names are typed by staff; traveller names by customers. A comma file opened in a spreadsheet
   // that splits on ";" must not turn a fragment of any of them into a formula.
   const evil = 'Harbour;=HYPERLINK("http://evil.test","x")';
-  const bad = (csv: string) => csv.split(/[,;\r\n]/).map((f) => f.replace(/^[\s"]+/, '')).filter((f) => /^[=+\-@]/.test(f));
+  // A fragment a reader could start a cell with: after spaces and double quotes (which it may drop), a formula character.
+  const bad = (csv: string) => csv.split(/[,;\r\n]/).filter((f) => /^(?:[^\S\t\r\n]|")*[=+\-@\t]/.test(f));
   const guests = activeTravellers([{ slot: 1, isLead: true, removedInVersion: null }], [{ slot: 1, givenName: 'Ana; -1', familyName: 'Garcia,@x' }]);
 
   it('rooming list: hotel, city, room and guest names are quoted and guarded on every fragment, and read back', () => {
@@ -129,6 +130,22 @@ describe('a list opened with semicolons as the separator (7.fix-5)', () => {
     expect(bad(csv)).toEqual([]);
     const row = parseCsv(csv)[1]!.map(unguardCell);
     expect([row[0], row[1], row[5], row[10], row[11]]).toEqual([evil, 'Sydney;@x', 'Double; +view', 'Ana; -1', 'Garcia,@x']);
+  });
+
+  it('itinerary: extra names, schedule details and hotel names are quoted and guarded, and read back', () => {
+    const l = buildItinerary({
+      trip, raceName: 'Test Marathon', raceStart: d('2027-06-19'), raceEnd: d('2027-06-19'), raceDatesConfirmed: true, distances: ['Marathon', '-5 km fun run'],
+      hotels: [evil, 'Hotel\n=2'],
+      extras: [
+        { kind: 'excursion', name: { 'en-AU': 'Tour;"=1+1' }, schedule: { departure: '2027-06-20 09:00; +bus', origin: 'Wharf', destination: '@Island' } },
+        { kind: 'meal', name: { 'en-AU': 'Dinner\r\n-late' }, schedule: null },
+      ],
+    });
+    const csv = itineraryCsv(l);
+    expect(bad(csv)).toEqual([]);
+    const cells = parseCsv(csv).slice(1).flatMap((r) => r.map(unguardCell));
+    for (const text of ['Tour;"=1+1', 'Dinner\r\n-late', `${evil}; Hotel\n=2`, 'Marathon; -5 km fun run']) expect(cells).toContain(text);
+    expect(cells.some((c) => c.includes('+bus') && c.includes('@Island'))).toBe(true);
   });
 
   it('transfer list: the transfer name, its schedule and passenger names are quoted and guarded, and read back', () => {

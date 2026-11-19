@@ -19,7 +19,7 @@ function readAs(text: string, delimiter: ',' | ';'): string[][] {
   let inQuotes = false;
   let atStart = true;
   const end = () => {
-    row.push(field.replace(/^ +| +$/g, ''));
+    row.push(field.replace(/^[^\S\t\r\n]+|[^\S\t\r\n]+$/g, ''));
     field = '';
     atStart = true;
   };
@@ -40,7 +40,7 @@ function readAs(text: string, delimiter: ',' | ';'): string[][] {
       continue;
     }
     field += ch;
-    if (ch !== ' ') atStart = false;
+    if (!/[^\S\t\r\n]/.test(ch)) atStart = false;
   }
   if (field !== '' || row.length) { end(); rows.push(row); }
   return rows;
@@ -57,7 +57,7 @@ describe('formula guard on every comma and semicolon fragment (table)', () => {
     ['Smith,   +SUM(A1)', `"Smith,   '+SUM(A1)"`],
     ['a;-1;@ref', `"a;'-1;'@ref"`],
     ['a;\t=1', `"a;'\t=1"`],
-    ['a;\r=1', `"a;'\r=1"`],
+    ['a;\r=1', `"a;'\r'=1"`], // CR is a formula character and also ends a row for a reader that ignores our quotes
     ['a;\n=1', `"a;\n'=1"`],
     ["a;'=b", `"a;''=b"`],
     ['  =lead', "  '=lead"],
@@ -111,5 +111,35 @@ describe('a whole file, read with either separator and read back by the import',
       expect(guardCell(s)).toBe(s);
       expect(unguardCell(s)).toBe(s);
     }
+  });
+});
+
+describe('quotes and line breaks before a formula, in a column that is not the first (review of 7.fix-5)', () => {
+  // In a column after the first, a reader splitting on the other separator is in the middle of a field when it reaches
+  // our opening quote, so it does not honour it: a later `"` at a fragment start opens a quoted field of its own, and a
+  // CR or LF ends the row.
+  it.each([
+    // [text, the cell as written]
+    ['x;"=1+1;y', `"x;'""=1+1;y"`],
+    ['x,"=1+1', `"x,'""=1+1"`],
+    ['x;"" =1', `"x;'"""" =1"`],
+    ['x; " @a', `"x; '"" @a"`],
+    ['"=1', `"'""=1"`],
+    ["x;'\"=1", `"x;''""=1"`],
+    ["ver\n=cmd|' /C calc'!A0;z", `"ver\n'=cmd|' /C calc'!A0;z"`],
+    ['a\r\n@b', `"a\r\n'@b"`],
+    ['a\r+1', `"a\r'+1"`],
+    ['a\n "=1', `"a\n '""=1"`],
+    ['a\n\t=1', `"a\n'\t=1"`],
+    ['say "hi"; ok', '"say ""hi""; ok"'],
+    ['line\nnext', '"line\nnext"'],
+  ])('%j', (text, written) => {
+    expect(cell(text)).toBe(written);
+    expect(unguardCell(guardCell(text))).toBe(text);
+    const csv = toCsv(['lead', 'value', 'tail'], [['Ana', text, 'end']]);
+    for (const delimiter of [',', ';'] as const) {
+      for (const f of readAs(csv, delimiter).flat()) expect([delimiter, f, FORMULA_START.test(f)]).toEqual([delimiter, f, false]);
+    }
+    expect(parseCsv(csv)[1]!.map(unguardCell)).toEqual(['Ana', text, 'end']);
   });
 });

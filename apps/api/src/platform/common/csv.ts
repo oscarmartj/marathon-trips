@@ -1,40 +1,65 @@
-// CSV for the table capabilities (task 0.5): RFC 4180 quoting, formula guard on text cells (on every comma and semicolon
-// fragment since 7.fix-5), and a small parser.
+// CSV for the table capabilities (task 0.5): RFC 4180 quoting, formula guard on text cells (on every comma, semicolon
+// and line-break fragment since 7.fix-5), and a small parser.
 
-// Text that starts with a formula character, or with quotes and then one (so a guarded cell and a value that already looks
-// guarded both survive an export and an import).
-const FORMULA = /^'*[=+\-@\t\r]/;
-const GUARDED = /^'+[=+\-@\t\r]/;
-// Leading whitespace of a fragment, except tab and CR: those are formula characters themselves, so the guard sees them.
-const LEADING_SPACE = /^[^\S\t\r]*/;
+// From a fragment start: quotes and spaces, then a formula character. Quotes of either kind count, because a reader that
+// splits on the other separator sees a fragment `"=1` or `"" =1` as a quoted field and drops the quotes. GUARDED is the
+// same with the guard quote in front, so a guarded cell and a value that already looks guarded both survive an export and
+// an import, and unguard(guard(x)) is x for every x.
+const FORMULA = /(?:['"]|[^\S\t\r\n])*[=+\-@\t\r]/y;
+const GUARDED = /'(?:['"]|[^\S\t\r\n])*[=+\-@\t\r]/y;
+// What a spreadsheet may start a new cell after: either separator (it may open a comma file with semicolons, or the
+// reverse) and a line break (a reader that splits on the other separator does not see our quotes, so CR or LF ends the row).
+const SEPARATOR = /[,;\r\n]/;
+// Leading whitespace of a fragment, except tab, CR and LF: tab and CR are formula characters, CR and LF separators.
+const SPACE = /[^\S\t\r\n]/;
 
 /**
- * Runs `each` on every fragment of the text split on a comma or a semicolon, after the fragment's leading whitespace.
- * A spreadsheet may open a comma file with semicolons (European Excel, LibreOffice) or the reverse, and then each fragment
- * becomes a cell of its own, often trimmed. The first fragment is the start of the cell. The guard only ever inserts a
- * quote, never a separator or whitespace, so the export and the import split a cell in the same places (7.fix-5).
+ * Where a fragment starts: the start of the text and the character after each comma, semicolon, CR or LF, each after its
+ * leading spaces (readers often trim them). A guard quote is neither a separator nor a space, so a guarded text has its
+ * fragment starts at the same characters as the original (7.fix-5).
  */
-function eachFragment(text: string, each: (fragment: string) => string): string {
-  return text
-    .split(/([,;])/)
-    .map((part, i) => {
-      if (i % 2 === 1) return part;
-      const space = LEADING_SPACE.exec(part)![0];
-      return space + each(part.slice(space.length));
-    })
-    .join('');
+function fragmentStarts(text: string): number[] {
+  const out: number[] = [];
+  let p = 0;
+  for (;;) {
+    while (p < text.length && SPACE.test(text[p]!)) p++;
+    out.push(p);
+    let k = p;
+    while (k < text.length && !SEPARATOR.test(text[k]!)) k++;
+    if (k >= text.length) return out;
+    p = k + 1;
+  }
 }
 
+const matchesAt = (re: RegExp, text: string, p: number): boolean => {
+  re.lastIndex = p;
+  return re.test(text);
+};
+
 /**
- * A text cell that a spreadsheet could run as a formula gets a leading quote, on every comma or semicolon fragment (a
- * fragment starting with =, +, -, @, tab or CR, after its leading spaces and any quotes); the import takes it off again.
+ * A text cell that a spreadsheet could run as a formula gets a quote in front of every fragment (split on a comma, a
+ * semicolon, CR or LF) that starts, after spaces and any quotes, with =, +, -, @, tab or CR. The import takes it off again.
  */
 export function guardCell(text: string): string {
-  return eachFragment(text, (f) => (FORMULA.test(f) ? `'${f}` : f));
+  let out = '';
+  let from = 0;
+  for (const p of fragmentStarts(text)) {
+    if (!matchesAt(FORMULA, text, p)) continue;
+    out += `${text.slice(from, p)}'`;
+    from = p;
+  }
+  return out + text.slice(from);
 }
 
 export function unguardCell(text: string): string {
-  return eachFragment(text, (f) => (GUARDED.test(f) ? f.slice(1) : f));
+  let out = '';
+  let from = 0;
+  for (const p of fragmentStarts(text)) {
+    if (!matchesAt(GUARDED, text, p)) continue;
+    out += text.slice(from, p);
+    from = p + 1;
+  }
+  return out + text.slice(from);
 }
 
 /** Quoted when it holds a quote, a comma, a semicolon, CR or LF, so a reader splitting on either separator keeps it whole. */
