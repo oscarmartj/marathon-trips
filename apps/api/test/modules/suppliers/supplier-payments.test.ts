@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SupplierLedger } from '../../../src/modules/payments';
 import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
+import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { LedgerKeyConflictError } from '../../../src/modules/payments/core/ledger.service';
 import { SUPPLIERS_PERMISSIONS, suppliersManifest } from '../../../src/modules/suppliers/manifest';
 import { supplierPaymentKey } from '../../../src/modules/suppliers/supplier-payment.service';
@@ -416,6 +417,28 @@ describe('database guards (section 2.3)', () => {
     const [livePayment, liveParams] = insertPayment(id, 760400);
     expect(await txError(app, [[livePayment.replace("'test'", "'live'"), liveParams], insertItem(id, c.id, 760400)])).toBe('23503');
     expect(await costStatus(c.id)).toBe('planned');
+  });
+
+  it('ledger_check_finds_missing_supplier_payment_posting and leaves good booking-less postings alone', async () => {
+    const { p } = await recorded();
+    const check = t.app.get(PaymentLedgerCheckService);
+    const findings = await check.check();
+    expect(findings.filter((f) => f.entityId === p.id || f.kind === 'missing_supplier_payment_posting')).toEqual([]);
+    // A live-mode payment written by hand without its posting (kept out of every test-mode figure).
+    const s = await newSupplier();
+    const c = await newCost(s.id);
+    const id = randomUUID();
+    expect(await txError(app, [
+      [`INSERT INTO supplier_payments (id, "supplierId", mode, "amountMinor", currency, "paidOn", reference, "idempotencyKey", "recordedById") VALUES ($1, $2, 'live', 760400, 'DKK', current_date, 'x', $3, $4)`, [id, s.id, `t-${id}`, admin.staff.id]],
+      [`INSERT INTO supplier_payment_items (id, "supplierPaymentId", mode, "costItemId", "amountMinor", currency) VALUES (gen_random_uuid(), $1, 'live', $2, 760400, 'DKK')`, [id, c.id]],
+      [`UPDATE cost_items SET status = 'paid', version = version + 1 WHERE id = $1`, [c.id]],
+    ])).toBeNull();
+    const spy = vi.spyOn(t.app.get(ProviderGateway), 'mode', 'get').mockReturnValue('live');
+    try {
+      expect((await check.check()).filter((f) => f.entityId === id)).toEqual([{ kind: 'missing_supplier_payment_posting', entityType: 'SupplierPayment', entityId: id }]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('a paid cost is frozen (guard 6): no new amount, trip, supplier or currency; its description may change', async () => {
