@@ -200,18 +200,18 @@ export class AppRefundsService {
       if (entry.blocked === 'booking_disputed') throw conflict('booking_dispute_open', 'A payment of this booking is disputed: nothing is refunded from here until the dispute ends.');
       if (entry.blocked === 'late_refund_in_progress') throw conflict('late_refund_in_progress', 'A refund of this booking that was marked as not made is still being processed by the payment gateway. Resolve it first.');
       if (entry.blocked === 'external_refund_in_progress') throw conflict('external_refund_in_progress', 'A refund made at the payment gateway is still in progress on this booking. Wait for it to settle.');
-      if (entry.refundableMinor <= 0n) throw conflict('nothing_to_refund', 'Nothing paid on this payment is beyond what the booking owes.');
       // Task 6.4 (P9, P10): a cancellation refund belongs to the booking's cancellation and all of them together never go
       // above what it left refundable; money that came in later goes back as an overpayment return.
-      let amount = entry.refundableMinor;
-      let cancellationId: string | null = null;
+      let cap: Awaited<ReturnType<typeof cancellationRefundCap>> = null;
       if (input.purpose === 'cancellation') {
-        const cap = await cancellationRefundCap(tx, b.id);
+        cap = await cancellationRefundCap(tx, b.id);
         if (!cap || b.status !== 'cancelled') throw conflict('cancellation_refund_rejected_until_cancellations_exist', 'This booking has no cancellation to refund.');
         if (cap.remainingMinor <= 0n) throw conflict('cancellation_refund_cap_reached', 'Everything this cancellation left refundable has been refunded or is on its way. Money paid since goes back as an overpayment.');
-        cancellationId = cap.cancellationId;
-        if (cap.remainingMinor < amount) amount = cap.remainingMinor;
       }
+      if (entry.refundableMinor <= 0n) throw conflict('nothing_to_refund', 'Nothing paid on this payment is beyond what the booking owes.');
+      let amount = entry.refundableMinor;
+      const cancellationId: string | null = cap?.cancellationId ?? null;
+      if (cap && cap.remainingMinor < amount) amount = cap.remainingMinor;
       if (!manual && manifest.capabilities.refunds === 'full' && amount < entry.netMinor) throw conflict('partial_refund_not_supported', 'This payment gateway only refunds a payment in full.');
       const [inserted] = await tx.$queryRaw<Array<{ id: string }>>`
         WITH n AS (SELECT gen_random_uuid() AS id)
