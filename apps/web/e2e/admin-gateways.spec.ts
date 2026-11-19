@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { Secret, TOTP } from 'otpauth';
 
 // Task 4.1: an owner adds a simulator account from the panel (test mode, born paused), sees its webhook address once,
@@ -21,10 +21,15 @@ async function signIn(page: Page, s: Staff) {
   await expect(page).toHaveURL(/\/admin$/);
 }
 
-/** Pausing or retiring the last card account asks for a confirmation; other suites may have left one active. */
-async function confirmIfAsked(page: Page) {
+/**
+ * Pausing or retiring the last card account asks for a confirmation; other suites may have left one active. Waits for
+ * either the new status or the question, answers it if asked, then for the status.
+ */
+async function settle(page: Page, row: Locator, status: string) {
   const proceed = page.getByRole('button', { name: 'Go ahead anyway' });
-  if (await proceed.isVisible().catch(() => false)) await proceed.click();
+  await expect(row.getByRole('cell', { name: status, exact: true }).or(proceed)).toBeVisible();
+  if (await proceed.isVisible()) await proceed.click();
+  await expect(row.getByRole('cell', { name: status, exact: true })).toBeVisible();
 }
 
 test('admin_creates_pauses_retires_and_archives_a_gateway_account', async ({ page }) => {
@@ -34,14 +39,14 @@ test('admin_creates_pauses_retires_and_archives_a_gateway_account', async ({ pag
   await expect(page.getByRole('heading', { name: 'Available gateways' })).toBeVisible();
 
   const name = `E2E simulator ${Date.now().toString(36)}`;
-  await page.getByLabel('Gateway').selectOption('simulator');
+  await page.getByLabel('Gateway', { exact: true }).selectOption('simulator');
   await page.getByLabel('Account name').fill(name);
   await page.getByRole('button', { name: 'Add account' }).click();
   const url = page.getByTestId('webhook-url');
   await expect(url).toContainText(/\/payments\/webhooks\/[A-Za-z0-9_-]{43}/);
   const address = (await url.textContent()) ?? '';
   const row = page.getByRole('row', { name: new RegExp(name) });
-  await expect(row).toContainText('Paused');
+  await expect(row.getByRole('cell', { name: 'Paused', exact: true })).toBeVisible();
   await expect(row).toContainText('Passed');
 
   // Shown once: gone after a reload.
@@ -52,14 +57,12 @@ test('admin_creates_pauses_retires_and_archives_a_gateway_account', async ({ pag
   await row.getByRole('button', { name: 'Test connection' }).click();
   await expect(page.getByRole('status').filter({ hasText: `${name}: Passed` })).toBeVisible();
   await row.getByRole('button', { name: 'Activate' }).click();
-  await expect(row).toContainText('Active');
+  await settle(page, row, 'Active');
   await row.getByRole('button', { name: 'Pause' }).click();
-  await confirmIfAsked(page);
-  await expect(row).toContainText('Paused');
+  await settle(page, row, 'Paused');
   await row.getByRole('button', { name: 'Retire' }).click();
-  await confirmIfAsked(page);
-  await expect(row).toContainText('Retired');
+  await settle(page, row, 'Retired');
   await row.getByRole('button', { name: 'Archive' }).click();
-  await expect(row).toContainText('Archived');
+  await settle(page, row, 'Archived');
   await expect(row.getByRole('button', { name: 'Archive' })).toHaveCount(0);
 });
