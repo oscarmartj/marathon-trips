@@ -138,7 +138,7 @@ describe('formula_injection_neutralised', () => {
     const csv = renderCsv(intl, [{ ...ana, givenName: 'Ana\n=1+1', emergencyContactName: 'x,"=1+1;y' }]);
     expect(csv).toContain(`;"Ana\n'=1+1";`);
     expect(csv).toContain(`"x,'""=1+1;y"`);
-    for (const part of csv.replace(/^﻿/, '').split(/[,;\r\n]/)) expect([part, /^[^\S\r\n]*"*[=+\-@\t]/.test(part)]).toEqual([part, false]);
+    for (const part of csv.replace(/^\uFEFF/, '').split(/[,;\r\n]/)) expect([part, /^[^\S\r\n]*"*[=+\-@\t]/.test(part)]).toEqual([part, false]);
   });
   it('a normal name is untouched, and generated dates, durations and distances never start with a formula character', () => {
     expect(lines(renderCsv(base, [ana]))[1]).toBe('Ana');
