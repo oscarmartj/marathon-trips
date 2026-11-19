@@ -27,15 +27,15 @@ enum AuditActorType {
 }
 
 model User {
-  id                   String           @id @default(uuid(7)) @db.Uuid
+  id                   String         @id @default(uuid(7)) @db.Uuid
   /// @nopii staff or customer
   kind                 UserKind
   /// @pii sign-in address
-  email                String           @db.Citext
+  email                String         @db.Citext
   /// @nopii when the address was proved by a magic link or set up by staff enrolment
-  emailVerifiedAt      DateTime?        @db.Timestamptz(3)
+  emailVerifiedAt      DateTime?      @db.Timestamptz(3)
   /// @nopii active or disabled
-  status               UserStatus       @default(active)
+  status               UserStatus     @default(active)
   /// @secret argon2id hash; staff only (CHECK)
   passwordHash         String?
   /// @secret AES-256-GCM ciphertext of the TOTP secret; pending while totpEnabledAt is NULL; staff only (CHECK)
@@ -43,25 +43,25 @@ model User {
   /// @nopii version of APP_ENCRYPTION_KEY that encrypted the TOTP secret
   totpKeyVersion       Int?
   /// @nopii when TOTP enrolment was confirmed with a valid code
-  totpEnabledAt        DateTime?        @db.Timestamptz(3)
+  totpEnabledAt        DateTime?      @db.Timestamptz(3)
   /// @nopii last accepted TOTP time step; a code is never accepted twice
   totpLastUsedStep     BigInt?
   /// @nopii consecutive failed password, TOTP or step-up attempts
-  failedLoginCount     Int              @default(0)
+  failedLoginCount     Int            @default(0)
   /// @nopii last counted attempt; the count starts again after an hour without attempts (same as unknown addresses)
-  lastFailedLoginAt    DateTime?        @db.Timestamptz(3)
+  lastFailedLoginAt    DateTime?      @db.Timestamptz(3)
   /// @nopii progressive delay: no attempt is checked before this instant
-  nextLoginAllowedAt   DateTime?        @db.Timestamptz(3)
+  nextLoginAllowedAt   DateTime?      @db.Timestamptz(3)
   /// @nopii last successful sign-in
-  lastLoginAt          DateTime?        @db.Timestamptz(3)
+  lastLoginAt          DateTime?      @db.Timestamptz(3)
   /// @nopii set when privacy erasure anonymised the row (task 5.5)
-  anonymisedAt         DateTime?        @db.Timestamptz(3)
+  anonymisedAt         DateTime?      @db.Timestamptz(3)
   /// @nopii optimistic lock for the admin panel
-  version              Int              @default(0)
+  version              Int            @default(0)
   /// @nopii
-  createdAt            DateTime         @default(now()) @db.Timestamptz(3)
+  createdAt            DateTime       @default(now()) @db.Timestamptz(3)
   /// @nopii
-  updatedAt            DateTime         @updatedAt @db.Timestamptz(3)
+  updatedAt            DateTime       @updatedAt @db.Timestamptz(3)
   sessions             Session[]
   recoveryCodes        RecoveryCode[]
   loginTokens          LoginToken[]
@@ -71,8 +71,8 @@ model User {
   savedReports         SavedReport[]
   customer             Customer?
   // Task 4.5: staff who confirmed manual refunds and recorded dispute evidence.
-  refundsConfirmed     Refund[]         @relation("RefundConfirmedBy")
-  disputeEvidence      Dispute[]        @relation("DisputeEvidenceSubmittedBy")
+  refundsConfirmed     Refund[]       @relation("RefundConfirmedBy")
+  disputeEvidence      Dispute[]      @relation("DisputeEvidenceSubmittedBy")
 
   @@unique([kind, email])
   @@unique([id, kind])

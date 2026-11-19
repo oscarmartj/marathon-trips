@@ -123,7 +123,7 @@ enum ProviderWebhookRejectionReason {
 /// are encrypted at rest and only ProviderGateway decrypts them. Test mode only (CHECK) until a later task, gated on a
 /// verified adapter and Oscar's approval, lifts it. Never deleted.
 model ProviderAccount {
-  id                       String                 @id @default(uuid(7)) @db.Uuid
+  id                       String                @id @default(uuid(7)) @db.Uuid
   /// @nopii key of the adapter in the code registry
   adapterKey               String
   /// @pii free text typed by staff
@@ -131,7 +131,7 @@ model ProviderAccount {
   /// @nopii test or live; never changes (trigger); test only (CHECK, kept by 4.1)
   mode                     PaymentMode
   /// @nopii
-  status                   ProviderAccountStatus  @default(active)
+  status                   ProviderAccountStatus @default(active)
   /// @secret AES-256-GCM ciphertext of the adapter's credentials (AAD provider_account:<id>:credentials)
   credentialsCiphertext    String
   /// @nopii version of APP_ENCRYPTION_KEY that encrypted the credentials
@@ -142,22 +142,22 @@ model ProviderAccount {
   /// @nopii version of APP_ENCRYPTION_KEY that encrypted the webhook secret; null with it
   webhookKeyVersion        Int?
   /// @nopii when the credentials or the webhook secret last changed: a connection test counts only if not older (4.1)
-  credentialsChangedAt     DateTime               @default(now()) @db.Timestamptz(3)
+  credentialsChangedAt     DateTime              @default(now()) @db.Timestamptz(3)
   /// @nopii why a paused account is paused: staff, boot_adapter_missing or boot_adapter_planned (CHECK); null otherwise
   pauseReasonCode          String?
   /// @secret HMAC of the webhook path token with AUTH_HMAC_KEY; the full URL is shown once
-  webhookPathTokenHash     String                 @unique @db.Char(64)
+  webhookPathTokenHash     String                @unique @db.Char(64)
   /// @nopii
-  lastConnectionTestAt     DateTime?              @db.Timestamptz(3)
+  lastConnectionTestAt     DateTime?             @db.Timestamptz(3)
   /// @nopii code: ok or the adapter's error code
   lastConnectionTestResult String?
-  createdById              String?                @db.Uuid
+  createdById              String?               @db.Uuid
   /// @nopii optimistic lock for the admin panel
-  version                  Int                    @default(0)
+  version                  Int                   @default(0)
   /// @nopii timestamp
-  createdAt                DateTime               @default(now()) @db.Timestamptz(3)
+  createdAt                DateTime              @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt                DateTime               @updatedAt @db.Timestamptz(3)
+  updatedAt                DateTime              @updatedAt @db.Timestamptz(3)
   payments                 Payment[]
   webhookEvents            WebhookEvent[]
   webhookRejections        WebhookRejection[]
@@ -229,24 +229,24 @@ model PaymentScheduleItem {
 /// A payment attempt (plan 0.1, 5.5 and 6.2). Its amount comes from the server (plan, snapshot); its status only moves
 /// through the attempt state machine and the pairs of a trigger; at most one live attempt per booking (liveBookingId).
 model Payment {
-  id                   String                @id @default(uuid(7)) @db.Uuid
-  bookingId            String                @db.Uuid
+  id                   String              @id @default(uuid(7)) @db.Uuid
+  bookingId            String              @db.Uuid
   /// @nopii ISO 4217, the booking's
-  currency             String                @db.Char(3)
-  booking              Booking               @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  currency             String              @db.Char(3)
+  booking              Booking             @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii collection, manual_intent (a transfer the customer said they would make) or inbound (a transfer staff confirmed)
   origin               PaymentOrigin
   /// @nopii 1, 2, … per booking
   attemptNumber        Int
   /// null only for an inbound transfer when no plan item is left to pay
-  targetScheduleItemId String?               @db.Uuid
-  targetScheduleItem   PaymentScheduleItem?  @relation(fields: [targetScheduleItemId, bookingId, currency], references: [id, bookingId, currency], onDelete: Restrict, onUpdate: Restrict)
-  payerCustomerId      String                @db.Uuid
-  payerCustomer        Customer              @relation(fields: [payerCustomerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  providerAccountId    String                @db.Uuid
+  targetScheduleItemId String?             @db.Uuid
+  targetScheduleItem   PaymentScheduleItem? @relation(fields: [targetScheduleItemId, bookingId, currency], references: [id, bookingId, currency], onDelete: Restrict, onUpdate: Restrict)
+  payerCustomerId      String              @db.Uuid
+  payerCustomer        Customer            @relation(fields: [payerCustomerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  providerAccountId    String              @db.Uuid
   /// @nopii test or live, the account's
   mode                 PaymentMode
-  providerAccount      ProviderAccount       @relation(fields: [providerAccountId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  providerAccount      ProviderAccount     @relation(fields: [providerAccountId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii key of the adapter that served the attempt
   adapterKey           String
   /// @nopii the method the customer chose; never changes the amount
@@ -256,9 +256,9 @@ model Payment {
   /// @nopii state of the attempt (plan 3.1, section 5.2)
   status               PaymentStatus
   /// @nopii set to bookingId while the attempt is live (created, requires_action, pending), else NULL: one live attempt per booking
-  liveBookingId        String?               @unique @db.Uuid
+  liveBookingId        String?             @unique @db.Uuid
   /// @nopii booking:<id>:attempt:<n>, generated by the server and sent to the gateway as its idempotency key
-  idempotencyKey       String                @unique
+  idempotencyKey       String              @unique
   /// @nopii the gateway's object id; for an inbound transfer, the bank statement's movement id (unique per account unless voided)
   providerPaymentRef   String?
   /// @nopii what the payer writes on the transfer: the booking's reference (it only finds the booking)
@@ -266,18 +266,18 @@ model Payment {
   /// @nopii code from the gateway's closed list
   failureCode          String?
   /// @nopii when the sweep asks the gateway about an unfinished attempt; never extended
-  pendingExpiresAt     DateTime              @db.Timestamptz(3)
+  pendingExpiresAt     DateTime            @db.Timestamptz(3)
   /// @nopii timestamp
-  succeededAt          DateTime?             @db.Timestamptz(3)
+  succeededAt          DateTime?           @db.Timestamptz(3)
   /// @nopii bumped with every change
-  version              Int                   @default(0)
+  version              Int                 @default(0)
   /// the payment link the attempt was started through (task 5.1); null for checkout; never changes
-  paymentLinkId        String?               @db.Uuid
-  paymentLink          PaymentLink?          @relation(fields: [paymentLinkId, bookingId], references: [id, bookingId], onDelete: Restrict, onUpdate: Restrict)
+  paymentLinkId        String?             @db.Uuid
+  paymentLink          PaymentLink?        @relation(fields: [paymentLinkId, bookingId], references: [id, bookingId], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii timestamp
-  createdAt            DateTime              @default(now()) @db.Timestamptz(3)
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt            DateTime              @updatedAt @db.Timestamptz(3)
+  updatedAt            DateTime            @updatedAt @db.Timestamptz(3)
   webhookEvents        WebhookEvent[]
   refunds              Refund[]
   disputes             Dispute[]
@@ -373,30 +373,30 @@ model WebhookRejection {
 /// The content page is edited in place, so the accepted text is kept here as a snapshot. Never edited or deleted (trigger
 /// in migration 0023); one row per booking and exact text.
 model TermsAcceptance {
-  id                       String   @id @default(uuid(7)) @db.Uuid
-  bookingId                String   @db.Uuid
-  booking                  Booking  @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id             String   @id @default(uuid(7)) @db.Uuid
+  bookingId      String   @db.Uuid
+  booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// who accepted: the booking's customer, read inside the same transaction
-  customerId               String   @db.Uuid
-  customer                 Customer @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  customerId     String   @db.Uuid
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii content page address, such as terms
-  documentSlug             String
+  documentSlug   String
   /// @nopii language tag such as en-AU
-  locale                   String
+  locale         String
   /// @nopii version counter of the content page when it was accepted
-  contentVersion           Int
+  contentVersion Int
   /// @nopii SHA-256 (hex) of the canonical JSON of slug, locale, title, intro and body
-  textDigest               String   @db.Char(64)
+  textDigest     String   @db.Char(64)
   /// @nopii editorial text as accepted
-  title                    String
+  title          String
   /// @nopii editorial text as accepted
-  intro                    String
+  intro          String
   /// @nopii editorial text as accepted
-  body                     String
+  body           String
   /// @nopii digest of the cancellation policy shown with the terms (task 6.4); null when the booking has none
-  cancellationPolicyDigest String?  @db.Char(64)
+  cancellationPolicyDigest String? @db.Char(64)
   /// @nopii timestamp
-  acceptedAt               DateTime @default(now()) @db.Timestamptz(3)
+  acceptedAt     DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([bookingId, documentSlug, locale, textDigest])
   @@map("terms_acceptances")
@@ -436,64 +436,64 @@ model PaymentLink {
 /// A refund of a payment (plan 0.1, 5.5 and 6.2; task 3.3). In 3.3 only refunds made on the gateway's dashboard exist
 /// (origin external, CHECK until task 4.5). Its status only moves through the refund state machine and a trigger.
 model Refund {
-  id                    String                @id @default(uuid(7)) @db.Uuid
-  paymentId             String                @db.Uuid
-  bookingId             String                @db.Uuid
-  providerAccountId     String                @db.Uuid
+  id                String            @id @default(uuid(7)) @db.Uuid
+  paymentId         String            @db.Uuid
+  bookingId         String            @db.Uuid
+  providerAccountId String            @db.Uuid
   /// @nopii test or live, the payment's
-  mode                  PaymentMode
+  mode              PaymentMode
   /// @nopii ISO 4217, the payment's
-  currency              String                @db.Char(3)
-  payment               Payment               @relation(fields: [paymentId, bookingId, providerAccountId, mode, currency], references: [id, bookingId, providerAccountId, mode, currency], onDelete: Restrict, onUpdate: Restrict, map: "refunds_payment_fkey")
+  currency          String            @db.Char(3)
+  payment           Payment           @relation(fields: [paymentId, bookingId, providerAccountId, mode, currency], references: [id, bookingId, providerAccountId, mode, currency], onDelete: Restrict, onUpdate: Restrict, map: "refunds_payment_fkey")
   /// @nopii minor units, in `currency`, as the gateway reports it
-  amountMinor           BigInt
+  amountMinor       BigInt
   /// @nopii app or external
-  origin                RefundOrigin
+  origin            RefundOrigin
   /// @nopii null for an external refund
-  purpose               RefundPurpose?
+  purpose           RefundPurpose?
   /// the cancellation a refund with purpose cancellation belongs to (task 6.4; same booking by the foreign key)
-  cancellationId        String?               @db.Uuid
-  cancellation          Cancellation?         @relation(fields: [cancellationId, bookingId], references: [id, bookingId], onDelete: Restrict, onUpdate: Restrict, map: "refunds_cancellation_fkey")
+  cancellationId    String?           @db.Uuid
+  cancellation      Cancellation?     @relation(fields: [cancellationId, bookingId], references: [id, bookingId], onDelete: Restrict, onUpdate: Restrict, map: "refunds_cancellation_fkey")
   /// @pii free text from staff (task 4.5); erased with the customer
-  reason                String?
+  reason            String?
   /// @nopii
-  status                RefundStatus
+  status            RefundStatus
   /// @nopii refund:external:<accountId>:<gateway ref> for an external refund; generated by the server
-  idempotencyKey        String                @unique
+  idempotencyKey    String            @unique
   /// @nopii the gateway's refund id
-  providerRefundRef     String?
+  providerRefundRef String?
   /// @nopii code from the gateway's closed list
-  failureCode           String?
-  requestedById         String?               @db.Uuid
+  failureCode       String?
+  requestedById     String?           @db.Uuid
   /// @nopii timestamp
-  succeededAt           DateTime?             @db.Timestamptz(3)
+  succeededAt       DateTime?         @db.Timestamptz(3)
   /// @nopii bumped with every change of status
-  version               Int                   @default(0)
+  version           Int               @default(0)
   /// @nopii true for the refund of a bank transfer (task 4.5): staff send it from the bank and confirm it with its reference
-  manualRefund          Boolean               @default(false)
+  manualRefund      Boolean           @default(false)
   /// @secret the account a manual refund goes to, encrypted; only while requested (task 4.5, P13)
   destinationCiphertext String?
   /// @nopii key version of destinationCiphertext
   destinationKeyVersion Int?
   /// @pii masked destination of a manual refund (last digits); erased with the customer
-  destinationHint       String?
+  destinationHint   String?
   /// staff who confirmed a manual refund
-  confirmedById         String?               @db.Uuid
-  confirmedBy           User?                 @relation("RefundConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  confirmedById     String?           @db.Uuid
+  confirmedBy       User?             @relation("RefundConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii when an unanswered gateway request is tried again with the same key (task 4.5)
-  nextAttemptAt         DateTime?             @db.Timestamptz(3)
+  nextAttemptAt     DateTime?         @db.Timestamptz(3)
   /// @nopii how many times the gateway request was sent
-  requestAttempts       Int                   @default(0)
+  requestAttempts   Int               @default(0)
   /// @nopii while the gateway request is being sent (or staff resolve it): nobody else sends or resolves (review, H1)
-  sendingUntil          DateTime?             @db.Timestamptz(3)
+  sendingUntil      DateTime?         @db.Timestamptz(3)
   /// @nopii timestamp
-  createdAt             DateTime              @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt             DateTime              @updatedAt @db.Timestamptz(3)
-  webhookEvents         WebhookEvent[]
-  ledgerTransactions    LedgerTransaction[]
-  receiptNotes          ReceiptNote[]
-  settlementMatches     SettlementLineMatch[]
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+  webhookEvents     WebhookEvent[]
+  ledgerTransactions LedgerTransaction[]
+  receiptNotes      ReceiptNote[]
+  settlementMatches SettlementLineMatch[]
 
   @@unique([id, mode])
   @@unique([providerAccountId, providerRefundRef])
@@ -517,15 +517,15 @@ enum DisputeStatus {
 /// A dispute (chargeback) a gateway reported on one of our payments (task 4.5). Its money moves only with the funds
 /// postings (withdrawn, reinstated), once each. Never deleted; no personal data (the evidence package is built on demand).
 model Dispute {
-  id                    String                @id @default(uuid(7)) @db.Uuid
-  paymentId             String                @db.Uuid
-  bookingId             String                @db.Uuid
-  providerAccountId     String                @db.Uuid
+  id                    String        @id @default(uuid(7)) @db.Uuid
+  paymentId             String        @db.Uuid
+  bookingId             String        @db.Uuid
+  providerAccountId     String        @db.Uuid
   /// @nopii test or live, the payment's
   mode                  PaymentMode
   /// @nopii ISO 4217, the payment's
-  currency              String                @db.Char(3)
-  payment               Payment               @relation(fields: [paymentId, bookingId, providerAccountId, mode, currency], references: [id, bookingId, providerAccountId, mode, currency], onDelete: Restrict, onUpdate: Restrict, map: "disputes_payment_fkey")
+  currency              String        @db.Char(3)
+  payment               Payment       @relation(fields: [paymentId, bookingId, providerAccountId, mode, currency], references: [id, bookingId, providerAccountId, mode, currency], onDelete: Restrict, onUpdate: Restrict, map: "disputes_payment_fkey")
   /// @nopii the gateway's dispute id
   providerDisputeRef    String
   /// @nopii minor units, in `currency`, as the gateway reports it
@@ -535,21 +535,21 @@ model Dispute {
   /// @nopii
   status                DisputeStatus
   /// @nopii timestamp
-  evidenceDueBy         DateTime?             @db.Timestamptz(3)
+  evidenceDueBy         DateTime?     @db.Timestamptz(3)
   /// @nopii timestamp
-  evidenceSubmittedAt   DateTime?             @db.Timestamptz(3)
-  evidenceSubmittedById String?               @db.Uuid
-  evidenceSubmittedBy   User?                 @relation("DisputeEvidenceSubmittedBy", fields: [evidenceSubmittedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidenceSubmittedAt   DateTime?     @db.Timestamptz(3)
+  evidenceSubmittedById String?       @db.Uuid
+  evidenceSubmittedBy   User?         @relation("DisputeEvidenceSubmittedBy", fields: [evidenceSubmittedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii when the withdrawal was posted
-  fundsWithdrawnAt      DateTime?             @db.Timestamptz(3)
+  fundsWithdrawnAt      DateTime?     @db.Timestamptz(3)
   /// @nopii when the reinstatement was posted
-  fundsReinstatedAt     DateTime?             @db.Timestamptz(3)
+  fundsReinstatedAt     DateTime?     @db.Timestamptz(3)
   /// @nopii bumped with every change
-  version               Int                   @default(0)
+  version               Int           @default(0)
   /// @nopii timestamp
-  createdAt             DateTime              @default(now()) @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
-  updatedAt             DateTime              @updatedAt @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @db.Timestamptz(3)
   webhookEvents         WebhookEvent[]
   ledgerTransactions    LedgerTransaction[]
   receiptNotes          ReceiptNote[]
@@ -809,17 +809,17 @@ enum ReceiptNoteDirection {
 
 /// A settlement (payout) as the gateway reported it, stored once and never changed (guard of 0037).
 model Settlement {
-  id                    String           @id @default(uuid(7)) @db.Uuid
-  providerAccountId     String           @db.Uuid
+  id                    String            @id @default(uuid(7)) @db.Uuid
+  providerAccountId     String            @db.Uuid
   /// @nopii test or live, the account's
   mode                  PaymentMode
-  account               ProviderAccount  @relation(fields: [providerAccountId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  account               ProviderAccount   @relation(fields: [providerAccountId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii the gateway's payout id
   providerSettlementRef String
   /// @nopii calendar date the gateway paid out
-  payoutDate            DateTime         @db.Date
+  payoutDate            DateTime          @db.Date
   /// @nopii ISO 4217, the payout's
-  currency              String           @db.Char(3)
+  currency              String            @db.Char(3)
   /// @signed minor units, everything the lines move
   grossMinor            BigInt
   /// @signed minor units, the gateway's fees (negative when it gave fees back)
@@ -829,7 +829,7 @@ model Settlement {
   /// @nopii SHA-256 of the settlement as imported: a later listing with other content is a difference
   contentSha256         String
   /// @nopii timestamp
-  importedAt            DateTime         @default(now()) @db.Timestamptz(3)
+  importedAt            DateTime          @default(now()) @db.Timestamptz(3)
   lines                 SettlementLine[]
 
   @@unique([providerAccountId, providerSettlementRef])
@@ -839,13 +839,13 @@ model Settlement {
 
 /// One line of a settlement. The gateway's references only; what it matches is in SettlementLineMatch.
 model SettlementLine {
-  id              String                @id @default(uuid(7)) @db.Uuid
-  settlementId    String                @db.Uuid
+  id              String              @id @default(uuid(7)) @db.Uuid
+  settlementId    String              @db.Uuid
   /// @nopii the settlement's
   mode            PaymentMode
   /// @nopii ISO 4217, the settlement's
-  currency        String                @db.Char(3)
-  settlement      Settlement            @relation(fields: [settlementId, mode, currency], references: [id, mode, currency], onDelete: Restrict, onUpdate: Restrict)
+  currency        String              @db.Char(3)
+  settlement      Settlement          @relation(fields: [settlementId, mode, currency], references: [id, mode, currency], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii the gateway's id for the line
   providerLineRef String
   /// @nopii
@@ -861,7 +861,7 @@ model SettlementLine {
   /// @nopii the gateway's dispute reference, if any
   disputeRef      String?
   /// @nopii timestamp
-  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
+  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
   matches         SettlementLineMatch[]
 
   @@unique([settlementId, providerLineRef])
@@ -871,23 +871,23 @@ model SettlementLine {
 
 /// What a settlement line was matched to, written once (at import or on a later run). Lines stay immutable.
 model SettlementLineMatch {
-  id        String             @id @default(uuid(7)) @db.Uuid
-  lineId    String             @unique @db.Uuid
+  id        String         @id @default(uuid(7)) @db.Uuid
+  lineId    String         @unique @db.Uuid
   /// @nopii the line's
   mode      PaymentMode
-  line      SettlementLine     @relation(fields: [lineId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  line      SettlementLine @relation(fields: [lineId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii the line's kind (one match per object and kind: code review M1)
   kind      SettlementLineKind
-  paymentId String?            @db.Uuid
-  payment   Payment?           @relation(fields: [paymentId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
-  refundId  String?            @db.Uuid
-  refund    Refund?            @relation(fields: [refundId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
-  disputeId String?            @db.Uuid
-  dispute   Dispute?           @relation(fields: [disputeId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  paymentId String?        @db.Uuid
+  payment   Payment?       @relation(fields: [paymentId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  refundId  String?        @db.Uuid
+  refund    Refund?        @relation(fields: [refundId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  disputeId String?        @db.Uuid
+  dispute   Dispute?       @relation(fields: [disputeId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   /// the booking of what it matched (checked by the guard of 0037)
-  bookingId String             @db.Uuid
+  bookingId String         @db.Uuid
   /// @nopii timestamp
-  matchedAt DateTime           @default(now()) @db.Timestamptz(3)
+  matchedAt DateTime       @default(now()) @db.Timestamptz(3)
 
   @@index([paymentId])
   @@index([refundId])
