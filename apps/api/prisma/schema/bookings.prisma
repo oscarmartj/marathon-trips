@@ -200,6 +200,8 @@ model Booking {
   waitlistEntries        WaitlistEntry[]
   travellerDetails       Traveller[]
   amendments             BookingAmendment[]
+  cancellations          Cancellation[]
+  cancellationRequest    CancellationRequest?
 
   @@unique([id, currency])
   @@unique([id, customerId])
@@ -236,6 +238,9 @@ model BookingSnapshot {
   priceVersion   PriceVersion        @relation(fields: [priceVersionId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii engine version that priced it
   engineVersion  String
+  /// The cancellation policy the booking was sold under (task 6.4): set at the request, copied by every amendment
+  cancellationPolicyId String?          @db.Uuid
+  cancellationPolicy   CancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii timestamp
   createdAt      DateTime            @default(now()) @db.Timestamptz(3)
 
@@ -393,4 +398,99 @@ model BookingAmendment {
   @@unique([bookingId, requestKeyHash])
   @@index([basisPriceVersionId])
   @@map("booking_amendments")
+}
+
+// ---- Cancellations (task 6.4, plan docs/plans/6.4-cancellation-policies.md, sections 2, 5, 6 and 13) ----
+
+enum CancellationRequestedBy {
+  customer
+  staff
+}
+
+/// Why a cancellation owes what it owes (plan 6.4, decision 3 and section 13, M3).
+enum CancellationBasis {
+  policy
+  not_contracted
+  no_policy
+  operator_cancelled
+}
+
+/// One cancellation of a booking, with what the policy said and what it left owed and refundable at that moment
+/// (history: screens show the current money from the plan and the payments). Immutable, no personal data and no free
+/// text (the reason is the booking's statusReason and the audit log); one per booking.
+model Cancellation {
+  id                    String                  @id @default(uuid(7)) @db.Uuid
+  bookingId             String                  @unique @db.Uuid
+  /// @nopii ISO 4217, the booking's
+  currency              String                  @db.Char(3)
+  booking               Booking                 @relation(fields: [bookingId, currency], references: [id, currency], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii customer or staff
+  requestedBy           CancellationRequestedBy
+  /// the user who cancelled (a customer or a member of staff)
+  requestedById         String                  @db.Uuid
+  /// @nopii the booking's state when it was cancelled
+  bookingStatus         BookingStatus
+  /// @nopii snapshot version in force when it was cancelled
+  snapshotVersion       Int
+  /// @nopii policy, not_contracted, no_policy or operator_cancelled
+  basis                 CancellationBasis
+  cancellationPolicyId  String?                 @db.Uuid
+  cancellationPolicy    CancellationPolicy?     @relation(fields: [cancellationPolicyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii the first blocked request whose date this cancellation kept (section 13, M4)
+  cancellationRequestId String?                 @unique @db.Uuid
+  cancellationRequest   CancellationRequest?    @relation(fields: [cancellationRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii calendar date (Brisbane) the days are counted from: the request's, within the hold window, or processedDate
+  businessDate          DateTime                @db.Date
+  /// @nopii calendar date (Brisbane) it was processed
+  processedDate         DateTime                @db.Date
+  /// @signed whole days from businessDate to the departure date; negative after departure
+  daysBeforeDeparture   Int
+  /// @nopii threshold of the tier that applied; null unless basis is policy
+  tierMinDays           Int?
+  /// @nopii the policy's tiers and the chosen tier as applied (ids, thresholds, modes, amounts; strict schema)
+  policySnapshot        Json
+  /// @nopii minor units, in `currency`: the booking total the penalty is based on (current snapshot)
+  baseTotalMinor        BigInt
+  /// @nopii traveller places of the current snapshot
+  places                Int
+  /// @signed minor units, in `currency`: what was held when it was cancelled (collected, disputed money excluded)
+  collectedMinor        BigInt
+  /// @nopii minor units, in `currency`: what the policy says
+  policyPenaltyMinor    BigInt
+  /// @nopii minor units, in `currency`: what the booking keeps owing (min of the policy penalty and what was held)
+  penaltyMinor          BigInt
+  /// @nopii minor units, in `currency`: the part of the policy penalty never charged (decision 5)
+  waivedMinor           BigInt
+  /// @nopii minor units, in `currency`: what may go back as cancellation refunds (cap of P10)
+  refundableMinor       BigInt
+  /// @nopii timestamp
+  createdAt             DateTime                @default(now()) @db.Timestamptz(3)
+  refunds               Refund[]
+
+  @@unique([id, bookingId])
+  @@index([cancellationPolicyId])
+  @@map("cancellations")
+}
+
+/// The first cancellation attempt refused while money was moving (plan 6.4, section 13, M4): its date holds for a
+/// fixed window. Immutable, one per booking, no personal data.
+model CancellationRequest {
+  id            String                  @id @default(uuid(7)) @db.Uuid
+  bookingId     String                  @unique @db.Uuid
+  booking       Booking                 @relation(fields: [bookingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// @nopii customer or staff
+  requestedBy   CancellationRequestedBy
+  /// the user who asked
+  requestedById String                  @db.Uuid
+  /// @nopii calendar date (Brisbane) of the attempt
+  businessDate  DateTime                @db.Date
+  /// @nopii code of what blocked it
+  blockedReason String
+  /// @nopii digest of the quote the requester saw
+  quoteDigest   String                  @db.Char(64)
+  /// @nopii timestamp
+  createdAt     DateTime                @default(now()) @db.Timestamptz(3)
+  cancellation  Cancellation?
+
+  @@map("cancellation_requests")
 }
