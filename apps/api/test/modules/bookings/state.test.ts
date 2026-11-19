@@ -26,6 +26,8 @@ type State = (typeof STATES)[number];
 const ALLOWED: ReadonlyArray<[State, State]> = [
   ['requested', 'approved'], ['requested', 'declined'], ['requested', 'cancelled'], ['requested', 'expired'],
   ['approved', 'deposit_paid'], ['approved', 'cancelled'], ['approved', 'expired'],
+  // Task 3.4: a voided bank transfer takes the deposit away from a booking that is not yet confirmed.
+  ['deposit_paid', 'approved'],
   ['deposit_paid', 'confirmed'], ['deposit_paid', 'cancelled'], ['deposit_paid', 'completed'],
   ['confirmed', 'balance_paid'], ['confirmed', 'cancelled'], ['confirmed', 'completed'],
   ['balance_paid', 'confirmed'], ['balance_paid', 'completed'], ['balance_paid', 'cancelled'],

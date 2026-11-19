@@ -1,5 +1,5 @@
 // Pure parts of the payments core (plan docs/plans/3.1-payment-provider-core.md, sections 2, 4, 5 and 10): no database.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { APP_ENVS, PAYMENT_METHODS, startPaymentSchema } from '@mt/shared';
@@ -183,16 +183,17 @@ describe('gateway_guard_matrix (plan 3.1, 2.4)', () => {
 });
 
 describe('payment_attempt_state_event_matrix (plan 3.1, 5.2)', () => {
-  const states = ['created', 'requires_action', 'pending', 'succeeded', 'failed', 'cancelled', 'expired'] as const;
-  const events: AttemptEvent[] = ['requires_action', 'pending', 'succeeded', 'failed', 'cancelled', 'expire_confirmed'];
+  const states = ['created', 'requires_action', 'pending', 'succeeded', 'failed', 'cancelled', 'expired', 'voided'] as const;
+  const events: AttemptEvent[] = ['requires_action', 'pending', 'succeeded', 'failed', 'cancelled', 'expire_confirmed', 'void'];
   // Written out by hand from the table of the plan: '' is "no change".
   const TABLE: Record<AttemptEvent, Record<(typeof states)[number], string>> = {
-    requires_action: { created: 'requires_action', requires_action: '', pending: '', succeeded: '', failed: '', cancelled: '', expired: '' },
-    pending: { created: 'pending', requires_action: 'pending', pending: '', succeeded: '', failed: '', cancelled: '', expired: '' },
-    succeeded: { created: 'succeeded', requires_action: 'succeeded', pending: 'succeeded', succeeded: '', failed: 'succeeded', cancelled: 'succeeded', expired: 'succeeded' },
-    failed: { created: 'failed', requires_action: 'failed', pending: 'failed', succeeded: '', failed: '', cancelled: '', expired: '' },
-    cancelled: { created: 'cancelled', requires_action: 'cancelled', pending: '', succeeded: '', failed: '', cancelled: '', expired: '' },
-    expire_confirmed: { created: 'expired', requires_action: 'expired', pending: '', succeeded: '', failed: '', cancelled: '', expired: '' },
+    requires_action: { created: 'requires_action', requires_action: '', pending: '', succeeded: '', failed: '', cancelled: '', expired: '', voided: '' },
+    pending: { created: 'pending', requires_action: 'pending', pending: '', succeeded: '', failed: '', cancelled: '', expired: '', voided: '' },
+    succeeded: { created: 'succeeded', requires_action: 'succeeded', pending: 'succeeded', succeeded: '', failed: 'succeeded', cancelled: 'succeeded', expired: 'succeeded', voided: '' },
+    failed: { created: 'failed', requires_action: 'failed', pending: 'failed', succeeded: '', failed: '', cancelled: '', expired: '', voided: '' },
+    cancelled: { created: 'cancelled', requires_action: 'cancelled', pending: '', succeeded: '', failed: '', cancelled: '', expired: '', voided: '' },
+    expire_confirmed: { created: 'expired', requires_action: 'expired', pending: '', succeeded: '', failed: '', cancelled: '', expired: '', voided: '' },
+    void: { created: '', requires_action: '', pending: '', succeeded: 'voided', failed: '', cancelled: '', expired: '', voided: '' },
   };
   it.each(events.flatMap((e) => states.map((s) => [e, s] as const)))('%s on %s', (event, state) => {
     expect(nextStatus(state, event) ?? '').toBe(TABLE[event][state]);
@@ -202,8 +203,12 @@ describe('payment_attempt_state_event_matrix (plan 3.1, 5.2)', () => {
     expect([...made].sort()).toEqual(PAYMENT_STATUS_PAIRS.map((p) => p.join('>')).sort());
   });
   it('payment_status_pairs_code_matches_trigger: the migration lists the same pairs (no pending → expired)', () => {
-    const sql = readFileSync(join(__dirname, '../../../prisma/migrations/0017_payments/migration.sql'), 'utf8');
-    const block = sql.slice(sql.indexOf("IF NOT ((OLD.\"status\", NEW.\"status\") IN ("), sql.indexOf('payment status cannot go from'));
+    // The latest migration that defines the function is the one the database runs: read that one, not a fixed file.
+    const dir = join(__dirname, '../../../prisma/migrations');
+    const latest = readdirSync(dir).filter((d) => /^\d{4}_/.test(d)).sort().filter((d) => readFileSync(join(dir, d, 'migration.sql'), 'utf8').includes('CREATE OR REPLACE FUNCTION public.mt_payment_guard()')).at(-1)!;
+    const sql = readFileSync(join(dir, latest, 'migration.sql'), 'utf8');
+    const fn = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.mt_payment_guard()'));
+    const block = fn.slice(fn.indexOf("IF NOT ((OLD.\"status\", NEW.\"status\") IN ("), fn.indexOf('payment status cannot go from'));
     const pairs = [...block.matchAll(/\('(\w+)'(?:::"PaymentStatus")?, '(\w+)'(?:::"PaymentStatus")?\)/g)].map((m) => `${m[1]}>${m[2]}`).sort();
     expect(pairs).toEqual(PAYMENT_STATUS_PAIRS.map((p) => p.join('>')).sort());
     expect(pairs).not.toContain('pending>expired');

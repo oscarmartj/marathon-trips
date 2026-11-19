@@ -50,6 +50,14 @@ describe('coverage_events_table (section 1.2): ten states × facts × auto-confi
     expect(coverageEvents(s, f, auto)).toEqual(expected(s, f, auto));
   });
 
+  it('deposit_uncovered_only_when_asked: a voided transfer reopens the approval, a change to the deposit never does', () => {
+    const f = { depositCovered: false, totalCovered: false };
+    expect(coverageEvents('deposit_paid', f, true)).toEqual([]);
+    expect(coverageEvents('deposit_paid', { ...f, reopenDeposit: true }, true)).toEqual(['deposit_uncovered']);
+    expect(coverageEvents('deposit_paid', { depositCovered: true, totalCovered: true, reopenDeposit: true }, true)).toEqual([]);
+    expect(coverageEvents('confirmed', { ...f, reopenDeposit: true }, true)).toEqual([]);
+  });
+
   it('full_payment_before_confirmation_waits_for_oscar: deposit_paid never jumps to balance_paid', () => {
     expect(coverageEvents('approved', { depositCovered: true, totalCovered: true }, false)).toEqual(['deposit_covered']);
     expect(coverageEvents('deposit_paid', { depositCovered: true, totalCovered: true }, true)).toEqual([]);
@@ -69,6 +77,7 @@ describe('booking_event_table_within_status_pairs (section 1.3)', () => {
     expect(BOOKING_EVENT_TABLE.confirm).toEqual({ deposit_paid: 'confirmed' });
     expect(BOOKING_EVENT_TABLE.total_covered).toEqual({ confirmed: 'balance_paid' });
     expect(BOOKING_EVENT_TABLE.total_uncovered).toEqual({ balance_paid: 'confirmed' });
+    expect(BOOKING_EVENT_TABLE.deposit_uncovered).toEqual({ deposit_paid: 'approved' });
     expect(BOOKING_EVENT_TABLE.expire_approval).toEqual({ approved: 'expired' });
     // Cancelling a paid booking stays a 409 until refunds exist.
     expect(BOOKING_EVENT_TABLE.cancel).toEqual({ requested: 'cancelled', approved: 'cancelled' });
@@ -150,7 +159,7 @@ describe('static checks (sections 1.3 and 11.11)', () => {
   const files = readSources(src);
 
   it('only_coverage_applies_money_events: the coverage events appear in the state machine table and applyCoverage only', () => {
-    const using = files.filter((f) => /'(deposit_covered|auto_confirm|total_covered|total_uncovered)'/.test(f.text)).map((f) => f.name).sort();
+    const using = files.filter((f) => /'(deposit_covered|auto_confirm|total_covered|total_uncovered|deposit_uncovered)'/.test(f.text)).map((f) => f.name).sort();
     expect(using).toEqual(['modules/bookings/coverage.ts', 'modules/bookings/state-machine.ts']);
     // The panel's route type takes no coverage event.
     expect(readFileSync(join(src, 'modules/bookings/state-machine.ts'), 'utf8')).toMatch(/export type StaffBookingEvent = 'approve' \| 'decline' \| 'cancel' \| 'confirm';/);

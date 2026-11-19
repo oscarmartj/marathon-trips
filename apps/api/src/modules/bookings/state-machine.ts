@@ -21,7 +21,7 @@ import { Tx, dbNow } from './support';
  */
 export const BOOKING_STATUS_PAIRS: ReadonlyArray<readonly [BookingStatus, BookingStatus]> = [
   ['requested', 'approved'], ['requested', 'declined'], ['requested', 'cancelled'], ['requested', 'expired'],
-  ['approved', 'deposit_paid'], ['approved', 'cancelled'], ['approved', 'expired'],
+  ['approved', 'deposit_paid'], ['approved', 'cancelled'], ['approved', 'expired'], ['deposit_paid', 'approved'],
   ['deposit_paid', 'confirmed'], ['deposit_paid', 'cancelled'], ['deposit_paid', 'completed'],
   ['confirmed', 'balance_paid'], ['confirmed', 'cancelled'], ['confirmed', 'completed'],
   ['balance_paid', 'confirmed'], ['balance_paid', 'completed'], ['balance_paid', 'cancelled'],
@@ -33,7 +33,7 @@ export const BOOKING_STATUS_PAIRS: ReadonlyArray<readonly [BookingStatus, Bookin
  * expiry and the coverage events, which only `applyCoverage` uses (no route takes them: plan 3.2, section 1.3).
  */
 export type BookingEvent = 'approve' | 'decline' | 'cancel' | 'expire_request' | 'confirm' | 'expire_approval' | CoverageEvent;
-export type CoverageEvent = 'deposit_covered' | 'auto_confirm' | 'total_covered' | 'total_uncovered';
+export type CoverageEvent = 'deposit_covered' | 'auto_confirm' | 'total_covered' | 'total_uncovered' | 'deposit_uncovered';
 /** The events the panel's routes may ask for. */
 export type StaffBookingEvent = 'approve' | 'decline' | 'cancel' | 'confirm';
 
@@ -50,6 +50,8 @@ export const BOOKING_EVENT_TABLE: Readonly<Record<BookingEvent, Partial<Record<B
   total_covered: { confirmed: 'balance_paid' },
   // Task 6.3: a change raised the total of a booking paid in full (plan 0.1, 6.2, rule C).
   total_uncovered: { balance_paid: 'confirmed' },
+  // Task 3.4: a confirmed bank transfer was voided and the deposit is no longer covered (plan 3.4, section 4).
+  deposit_uncovered: { deposit_paid: 'approved' },
 };
 
 /** Events that are "no change" instead of a 409 when they do not apply (the expiry sweeps). */
@@ -72,7 +74,7 @@ const STATUS_EVENT: Partial<Record<BookingStatus, string>> = {
  * Events whose transition publishes its own event instead of the status's (task 6.3, plan review m3): a change that
  * reopens the balance of a paid booking is not a second confirmation for automations or outbound webhooks.
  */
-const EVENT_TYPE: Partial<Record<BookingEvent, string>> = { total_uncovered: BOOKING_EVENTS.balanceReopened };
+const EVENT_TYPE: Partial<Record<BookingEvent, string>> = { total_uncovered: BOOKING_EVENTS.balanceReopened, deposit_uncovered: BOOKING_EVENTS.depositReopened };
 
 const RELEASING: ReadonlySet<BookingStatus> = new Set(['declined', 'cancelled', 'expired']);
 const TIME_COLUMN: Partial<Record<BookingStatus, string>> = { approved: 'approvedAt', declined: 'declinedAt', cancelled: 'cancelledAt', expired: 'expiredAt' };
@@ -118,7 +120,7 @@ export class BookingStateMachine {
   ) {}
 
   async transition(tx: Tx, bookingId: string, event: BookingEvent, input: TransitionInput): Promise<TransitionResult> {
-    const approvalHours = event === 'approve' ? (input.approvalHours ?? (await this.settings.get(BOOKING_SETTINGS.approvalExpiryHours.key, BOOKING_SETTINGS.approvalExpiryHours.fallback))) : 0;
+    const approvalHours = event === 'approve' || event === 'deposit_uncovered' ? (input.approvalHours ?? (await this.settings.get(BOOKING_SETTINGS.approvalExpiryHours.key, BOOKING_SETTINGS.approvalExpiryHours.fallback))) : 0;
     const rows = await tx.$queryRaw<LockedBooking[]>`
       SELECT id, status::text AS status, version, "customerId", "packageId", "editionId", currency, "requestExpiresAt", "approvalExpiresAt"
       FROM bookings WHERE id = ${bookingId}::uuid FOR UPDATE`;
@@ -145,7 +147,8 @@ export class BookingStateMachine {
     const hookedEvent = HOOKED.has(event) ? (event as HookedEvent) : null;
     if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, { actor: input.actor, at, approvalExpiresAt });
 
-    const column = TIME_COLUMN[to];
+    // Going back to approved after a voided transfer is not a new approval: its date stays (the window to pay starts again).
+    const column = event === 'deposit_uncovered' ? undefined : TIME_COLUMN[to];
     const reason = input.reason ?? null;
     // Compare-and-set: the row is locked, so 0 rows here means a bug, never a race; still a 409, never a silent write.
     // The payment states have no time column of their own: the audit log and the event carry the time.

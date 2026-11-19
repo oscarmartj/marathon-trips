@@ -27,7 +27,7 @@ export class PaymentAdminService {
     });
     const payments = await this.prisma.payment.findMany({
       where: { bookingId }, orderBy: { attemptNumber: 'asc' },
-      select: { id: true, attemptNumber: true, origin: true, method: true, mode: true, adapterKey: true, amountMinor: true, currency: true, status: true, providerPaymentRef: true, failureCode: true, pendingExpiresAt: true, succeededAt: true, createdAt: true, targetScheduleItemId: true },
+      select: { id: true, attemptNumber: true, origin: true, method: true, mode: true, adapterKey: true, amountMinor: true, currency: true, status: true, providerPaymentRef: true, payerReference: true, version: true, failureCode: true, pendingExpiresAt: true, succeededAt: true, createdAt: true, targetScheduleItemId: true },
     });
     const events = await this.prisma.webhookEvent.findMany({ where: { bookingId }, orderBy: { receivedAt: 'asc' }, select: { id: true, paymentId: true, type: true, status: true, receivedAt: true, processedAt: true, errorCode: true } });
     const refunds = await this.prisma.refund.findMany({ where: { bookingId }, orderBy: { createdAt: 'asc' }, select: { id: true, paymentId: true, origin: true, purpose: true, mode: true, amountMinor: true, currency: true, status: true, providerRefundRef: true, failureCode: true, createdAt: true, succeededAt: true } });

@@ -1,5 +1,6 @@
 // The payment plan and payment attempts through HTTP, the simulator and a real PostgreSQL
 // (plan docs/plans/3.1-payment-provider-core.md, sections 4, 5, 7, 10 and 14).
+import { ManualMethodsService } from '../../../src/modules/payments/core/manual-methods.service';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -687,7 +688,7 @@ describe('environments (plan 0.1, P11)', () => {
     await deliver(t, acc, await eventFor(t, acc, p!.id));
     const real = t.app.get(ProviderGateway);
     const prodGateway = Object.create(real, { env: { get: () => 'production' }, mode: { get: () => modeForEnv('production') } }) as ProviderGateway;
-    const routing = new PaymentRouting(prodGateway);
+    const routing = new PaymentRouting(prodGateway, t.app.get(ManualMethodsService));
     expect(await t.prisma.providerAccount.count({ where: { status: 'active', mode: 'test' } })).toBeGreaterThan(0);
     expect(await routing.candidates(t.prisma, { method: 'card', currency: 'AUD', country: 'AU' })).toEqual([]);
     expect(await netCollectedSource.collected(t.prisma, bookingId, modeForEnv('production'))).toBe(0n);

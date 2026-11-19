@@ -15,6 +15,10 @@ import { PaymentPendingService } from './core/pending.service';
 import { PAYMENT_REMINDER_TEMPLATE, PaymentRemindersService } from './core/reminders.service';
 import { PaymentAdminService } from './admin.service';
 import { adapterOptions, createAdapters } from './adapters';
+import { ManualProvider } from './adapters/manual/manual';
+import { ManualMethodsService } from './core/manual-methods.service';
+import { ManualTransfersService } from './core/manual-transfers.service';
+import { InboundPaymentHooks } from './core/inbound-hooks';
 import { PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController } from './controllers';
 import { ProviderAccountsService } from './core/accounts.service';
 import { PaymentStateMachine } from './core/attempt-state';
@@ -45,12 +49,12 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
   // the configuration is parsed from.
   controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
-    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
+    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
-    SimulatorCheckoutService, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
+    SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
   ],
-  exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
+  exports: [ProviderAccountsService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(
@@ -67,6 +71,8 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(PaymentRemindersService) private readonly reminders: PaymentRemindersService,
     @Inject(BookingAmendmentHooks) private readonly amendmentHooks: BookingAmendmentHooks,
     @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
+    @Inject(InboundPaymentHooks) private readonly inbound: InboundPaymentHooks,
+    @Inject(LedgerService) private readonly ledger: LedgerService,
   ) {}
 
   /** Permissions, settings, entities, the booking hooks (the plan and its coverage follow the booking) and the webhook bytes. */
@@ -77,6 +83,9 @@ export class PaymentsModule implements OnModuleInit {
     this.schedule.register(this.hooks);
     this.coverage.register(this.hooks);
     this.amendments.register(this.amendmentHooks);
+    // Task 3.3: the ledger follows a confirmed bank transfer and its void (task 3.4's hooks), in the same transaction.
+    this.inbound.onConfirmed('payments.ledger', async (tx, p) => void (await this.ledger.postPaymentSucceeded(tx, { id: p.bookingId, currency: p.currency }, p)));
+    this.inbound.onVoided('payments.ledger', async (tx, p) => void (await this.ledger.postInboundVoided(tx, { id: p.bookingId, currency: p.currency }, p)));
     this.mailTemplates.register({ ...PAYMENT_LINK_TEMPLATE, render: (ctx) => this.links.renderEmail(ctx) });
     this.mailTemplates.register({ ...PAYMENT_REMINDER_TEMPLATE, render: (ctx) => this.reminders.renderEmail(ctx) });
     this.rawBody.register(WEBHOOK_PATH_PREFIX, { maxBytes: WEBHOOK_MAX_BYTES, perIpPerMinute: this.config.PAYMENT_WEBHOOKS_PER_MINUTE_PER_IP });
