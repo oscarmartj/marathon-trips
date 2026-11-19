@@ -170,10 +170,12 @@ export class PaymentStateMachine {
   /**
    * The coverage rule in the same transaction as the money (plan 0.1, 6.2; plan 3.2, section 1.4). If it fails, the
    * whole change is undone: a database retry stays a retry, anything else becomes CoverageFailedError, which the callers
-   * turn into a task for Oscar (plan 3.2, section 11, point 8). Once recorded, an earlier such task is closed.
+   * turn into a task for Oscar (plan 3.2, section 11, point 8). Once recorded, an earlier such task is closed. The
+   * ledger posting `payment:<id>:succeeded` is part of the same step (plan 3.3, 1.5): no money without its posting.
    */
   private async applyCoverage(tx: Tx, booking: LockedBooking, p: LockedPayment): Promise<void> {
     try {
+      await this.ledger.postPaymentSucceeded(tx, booking, p);
       await this.coverage.apply(tx, booking, SYSTEM_ACTOR);
     } catch (err) {
       if (isRetryableTransactionError(err)) throw err;

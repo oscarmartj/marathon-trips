@@ -1,5 +1,7 @@
 // The ledger's pure parts and the refund state table (plan docs/plans/3.3-stripe-adapter-ledger.md, sections 1.4, 3 and
 // 12.7). No database.
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { allocate } from '../../../src/modules/payments/core/allocation';
 import { LEDGER_ACCOUNTS, assertBalanced, contentSha256, customerSide } from '../../../src/modules/payments/core/ledger';
@@ -103,5 +105,36 @@ describe('refund_state_table (plan 0.1, 6.2)', () => {
     expect(nextRefundStatus('failed', 'succeeded')).toBeNull();
     expect(nextRefundStatus('reversed', 'succeeded')).toBeNull();
     expect(nextRefundStatus('pending', 'pending')).toBeNull();
+  });
+});
+
+const SRC = join(__dirname, '../../../src');
+const sources = (dir: string): string[] => readdirSync(dir).flatMap((n) => {
+  const p = join(dir, n);
+  return statSync(p).isDirectory() ? (n === 'generated' ? [] : sources(p)) : p.endsWith('.ts') ? [p] : [];
+});
+
+describe('writers of money tables (plan 3.3, 1.2 and 3.1)', () => {
+  it('refund_status_pairs_code_matches_trigger', () => {
+    const sql = readFileSync(join(__dirname, '../../../prisma/migrations/0033_ledger_refunds/migration.sql'), 'utf8');
+    const block = sql.slice(sql.indexOf('IF NOT ((OLD."status", NEW."status") IN ('), sql.indexOf('refund status cannot go from'));
+    const pairs = [...block.matchAll(/\('(\w+)'(?:::"RefundStatus")?, '(\w+)'(?:::"RefundStatus")?\)/g)].map((m) => `${m[1]}>${m[2]}`).sort();
+    expect(pairs).toEqual(REFUND_STATUS_PAIRS.map((p) => p.join('>')).sort());
+  });
+
+  it('only_ledger_service_writes_ledger, and only the refund state machine writes a refund status', () => {
+    const ledgerWriters: string[] = [];
+    const refundStatusWriters: string[] = [];
+    for (const f of sources(SRC)) {
+      const text = readFileSync(f, 'utf8');
+      const name = relative(SRC, f);
+      if (/INSERT INTO ledger_|UPDATE ledger_|DELETE FROM ledger_|ledger(Transaction|Entry|Account)\.(create|update|upsert|delete)/.test(text)) ledgerWriters.push(name);
+      if (/UPDATE refunds SET status|refund\.(update|updateMany|upsert)\([^)]*status/.test(text)) refundStatusWriters.push(name);
+    }
+    expect(ledgerWriters).toEqual(['modules/payments/core/ledger.service.ts']);
+    expect(refundStatusWriters).toEqual(['modules/payments/core/refunds.service.ts']);
+    // No route writes the ledger: no controller mentions it.
+    const controllers = sources(SRC).filter((f) => /controller/.test(f)).filter((f) => /ledger/i.test(readFileSync(f, 'utf8')));
+    expect(controllers.map((f) => relative(SRC, f))).toEqual([]);
   });
 });
