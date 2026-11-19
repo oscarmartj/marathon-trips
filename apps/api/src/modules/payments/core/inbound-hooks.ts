@@ -28,6 +28,11 @@ export class InboundPaymentHooks {
     this.voided.set(name, fn);
   }
 
+  /** How many hooks follow a confirmed and a voided transfer (a test fails when a ledger exists and these are zero). */
+  registered(): { confirmed: number; voided: number } {
+    return { confirmed: this.confirmed.size, voided: this.voided.size };
+  }
+
   async runConfirmed(tx: Tx, p: InboundPayment): Promise<void> {
     for (const fn of this.confirmed.values()) await fn(tx, p);
   }

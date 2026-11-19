@@ -1,5 +1,5 @@
 // Pure parts of the payments core (plan docs/plans/3.1-payment-provider-core.md, sections 2, 4, 5 and 10): no database.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { APP_ENVS, PAYMENT_METHODS, startPaymentSchema } from '@mt/shared';
@@ -197,8 +197,10 @@ describe('payment_attempt_state_event_matrix (plan 3.1, 5.2)', () => {
     expect([...made].sort()).toEqual(PAYMENT_STATUS_PAIRS.map((p) => p.join('>')).sort());
   });
   it('payment_status_pairs_code_matches_trigger: the migration lists the same pairs (no pending → expired)', () => {
-    // The function was last redefined by 0032 (task 3.4 added the voiding of a confirmed transfer).
-    const sql = readFileSync(join(__dirname, '../../../prisma/migrations/0032_manual_transfers/migration.sql'), 'utf8');
+    // The latest migration that defines the function is the one the database runs: read that one, not a fixed file.
+    const dir = join(__dirname, '../../../prisma/migrations');
+    const latest = readdirSync(dir).filter((d) => /^\d{4}_/.test(d)).sort().filter((d) => readFileSync(join(dir, d, 'migration.sql'), 'utf8').includes('CREATE OR REPLACE FUNCTION public.mt_payment_guard()')).at(-1)!;
+    const sql = readFileSync(join(dir, latest, 'migration.sql'), 'utf8');
     const fn = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.mt_payment_guard()'));
     const block = fn.slice(fn.indexOf("IF NOT ((OLD.\"status\", NEW.\"status\") IN ("), fn.indexOf('payment status cannot go from'));
     const pairs = [...block.matchAll(/\('(\w+)'(?:::"PaymentStatus")?, '(\w+)'(?:::"PaymentStatus")?\)/g)].map((m) => `${m[1]}>${m[2]}`).sort();

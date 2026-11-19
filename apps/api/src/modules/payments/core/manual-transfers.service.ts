@@ -5,7 +5,7 @@ import { AuditService } from '../../../platform/audit/audit.service';
 import type { AuditActor } from '../../../platform/audit/audit.service';
 import { PrismaService } from '../../../platform/database/prisma.service';
 import { runTransaction } from '../../../platform/database/transaction';
-import { conflict, notFound } from '../../../platform/http/api-error';
+import { conflict, notFound, unprocessable } from '../../../platform/http/api-error';
 import { readBookingForPayments } from '../../bookings';
 import { MANUAL_KEY } from '../adapters/manual/manual';
 import { PaymentStateMachine, lockPayment } from './attempt-state';
@@ -66,12 +66,14 @@ export class ManualTransfersService {
         const b = await readBookingForPayments(tx, { id: bookingId }, true);
         if (!b) throw notFound('booking_not_found', 'Booking not found');
         if (!RECEIVING.includes(b.status)) throw conflict('booking_cannot_receive_payment', 'This booking cannot take a payment in its current state');
+        // The statement ID names the bank movement. The booking's own reference would collide on a second transfer.
+        if (input.reference === b.reference.toUpperCase()) throw unprocessable('reference_is_booking_reference', 'Enter the bank statement transaction ID, not the booking reference');
         const accounts = await tx.providerAccount.findMany({ where: { adapterKey: MANUAL_KEY, status: 'active', mode: this.gateway.mode }, select: { id: true, adapterKey: true, mode: true, status: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
         const account = accounts.find((a) => callBlockReason(a, this.gateway.registry.get(a.adapterKey)?.manifest, 'create', this.gateway.env) === null);
         if (!account) throw conflict('no_manual_account', 'There is no bank transfer account set up for this environment');
         if (!this.gateway.registry.get(MANUAL_KEY)!.manifest.currencies.includes(b.currency)) throw conflict('currency_not_supported', 'Bank transfers are not available in this currency');
 
-        const existing = await tx.payment.findFirst({ where: { providerAccountId: account.id, providerPaymentRef: input.reference, status: { not: 'voided' } }, select: { ...SELECT, origin: true } });
+        const existing = await tx.payment.findFirst({ where: { adapterKey: MANUAL_KEY, mode: account.mode, origin: 'inbound', providerPaymentRef: input.reference, status: { not: 'voided' } }, select: { ...SELECT, origin: true } });
         if (existing) {
           // The same confirmation again: nothing is recorded twice (plan 3.4, section 3).
           if (existing.bookingId === b.id && existing.origin === 'inbound' && existing.amountMinor === amount) return { transfer: toView(existing), replayed: true };

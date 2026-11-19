@@ -18,7 +18,7 @@ interface PaymentRow {
   currency: string;
   status: string;
   version: number;
-  payerReference: string | null;
+  providerPaymentRef: string | null;
   succeededAt: string | null;
 }
 
@@ -117,7 +117,7 @@ export function TransfersPanel({ bookingId, onChanged }: { bookingId: string; on
             <li key={p.id}>
               {t('admin.crm.transfers.row', {
                 amount: formatMoney(p.amountMinor, p.currency), state: t(`admin.crm.transfers.states.${p.status}`),
-                reference: p.payerReference ?? '', when: p.succeededAt ? formatMoment(p.succeededAt) : '',
+                reference: p.providerPaymentRef ?? '', when: p.succeededAt ? formatMoment(p.succeededAt) : '',
               })}
               {p.status === 'succeeded' && voiding !== p.id ? (
                 <>
@@ -148,7 +148,7 @@ export function TransfersPanel({ bookingId, onChanged }: { bookingId: string; on
           </select>
         </div>
         <Field label={t('admin.crm.transfers.amount', { currency })} id="amount" inputMode="decimal" autoComplete="off" required />
-        <Field label={t('admin.crm.transfers.reference')} id="reference" autoComplete="off" maxLength={100} required defaultValue={data.booking.reference} />
+        <Field label={t('admin.crm.transfers.statementId')} id="reference" autoComplete="off" maxLength={100} required />
         <p><button className="btn" type="submit" disabled={busy}>{t('admin.crm.transfers.confirm')}</button></p>
       </form>
       {stepUp.prompt}

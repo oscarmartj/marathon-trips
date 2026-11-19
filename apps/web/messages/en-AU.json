@@ -2462,9 +2462,9 @@
       },
       "transfers": {
         "title": "Bank transfers",
-        "intro": "Record money that arrived by PayID or bank transfer for booking {reference}. Match it by the reference the customer wrote. The booking only counts the money once you have recorded it here.",
+        "intro": "Record money that arrived by PayID or bank transfer for booking {reference}. Find the customer's payment on your bank statement by the booking reference they wrote, then enter the bank's own transaction ID for that line. Each transfer has its own ID, so record a second transfer of the same amount with its own ID. The booking only counts the money once you have recorded it here.",
         "none": "No bank transfers recorded.",
-        "row": "{amount}, {state}, reference {reference}, {when}",
+        "row": "{amount}, {state}, statement ID {reference}, {when}",
         "states": {
           "succeeded": "recorded",
           "voided": "voided",
@@ -2473,7 +2473,7 @@
         "confirmHeading": "Record a transfer",
         "method": "Method",
         "amount": "Amount received ({currency})",
-        "reference": "Payment reference",
+        "statementId": "Bank statement transaction ID",
         "confirm": "Record transfer",
         "confirmed": "Transfer recorded.",
         "replayed": "This transfer was already recorded. Nothing changed.",
@@ -2493,7 +2493,9 @@
           "currency_not_supported": "Bank transfers are not set up for this booking's currency.",
           "no_manual_account": "No account is set up to receive bank transfers yet.",
           "payment_not_voidable": "Only a recorded bank transfer can be voided.",
-          "reference_already_recorded": "A transfer with this reference is already recorded for another booking or amount.",
+          "reference_already_recorded": "A transfer with this statement ID is already recorded for another booking or amount.",
+          "reference_is_booking_reference": "Enter the bank statement transaction ID, not the booking reference.",
+          "validation_failed": "Enter the bank statement transaction ID. A booking reference such as MT-ABC123 is not accepted.",
           "version_conflict": "Someone else changed this transfer. Reload and try again.",
           "void_would_uncover_confirmed_booking": "This booking was confirmed on this transfer. Refund or cancel the booking instead."
         }

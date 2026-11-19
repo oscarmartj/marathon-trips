@@ -9,7 +9,7 @@ import { ProviderGateway, modeForEnv } from '../../../src/modules/payments/core/
 import { ProviderAccountsService } from '../../../src/modules/payments/core/accounts.service';
 import { TestApp, makeApp } from '../../support/auth';
 import { CATALOGUE_AND_PRICING, Client, closeCatalogue, staffClient } from '../../support/catalogue';
-import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents } from '../../support/bookings';
+import { ALL_BOOKING_PERMISSIONS, cleanBookingEvents, requestBody } from '../../support/bookings';
 import { pricedWorld } from '../../support/pricing';
 import { PayingCustomer, SimAccount, approvedBooking, cleanPayments, deliver, eventFor, expireNow, onlyAccount, payingCustomer, paymentsStaff, sim, simulatorAccount } from '../../support/payments';
 
@@ -124,7 +124,7 @@ describe('the methods and their configuration (section 5)', () => {
     const row = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: manualId } });
     expect([row.adapterKey, row.mode]).toEqual(['manual', 'test']);
     expect(row.credentialsCiphertext).not.toContain('{');
-    await expect(t.prisma.$executeRawUnsafe(`UPDATE provider_accounts SET mode = 'live' WHERE id = $1::uuid`, manualId)).rejects.toThrow();
+    await expect(t.prisma.$executeRawUnsafe(`UPDATE provider_accounts SET mode = 'live' WHERE id = $1::uuid`, manualId)).rejects.toThrow(/never change/);
     const real = t.app.get(ProviderGateway);
     const prod = Object.create(real, { env: { get: () => 'production' }, mode: { get: () => modeForEnv('production') } }) as ProviderGateway;
     const routing = new PaymentRouting(prod, t.app.get(ManualMethodsService));
@@ -167,11 +167,11 @@ describe('the customer asks to pay by transfer (section 2)', () => {
     const b = await booked();
     await c.pay(b.reference, { method: 'payid_transfer' });
     const [p] = await paymentsOf(b.bookingId);
-    for (const sql of [
-      `UPDATE payments SET status = 'succeeded', version = version + 1, "succeededAt" = now(), "providerPaymentRef" = 'x' WHERE id = $1::uuid`,
-      `UPDATE payments SET status = 'pending', version = version + 1 WHERE id = $1::uuid`,
-      `UPDATE payments SET "liveBookingId" = "bookingId" WHERE id = $1::uuid`,
-    ]) await expect(t.prisma.$executeRawUnsafe(sql, p!.id)).rejects.toThrow();
+    for (const [sql, constraint] of [
+      [`UPDATE payments SET status = 'succeeded', version = version + 1, "succeededAt" = now(), "providerPaymentRef" = 'x' WHERE id = $1::uuid`, 'payments_manual_intent_check'],
+      [`UPDATE payments SET status = 'pending', version = version + 1 WHERE id = $1::uuid`, 'payments_manual_intent_check'],
+      [`UPDATE payments SET "liveBookingId" = "bookingId" WHERE id = $1::uuid`, 'payments_live_check'],
+    ] as const) await expect(t.prisma.$executeRawUnsafe(sql, p!.id), constraint).rejects.toThrow(new RegExp(`violates check constraint "${constraint}"`));
   });
 
   it('manual_intent_cancelled_by_new_card_attempt; manual_intent_does_not_block_approval_expiry', async () => {
@@ -294,6 +294,105 @@ describe('staff confirm a transfer (section 3)', () => {
     expect(await inbound(b.bookingId)).toHaveLength(0);
   });
 
+  it('statement_id_is_the_transfers_own_identity: two equal transfers are both recorded, a repeat of one is a replay, a booking reference is refused', async () => {
+    const b = await booked(false);
+    const half = (b.depositMinor / 2n).toString();
+    const first = uniq('STMT');
+    const second = uniq('STMT');
+    const one = await confirm(b.bookingId, { amountMinor: half, reference: first });
+    const two = await confirm(b.bookingId, { amountMinor: half, reference: second });
+    expect([one.status, one.body.replayed, two.status, two.body.replayed]).toEqual([200, false, 200, false]);
+    expect(await inbound(b.bookingId)).toHaveLength(2);
+    // The same statement line again: nothing is recorded twice.
+    const again = await confirm(b.bookingId, { amountMinor: half, reference: second });
+    expect([again.status, again.body.replayed, again.body.transfer.id]).toEqual([200, true, two.body.transfer.id]);
+    expect(await inbound(b.bookingId)).toHaveLength(2);
+    expect((await admin.get(`/admin/payments/bookings/${b.bookingId}`)).body.coverage.collectedMinor).toBe((BigInt(half) * 2n).toString());
+    // The booking's own reference names the booking, not the bank movement: refused, whatever its case, and so is anything shaped like one.
+    for (const reference of [b.reference, b.reference.toLowerCase(), ` ${b.reference} `, 'MT-ZZZZZZ', 'mt-abc123']) {
+      const r = await confirm(b.bookingId, { amountMinor: half, reference });
+      expect([r.status, r.body.code], reference).toEqual([422, 'validation_failed']);
+    }
+    expect(await inbound(b.bookingId)).toHaveLength(2);
+  });
+
+  it('a_statement_id_is_recorded_once_across_manual_accounts: a second account cannot take it again (service and database)', async () => {
+    const x = await booked(false);
+    const y = await booked(false);
+    const reference = uniq('STMT');
+    expect((await confirm(x.bookingId, { amountMinor: x.depositMinor.toString(), reference })).status).toBe(200);
+    const other = (await t.app.get(ProviderAccountsService).createManualAccount({ displayName: 'Second bank account' })).id;
+    await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'paused' } });
+    try {
+      const r = await confirm(y.bookingId, { amountMinor: x.depositMinor.toString(), reference });
+      expect([r.status, r.body.code]).toEqual([409, 'reference_already_recorded']);
+      await expect(t.prisma.$executeRawUnsafe(
+        `INSERT INTO payments (id, "bookingId", currency, origin, "attemptNumber", "payerCustomerId", "providerAccountId", mode, "adapterKey", method, "amountMinor", status, "idempotencyKey", "providerPaymentRef", "payerReference", "pendingExpiresAt", "updatedAt")
+         SELECT gen_random_uuid(), "bookingId", currency, 'inbound', 98, "payerCustomerId", $2::uuid, mode, "adapterKey", method, 1, 'created', 'booking:' || "bookingId"::text || ':inbound:98', "providerPaymentRef", "payerReference", now(), now() FROM payments WHERE "bookingId" = $1::uuid AND origin = 'inbound'`,
+        x.bookingId, other)).rejects.toThrow(/payments_inbound_ref_not_voided/);
+    } finally {
+      await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'active' } });
+      await t.prisma.providerAccount.update({ where: { id: other }, data: { status: 'paused' } });
+    }
+    expect(await inbound(y.bookingId)).toHaveLength(0);
+  });
+
+  it('unpayable_states: requested, declined and refunded take no transfer; cancelled and expired record it with an overpayment task', async () => {
+    const w = await pricedWorld(admin);
+    const requestedRes = await c.request(requestBody(w));
+    expect(requestedRes.status).toBe(201);
+    const requested = await t.prisma.booking.findUniqueOrThrow({ where: { reference: requestedRes.body.reference as string } });
+    const body = (amountMinor: string) => ({ amountMinor, reference: uniq('STMT') });
+    const refused = async (bookingId: string) => {
+      const r = await confirm(bookingId, body('1000'));
+      expect([r.status, r.body.code]).toEqual([409, 'booking_cannot_receive_payment']);
+      expect(await inbound(bookingId)).toHaveLength(0);
+    };
+    await refused(requested.id);
+    expect((await admin.post(`/admin/bookings/${requested.id}/decline`, { version: requested.version, reason: 'Full' })).status).toBe(200);
+    expect((await bookingRow(requested.id)).status).toBe('declined');
+    await refused(requested.id);
+    // Refunded: a cancelled booking whose money has been given back.
+    const gone = await booked(false);
+    expect((await admin.post(`/admin/bookings/${gone.bookingId}/cancel`, { version: (await bookingRow(gone.bookingId)).version, reason: 'test' })).status).toBe(200);
+    await t.prisma.$executeRawUnsafe(`UPDATE bookings SET status = 'refunded', version = version + 1 WHERE id = $1::uuid`, gone.bookingId);
+    await refused(gone.bookingId);
+    // Cancelled and expired: the money did arrive, so it is recorded; all of it is an overpayment for staff to give back.
+    const cancelled = await booked(false);
+    expect((await admin.post(`/admin/bookings/${cancelled.bookingId}/cancel`, { version: (await bookingRow(cancelled.bookingId)).version, reason: 'test' })).status).toBe(200);
+    const late = await booked(false);
+    await t.prisma.$executeRawUnsafe(`UPDATE bookings SET "approvalExpiresAt" = clock_timestamp() - interval '1 minute' WHERE id = $1::uuid`, late.bookingId);
+    await t.app.get(BookingExpiryService).run();
+    expect((await bookingRow(late.bookingId)).status).toBe('expired');
+    for (const [status, b] of [['cancelled', cancelled], ['expired', late]] as const) {
+      const r = await confirm(b.bookingId, body(b.depositMinor.toString()));
+      expect([status, r.status, r.body.replayed], status).toEqual([status, 200, false]);
+      expect((await bookingRow(b.bookingId)).status).toBe(status);
+      expect(await t.prisma.task.count({ where: { sourceRef: `payments:overpaid:${r.body.transfer.id}` } }), status).toBe(1);
+      expect((await admin.get(`/admin/payments/bookings/${b.bookingId}`)).body.allocation.overpaidMinor, status).toBe(b.depositMinor.toString());
+    }
+  });
+
+  it('the_ledger_must_follow_transfers: a ledger without inbound hooks fails here (task 3.3 registers them)', async () => {
+    const ledger = await t.prisma.$queryRawUnsafe<Array<{ table_name: string }>>(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'ledger%'`);
+    const hooks = t.app.get(InboundPaymentHooks);
+    // No ledger yet (the state of this task): nothing to follow. Once any ledger table exists, 3.3 must register both hooks.
+    if (ledger.length === 0) return;
+    const why = `ledger tables (${ledger.map((l) => l.table_name).join(', ')}) exist but no hook follows a transfer`;
+    expect(hooks.registered().confirmed, why).toBeGreaterThan(0);
+    expect(hooks.registered().voided, why).toBeGreaterThan(0);
+  });
+
+  it('a_recorded_transfer_keeps_its_identity: the live guard refuses edits to the statement ID, the payer reference, the amount and the origin', async () => {
+    const b = await booked(false);
+    const r = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference: uniq('STMT') });
+    for (const set of [`"payerReference" = 'MT-AAAAAA'`, `"providerPaymentRef" = 'OTHER-1'`, `"amountMinor" = 1`, `origin = 'collection'`, `"bookingId" = gen_random_uuid()`]) {
+      await expect(t.prisma.$executeRawUnsafe(`UPDATE payments SET ${set} WHERE id = $1::uuid`, r.body.transfer.id), set).rejects.toThrow();
+    }
+    const row = await t.prisma.payment.findUniqueOrThrow({ where: { id: r.body.transfer.id } });
+    expect([row.payerReference, row.amountMinor, row.origin]).toEqual([b.reference, b.depositMinor, 'inbound']);
+  });
+
   it('no_manual_account: nothing is recorded', async () => {
     const b = await booked(false);
     await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'paused' } });
@@ -380,7 +479,7 @@ describe('voiding a mistaken transfer (section 4)', () => {
     await expect(t.prisma.$executeRawUnsafe(
       `INSERT INTO payments (id, "bookingId", currency, origin, "attemptNumber", "payerCustomerId", "providerAccountId", mode, "adapterKey", method, "amountMinor", status, "idempotencyKey", "providerPaymentRef", "payerReference", "pendingExpiresAt", "updatedAt")
        SELECT gen_random_uuid(), "bookingId", currency, 'inbound', 99, "payerCustomerId", "providerAccountId", mode, "adapterKey", method, 1, 'created', 'booking:' || "bookingId"::text || ':inbound:99', "providerPaymentRef", "payerReference", now(), now() FROM payments WHERE id = $1::uuid`,
-      right.body.transfer.id)).rejects.toThrow();
+      right.body.transfer.id)).rejects.toThrow(/payments_provider_ref_not_voided|payments_inbound_ref_not_voided/);
   });
 
   it('void_twice_is_409; void_rejects_gateway_payment; void_stale_version_409; void_needs_step_up', async () => {

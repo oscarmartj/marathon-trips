@@ -167,11 +167,14 @@ export const BANK_REFERENCE = /^[A-Z0-9][A-Z0-9 _./:#-]{0,63}$/;
 /** Normalises what staff typed: trimmed, spaces collapsed, upper case. The API checks the result against BANK_REFERENCE. */
 export const normaliseBankReference = (v: string): string => v.trim().replace(/\s+/g, ' ').toUpperCase();
 
+/** A booking reference (MT-XXXXXX). It names the booking, never the bank movement, so it is not accepted as a statement ID. */
+export const BOOKING_REFERENCE_SHAPE = /^MT-[A-Z0-9]{6}$/;
+
 /** Body of POST /admin/payments/bookings/:id/inbound-payments. The amount is the one the bank shows, in the booking's currency. */
 export const confirmTransferSchema = z.strictObject({
   method: z.enum(MANUAL_PAYMENT_METHODS).default('payid_transfer'),
   amountMinor: z.string().regex(/^[1-9]\d{0,11}$/),
-  reference: z.string().min(1).max(100).transform(normaliseBankReference).refine((v) => BANK_REFERENCE.test(v), 'Not a bank reference'),
+  reference: z.string().min(1).max(100).transform(normaliseBankReference).refine((v) => BANK_REFERENCE.test(v), 'Not a bank reference').refine((v) => !BOOKING_REFERENCE_SHAPE.test(v), 'A booking reference is not a bank statement ID'),
 });
 export type ConfirmTransfer = z.infer<typeof confirmTransferSchema>;
 

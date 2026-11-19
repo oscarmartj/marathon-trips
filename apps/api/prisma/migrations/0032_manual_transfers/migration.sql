@@ -68,6 +68,8 @@ DROP INDEX "payments_providerAccountId_providerPaymentRef_key";
 CREATE INDEX "payments_providerAccountId_providerPaymentRef_idx" ON "payments"("providerAccountId", "providerPaymentRef");
 -- A bank movement is recorded once per account, until it is voided: then it can be confirmed again (plan 0.1, 5.5).
 CREATE UNIQUE INDEX "payments_provider_ref_not_voided" ON "payments"("providerAccountId", "providerPaymentRef") WHERE "status" <> 'voided' AND "providerPaymentRef" IS NOT NULL;
+-- A bank movement is also recorded once across every manual account (a paused account and a new one must not both take it).
+CREATE UNIQUE INDEX "payments_inbound_ref_not_voided" ON "payments"("mode", "providerPaymentRef") WHERE "origin" = 'inbound' AND "status" <> 'voided' AND "providerPaymentRef" IS NOT NULL;
 -- One open manual intent per booking.
 CREATE UNIQUE INDEX "payments_one_open_manual_intent" ON "payments"("bookingId") WHERE "origin" = 'manual_intent' AND "status" = 'created';
 
