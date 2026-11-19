@@ -48,21 +48,21 @@ test('supplier_payment_record_and_void', async ({ page }) => {
 
   await page.goto('/admin/suppliers/payments');
   await expect(page.getByRole('heading', { level: 1, name: 'Supplier payments' })).toBeVisible();
-  await expect(page.getByRole('table', { name: /Due in the next 7 days/ }).getByRole('row', { name: new RegExp(`Harbour ${run}`) })).toContainText('500.00');
+  await expect(page.getByRole('table', { name: /Next 7 days/ }).getByRole('row', { name: new RegExp(`Harbour ${run}`) })).toContainText('500.00');
 
   await page.goto(`/admin/suppliers/${supplierId}`);
-  await expect(page.getByText('Recording a payment does not send any money.')).toBeVisible();
+  await expect(page.getByText('Recording a payment does not send any money: pay from your bank first, then record it here.')).toBeVisible();
   await page.getByLabel(new RegExp(`Rooms ${run}`)).check();
   await page.getByRole('button', { name: 'Check total' }).click();
-  await expect(page.getByText(/Total of this payment: DKK\s*500\.00/)).toBeVisible();
-  await page.getByLabel('Bank or invoice reference').fill(`INV-${run}`);
+  await expect(page.getByText(/Total: DKK\s*500\.00/)).toBeVisible();
+  await page.getByLabel('Reference', { exact: true }).fill(`INV-${run}`);
   await page.getByRole('button', { name: 'Record payment' }).click();
   await expect(page.getByText('Payment recorded.')).toBeVisible();
-  await expect(page.getByText(new RegExp(`reference INV-${run}`))).toBeVisible();
-  await expect(page.getByText('Nothing is owed to this supplier.')).toBeVisible();
+  await expect(page.getByText(new RegExp(`ref INV-${run}`))).toBeVisible();
+  await expect(page.getByText('Nothing is owed.')).toBeVisible();
 
   await page.getByText('Void payment').first().click();
-  await page.getByLabel('Reason for voiding').fill('Recorded against the wrong invoice');
+  await page.getByLabel('Reason', { exact: true }).fill('Recorded against the wrong invoice');
   await page.getByRole('button', { name: 'Void payment' }).click();
   await expect(page.getByText('Payment voided.')).toBeVisible();
   await expect(page.getByText('Voided: Recorded against the wrong invoice')).toBeVisible();

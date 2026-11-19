@@ -36,7 +36,7 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
 
   const chosen = owed.filter((c) => selected.includes(c.id));
   const toggle = (id: string) => { setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id])); setTotal(null); };
-  const fail = (code: string | undefined) => setMessage({ text: code === 'step_up_required' ? t('admin.suppliers.payments.stepUpCancelled') : paymentErrorMessage(code), tone: 'error' });
+  const fail = (code: string | undefined) => setMessage({ text: paymentErrorMessage(code), tone: 'error' });
   const reloadAll = () => { void payments.reload(); onChange(); };
 
   async function check() {
@@ -86,11 +86,10 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
       {stepUp.prompt}
       <Status message={message?.text ?? null} tone={message?.tone} />
 
-      <h3>{t('admin.suppliers.payments.owedHeading')}</h3>
       {owed.length === 0 ? <p role="status">{t('admin.suppliers.payments.owedEmpty')}</p> : (
         <form className="stack form" onSubmit={(e) => void record(e)} aria-describedby="supplier-payments-notice">
           <fieldset>
-            <legend>{t('admin.suppliers.payments.owedLegend')}</legend>
+            <legend>{t('admin.suppliers.payments.chooseFirst')}</legend>
             {owed.map((c) => (
               <div key={`${c.id}-${c.version}`} className="field field--checkbox">
                 <input id={`pay-${c.id}`} type="checkbox" checked={selected.includes(c.id)} onChange={() => toggle(c.id)} />
@@ -106,18 +105,17 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
           <Field label={t('admin.suppliers.payments.reference')} id="reference" required maxLength={80} />
           <Field label={t('admin.suppliers.payments.baseAmount')} id="baseAmount" inputMode="decimal" aria-describedby="baseAmount-hint" />
           <p className="field__hint" id="baseAmount-hint">{t('admin.suppliers.payments.baseHint')}</p>
-          <Field label={t('admin.suppliers.payments.baseCurrency')} id="baseCurrency" maxLength={3} />
+          <Field label={t('admin.supplierSchedule.currency')} id="baseCurrency" maxLength={3} aria-describedby="baseAmount-hint" />
           <div className="actions"><button className="btn" type="submit" disabled={busy}>{t('admin.suppliers.payments.record')}</button></div>
         </form>
       )}
 
-      <h3>{t('admin.suppliers.payments.listHeading')}</h3>
       <Status message={payments.error} />
       {payments.data && payments.data.items.length === 0 ? <p role="status">{t('admin.suppliers.payments.listEmpty')}</p> : null}
       <ul className="stack">
         {(payments.data?.items ?? []).map((p) => (
           <li key={`${p.id}-${p.version}`} className="stack">
-            <span>{t('admin.suppliers.payments.line', { date: formatDay(p.paidOn), amount: formatMinor(p.amountMinor, p.currency), reference: p.reference, quantity: p.items.length })}</span>
+            <span>{t('admin.suppliers.payments.line', { date: formatDay(p.paidOn), amount: formatMinor(p.amountMinor, p.currency), reference: p.reference })}</span>
             {p.base ? <span>{t('admin.suppliers.payments.baseLine', { amount: formatMinor(p.base.amountMinor, p.base.currency) })}</span> : null}
             <span className="badge">{t(`admin.suppliers.payments.statuses.${p.status}`)}</span>
             {p.status === 'voided' ? <span>{t('admin.suppliers.payments.voidedLine', { description: p.voidReason ?? '' })}</span> : (
@@ -152,7 +150,7 @@ function Instalments({ supplierId, contracts, onDone }: { supplierId: string; co
       const description = String(f.get(`inst-desc-${n}`) ?? '').trim();
       if (!description) continue;
       const unitAmountMinor = toMinor(String(f.get(`inst-amount-${n}`) ?? ''), currency);
-      if (unitAmountMinor === null) return setMessage({ text: paymentErrorMessage('bad_amount'), tone: 'error' });
+      if (unitAmountMinor === null) return setMessage({ text: t('admin.suppliers.errors.bad_amount'), tone: 'error' });
       instalments.push({ description, unitAmountMinor, dueDate: String(f.get(`inst-date-${n}`) ?? '') });
     }
     const r = await api(`/admin/suppliers/${supplierId}/costs/instalments`, { method: 'POST', body: { contractId: String(f.get('instContract')), packageId: null, currency, instalments } });
@@ -166,7 +164,6 @@ function Instalments({ supplierId, contracts, onDone }: { supplierId: string; co
     <details>
       <summary>{t('admin.suppliers.payments.instalmentsHeading')}</summary>
       <form className="stack form" onSubmit={(e) => void submit(e)}>
-        <p className="field__hint">{t('admin.suppliers.payments.instalmentsHint')}</p>
         <div className="field">
           <label htmlFor="instContract">{t('admin.suppliers.costs.contract')}</label>
           <select id="instContract" name="instContract" required>{contracts.map((c) => <option key={c.id} value={c.id}>{c.reference}</option>)}</select>
@@ -174,10 +171,10 @@ function Instalments({ supplierId, contracts, onDone }: { supplierId: string; co
         <Field label={t('admin.suppliers.fields.currencyShort')} id="instCurrency" required maxLength={3} />
         {rows.map((n) => (
           <fieldset key={n}>
-            <legend>{t('admin.suppliers.payments.instalmentDescription', { label: String(n) })}</legend>
-            <Field label={t('admin.suppliers.payments.instalmentDescription', { label: String(n) })} id={`inst-desc-${n}`} maxLength={300} required={n <= 2} />
-            <Field label={t('admin.suppliers.payments.instalmentAmount', { label: String(n) })} id={`inst-amount-${n}`} inputMode="decimal" required={n <= 2} />
-            <Field label={t('admin.suppliers.payments.instalmentDate', { label: String(n) })} id={`inst-date-${n}`} type="date" required={n <= 2} />
+            <legend>{t('admin.suppliers.payments.instalment', { label: String(n) })}</legend>
+            <Field label={t('admin.suppliers.costs.description')} id={`inst-desc-${n}`} maxLength={300} required={n <= 2} />
+            <Field label={t('admin.suppliers.costs.unitAmount')} id={`inst-amount-${n}`} inputMode="decimal" required={n <= 2} />
+            <Field label={t('admin.suppliers.costs.dueDate')} id={`inst-date-${n}`} type="date" required={n <= 2} />
           </fieldset>
         ))}
         <div className="actions"><button className="btn" type="submit">{t('admin.suppliers.payments.instalmentsAdd')}</button></div>

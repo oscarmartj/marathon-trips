@@ -61,7 +61,7 @@ export function CustomerMoneyPanel() {
           <h3>{t('admin.customerMoney.totalsHeading')}</h3>
           <ul>
             {data.totals.map((x) => (
-              <li key={x.currency}>{t('admin.customerMoney.totalRow', { currency: x.currency, held: formatMoney(x.heldMinor, x.currency), keep: formatMoney(x.keepSeparateMinor, x.currency), earned: formatMoney(x.marginEarnedMinor, x.currency), debt: formatMoney(x.customerDebtMinor, x.currency), fees: formatMoney(x.feesMinor, x.currency), paid: formatMoney(x.paidToSuppliersMinor, x.currency), own: formatMoney(x.paidBeyondCustomerMoneyMinor, x.currency) })}</li>
+              <li key={x.currency}>{t('admin.customerMoney.totalRow', { currency: x.currency, held: formatMoney(x.heldMinor, x.currency), keep: formatMoney(x.keepSeparateMinor, x.currency), earned: formatMoney(x.marginEarnedMinor, x.currency), debt: formatMoney(x.customerDebtMinor, x.currency), fees: formatMoney(x.feesMinor, x.currency), paid: formatMoney(x.paidToSuppliersMinor, x.currency) })}</li>
             ))}
           </ul>
         </>
@@ -69,7 +69,6 @@ export function CustomerMoneyPanel() {
       {data.unlinked.length > 0 ? (
         <>
           <h3>{t('admin.customerMoney.unlinkedHeading')}</h3>
-          <p>{t('admin.customerMoney.unlinkedHint')}</p>
           <ul>
             {data.unlinked.map((u) => <li key={u.currency}>{t('admin.customerMoney.unlinkedRow', { currency: u.currency, cost: formatMoney(u.costMinor, u.currency), paid: formatMoney(u.paidMinor, u.currency), unpaid: formatMoney(u.unpaidMinor, u.currency) })}</li>)}
           </ul>

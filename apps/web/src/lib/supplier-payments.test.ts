@@ -6,7 +6,7 @@ const get = (path: string): unknown => path.split('.').reduce<unknown>((o, k) =>
 
 describe('supplier payment pages (task 6.2)', () => {
   it('every error code, bucket and label has its Australian English text', () => {
-    for (const code of [...PAYMENT_ERROR_CODES, 'generic']) expect(typeof get(`admin.suppliers.payments.errors.${code}`)).toBe('string');
+    for (const code of PAYMENT_ERROR_CODES) expect(typeof get(`admin.suppliers.payments.errors.${code}`)).toBe('string');
     for (const b of SCHEDULE_BUCKETS) expect(typeof get(`admin.supplierSchedule.buckets.${b}`)).toBe('string');
     for (const k of ['paid', 'ownMoney', 'otherCurrencyPaid', 'unlinkedHeading', 'unlinkedRow']) expect(typeof get(`admin.customerMoney.${k}`)).toBe('string');
     expect(get('admin.nav.supplierPayments')).toBe('Supplier payments');
@@ -19,9 +19,11 @@ describe('supplier payment pages (task 6.2)', () => {
 
   it('maps known codes and falls back for unknown ones', () => {
     expect(paymentErrorMessage('cost_item_already_paid')).toMatch(/already paid/);
-    expect(paymentErrorMessage('something_else')).toBe(get('admin.suppliers.payments.errors.generic'));
-    expect(paymentErrorMessage(undefined)).toBe(get('admin.suppliers.payments.errors.generic'));
-    expect(bucketLabel('upcoming', 7)).toBe('Due in the next 7 days');
+    expect(paymentErrorMessage('version_conflict')).toBe(get('admin.catalogue.errors.version_conflict'));
+    expect(paymentErrorMessage('bad_amount')).toBe(get('admin.suppliers.errors.bad_amount'));
+    expect(paymentErrorMessage('something_else')).toBe(get('admin.common.error'));
+    expect(paymentErrorMessage(undefined)).toBe(get('admin.common.error'));
+    expect(bucketLabel('upcoming', 7)).toBe('Next 7 days');
   });
 
   it('builds the body without any amount of its own; the bank amount is parsed in its currency', () => {

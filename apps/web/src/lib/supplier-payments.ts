@@ -4,14 +4,25 @@ import { toMinor } from './supplier-format';
 import { t } from './i18n';
 
 export const PAYMENT_ERROR_CODES = [
-  'cost_item_already_paid', 'cost_item_not_payable', 'cost_items_currency_mismatch', 'cost_item_supplier_mismatch', 'cost_item_not_found',
-  'version_conflict', 'paid_on_in_future', 'paid_on_too_old', 'base_currency_same_as_payment', 'supplier_payment_already_voided',
-  'idempotency_key_reused', 'instalment_dates_not_increasing', 'bad_amount',
+  'cost_item_already_paid', 'cost_item_not_payable', 'cost_items_currency_mismatch', 'paid_on_in_future', 'paid_on_too_old', 'base_currency_same_as_payment',
+  'supplier_payment_already_voided', 'instalment_dates_not_increasing',
 ] as const;
 
-/** The message for an API error code of these pages; anything else is the generic one. */
+/**
+ * The message for an API error code of these pages: their own wording, then the panel's shared wording for the code
+ * (version_conflict, validation_failed…), then the general one. Kept short: the panel's copy ships with every page.
+ */
 export function paymentErrorMessage(code: string | undefined): string {
-  return code && (PAYMENT_ERROR_CODES as readonly string[]).includes(code) ? t(`admin.suppliers.payments.errors.${code}`) : t('admin.suppliers.payments.errors.generic');
+  if (code && (PAYMENT_ERROR_CODES as readonly string[]).includes(code)) return t(`admin.suppliers.payments.errors.${code}`);
+  if (code === 'bad_amount') return t('admin.suppliers.errors.bad_amount');
+  if (code) {
+    try {
+      return t(`admin.catalogue.errors.${code}`);
+    } catch {
+      /* the general message */
+    }
+  }
+  return t('admin.common.error');
 }
 
 /** A fresh Idempotency-Key for one submission of a form (the same key is reused only when that submission is retried). */
@@ -37,7 +48,7 @@ export function recordBody(selected: readonly SelectedCost[], paidOn: string, re
   if (baseAmount.trim()) {
     const currency = baseCurrency.trim().toUpperCase();
     const amountMinor = /^[A-Z]{3}$/.test(currency) ? toMinor(baseAmount, currency) : null;
-    if (amountMinor === null || !/[1-9]/.test(amountMinor)) return { error: paymentErrorMessage('bad_amount') };
+    if (amountMinor === null || !/[1-9]/.test(amountMinor)) return { error: t('admin.suppliers.errors.bad_amount') };
     base = { amountMinor, currency };
   }
   return { items: selected.map((c) => ({ costItemId: c.id, version: c.version })), paidOn, reference: reference.trim(), base };

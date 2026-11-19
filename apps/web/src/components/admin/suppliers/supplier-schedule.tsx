@@ -37,16 +37,16 @@ export function SupplierSchedulePanel() {
 
   return (
     <div className="stack">
-      <Section id="schedule-filters" title={t('admin.supplierSchedule.filters')}>
-        <form className="stack form" onSubmit={apply}>
+      <div className="card stack">
+        <form className="stack form" onSubmit={apply} aria-label={t('admin.supplierSchedule.title')}>
           <Field label={t('admin.supplierSchedule.from')} id="from" type="date" />
           <Field label={t('admin.supplierSchedule.to')} id="to" type="date" />
           <Field label={t('admin.supplierSchedule.currency')} id="currency" maxLength={3} />
-          <div className="actions"><button className="btn" type="submit">{t('admin.supplierSchedule.apply')}</button></div>
+          <div className="actions"><button className="btn" type="submit">{t('admin.table.filters.show')}</button></div>
         </form>
         <Status message={error} />
         {data ? <p>{t('admin.supplierSchedule.today', { date: formatDay(data.today) })}</p> : null}
-      </Section>
+      </div>
       {data ? SCHEDULE_BUCKETS.map((bucket) => {
         const { rows, title } = bucketOf(data, bucket);
         return (
@@ -56,7 +56,7 @@ export function SupplierSchedulePanel() {
                 <table>
                   <caption>{t('admin.supplierSchedule.caption', { label: title })}</caption>
                   <thead>
-                    <tr>{(['supplier', 'contract', 'description', 'dueDate', 'amount'] as const).map((k) => <th key={k} scope="col">{t(`admin.supplierSchedule.${k}`)}</th>)}</tr>
+                    <tr>{[t('admin.nav.supplier'), t('admin.suppliers.allotments.contract'), t('admin.suppliers.costs.description'), t('admin.suppliers.costs.dueDate'), t('admin.dashboard.payments.amount')].map((h) => <th key={h} scope="col">{h}</th>)}</tr>
                   </thead>
                   <tbody>
                     {rows.map((r) => (
@@ -72,8 +72,8 @@ export function SupplierSchedulePanel() {
                 </table>
               </div>
             )}
-            <ul>
-              {data.totals.filter((x) => x.bucket === bucket).map((x) => <li key={x.currency}>{t('admin.supplierSchedule.totalRow', { label: title, currency: x.currency, amount: formatMinor(x.amountMinor, x.currency) })}</li>)}
+            <ul aria-label={t('admin.customerMoney.totalsHeading')}>
+              {data.totals.filter((x) => x.bucket === bucket).map((x) => <li key={x.currency}>{t('admin.supplierSchedule.totalRow', { currency: x.currency, amount: formatMinor(x.amountMinor, x.currency) })}</li>)}
             </ul>
           </Section>
         );
@@ -84,9 +84,9 @@ export function SupplierSchedulePanel() {
           {data.releases.length === 0 ? <p role="status">{t('admin.supplierSchedule.noReleases')}</p> : (
             <div className="table-wrap">
               <table>
-                <caption>{t('admin.supplierSchedule.releasesCaption')}</caption>
+                <caption>{t('admin.supplierSchedule.releasesHeading')}</caption>
                 <thead>
-                  <tr>{(['supplier', 'contract', 'pool', 'releaseDate', 'quantity', 'atStake'] as const).map((k) => <th key={k} scope="col">{t(`admin.supplierSchedule.${k}`)}</th>)}</tr>
+                  <tr>{[t('admin.nav.supplier'), t('admin.suppliers.allotments.contract'), t('admin.suppliers.allotments.pool'), t('admin.suppliers.allotments.releaseDate'), t('admin.suppliers.allotments.quantity'), t('admin.supplierSchedule.atStake')].map((h) => <th key={h} scope="col">{h}</th>)}</tr>
                 </thead>
                 <tbody>
                   {data.releases.map((r) => (
