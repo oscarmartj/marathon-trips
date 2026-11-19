@@ -477,3 +477,66 @@ describe('review of the code (M1, M2)', () => {
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:ledger_check:missing_chargeback:${dispute.id}` } })).toBe(1);
   });
 });
+
+describe('re-review (L1, L2, point 5)', () => {
+  it('evidence_package_has_only_this_bookings_emails: another booking of the same customer stays out', async () => {
+    const { reference, bookingId } = await booking();
+    const other = await booking();
+    const customerId = (await t.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).customerId;
+    const mail = (related: string, key: string) => t.prisma.outboundEmail.create({ data: { to: c.email, templateKey: key, templateVersion: 1, locale: 'en-AU', dedupeKey: `test:${randomUUID()}`, customerId, relatedEntityType: 'Booking', relatedEntityId: related } });
+    await mail(bookingId, 'test_this_booking');
+    await mail(other.bookingId, 'test_other_booking');
+    const p = await pay(reference, bookingId);
+    const d = sim.openDispute(acc.id, p.providerPaymentRef!);
+    await send(d.ref);
+    const dispute = (await disputesOf(bookingId))[0]!;
+    const pack = JSON.parse((await admin.get(`/admin/payments/disputes/${dispute.id}/evidence`)).text) as { emailsSent: Array<{ template: string }> };
+    const templates = pack.emailsSent.map((e) => e.template);
+    expect(templates).toContain('test_this_booking');
+    expect(templates).not.toContain('test_other_booking');
+  });
+
+  it('staff_fks_and_dispute_insert_guard: unknown staff ids and a dispute born with funds or evidence are refused', async () => {
+    const { reference, bookingId } = await booking();
+    const p = await pay(reference, bookingId);
+    const db = await connect('app');
+    try {
+      const ins = (cols: string, vals: string) => txError(db, [[
+        `INSERT INTO disputes (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "providerDisputeRef", "amountMinor", "reasonCode", status, "updatedAt"${cols})
+         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'test', 'AUD', $4, 100, 'other', 'open', now()${vals})`, [p.id, bookingId, acc.id, `dp_${randomUUID()}`],
+      ]]);
+      expect(await ins(', "fundsWithdrawnAt"', ', now()')).toBe('23514');
+      expect(await ins(', "evidenceSubmittedAt"', ', now()')).toBe('23514');
+      expect(await ins(', version', ', 3')).toBe('23514');
+      expect(await ins(', "evidenceSubmittedById"', `, '${randomUUID()}'::uuid`)).not.toBeNull();
+      // A refund naming a staff user who does not exist: the foreign key refuses it.
+      expect(await txError(db, [[
+        `INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, status, "idempotencyKey", "providerRefundRef", "confirmedById", "updatedAt")
+         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'test', 'AUD', 100, 'external', 'pending', $4, $5, $6::uuid, now())`,
+        [p.id, bookingId, acc.id, `refund:external:test:${randomUUID()}`, `re_${randomUUID()}`, randomUUID()],
+      ]])).toBe('23503');
+    } finally {
+      await db.end();
+    }
+    const owner = await connect('owner');
+    try {
+      const { rows } = await owner.query(`SELECT conname FROM pg_constraint WHERE conname IN ('refunds_confirmedById_fkey', 'disputes_evidenceSubmittedById_fkey') ORDER BY conname`);
+      expect(rows.map((r: { conname: string }) => r.conname)).toEqual(['disputes_evidenceSubmittedById_fkey', 'refunds_confirmedById_fkey']);
+    } finally {
+      await owner.end();
+    }
+  });
+
+  it('under_review_counts_only_this_mode: a debt in test mode is not a live-mode debt', async () => {
+    const { bookingUnderPaymentReview } = await import('../../../src/modules/payments/core/refunds.service');
+    const { reference, bookingId } = await booking();
+    const p = await pay(reference, bookingId, 1);
+    const ext = sim.gatewayRefund(acc.id, p.providerPaymentRef!, p.amountMinor);
+    await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, ext.ref));
+    const d = sim.openDispute(acc.id, p.providerPaymentRef!, { withdrawn: true, status: 'lost' });
+    await send(d.ref);
+    await t.prisma.task.updateMany({ where: { entityId: bookingId, status: 'open' }, data: { status: 'done' } });
+    expect(await bookingUnderPaymentReview(t.prisma, bookingId, 'test')).toBe(true);
+    expect(await bookingUnderPaymentReview(t.prisma, bookingId, 'live')).toBe(false);
+  });
+});

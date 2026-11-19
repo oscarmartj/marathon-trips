@@ -173,6 +173,10 @@ describe('a manual refund from request to confirmation (P13)', () => {
     // A week later it gets its own task instead.
     expect(await t.app.get(AppRefundsService).flagWaitingManual(new Date(Date.now() + 8 * 86_400_000))).toContain(r.body.id);
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:manual_refund_waiting:${r.body.id}` } })).toBe(1);
+    // Closed without acting, it does not come back on the next sweep (re-review, L3).
+    await t.prisma.task.updateMany({ where: { sourceRef: `payments:manual_refund_waiting:${r.body.id}` }, data: { status: 'done' } });
+    expect(await t.app.get(AppRefundsService).flagWaitingManual(new Date(Date.now() + 8 * 86_400_000))).not.toContain(r.body.id);
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:manual_refund_waiting:${r.body.id}` } })).toBe(1);
   });
 
   it('manual_refund_destination_erased_with_customer: the hint goes with the reason', async () => {

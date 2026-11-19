@@ -133,7 +133,7 @@ export class PaymentLinksService {
       if (refusal === 'approval_expired') throw conflict('approval_expired', 'The time to pay the deposit for this booking has run out');
       if (refusal) throw conflict('booking_not_payable', 'This booking cannot take a payment in its current state');
       // Task 4.5 (plan review, 6): no link while the booking is under payment review (money out, or an open dispute).
-      if (await bookingUnderPaymentReview(tx, b.id)) throw underReview();
+      if (await bookingUnderPaymentReview(tx, b.id, this.gateway.mode)) throw underReview();
       const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
       const collected = await netCollectedSource.collected(tx, b.id, this.gateway.mode);
       const due = payable(items, collected).next;

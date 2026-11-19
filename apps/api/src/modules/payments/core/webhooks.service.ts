@@ -273,6 +273,10 @@ export class PaymentWebhooksService {
           SELECT COALESCE((SELECT sum("amountMinor") FROM refunds WHERE "paymentId" = ${p.id}::uuid AND status IN ('requested', 'pending', 'succeeded')), 0)::bigint AS refunds,
                  COALESCE((SELECT sum("amountMinor") FROM disputes WHERE "paymentId" = ${p.id}::uuid AND "fundsWithdrawnAt" IS NOT NULL AND "fundsReinstatedAt" IS NULL), 0)::bigint AS withdrawn`;
         overCap = x!.refunds + x!.withdrawn + remote.amount.amountMinor > p.amountMinor;
+        // Re-review, 2: a refund from the app still in flight elsewhere on the booking may now pay twice: Oscar checks.
+        const [inflight] = await tx.$queryRaw<Array<{ n: bigint }>>`
+          SELECT count(*)::bigint AS n FROM refunds WHERE "bookingId" = ${b.id}::uuid AND origin = 'app' AND status IN ('requested', 'pending')`;
+        if ((inflight?.n ?? 0n) > 0n) overCap = true;
       }
       const r = await this.refunds.createExternal(tx, b, p, remote);
       if (overCap) {

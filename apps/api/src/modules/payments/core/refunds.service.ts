@@ -32,6 +32,9 @@ export const APP_REFUND_LATE_SUCCESS: readonly ['failed', 'succeeded'] = ['faile
 
 export const refundReviewTaskRef = (id: string) => `payments:refund_review:${id}`;
 
+/** A failed app refund the gateway still reports as pending (re-review, 1): it blocks refunds of its booking. */
+export const LATE_PENDING_CODE = 'late_pending_at_gateway';
+
 /** A gateway status as an event; a cancelled refund moved no money, so it is a failure (plan 3.3, 12.9). */
 export const refundEventOf = (s: ProviderRefundStatus): 'pending' | 'succeeded' | 'failed' => (s === 'cancelled' ? 'failed' : s);
 
@@ -85,7 +88,7 @@ export const coverageLostTaskRef = (bookingId: string) => `payments:coverage_los
  * Whether a booking is under payment review: its coverage-lost task is open. While it is, no reminder is sent and no
  * new charge attempt starts (plan 3.3, 12.3). Oscar closes the task once he has cancelled or adjusted the booking.
  */
-export async function bookingUnderPaymentReview(db: Pick<Tx, '$queryRaw'>, bookingId: string): Promise<boolean> {
+export async function bookingUnderPaymentReview(db: Pick<Tx, '$queryRaw'>, bookingId: string, mode: 'test' | 'live'): Promise<boolean> {
   // Task 4.5 (plan review, 6): a dispute still open on one of its payments puts it under review too, so no reminder,
   // payment link or new charge reaches a customer who is disputing a payment.
   const rows = await db.$queryRaw<Array<{ open: boolean }>>`
@@ -94,9 +97,9 @@ export async function bookingUnderPaymentReview(db: Pick<Tx, '$queryRaw'>, booki
          -- Review of the code, M1: while the customer owes money beyond the plan (a receivable), checkout, links and
          -- reminders stay off even after the task is closed: what came in would pay the debt, not the plan. Oscar
          -- settles it (a transfer, a change of the booking) first.
-         OR (SELECT COALESCE(sum("amountMinor"), 0) FROM payments WHERE "bookingId" = ${bookingId}::uuid AND status = 'succeeded')
-            - (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND (status = 'succeeded' OR (origin = 'app' AND status IN ('requested', 'pending'))))
-            - (SELECT COALESCE(sum("amountMinor"), 0) FROM disputes WHERE "bookingId" = ${bookingId}::uuid AND "fundsWithdrawnAt" IS NOT NULL AND "fundsReinstatedAt" IS NULL) < 0) AS open`;
+         OR (SELECT COALESCE(sum("amountMinor"), 0) FROM payments WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND status = 'succeeded')
+            - (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND (status = 'succeeded' OR (origin = 'app' AND status IN ('requested', 'pending'))))
+            - (SELECT COALESCE(sum("amountMinor"), 0) FROM disputes WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND "fundsWithdrawnAt" IS NOT NULL AND "fundsReinstatedAt" IS NULL) < 0) AS open`;
   return rows[0]?.open === true;
 }
 
@@ -195,9 +198,17 @@ export class PaymentRefundStateMachine {
    * reference; either way Oscar gets a review task. Returns true when it handled the refund.
    */
   async gatewayMovedFailedRefund(tx: Tx, booking: LockedBooking, p: LockedPayment, r: LockedRefund, remote: { ref: string; status: ProviderRefundStatus }, source: RefundApplyContext['source']): Promise<boolean> {
-    if (r.status !== 'failed' || r.origin !== 'app' || r.manualRefund || (remote.status !== 'succeeded' && remote.status !== 'pending')) return false;
+    if (r.status !== 'failed' || r.origin !== 'app' || r.manualRefund) return false;
+    if (remote.status === 'failed' || remote.status === 'cancelled') {
+      // A refund held back as "still pending at the gateway" that the gateway then failed: nothing blocks any more.
+      await tx.$executeRaw`UPDATE refunds SET "failureCode" = 'refund_failed', "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND "failureCode" = ${LATE_PENDING_CODE}`;
+      return false;
+    }
     if (r.providerRefundRef === null) await this.setReference(tx, r, remote.ref);
     if (remote.status === 'succeeded') await this.apply(tx, booking, p, r, 'late_succeeded', { source, providerRefundRef: remote.ref });
+    // Re-review, 1: still pending at the gateway: the refund stays failed here (the trigger allows no way back), but its
+    // code says so, and no refund of the booking is made from the app until the gateway settles it.
+    else await tx.$executeRaw`UPDATE refunds SET "failureCode" = ${LATE_PENDING_CODE}, "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND status = 'failed'`;
     await this.tasks.createSystemIn(tx, {
       title: `Refund on booking ${booking.reference} was made at the gateway after it was marked as not made`,
       description: remote.status === 'succeeded'

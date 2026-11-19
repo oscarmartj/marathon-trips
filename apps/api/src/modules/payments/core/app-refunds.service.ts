@@ -404,16 +404,18 @@ export class AppRefundsService {
   /** Manual refunds still waiting for their transfer after a week: one task each. */
   async flagWaitingManual(now: Date = new Date()): Promise<string[]> {
     const rows = await this.prisma.refund.findMany({ where: { manualRefund: true, status: 'requested', createdAt: { lte: new Date(now.getTime() - MANUAL_REFUND_WAITING_MS) } }, select: { id: true }, take: 200 });
+    const flagged: string[] = [];
     for (const r of rows) {
       // Review of the code, L3: one task per refund, ever; closing it without acting does not bring it back every sweep.
       if ((await this.prisma.task.count({ where: { sourceRef: `payments:manual_refund_waiting:${r.id}` } })) > 0) continue;
+      flagged.push(r.id);
       await this.prisma.$transaction((tx) => this.tasks.createSystemIn(tx, {
         title: 'A bank transfer refund is still waiting to be sent',
         description: 'A refund of a bank transfer was asked for more than a week ago and is not confirmed. Send it from the bank and confirm it with its reference, or cancel it.',
         entityType: 'Refund', entityId: r.id, sourceRef: `payments:manual_refund_waiting:${r.id}`,
       }));
     }
-    return rows.map((r) => r.id);
+    return flagged;
   }
 
   // ---- helpers ----
@@ -438,10 +440,11 @@ export class AppRefundsService {
    * A dispute on the payment (open, evidence submitted or lost), or a refund made on the gateway's dashboard since ours
    * was asked: a call now could pay the customer twice (plan review, 2).
    */
-  private async secondPayoutRisk(db: Pick<Tx, '$queryRaw'>, row: { paymentId: string; createdAt: Date }): Promise<boolean> {
+  private async secondPayoutRisk(db: Pick<Tx, '$queryRaw'>, row: { bookingId: string; createdAt: Date }): Promise<boolean> {
+    // Re-review, 2: the cap is per booking, so any payment of the booking counts, not only this refund's.
     const [x] = await db.$queryRaw<Array<{ risk: boolean }>>`
-      SELECT (EXISTS (SELECT 1 FROM disputes d WHERE d."paymentId" = ${row.paymentId}::uuid AND d.status IN ('open', 'evidence_submitted', 'lost'))
-           OR EXISTS (SELECT 1 FROM refunds r WHERE r."paymentId" = ${row.paymentId}::uuid AND r.origin = 'external' AND r."createdAt" >= ${row.createdAt}
+      SELECT (EXISTS (SELECT 1 FROM disputes d WHERE d."bookingId" = ${row.bookingId}::uuid AND d.status IN ('open', 'evidence_submitted', 'lost'))
+           OR EXISTS (SELECT 1 FROM refunds r WHERE r."bookingId" = ${row.bookingId}::uuid AND r.origin = 'external' AND r."createdAt" >= ${row.createdAt}
                         AND r.status IN ('pending', 'succeeded'))) AS risk`;
     return x?.risk === true;
   }

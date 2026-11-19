@@ -66,7 +66,8 @@ export async function loadRefundable(tx: Pick<Tx, '$queryRaw' | 'paymentSchedule
       COALESCE((SELECT sum(r."amountMinor") FROM refunds r WHERE r."paymentId" = p.id AND r.origin = 'app' AND r.status IN ('requested', 'pending')), 0)::bigint AS reserved,
       COALESCE((SELECT sum(d."amountMinor") FROM disputes d WHERE d."paymentId" = p.id AND d."fundsWithdrawnAt" IS NOT NULL AND d."fundsReinstatedAt" IS NULL), 0)::bigint AS withdrawn,
       EXISTS (SELECT 1 FROM disputes d WHERE d."paymentId" = p.id AND d.status IN ('open', 'evidence_submitted', 'lost')) AS disputed,
-      EXISTS (SELECT 1 FROM refunds r WHERE r."bookingId" = p."bookingId" AND r.origin = 'external' AND r.status = 'pending') AS "externalPending"
+      EXISTS (SELECT 1 FROM refunds r WHERE r."bookingId" = p."bookingId" AND ((r.origin = 'external' AND r.status = 'pending')
+        OR (r.origin = 'app' AND r.status = 'failed' AND r."failureCode" = 'late_pending_at_gateway'))) AS "externalPending"
     FROM payments p WHERE p."bookingId" = ${bookingId}::uuid AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded'
     ORDER BY p."succeededAt", p.id`;
   return refundableByPayment(items, rows.map((r) => ({ id: r.id, amountMinor: r.amountMinor, succeededAt: r.succeededAt, refundedMinor: r.refunded, reservedMinor: r.reserved, withdrawnMinor: r.withdrawn, disputed: r.disputed, externalPending: r.externalPending })));
