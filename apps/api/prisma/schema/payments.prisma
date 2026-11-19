@@ -274,6 +274,7 @@ model Payment {
   updatedAt            DateTime            @updatedAt @db.Timestamptz(3)
   webhookEvents        WebhookEvent[]
   refunds              Refund[]
+  disputes             Dispute[]
   ledgerTransactions   LedgerTransaction[]
 
   @@unique([id, bookingId, currency])
@@ -303,6 +304,9 @@ model WebhookEvent {
   /// the refund the event was matched to (task 3.3)
   refundId          String?                    @db.Uuid
   refund            Refund?                    @relation(fields: [refundId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// the dispute the event was matched to (task 4.5)
+  disputeId         String?                    @db.Uuid
+  dispute           Dispute?                   @relation(fields: [disputeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii the gateway's event type (payment.updated…)
   type              String
   /// @pii the body as received (can carry the payer's details)
@@ -327,6 +331,7 @@ model WebhookEvent {
   @@index([bookingId])
   @@index([paymentId])
   @@index([refundId])
+  @@index([disputeId])
   @@map("webhook_events")
 }
 
@@ -449,6 +454,20 @@ model Refund {
   succeededAt       DateTime?         @db.Timestamptz(3)
   /// @nopii bumped with every change of status
   version           Int               @default(0)
+  /// @nopii true for the refund of a bank transfer (task 4.5): staff send it from the bank and confirm it with its reference
+  manualRefund      Boolean           @default(false)
+  /// @secret the account a manual refund goes to, encrypted; only while requested (task 4.5, P13)
+  destinationCiphertext Bytes?
+  /// @nopii key version of destinationCiphertext
+  destinationKeyVersion Int?
+  /// @pii masked destination of a manual refund (last digits); erased with the customer
+  destinationHint   String?
+  /// staff who confirmed a manual refund
+  confirmedById     String?           @db.Uuid
+  /// @nopii when an unanswered gateway request is tried again with the same key (task 4.5)
+  nextAttemptAt     DateTime?         @db.Timestamptz(3)
+  /// @nopii how many times the gateway request was sent
+  requestAttempts   Int               @default(0)
   /// @nopii timestamp
   createdAt         DateTime          @default(now()) @db.Timestamptz(3)
   /// @nopii timestamp
@@ -461,7 +480,63 @@ model Refund {
   @@index([paymentId])
   @@index([bookingId])
   @@index([status, updatedAt])
+  @@index([nextAttemptAt])
   @@map("refunds")
+}
+
+/// The state of a dispute (task 4.5, plan 0.1, 6.2): forward only; won, lost and closed are final (trigger of 0035).
+enum DisputeStatus {
+  open
+  evidence_submitted
+  won
+  lost
+  closed
+}
+
+/// A dispute (chargeback) a gateway reported on one of our payments (task 4.5). Its money moves only with the funds
+/// postings (withdrawn, reinstated), once each. Never deleted; no personal data (the evidence package is built on demand).
+model Dispute {
+  id                    String        @id @default(uuid(7)) @db.Uuid
+  paymentId             String        @db.Uuid
+  bookingId             String        @db.Uuid
+  providerAccountId     String        @db.Uuid
+  /// @nopii test or live, the payment's
+  mode                  PaymentMode
+  /// @nopii ISO 4217, the payment's
+  currency              String        @db.Char(3)
+  payment               Payment       @relation(fields: [paymentId, bookingId, providerAccountId, mode, currency], references: [id, bookingId, providerAccountId, mode, currency], onDelete: Restrict, onUpdate: Restrict, map: "disputes_payment_fkey")
+  /// @nopii the gateway's dispute id
+  providerDisputeRef    String
+  /// @nopii minor units, in `currency`, as the gateway reports it
+  amountMinor           BigInt
+  /// @nopii closed list (fraudulent, product_not_received…)
+  reasonCode            String
+  /// @nopii
+  status                DisputeStatus
+  /// @nopii timestamp
+  evidenceDueBy         DateTime?     @db.Timestamptz(3)
+  /// @nopii timestamp
+  evidenceSubmittedAt   DateTime?     @db.Timestamptz(3)
+  evidenceSubmittedById String?       @db.Uuid
+  /// @nopii when the withdrawal was posted
+  fundsWithdrawnAt      DateTime?     @db.Timestamptz(3)
+  /// @nopii when the reinstatement was posted
+  fundsReinstatedAt     DateTime?     @db.Timestamptz(3)
+  /// @nopii bumped with every change
+  version               Int           @default(0)
+  /// @nopii timestamp
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
+  /// @nopii timestamp
+  updatedAt             DateTime      @updatedAt @db.Timestamptz(3)
+  webhookEvents         WebhookEvent[]
+  ledgerTransactions    LedgerTransaction[]
+
+  @@unique([id, mode])
+  @@unique([providerAccountId, providerDisputeRef])
+  @@index([bookingId])
+  @@index([paymentId])
+  @@index([status])
+  @@map("disputes")
 }
 
 /// An account of the ledger (plan 0.1, 5.5; task 3.3), created on demand and never changed. Test and live never share one.
@@ -502,6 +577,8 @@ model LedgerTransaction {
   refundId              String?               @db.Uuid
   refund                Refund?               @relation(fields: [refundId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   reversesTransactionId String?               @db.Uuid
+  disputeId             String?               @db.Uuid
+  dispute               Dispute?              @relation(fields: [disputeId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   reverses              LedgerTransaction?    @relation("LedgerReversal", fields: [reversesTransactionId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   reversedBy            LedgerTransaction[]   @relation("LedgerReversal")
   /// @nopii one per business fact (plan 0.1, P5): payment:<id>:succeeded, refund:<id>:succeeded…
@@ -519,6 +596,7 @@ model LedgerTransaction {
   @@index([bookingId])
   @@index([paymentId])
   @@index([refundId])
+  @@index([disputeId])
   @@map("ledger_transactions")
 }
 
