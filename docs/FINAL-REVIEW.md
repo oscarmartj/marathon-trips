@@ -27,30 +27,37 @@ Todo lo abierto, por importancia: seguridad y legal, luego corrección y por úl
 7. **Consentimiento de avisos (7.fix-2):** un aviso sin acuse exige consentimiento `marketing_email.v2`; quien dio el v1 debe retirarlo y volver a darlo para recibirlos (no hay datos reales aún). Fuente: `docs/done/7.fix-2.md`.
 8. **Casilla de `serviceMessageAck` en el panel: no existe**, así que todos los avisos al cliente salen como marketing. Decidir si se quiere avisos de servicio. Fuente: `docs/done/7.fix-2.md`.
 9. **Datos personales:** riesgo residual aceptado en la fase 0; 5.5 ya borra, pero restaurar una copia antigua resucita a los clientes borrados (`privacy:erasures-reapply`) y `?audience=full` lleva notas del personal. Fuente: `docs/done/5.5.md`.
-10. **Revisiones de Opus pendientes:** 7.2 (datos personales) y 7.7; la de 7.4 se hizo y sus puntos están en 7.fix-2. Fuente: `docs/done/7.close.md`.
-11. **Pendientes de 8.5:** ZAP y SSL Labs contra el entorno de pruebas, `includeSubDomains` en HSTS (S-24), y para 9.x S-19 y ampliar la CSP y `Permissions-Policy: payment`. Fuente: `docs/done/8.5.md`.
-12. **Antes de dinero real:** lista de arriba, cuando se retome el dinero (3.3, 3.4, 4.x, 6.2, 6.4, 6.6 y 9.x, aparcados).
+10. **Pendientes de 8.5:** ZAP y SSL Labs contra el entorno de pruebas, `includeSubDomains` en HSTS (S-24), y para 9.x S-19 y ampliar la CSP y `Permissions-Policy: payment`. Fuente: `docs/done/8.5.md`.
+11. **Antes de dinero real:** lista de arriba, cuando se retome el dinero (3.3, 3.4, 4.x, 6.2, 6.4, 6.6 y 9.x, aparcados).
 
 ### Corrección
 
-13. **Prueba inestable `pending_collections_skip_paid_lines`** (y `payments/flow.test.ts` «drive against expiry»): fallan por datos acumulados o carreras ajenas y pasan al repetir. Aislarlas con su propio estado. Fuente: `docs/done/7.fix-2.md`.
-14. **Consulta de atrasos de automatizaciones O(n^2)** con una cola grande; vale con el volumen actual. Fuente: `docs/done/7.fix-2.md`.
-15. **Base de precio de 6.3 con las reglas actuales:** una regla posterior se aplica en silencio a lo añadido; confirmar o exigir congelar la base. Fuente: `docs/done/6.3.md`.
-16. **`stackable` por defecto `false`** en reglas y códigos: confirmar o cambiar. Fuente: `docs/done/2.2.md`.
-17. **`instantBooking`** es una función del brief sin dueño (2.4, 3.1, 3.2, 3.5, 5.1): decidir si se crea una tarea de riesgo alto. Fuente: `docs/done/5.close.md`.
-18. **Límites conocidos:** 5.5 (copias antiguas, `audience=full`, archivados sin usuario), 5.6 (desfase consumido con pago en curso, sin recordatorios de vencidos, sin pantalla de desfases), 6.3 (recordatorio `failed` si llega un cambio, crédito manual), 6.5 (solo al liberarse plazas, «el primero al que le cabe», sin prueba del reintento por interbloqueo) y 7.2 (dos formatos de ejemplo, sin pantalla). Fuente: `docs/done/5.5.md`, `5.6.md`, `6.3.md`, `6.5.md`, `7.2.md`.
-19. **Informes (7.fix-1):** índice sobre `bookings."requestedAt"` aplazado (pide migración); el fallo de un informe no deja ejecución. Fuente: `docs/done/7.fix-1.md`.
-20. **CI:** `ci.yml` fijado a `ubuntu-24.04` (PR #48) por `pg_restore` y `transaction_timeout`; quitar el pin al subir PostgreSQL y comprobar `backup.test.ts`. Fuente: `docs/done/fix-ci-runner-pin.md`.
-21. **Sin verificar:** Docker, Caddy, TLS y `rclone` reales; correo real; lector de pantalla, móvil real y Lighthouse sobre un sitio desplegado. Fuente: `docs/done/8.5.md`, `8.6.md`, `8.3.md`.
+12. **Prueba inestable `pending_collections_skip_paid_lines`** (y `payments/flow.test.ts` «drive against expiry»): fallan por datos acumulados o carreras ajenas y pasan al repetir. Aislarlas con su propio estado. Fuente: `docs/done/7.fix-2.md`.
+13. **Consulta de atrasos de automatizaciones O(n^2)** con una cola grande; vale con el volumen actual. Fuente: `docs/done/7.fix-2.md`.
+14. **Base de precio de 6.3 con las reglas actuales:** una regla posterior se aplica en silencio a lo añadido; confirmar o exigir congelar la base. Fuente: `docs/done/6.3.md`.
+15. **`stackable` por defecto `false`** en reglas y códigos: confirmar o cambiar. Fuente: `docs/done/2.2.md`.
+16. **`instantBooking`** es una función del brief sin dueño (2.4, 3.1, 3.2, 3.5, 5.1): decidir si se crea una tarea de riesgo alto. Fuente: `docs/done/5.close.md`.
+17. **Límites conocidos:** 5.5 (copias antiguas, `audience=full`, archivados sin usuario), 5.6 (desfase consumido con pago en curso, sin recordatorios de vencidos, sin pantalla de desfases), 6.3 (recordatorio `failed` si llega un cambio, crédito manual), 6.5 (solo al liberarse plazas, «el primero al que le cabe», sin prueba del reintento por interbloqueo) y 7.2 (dos formatos de ejemplo, sin pantalla). Fuente: `docs/done/5.5.md`, `5.6.md`, `6.3.md`, `6.5.md`, `7.2.md`.
+18. **Informes (7.fix-1):** índice sobre `bookings."requestedAt"` aplazado (pide migración); el fallo de un informe no deja ejecución. Fuente: `docs/done/7.fix-1.md`.
+19. **CI:** `ci.yml` fijado a `ubuntu-24.04` (PR #48) por `pg_restore` y `transaction_timeout`; quitar el pin al subir PostgreSQL y comprobar `backup.test.ts`. Fuente: `docs/done/fix-ci-runner-pin.md`.
+20. **Sin verificar:** Docker, Caddy, TLS y `rclone` reales; correo real; lector de pantalla, móvil real y Lighthouse sobre un sitio desplegado. Fuente: `docs/done/8.5.md`, `8.6.md`, `8.3.md`.
+21. **Filas de auditoría de exportaciones grandes (7.fix-3):** unos 175 KB por exportación de 5000 corredores y `GET /admin/audit` devuelve hasta 200 filas sin paginar (unos 35 MB en el peor caso): paginar o acotar. Fuente: `docs/done/7.fix-3.md`.
+22. **Límites de exportación para organizadores en memoria (7.2):** se pierden al reiniciar y se multiplican por instancia; el límite por IP es de 100 archivos/hora (no 10), por usuario 10 y comprobaciones 60. Fuente: `docs/done/7.fix-3.md`.
+23. **Informes semanales con un periodo distinto de 7 días** ahora envían 7 días; los días de un envío con el calendario cambiado (`MAIL_NOT_SENDABLE`) no los cubre el siguiente y solo avisa el monitor `mail_failed`. Fuente: `docs/done/7.fix-4.md`.
+24. **`appliesTo.years` se quitó** de los formatos de exportación: solo queda `raceSlugs`. Fuente: `docs/done/7.fix-3.md`.
+25. **Pruebas inestables vistas en CI:** `apps/web/e2e/customer-area.spec.ts:205` (`getByText('Ada')`, otra vez) y `apps/api/test/ops/backup.test.ts` (una vez, la frase de contraseña errónea dio «not a Marathon Trips backup» en lugar de «cannot decrypt»; pasó al repetir). Fuente: CI de las PR #66 a #68.
 
 ### Pulido
 
-22. **Idiomas (8.2):** `es-ES` parcial y apagado; el compose de producción no pasa `ENABLED_LOCALES` (hay que ponerlo en la construcción y en el contenedor web); cliente y panel siguen en inglés. Fuente: `docs/done/8.2.md`.
-23. **`apps/web/src/lib/amendments.ts`** mete zod en el navegador de cuenta y admin; hacer como con `checkout.ts`. Fuente: `docs/done/8.3.md`.
-24. **E2E frágil:** `getByText('Ada')` en `apps/web/e2e/customer-area.spec.ts` (~línea 182) es una subcadena sin distinguir mayúsculas y falló una vez contra texto aleatorio. Apretarla en una decisión aparte. Fuente: `docs/done/5.7.md`.
-25. **Prueba del limitador (nit):** falta el caso espejo del desempate por id en `apps/api/test/modules/automations/automations.test.ts`. Fuente: `docs/done/7.fix-2.md`.
-26. **Plantillas por redactar** antes de activar: `payments.balance_reminder` (y `balanceReminderOffsetsDays`), `automations.customer_notice_1..3` y `automations.staff_notice`. Fuente: `docs/done/7.close.md`, `5.6.md`.
-27. **Auditoría de accesibilidad propia** en lugar de `axe-core` (MPL-2.0): cambiar si Oscar acepta la licencia. Fuente: `docs/done/8.3.md`.
+26. **Idiomas (8.2):** `es-ES` parcial y apagado; el compose de producción no pasa `ENABLED_LOCALES` (hay que ponerlo en la construcción y en el contenedor web); cliente y panel siguen en inglés. Fuente: `docs/done/8.2.md`.
+27. **`apps/web/src/lib/amendments.ts`** mete zod en el navegador de cuenta y admin; hacer como con `checkout.ts`. Fuente: `docs/done/8.3.md`.
+28. **E2E frágil:** `getByText('Ada')` en `apps/web/e2e/customer-area.spec.ts` (~línea 182, y `:205`) es una subcadena sin distinguir mayúsculas y falló una vez contra texto aleatorio. Apretarla en una decisión aparte. Fuente: `docs/done/5.7.md`.
+29. **Prueba del limitador (nit):** falta el caso espejo del desempate por id en `apps/api/test/modules/automations/automations.test.ts`. Fuente: `docs/done/7.fix-2.md`.
+30. **Plantillas por redactar** antes de activar: `payments.balance_reminder` (y `balanceReminderOffsetsDays`), `automations.customer_notice_1..3` y `automations.staff_notice`. Fuente: `docs/done/7.close.md`, `5.6.md`.
+31. **Auditoría de accesibilidad propia** en lugar de `axe-core` (MPL-2.0): cambiar si Oscar acepta la licencia. Fuente: `docs/done/8.3.md`.
+32. **Prueba `organiser-exports/exports.test.ts:470`** desestructura `audits()` sin `orderBy` (riesgo bajo de inestabilidad). Fuente: `apps/api/test/modules/organiser-exports/exports.test.ts`.
+33. **Caracteres de fórmula de ancho completo** no se guardan en CSV (se cree inocuo en Excel y LibreOffice; sin verificar). Fuente: `docs/done/7.fix-5.md`.
+34. **Borde teórico de CSV:** un valor que acaba en `;` en la última columna, abierto con un lector con `;`. Fuente: `docs/done/7.fix-5.md`.
 
 ## Recorridos que conviene hacer a mano
 
@@ -165,7 +172,7 @@ Sección «Revisión de Oscar» de `docs/phases/phase-6.md`: simular un viaje co
 Sección «Revisión de Oscar» de `docs/phases/phase-7.md`: crear dos automatizaciones reales y un informe que usarías cada semana. Probar también una reclamación y el calendario de fechas clave (antelación fija de 7 días).
 
 - **Límites conocidos:** 7.2 solo trae dos formatos de ejemplo de organizador (los reales se desconocen) y no tiene pantalla en el panel; 7.7 no tiene prueba unitaria de la exclusión de reservas demo (`NOT b."isDemo"` en `engine.ts`; la existente cubre solo carreras demo); 7.1 solo incluye reservas con depósito pagado y sitúa en un día los traslados con fecha `AAAA-MM-DD`; 7.3 antelación fija; 7.4 sin transiciones de estado ni eventos de pagos; 7.5 las páginas públicas aún no pintan los campos personalizados; 7.6 sin adjuntos y `GET /admin/complaints/owners` enseña el correo del personal a quien tenga `manage`.
-- **Revisiones de Opus pendientes:** 7.2 (datos personales), 7.4 (código) y 7.7.
+- **Revisiones de Opus:** hechas las de 7.2, 7.4 y 7.7; sus puntos están en 7.fix-2 a 7.fix-5.
 - **Sin verificar:** envío real de correo, lector de pantalla.
 
 ### Fase 8 (cerrada, `docs/done/8.close.md`)
