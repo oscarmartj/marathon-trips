@@ -324,7 +324,8 @@ describe('secrets (plan 0.1, 4.7; plan 3.1, 2.4)', () => {
     const other = await simulatorAccount(t);
     await t.prisma.providerAccount.update({ where: { id: other.id }, data: { status: 'paused' } });
     const a = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: acc.id } });
-    await t.prisma.providerAccount.update({ where: { id: other.id }, data: { credentialsCiphertext: a.credentialsCiphertext } });
+    // credentialsChangedAt moves with the ciphertext (task 4.1, migration 0034's trigger).
+    await t.prisma.providerAccount.update({ where: { id: other.id }, data: { credentialsCiphertext: a.credentialsCiphertext, credentialsChangedAt: new Date(Date.now() + 60_000) } });
     await expect(t.app.get(ProviderGateway).call(other.id, 'retrieve', async () => 'reached')).rejects.toThrow(/could not be decrypted/);
   });
 
@@ -397,7 +398,8 @@ describe('SQL nets (plan 3.1, section 3)', () => {
   it('payments_tables_reject_delete_and_truncate', async () => {
     const { p } = await attempt();
     await expect(t.prisma.$executeRawUnsafe(`DELETE FROM payments WHERE id = $1::uuid`, p.id)).rejects.toThrow(/never deleted/);
-    await expect(t.prisma.$executeRawUnsafe(`DELETE FROM provider_accounts WHERE id = $1::uuid`, acc.id)).rejects.toThrow(/never deleted/);
+    // Task 4.1: mt_app no longer has DELETE on provider_accounts (0034); the trigger still refuses the owner (provider-accounts.test.ts).
+    await expect(t.prisma.$executeRawUnsafe(`DELETE FROM provider_accounts WHERE id = $1::uuid`, acc.id)).rejects.toThrow(/permission denied/);
     await expect(t.prisma.$executeRawUnsafe(`DELETE FROM webhook_events`)).rejects.toThrow(/never deleted/);
     for (const table of ['payments', 'payment_schedules', 'payment_schedule_items', 'provider_accounts', 'webhook_events']) {
       await expect(t.prisma.$executeRawUnsafe(`TRUNCATE ${table} CASCADE`)).rejects.toThrow();

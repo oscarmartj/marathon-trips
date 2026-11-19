@@ -290,6 +290,8 @@ describe('postings under concurrency (plan 3.3, 1.2)', () => {
     expect(delivered.outcome).toBe('processed');
     // The change may lose to the money (its preview no longer matches); whichever order won, the ledger agrees with it.
     expect([201, 409]).toContain(amended.status);
+    // A lost race is the preview no longer matching, never another conflict (task 4.1, from 3.3's review).
+    if (amended.status === 409) expect(amended.body.code).toBe('amendment_price_changed');
     expect(await check(b.bookingId)).toEqual([]);
     const collected = (await t.prisma.payment.aggregate({ where: { bookingId: b.bookingId, status: 'succeeded' }, _sum: { amountMinor: true } }))._sum.amountMinor!;
     const bal2 = await balancesOf(t, b.bookingId);

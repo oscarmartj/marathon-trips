@@ -112,11 +112,15 @@ describe('the methods and their configuration (section 5)', () => {
   it('manual_methods_follow_config_enabled_country_and_validity', async () => {
     const { reference } = await booked();
     expect((await c.plan(reference)).body.methods).toContain('payid_transfer');
-    expect((await setConfig({ countries: ['NZ'] })).status).toBe(200);
+    // Task 4.1 (plan 15.5): taking the last way to pay by transfer away from AU needs a confirmation.
+    const warned = await setConfig({ countries: ['NZ'] });
+    expect([warned.status, warned.body.code, warned.body.lost]).toEqual([409, 'coverage_loss_unconfirmed', [{ method: 'payid_transfer', country: 'AU' }]]);
+    expect((await c.plan(reference)).body.methods).toContain('payid_transfer');
+    expect((await setConfig({ countries: ['NZ'], confirmCoverageLoss: true })).status).toBe(200);
     expect((await c.plan(reference)).body.methods).not.toContain('payid_transfer');
     const refused = await c.pay(reference, { method: 'payid_transfer' });
     expect([refused.status, refused.body.code]).toEqual([409, 'no_payment_method_available']);
-    expect((await setConfig({ enabled: false })).status).toBe(200);
+    expect((await setConfig({ enabled: false, confirmCoverageLoss: true })).status).toBe(200);
     expect((await c.plan(reference)).body.methods).not.toContain('payid_transfer');
     expect((await setConfig()).status).toBe(200);
     expect((await c.plan(reference)).body.methods).toContain('payid_transfer');
@@ -395,12 +399,46 @@ describe('staff confirm a transfer (section 3)', () => {
     expect([row.payerReference, row.amountMinor, row.origin]).toEqual([b.reference, b.depositMinor, 'inbound']);
   });
 
+  // Task 4.1 (plan 15.3): a paused or retired manual account still records money that arrived, so "no manual account"
+  // now means no usable one at all (here: the manual adapter is missing from the code).
   it('no_manual_account: nothing is recorded', async () => {
+    const b = await booked(false);
+    const registry = t.app.get(ProviderGateway).registry;
+    const original = registry.get.bind(registry);
+    const spy = vi.spyOn(registry, 'get').mockImplementation((k: string) => (k === 'manual' ? undefined : original(k)));
+    try {
+      const r = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference: uniq() });
+      expect([r.status, r.body.code]).toEqual([409, 'no_manual_account']);
+      expect(await t.prisma.payment.count({ where: { bookingId: b.bookingId, origin: 'inbound' } })).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('transfer_recorded_on_paused_or_retired_manual_account', async () => {
     const b = await booked(false);
     await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'paused' } });
     try {
       const r = await confirm(b.bookingId, { amountMinor: b.depositMinor.toString(), reference: uniq() });
-      expect([r.status, r.body.code]).toEqual([409, 'no_manual_account']);
+      expect(r.status).toBe(200);
+      const statusOf = async (bookingId: string) => {
+        const p = await t.prisma.payment.findFirstOrThrow({ where: { bookingId, origin: 'inbound' }, select: { providerAccountId: true } });
+        return { id: p.providerAccountId, status: (await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: p.providerAccountId } })).status };
+      };
+      // No active manual account: the newest paused or retired one (other tests leave paused ones behind).
+      expect(['paused', 'retired']).toContain((await statusOf(b.bookingId)).status);
+      // A newer retired manual account is preferred to an older paused one; an archived one is never used.
+      const retired = (await t.app.get(ProviderAccountsService).createManualAccount({ displayName: 'Retired transfers' })).id;
+      await t.prisma.providerAccount.update({ where: { id: retired }, data: { status: 'retired' } });
+      const b2 = await booked(false);
+      expect((await confirm(b2.bookingId, { amountMinor: b2.depositMinor.toString(), reference: uniq() })).status).toBe(200);
+      expect((await statusOf(b2.bookingId)).id).toBe(retired);
+      await t.prisma.providerAccount.update({ where: { id: retired }, data: { status: 'archived' } });
+      const b3 = await booked(false);
+      expect((await confirm(b3.bookingId, { amountMinor: b3.depositMinor.toString(), reference: uniq() })).status).toBe(200);
+      const third = await statusOf(b3.bookingId);
+      expect(third.id).not.toBe(retired);
+      expect(['paused', 'retired']).toContain(third.status);
     } finally {
       await t.prisma.providerAccount.update({ where: { id: manualId }, data: { status: 'active' } });
     }
