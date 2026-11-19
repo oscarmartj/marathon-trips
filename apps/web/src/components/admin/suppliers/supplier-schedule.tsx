@@ -38,7 +38,7 @@ export function SupplierSchedulePanel() {
   return (
     <div className="stack">
       <div className="card stack">
-        <form className="stack form" onSubmit={apply} aria-label={t('admin.supplierSchedule.title')}>
+        <form className="stack form" onSubmit={apply} aria-label={t('admin.nav.supplierPayments')}>
           <Field label={t('admin.supplierSchedule.from')} id="from" type="date" />
           <Field label={t('admin.supplierSchedule.to')} id="to" type="date" />
           <Field label={t('admin.supplierSchedule.currency')} id="currency" maxLength={3} />
@@ -51,10 +51,10 @@ export function SupplierSchedulePanel() {
         const { rows, title } = bucketOf(data, bucket);
         return (
           <Section key={bucket} id={`bucket-${bucket}`} title={title}>
-            {rows.length === 0 ? <p role="status">{t('admin.supplierSchedule.empty')}</p> : (
+            {rows.length === 0 ? <p role="status">{t('admin.suppliers.payments.owedEmpty')}</p> : (
               <div className="table-wrap">
                 <table>
-                  <caption>{t('admin.supplierSchedule.caption', { label: title })}</caption>
+                  <caption>{title}</caption>
                   <thead>
                     <tr>{[t('admin.nav.supplier'), t('admin.suppliers.allotments.contract'), t('admin.suppliers.costs.description'), t('admin.suppliers.costs.dueDate'), t('admin.dashboard.payments.amount')].map((h) => <th key={h} scope="col">{h}</th>)}</tr>
                   </thead>

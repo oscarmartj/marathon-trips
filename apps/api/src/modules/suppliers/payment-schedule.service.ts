@@ -88,7 +88,8 @@ export class PaymentScheduleService {
     return this.prisma.$transaction(async (tx) => {
       const costs = await tx.costItem.findMany({
         where: {
-          status: { in: ['planned', 'due'] }, supplier: { deletedAt: null },
+          // A cost of 0 is owed nothing (code review, M1).
+          status: { in: ['planned', 'due'] }, amountMinor: { gt: 0n }, supplier: { deletedAt: null },
           ...(q.supplierId ? { supplierId: q.supplierId } : {}), ...(q.packageId ? { packageId: q.packageId } : {}), ...(q.currency ? { currency: q.currency } : {}),
           OR: [{ dueDate: null }, { dueDate: { lt: toDate(today) } }, { dueDate: { gte: toDate(from), lte: toDate(to) } }],
         },
@@ -168,7 +169,7 @@ export class PaymentScheduleService {
       SELECT c.id::text AS id, c."dueDate", s.name,
         (SELECT count(*)::int FROM supplier_payment_items i WHERE i."costItemId" = c.id AND NOT i.active) AS generation
       FROM cost_items c JOIN suppliers s ON s.id = c."supplierId"
-      WHERE c.status IN ('planned', 'due') AND c."dueDate" IS NOT NULL AND c."dueDate" <= ${toDate(addDays(today, SUPPLIER_PAYMENT_LEAD_DAYS))}::date AND s."deletedAt" IS NULL`;
+      WHERE c.status IN ('planned', 'due') AND c."amountMinor" > 0 AND c."dueDate" IS NOT NULL AND c."dueDate" <= ${toDate(addDays(today, SUPPLIER_PAYMENT_LEAD_DAYS))}::date AND s."deletedAt" IS NULL`;
     for (const c of costs) {
       const due = fromDate(c.dueDate)!;
       if (due < today) {
@@ -203,7 +204,7 @@ export class PaymentScheduleService {
     const booking = await tx.booking.findUnique({ where: { id: bookingId }, select: { reference: true, packageId: true, editionId: true } });
     if (!booking?.packageId) return;
     const today = todayInBrisbane(event.occurredAt);
-    const unpaid = await tx.costItem.count({ where: { packageId: booking.packageId, status: { in: ['planned', 'due'] } } });
+    const unpaid = await tx.costItem.count({ where: { packageId: booking.packageId, status: { in: ['planned', 'due'] }, amountMinor: { gt: 0n } } });
     const held = await tx.allotment.count({ where: { status: 'held', releaseDate: { gte: toDate(today) }, pool: { editionId: booking.editionId }, contract: { deletedAt: null } } });
     if (unpaid + held === 0) return;
     const pkg = await tx.package.findUnique({ where: { id: booking.packageId }, select: { name: true, edition: { select: { year: true, race: { select: { name: true } } } } } });

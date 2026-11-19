@@ -13,12 +13,18 @@ describe('supplier payment pages (task 6.2)', () => {
   });
 
   it('says plainly that recording sends no money', () => {
-    expect(get('admin.suppliers.payments.notice')).toMatch(/does not send any money/);
+    expect(get('admin.suppliers.payments.notice')).toMatch(/sends no money/);
     expect(get('admin.supplierSchedule.intro')).toMatch(/does not send money/);
+    // Code review, m2: what the plan requires the panel to say.
+    expect(get('admin.suppliers.payments.voidHint')).toMatch(/If a supplier refunds you, note it and tell your accountant/);
+    expect(get('admin.customerMoney.footer')).toMatch(/your own/);
+    expect(get('admin.customerMoney.totalRow')).toMatch(/\{own\}/);
+    expect(get('admin.suppliers.payments.baseCurrency')).toBe('Bank currency');
   });
 
   it('maps known codes and falls back for unknown ones', () => {
     expect(paymentErrorMessage('cost_item_already_paid')).toMatch(/already paid/);
+    expect(paymentErrorMessage('cost_item_zero_amount')).toMatch(/0/);
     expect(paymentErrorMessage('version_conflict')).toBe(get('admin.catalogue.errors.version_conflict'));
     expect(paymentErrorMessage('bad_amount')).toBe(get('admin.suppliers.errors.bad_amount'));
     expect(paymentErrorMessage('something_else')).toBe(get('admin.common.error'));

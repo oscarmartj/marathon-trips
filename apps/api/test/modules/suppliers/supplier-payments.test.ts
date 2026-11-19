@@ -7,6 +7,7 @@ import { ProviderGateway } from '../../../src/modules/payments/core/gateway';
 import { PaymentLedgerCheckService } from '../../../src/modules/payments/core/ledger-check.service';
 import { LedgerKeyConflictError } from '../../../src/modules/payments/core/ledger.service';
 import { SUPPLIERS_PERMISSIONS, suppliersManifest } from '../../../src/modules/suppliers/manifest';
+import { PaymentScheduleService } from '../../../src/modules/suppliers/payment-schedule.service';
 import { supplierPaymentKey } from '../../../src/modules/suppliers/supplier-payment.service';
 import { TRANSACTION_RETRIES } from '../../../src/platform/database/transaction';
 import { ConsumerRegistry } from '../../../src/platform/events/consumers';
@@ -53,6 +54,33 @@ const body = (costs: Array<{ id: string; version: number }>, over: Record<string
 const pay = (supplierId: string, b: object, k: string = key(), client: Client = admin) => client.post(`/admin/suppliers/${supplierId}/payments`, b).set('Idempotency-Key', k);
 const voidIt = (id: string, b: object, k: string = key(), client: Client = admin) => client.post(`/admin/suppliers/payments/${id}/void`, b).set('Idempotency-Key', k);
 const costStatus = async (id: string) => (await t.prisma.costItem.findUniqueOrThrow({ where: { id } })).status;
+const full = async (id: string) => must(await admin.get(`/admin/suppliers/payments/${id}`), 'get').body;
+
+/** Holds a row lock on cost items from its own connection, so concurrent requests queue behind it for certain. */
+async function gate(costIds: string[]) {
+  const db = await connect('app');
+  const pid = (await db.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
+  await db.query('BEGIN');
+  await db.query('SELECT id FROM cost_items WHERE id = ANY($1::uuid[]) FOR UPDATE', [costIds]);
+  return { pid, release: async () => { await db.query('COMMIT'); await db.end(); } };
+}
+/** Waits until `n` sessions are queued behind the gate (directly, or behind one already queued on the same row). */
+async function waitForLockWaiters(g: { pid: number }, n: number): Promise<void> {
+  for (let i = 0; i < 250; i++) {
+    const rows = await t.prisma.$queryRaw<Array<{ pid: number; blockers: number[] }>>`
+      SELECT pid, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+    const queued = new Set<number>([g.pid]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const r of rows) if (!queued.has(r.pid) && r.blockers.some((b) => queued.has(b))) { queued.add(r.pid); grew = true; }
+    }
+    if (queued.size - 1 >= n) return;
+    await new Promise((res) => setTimeout(res, 20));
+  }
+  throw new Error(`fewer than ${n} sessions queued behind the gate`);
+}
+
 const ledgerOf = (supplierPaymentId: string) => t.prisma.ledgerTransaction.findMany({ where: { supplierPaymentId }, orderBy: { occurredAt: 'asc' }, include: { entries: { orderBy: [{ accountCode: 'asc' }, { currency: 'asc' }] } } });
 
 describe('failure paths of recording (section 10)', () => {
@@ -109,10 +137,51 @@ describe('failure paths of recording (section 10)', () => {
     expect((await admin.post(`/admin/suppliers/costs/${paid.id}/status`, { status: 'cancelled', version: paid.version + 1 })).body.code).toBe('transition_not_allowed');
   });
 
+  it('cost_item_zero_amount: a cost of 0 is never paid, never in the schedule, never an alert (code review, M1)', async () => {
+    const s = await newSupplier();
+    const zero = await newCost(s.id, { basis: 'fixed', quantity: 1, unitAmountMinor: '0', dueDate: daysFrom(today(), -3) });
+    const ok = await newCost(s.id, { dueDate: daysFrom(today(), -3) });
+    for (const items of [[zero], [zero, ok]]) {
+      const r = await pay(s.id, body(items));
+      expect([r.status, r.body.code]).toEqual([422, 'cost_item_zero_amount']);
+      const prev = await admin.post(`/admin/suppliers/${s.id}/payments/preview`, { items: items.map((c) => ({ costItemId: c.id, version: c.version })) });
+      expect([prev.status, prev.body.code]).toEqual([422, 'cost_item_zero_amount']);
+    }
+    expect(await costStatus(zero.id)).toBe('planned');
+    const sched = must(await admin.get(`/admin/suppliers/payments/schedule?supplierId=${s.id}`), 'schedule').body;
+    expect(sched.items.map((i: { costItemId: string }) => i.costItemId)).toEqual([ok.id]);
+    await t.app.get(PaymentScheduleService).sweep();
+    expect(await t.prisma.task.count({ where: { entityId: zero.id } })).toBe(0);
+    expect(await t.prisma.task.count({ where: { entityId: ok.id, status: 'open' } })).toBe(1);
+  });
+
+  it('paid_on_brisbane_boundary through the API: at 13:59:59.999Z tomorrow\'s Brisbane date is refused, at 14:00Z it is today', async () => {
+    const s = await newSupplier();
+    const c = await newCost(s.id);
+    // Today's UTC date, so the faked clock stays within hours of the real one (sessions and step-up keep working).
+    const utcDay = new Date().toISOString().slice(0, 10);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(`${utcDay}T13:59:59.999Z`));
+      const before = await pay(s.id, body([c], { paidOn: daysFrom(utcDay, 1) }));
+      expect([before.status, before.body.code]).toEqual([422, 'paid_on_in_future']);
+      vi.setSystemTime(new Date(`${utcDay}T14:00:00.000Z`));
+      const after = await pay(s.id, body([c], { paidOn: daysFrom(utcDay, 1) }));
+      expect(after.status).toBe(201);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('cost_item_cannot_be_paid_twice: concurrently by two people, one wins and the other gets 409', async () => {
     const s = await newSupplier();
     const c = await newCost(s.id);
-    const [a, b] = await Promise.all([pay(s.id, body([c])), pay(s.id, body([c]), key(), other)]);
+    // Deterministic: both requests are queued on the cost's row lock before either can go on.
+    const g = await gate([c.id]);
+    const pending = Promise.all([pay(s.id, body([c])), pay(s.id, body([c]), key(), other)]);
+    await waitForLockWaiters(g, 2);
+    await g.release();
+    const [a, b] = await pending;
     expect([a.status, b.status].sort()).toEqual([201, 409]);
     expect([a, b].find((r) => r.status === 409)!.body.code).toBe('cost_item_already_paid');
     expect(await t.prisma.supplierPaymentItem.count({ where: { costItemId: c.id } })).toBe(1);
@@ -123,7 +192,13 @@ describe('failure paths of recording (section 10)', () => {
     const a = await newCost(s.id);
     const b = await newCost(s.id);
     const deadlocks = TRANSACTION_RETRIES.deadlock;
-    const res = await Promise.all([pay(s.id, body([a, b])), pay(s.id, body([b, a]), key(), other)]);
+    // The gate holds only the lower id. Locking in ascending order, both requests queue there; a request that locked in
+    // its own order would take the higher id first, and the two would then deadlock once the gate lets go.
+    const g = await gate([[a.id, b.id].sort()[0]!]);
+    const pending = Promise.all([pay(s.id, body([a, b])), pay(s.id, body([b, a]), key(), other)]);
+    await waitForLockWaiters(g, 2);
+    await g.release();
+    const res = await pending;
     expect(res.map((r) => r.status).sort()).toEqual([201, 409]);
     expect(TRANSACTION_RETRIES.deadlock).toBe(deadlocks);
   });
@@ -167,6 +242,16 @@ describe('access (section 8)', () => {
     const p = must(await pay(s.id, body([c])), 'pay').body;
     const v = await voidIt(p.id, { version: p.version, reason: 'Recorded twice' }, key(), stale);
     expect([v.status, v.body.code]).toEqual([403, 'step_up_required']);
+    // Someone who may record but not see costs learns nothing about amounts from the answer (code review, m5).
+    const recorder = await adminWith(t, [SP.paymentRecord, SP.paymentVoid]);
+    const d = await newCost(s.id, { description: 'Secret cost line' });
+    const rec = await pay(s.id, body([d]), key(), recorder);
+    expect(rec.status).toBe(201);
+    expect(JSON.stringify(rec.body)).not.toMatch(/amountMinor|Secret cost line|INV-2027/);
+    expect((await recorder.get(`/admin/suppliers/payments/${rec.body.id}`)).status).toBe(403);
+    const vo = await voidIt(rec.body.id, { version: rec.body.version, reason: 'Mistake' }, key(), recorder);
+    expect(vo.status).toBe(200);
+    expect(JSON.stringify(vo.body)).not.toMatch(/amountMinor|Secret cost line|Mistake/);
     for (const k of [SUPPLIERS_PERMISSIONS.paymentRecord, SUPPLIERS_PERMISSIONS.paymentVoid]) {
       const d = suppliersManifest.permissions.find((x) => x.key === k)!;
       expect([d.requiresStepUp, d.apiKeyScopable]).toEqual([true, false]);
@@ -194,7 +279,9 @@ describe('recording (sections 4.2, 5)', () => {
     expect(await t.prisma.supplierPayment.count({ where: { supplierId: s.id } })).toBe(0);
     const r = await pay(s.id, body([a, b], { reference: 'BANKREF-XYZZY' }));
     expect(r.status).toBe(201);
-    expect(r.body).toMatchObject({ amountMinor: '761400', currency: 'DKK', status: 'recorded', mode: 'test', base: null, reference: 'BANKREF-XYZZY', paidOn: today() });
+    // The answer to recording carries no amounts, descriptions or reference (code review, m5); reading it needs cost.read.
+    expect(r.body).toEqual({ id: r.body.id, supplierId: s.id, mode: 'test', status: 'recorded', version: 0, paidOn: today(), items: 2 });
+    expect(await full(r.body.id)).toMatchObject({ amountMinor: '761400', currency: 'DKK', status: 'recorded', mode: 'test', base: null, reference: 'BANKREF-XYZZY', paidOn: today() });
     expect(await costStatus(a.id)).toBe('paid');
     expect(await costStatus(b.id)).toBe('paid');
     const [tx] = await ledgerOf(r.body.id);
@@ -221,7 +308,7 @@ describe('recording (sections 4.2, 5)', () => {
       const s = await newSupplier(admin, row.cost.currency as string);
       const c = await newCost(s.id, row.cost);
       const r = must(await pay(s.id, body([c], { base: row.base })), 'pay');
-      expect(r.body.base).toEqual(row.base);
+      expect((await full(r.body.id)).base).toEqual(row.base);
       const [tx] = await ledgerOf(r.body.id);
       const cur = row.cost.currency as string;
       const base = BigInt(row.base.amountMinor);
@@ -297,7 +384,10 @@ describe('voiding (section 4.4)', () => {
     const p = must(await pay(s.id, body([c], { base: { amountMinor: '150000', currency: 'AUD' } })), 'pay').body;
     expect((await voidIt(p.id, { version: p.version })).status).toBe(422);
     expect((await voidIt(p.id, { version: p.version + 1, reason: 'Wrong supplier' })).body.code).toBe('version_conflict');
-    const v = must(await voidIt(p.id, { version: p.version, reason: 'Recorded against the wrong invoice' }), 'void').body;
+    const answer = must(await voidIt(p.id, { version: p.version, reason: 'Recorded against the wrong invoice' }), 'void').body;
+    expect(answer).toMatchObject({ status: 'voided', version: p.version + 1 });
+    expect(JSON.stringify(answer)).not.toMatch(/wrong invoice|amountMinor/);
+    const v = await full(p.id);
     expect(v).toMatchObject({ status: 'voided', voidReason: 'Recorded against the wrong invoice', version: p.version + 1 });
     expect(v.items.every((i: { active: boolean }) => !i.active)).toBe(true);
     expect(await costStatus(c.id)).toBe('due');
@@ -423,7 +513,9 @@ describe('database guards (section 2.3)', () => {
     const { p } = await recorded();
     const check = t.app.get(PaymentLedgerCheckService);
     const findings = await check.check();
-    expect(findings.filter((f) => f.entityId === p.id || f.kind === 'missing_supplier_payment_posting')).toEqual([]);
+    const txIds = (await t.prisma.ledgerTransaction.findMany({ where: { supplierPaymentId: p.id }, select: { id: true } })).map((x) => x.id);
+    expect(txIds.length).toBe(1);
+    expect(findings.filter((f) => f.entityId === p.id || txIds.includes(f.entityId) || f.kind === 'missing_supplier_payment_posting')).toEqual([]);
     // A live-mode payment written by hand without its posting (kept out of every test-mode figure).
     const s = await newSupplier();
     const c = await newCost(s.id);
@@ -433,9 +525,14 @@ describe('database guards (section 2.3)', () => {
       [`INSERT INTO supplier_payment_items (id, "supplierPaymentId", mode, "costItemId", "amountMinor", currency) VALUES (gen_random_uuid(), $1, 'live', $2, 760400, 'DKK')`, [id, c.id]],
       [`UPDATE cost_items SET status = 'paid', version = version + 1 WHERE id = $1`, [c.id]],
     ])).toBeNull();
+    // In test mode that live payment cannot be read or voided (code review, m6).
+    expect((await admin.get(`/admin/suppliers/payments/${id}`)).status).toBe(404);
+    expect((await voidIt(id, { version: 0, reason: 'Mistake' })).status).toBe(404);
+    expect((await admin.get(`/admin/suppliers/${s.id}/payments`)).body.items).toEqual([]);
     const spy = vi.spyOn(t.app.get(ProviderGateway), 'mode', 'get').mockReturnValue('live');
     try {
       expect((await check.check()).filter((f) => f.entityId === id)).toEqual([{ kind: 'missing_supplier_payment_posting', entityType: 'SupplierPayment', entityId: id }]);
+      expect((await admin.get(`/admin/suppliers/payments/${id}`)).status).toBe(200);
     } finally {
       spy.mockRestore();
     }
@@ -444,10 +541,12 @@ describe('database guards (section 2.3)', () => {
   it('a paid cost is frozen (guard 6): no new amount, trip, supplier or currency; its description may change', async () => {
     const { c } = await recorded();
     const other = await buildWorld(admin);
+    const otherSupplier = await newSupplier();
     for (const sql of [
       `UPDATE cost_items SET "amountMinor" = "amountMinor" + 1 WHERE id = $1`, `UPDATE cost_items SET quantity = quantity + 1 WHERE id = $1`,
       `UPDATE cost_items SET "unitAmountMinor" = "unitAmountMinor" + 1 WHERE id = $1`, `UPDATE cost_items SET "packageId" = '${other.pkg.id}' WHERE id = $1`,
       `UPDATE cost_items SET "packageId" = NULL WHERE id = $1`,
+      `UPDATE cost_items SET "supplierId" = '${otherSupplier.id}' WHERE id = $1`, `UPDATE cost_items SET currency = 'EUR' WHERE id = $1`,
     ]) expect([sql, await txError(app, [[sql, [c.id]]])]).toEqual([sql, '42501']);
     expect(await txError(app, [[`UPDATE cost_items SET description = 'Renamed' WHERE id = $1`, [c.id]]])).toBeNull();
   });

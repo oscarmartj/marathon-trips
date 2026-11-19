@@ -61,7 +61,7 @@ export function CustomerMoneyPanel() {
           <h3>{t('admin.customerMoney.totalsHeading')}</h3>
           <ul>
             {data.totals.map((x) => (
-              <li key={x.currency}>{t('admin.customerMoney.totalRow', { currency: x.currency, held: formatMoney(x.heldMinor, x.currency), keep: formatMoney(x.keepSeparateMinor, x.currency), earned: formatMoney(x.marginEarnedMinor, x.currency), debt: formatMoney(x.customerDebtMinor, x.currency), fees: formatMoney(x.feesMinor, x.currency), paid: formatMoney(x.paidToSuppliersMinor, x.currency) })}</li>
+              <li key={x.currency}>{t('admin.customerMoney.totalRow', { currency: x.currency, held: formatMoney(x.heldMinor, x.currency), keep: formatMoney(x.keepSeparateMinor, x.currency), earned: formatMoney(x.marginEarnedMinor, x.currency), debt: formatMoney(x.customerDebtMinor, x.currency), fees: formatMoney(x.feesMinor, x.currency), paid: formatMoney(x.paidToSuppliersMinor, x.currency), own: formatMoney(x.paidBeyondCustomerMoneyMinor, x.currency) })}</li>
             ))}
           </ul>
         </>

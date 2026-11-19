@@ -103,9 +103,8 @@ export function SupplierPayments({ supplierId, costs, contracts, onChange }: { s
           </p>
           <Field label={t('admin.suppliers.payments.paidOn')} id="paidOn" type="date" required defaultValue={today()} max={today()} />
           <Field label={t('admin.suppliers.payments.reference')} id="reference" required maxLength={80} />
-          <Field label={t('admin.suppliers.payments.baseAmount')} id="baseAmount" inputMode="decimal" aria-describedby="baseAmount-hint" />
-          <p className="field__hint" id="baseAmount-hint">{t('admin.suppliers.payments.baseHint')}</p>
-          <Field label={t('admin.supplierSchedule.currency')} id="baseCurrency" maxLength={3} aria-describedby="baseAmount-hint" />
+          <Field label={t('admin.suppliers.payments.baseAmount')} id="baseAmount" inputMode="decimal" />
+          <Field label={t('admin.suppliers.payments.baseCurrency')} id="baseCurrency" maxLength={3} />
           <div className="actions"><button className="btn" type="submit" disabled={busy}>{t('admin.suppliers.payments.record')}</button></div>
         </form>
       )}

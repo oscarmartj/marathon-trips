@@ -4,7 +4,7 @@ import { t } from '@/lib/i18n';
 
 export default function Page() {
   return (
-    <AdminPage current="/admin/suppliers/payments" title={t('admin.supplierSchedule.title')} intro={t('admin.supplierSchedule.intro')} placeholder={false}>
+    <AdminPage current="/admin/suppliers/payments" title={t('admin.nav.supplierPayments')} intro={t('admin.supplierSchedule.intro')} placeholder={false}>
       <SupplierSchedulePanel />
     </AdminPage>
   );

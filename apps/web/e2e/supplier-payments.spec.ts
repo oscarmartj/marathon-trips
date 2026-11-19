@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { Secret, TOTP } from 'otpauth';
 
@@ -29,6 +31,10 @@ async function setSuppliers(page: Page, on: boolean) {
   }
 }
 
+/** The owner's second factor is made ten minutes old, so the next payment action asks for a fresh code. */
+const staleStepUp = (email: string) =>
+  execFileSync('pnpm', ['exec', 'tsx', 'scripts/e2e-stale-step-up.ts', email], { cwd: join(__dirname, '..', '..', 'api'), env: { ...process.env, APP_ENV: process.env.APP_ENV ?? 'test' }, encoding: 'utf8' });
+
 const brisbaneIn = (n: number): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane' }).format(new Date(Date.now() + n * 86_400_000));
 
 test.use({ actionTimeout: 15_000 });
@@ -51,15 +57,20 @@ test('supplier_payment_record_and_void', async ({ page }) => {
   await expect(page.getByRole('table', { name: /Next 7 days/ }).getByRole('row', { name: new RegExp(`Harbour ${run}`) })).toContainText('500.00');
 
   await page.goto(`/admin/suppliers/${supplierId}`);
-  await expect(page.getByText('Recording a payment does not send any money: pay from your bank first, then record it here.')).toBeVisible();
+  await expect(page.getByText('Recording a payment sends no money: pay from your bank, then record it here.')).toBeVisible();
   await page.getByLabel(new RegExp(`Rooms ${run}`)).check();
   await page.getByRole('button', { name: 'Check total' }).click();
   await expect(page.getByText(/Total: DKK\s*500\.00/)).toBeVisible();
   await page.getByLabel('Reference', { exact: true }).fill(`INV-${run}`);
+  // Recording is a money fact: with a stale second factor the panel asks for a fresh code, then records.
+  staleStepUp(owner().email);
   await page.getByRole('button', { name: 'Record payment' }).click();
+  await expect(page.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
+  await page.getByLabel('Authenticator code').fill(code(owner().secret));
+  await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Payment recorded.')).toBeVisible();
   await expect(page.getByText(new RegExp(`ref INV-${run}`))).toBeVisible();
-  await expect(page.getByText('Nothing is owed.')).toBeVisible();
+  await expect(page.getByText('Nothing owed.')).toBeVisible();
 
   await page.getByText('Void payment').first().click();
   await page.getByLabel('Reason', { exact: true }).fill('Recorded against the wrong invoice');

@@ -5,7 +5,7 @@ import { t } from './i18n';
 
 export const PAYMENT_ERROR_CODES = [
   'cost_item_already_paid', 'cost_item_not_payable', 'cost_items_currency_mismatch', 'paid_on_in_future', 'paid_on_too_old', 'base_currency_same_as_payment',
-  'supplier_payment_already_voided', 'instalment_dates_not_increasing',
+  'supplier_payment_already_voided', 'instalment_dates_not_increasing', 'cost_item_zero_amount',
 ] as const;
 
 /**
