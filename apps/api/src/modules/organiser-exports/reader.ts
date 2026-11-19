@@ -37,7 +37,8 @@ export const needsOf = (format: FormatDefinition): Set<Need> => new Set(format.c
  * Reads the runners of one edition for one format. Data minimisation is structural: the select is built from the
  * format's columns, so a format that does not ask for date of birth never loads it. Supporters never match (the filter
  * is on the format's runner types, which can only be runner types), places removed by an amendment are left out, and a
- * traveller that was erased, or whose customer was, is counted and left out.
+ * traveller that was erased, or whose customer was, is counted and left out. Demo bookings, customers and races are not
+ * read at all.
  */
 export async function loadRunners(tx: Tx, format: FormatDefinition, edition: { id: string }, raceDistanceId?: string): Promise<LoadedRunners> {
   const needs = needsOf(format);
@@ -46,7 +47,8 @@ export async function loadRunners(tx: Tx, format: FormatDefinition, edition: { i
       participationType: { in: [...format.participation] },
       removedInVersion: null,
       ...(raceDistanceId ? { raceDistanceId } : {}),
-      booking: { editionId: edition.id, status: { in: [...EXPORT_BOOKING_STATUSES] } },
+      // Demo data never leaves (as in the reports, 7.fix-1): not a demo booking, customer or race.
+      booking: { editionId: edition.id, status: { in: [...EXPORT_BOOKING_STATUSES] }, isDemo: false, customer: { isDemo: false }, edition: { race: { isDemo: false } } },
     },
     select: {
       bookingId: true,

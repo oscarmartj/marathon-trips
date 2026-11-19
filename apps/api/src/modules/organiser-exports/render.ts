@@ -17,19 +17,41 @@ export function problemsOf(format: FormatDefinition, r: Runner): ExportIssue['pr
   return out;
 }
 
-function quote(s: string, delimiter: string): string {
-  return s.includes('"') || s.includes(delimiter) || s.includes('\r') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+// Leading whitespace of a fragment, except tab and CR: those are formula characters themselves, so the guard sees them.
+const LEADING_SPACE = /^[^\S\t\r]*/;
+
+/**
+ * The platform formula guard (a leading =, +, -, @, tab or CR, after any quotes, gets a quote in front), on every
+ * fragment of the cell split on a comma or a semicolon and after the fragment's leading whitespace: an organiser may
+ * open a comma file with semicolons (or the reverse), and then each fragment becomes a cell of its own, trimmed. The
+ * first fragment is the start of the cell, so a leading formula character is guarded as before.
+ */
+export function guardFragments(text: string): string {
+  return text
+    .split(/([,;])/)
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      const space = LEADING_SPACE.exec(part)![0];
+      return space + guardCell(part.slice(space.length));
+    })
+    .join('');
+}
+
+/** Quoted when it holds a quote, a comma, a semicolon, CR or LF, whatever the format's delimiter. */
+function quote(s: string): string {
+  return /[",;\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /**
  * The file. Built by walking the format's columns: a runner is only ever asked for the sources the format names, and
- * every cell is text that goes through the formula guard (a leading =, +, -, @, tab or CR gets a quote in front).
+ * every cell is text that goes through the formula guard on each comma or semicolon fragment (a leading =, +, -, @, tab or
+ * CR gets a quote in front) and is quoted when it holds either separator.
  * UTF-8; a byte order mark only when the format says the organiser needs it.
  */
 export function renderCsv(format: FormatDefinition, runners: readonly Runner[]): string {
   const { delimiter, bom, eol } = format.file;
-  const lines = [format.columns.map((c) => quote(c.header, delimiter)).join(delimiter)];
-  for (const r of runners) lines.push(format.columns.map((c) => quote(guardCell(cellOf(c, r)), delimiter)).join(delimiter));
+  const lines = [format.columns.map((c) => quote(c.header)).join(delimiter)];
+  for (const r of runners) lines.push(format.columns.map((c) => quote(guardFragments(cellOf(c, r)))).join(delimiter));
   return `${bom ? '﻿' : ''}${lines.join(eol)}${eol}`;
 }
 

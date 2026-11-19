@@ -112,8 +112,10 @@ export class OrganiserExportService {
       const csv = renderCsv(format, loaded.rows.map((r) => r.runner));
       await this.audit.record(tx, {
         actor, action: 'exports.runnerData.generated', entityType: 'RaceEdition', entityId: ed.id,
-        after: { formatId: format.id, raceDistanceId: body.raceDistanceId ?? null, rowCount: loaded.rows.length },
-        fieldClasses: { formatId: 'nopii', raceDistanceId: 'nopii', rowCount: 'nopii' },
+        // Who was in the file, for a breach notice or a runner asking who got their data: the booking reference (random,
+        // @nopii) and the place, never a name or a value from the file (7.fix-3).
+        after: { formatId: format.id, raceDistanceId: body.raceDistanceId ?? null, rowCount: loaded.rows.length, places: loaded.rows.map((r) => ({ reference: r.reference, slot: r.slot })) },
+        fieldClasses: { formatId: 'nopii', raceDistanceId: 'nopii', rowCount: 'nopii', places: 'nopii' },
       });
       return { kind: 'file', filename: safeFilename(ed.raceSlug, ed.year, format.id, today()), body: csv, rowCount: loaded.rows.length, excluded: loaded.erased } as const;
     });
