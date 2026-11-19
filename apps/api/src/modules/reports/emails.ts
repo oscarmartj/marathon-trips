@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { REPORT_EMAIL_ROWS, reportDefinitionSchema } from '@mt/shared';
+import { REPORT_EMAIL_ROWS, reportDefinitionSchema, reportScheduleSchema } from '@mt/shared';
 import type { ReportResult } from '@mt/shared';
 import type { AppConfig } from '../../platform/config/config';
 import { APP_CONFIG } from '../../platform/database/prisma.service';
@@ -55,10 +55,16 @@ export class ReportEmails {
     // With the module off nothing goes out, also what was queued before it was switched off.
     if (!(await this.flags.isModuleEnabled(REPORTS_MODULE, ctx.tx))) throw new AppError(MAIL_SKIPPED, 'module_disabled');
     const runId = ctx.email.relatedEntityType === 'ReportRun' ? ctx.email.relatedEntityId : null;
-    const run = runId ? await ctx.tx.reportRun.findUnique({ where: { id: runId }, select: { scheduledFor: true, report: { select: { id: true, name: true, definition: true, deletedAt: true, ownerUserId: true, recipientUserIds: true } } } }) : null;
+    const run = runId ? await ctx.tx.reportRun.findUnique({ where: { id: runId }, select: { scheduledFor: true, report: { select: { id: true, name: true, definition: true, schedule: true, scheduleStartedAt: true, deletedAt: true, ownerUserId: true, recipientUserIds: true } } } }) : null;
     if (!run || run.report.deletedAt) throw new AppError(MAIL_NOT_SENDABLE, 'The report is gone');
     const def = reportDefinitionSchema.safeParse(run.report.definition);
     if (!def.success) throw new AppError(MAIL_NOT_SENDABLE, 'The report is no longer valid');
+    // The schedule says which days this email covers. A report without one has no recipients either.
+    const schedule = reportScheduleSchema.safeParse(run.report.schedule);
+    if (!schedule.success) throw new AppError(MAIL_NOT_SENDABLE, 'The report is no longer on a schedule');
+    // A schedule changed after this run was due restarts its clock (`scheduleStartedAt`). The days this email would cover
+    // then come from a schedule it was not made for, and can even end before they start: it is not sent.
+    if (!run.report.scheduleStartedAt || run.report.scheduleStartedAt > run.scheduledFor) throw new AppError(MAIL_NOT_SENDABLE, 'The schedule of the report changed after this email was due');
     const user = await ctx.tx.user.findFirst({ where: { email: ctx.email.to, kind: 'staff', status: 'active', anonymisedAt: null }, select: { id: true } });
     const eff = user ? await this.access.effective(ctx.tx, user.id) : null;
     if (!eff || !eff.keys.has(P.read) || !eff.keys.has(entityPermission(def.data.entity))) throw new AppError(MAIL_NOT_SENDABLE, 'The recipient can no longer see this report');
@@ -66,8 +72,9 @@ export class ReportEmails {
     if (!user || !run.report.recipientUserIds.includes(user.id)) throw new AppError(MAIL_NOT_SENDABLE, 'The recipient is no longer on this report');
     const ownerEff = await this.access.effective(ctx.tx, run.report.ownerUserId);
     if (!ownerEff.keys.has(P.read) || !ownerEff.keys.has(entityPermission(def.data.entity))) throw new AppError(MAIL_NOT_SENDABLE, 'The owner of the report can no longer see its data');
-    // Whole days that ended before the scheduled time, so one report starts where the last one ended.
-    const result = await this.engine.run(ctx.tx, def.data, run.scheduledFor, { completeDaysOnly: true });
+    // The whole days since the previous scheduled time, up to the day before this one: each email starts where the last
+    // one ended, weekly or monthly, so no request is left out of the emails or counted in two of them.
+    const result = await this.engine.run(ctx.tx, def.data, run.scheduledFor, { schedule: schedule.data });
     const link = `${new URL(this.config.WEB_ORIGIN).origin}/admin/reports`;
     return { subject: `Report: ${run.report.name}`, text: formatReportText(run.report.name, result, link) };
   }

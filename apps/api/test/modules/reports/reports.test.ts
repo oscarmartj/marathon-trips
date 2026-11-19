@@ -195,6 +195,24 @@ describe('access', () => {
     expect((await noBookings.post(`/admin/reports/${funnelSaved.id}/run`)).status).toBe(200);
   });
 
+  it('deleting a report of bookings needs bookings.booking.read, so no one without it can stop its email', async () => {
+    const noBookings = await staffClient(t, [P.read, P.manage, P.funnelRead]);
+    const reader = await staffClient(t, [P.read, BOOKING_READ]);
+    const schedule = { frequency: 'weekly', weekday: 1, time: '08:00' };
+    const saved = must(await admin.post('/admin/reports', { name: 'Bookings mailed', definition: bookingDef([]), schedule, recipientUserIds: [reader.staff.id] }), 'create').body as { id: string };
+    const before = await t.prisma.savedReport.findUniqueOrThrow({ where: { id: saved.id } });
+    const res = await noBookings.delete(`/admin/reports/${saved.id}?version=0`);
+    expect(res.status).toBe(403);
+    const after = await t.prisma.savedReport.findUniqueOrThrow({ where: { id: saved.id } });
+    expect(after).toMatchObject({ deletedAt: null, version: 0, recipientUserIds: [reader.staff.id], scheduleStartedAt: before.scheduleStartedAt });
+    expect(after.schedule).toEqual(schedule);
+    expect(await t.prisma.auditLog.count({ where: { entityType: 'SavedReport', entityId: saved.id, action: 'reports.report.deleted' } })).toBe(0);
+    // The same person may delete a report whose data they can see, and someone with the data may delete this one.
+    const funnelSaved = must(await admin.post('/admin/reports', { name: 'Funnel to delete', definition: funnelDef([]) }), 'create').body as { id: string };
+    expect((await noBookings.delete(`/admin/reports/${funnelSaved.id}?version=0`)).status).toBe(204);
+    expect((await admin.delete(`/admin/reports/${saved.id}?version=0`)).status).toBe(204);
+  });
+
   it('effectiveMany answers like effective for each user, in one read', async () => {
     const reader = await staffClient(t, [P.read]);
     const none = await staffClient(t, []);
@@ -550,6 +568,121 @@ describe('scheduled sending', () => {
     expect(await mail.processSend(mails.find((m) => m.to === a.staff.email)!.id)).toBe('failed');
     await t.prisma.$executeRawUnsafe(`DELETE FROM user_roles WHERE "userId" = '${owner.staff.id}'::uuid`);
     expect(await mail.processSend(mails.find((m) => m.to === b.staff.email)!.id)).toBe('failed');
+  });
+
+  const breakDefinition = (id: string) => t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET definition = '{"entity":"funnel","columns":["nope"]}'::jsonb WHERE id = '${id}'::uuid`);
+
+  it('a report whose definition no longer holds makes a skipped run and no email', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await breakDefinition(id);
+    expect(await tick()).toMatchObject({ emails: 0 });
+    const runs = await runsOf(id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ status: 'skipped', reasonCode: 'report_invalid', emailsQueued: 0 });
+    expect(runs[0]!.scheduledFor.toISOString()).toBe('2027-03-02T22:00:00.000Z');
+    expect(await emailsOf(runs[0]!.id)).toHaveLength(0);
+    await tick(); // not tried again for the same occurrence
+    expect(await runsOf(id)).toHaveLength(1);
+  });
+
+  it('a queued email is refused when the definition of its report no longer holds', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await tick();
+    const mail = (await emailsOf((await runsOf(id))[0]!.id))[0]!;
+    await breakDefinition(id);
+    t.mail.sent.length = 0;
+    expect(await t.app.get(MailService).processSend(mail.id)).toBe('failed');
+    expect((await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: mail.id } })).error).toContain('mail_not_sendable');
+    expect(t.mail.sent.filter((m) => m.to === a.staff.email)).toHaveLength(0);
+  });
+
+  it('a queued email is refused when its report no longer has a valid schedule', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const b = await staffClient(t, [P.read, P.funnelRead]);
+    const invalid = await scheduled([a]);
+    const cleared = await scheduled([b]);
+    await tick();
+    const mailA = (await emailsOf((await runsOf(invalid))[0]!.id))[0]!;
+    const mailB = (await emailsOf((await runsOf(cleared))[0]!.id))[0]!;
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET schedule = '{"frequency":"weekly","time":"08:00"}'::jsonb WHERE id = '${invalid}'::uuid`);
+    // Only SQL can leave the recipients on a report without a schedule: the service refuses it.
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET schedule = NULL, "scheduleStartedAt" = NULL WHERE id = '${cleared}'::uuid`);
+    t.mail.sent.length = 0;
+    for (const mail of [mailA, mailB]) {
+      expect(await t.app.get(MailService).processSend(mail.id)).toBe('failed');
+      const { error } = await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: mail.id } });
+      expect(error).toContain('mail_not_sendable');
+      expect(error).toContain('The report is no longer on a schedule');
+    }
+    expect(t.mail.sent.filter((m) => m.to === a.staff.email || m.to === b.staff.email)).toHaveLength(0);
+  });
+
+  it('a queued email is refused when the schedule changed after it was due, so its days never run backwards', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await tick();
+    const run = (await runsOf(id))[0]!;
+    const mail = (await emailsOf(run.id))[0]!;
+    // Wednesday 08:00 becomes Wednesday 07:00: the previous occurrence of the new schedule is after the run's previous
+    // day, so the range would end before it starts. Changing the schedule restarts its clock.
+    must(await admin.patch(`/admin/reports/${id}`, { schedule: { frequency: 'weekly', weekday: 3, time: '07:00' }, version: 0 }), 'reschedule');
+    const report = await t.prisma.savedReport.findUniqueOrThrow({ where: { id } });
+    expect(report.scheduleStartedAt!.toISOString()).not.toBe('2027-01-01T00:00:00.000Z'); // the change restarted the clock
+    // This test's clock is March 2027, the real one is earlier: put the restart where the edit happens in this story,
+    // 11:00 on the Wednesday, after the run was due.
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "scheduleStartedAt" = '2027-03-03T01:00:00Z' WHERE id = '${id}'::uuid`);
+    t.mail.sent.length = 0;
+    expect(await t.app.get(MailService).processSend(mail.id)).toBe('failed');
+    expect((await t.prisma.outboundEmail.findUniqueOrThrow({ where: { id: mail.id } })).error).toContain('The schedule of the report changed after this email was due');
+    expect(t.mail.sent.filter((m) => m.to === a.staff.email)).toHaveLength(0);
+  });
+
+  it('a queued email still goes when only the name changed', async () => {
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const id = await scheduled([a]);
+    await tick();
+    const mail = (await emailsOf((await runsOf(id))[0]!.id))[0]!;
+    must(await admin.patch(`/admin/reports/${id}`, { name: `Renamed ${Date.now()}`, version: 0 }), 'rename');
+    t.mail.sent.length = 0;
+    expect(await t.app.get(MailService).processSend(mail.id)).toBe('sent');
+    expect(t.mail.sent.find((m) => m.to === a.staff.email)!.text).toContain('From 2027-02-24 to 2027-03-02');
+  });
+
+  it('a monthly report is sent once a month and each email covers the days since the previous one', async () => {
+    const w = await publishedWorld();
+    const v = await versionOf(w);
+    // 1 March 2027 00:30 in Brisbane (28 February in UTC): a 30-day window sent on 1 April would leave it out.
+    await booking(w, v, 'requested', '2027-02-28T14:30:00Z');
+    await booking(w, v, 'requested', '2027-02-10T00:00:00Z'); // February
+    await booking(w, v, 'requested', '2027-01-31T00:00:00Z'); // January: in neither email
+    const a = await staffClient(t, [P.read, P.funnelRead]);
+    const definition = funnelDef([w.race.id], { columns: ['requests'], range: { kind: 'last_days', days: 30 } });
+    const r = must(await admin.post('/admin/reports', { name: `Monthly ${Date.now()}`, definition, schedule: { frequency: 'monthly', dayOfMonth: 1, time: '08:00' }, recipientUserIds: [a.staff.id] }), 'create').body as { id: string };
+    await t.prisma.$executeRawUnsafe(`UPDATE saved_reports SET "scheduleStartedAt" = '2027-01-15T00:00:00Z' WHERE id = '${r.id}'::uuid`);
+    const label = (await t.prisma.race.findUniqueOrThrow({ where: { id: w.race.id } })).name as Record<string, string>;
+    const row = (text: string) => text.split('\n').find((l) => l.startsWith(label['en-AU']!));
+    const send = async (now: string) => {
+      await tick(new Date(now));
+      const runs = (await runsOf(r.id)).sort((x, y) => x.scheduledFor.getTime() - y.scheduledFor.getTime());
+      const mail = (await emailsOf(runs.at(-1)!.id))[0]!;
+      t.mail.sent.length = 0;
+      expect(await t.app.get(MailService).processSend(mail.id)).toBe('sent');
+      return { runs, text: t.mail.sent.find((m) => m.to === a.staff.email)!.text };
+    };
+
+    expect(await tick(new Date('2027-02-28T21:59:00Z'))).toMatchObject({ runs: 0 }); // 07:59 on 1 March: February's send is old
+    const march = await send('2027-03-01T00:00:00Z'); // 10:00 on 1 March
+    expect(march.runs.map((x) => x.scheduledFor.toISOString())).toEqual(['2027-02-28T22:00:00.000Z']);
+    expect(march.text).toContain('From 2027-02-01 to 2027-02-28');
+    expect(row(march.text)).toMatch(/\s1$/);
+    await tick(new Date('2027-03-15T00:00:00Z')); // nothing in the middle of the month
+    expect(await runsOf(r.id)).toHaveLength(1);
+    const april = await send('2027-03-31T23:00:00Z'); // 09:00 on 1 April
+    expect(april.runs.map((x) => x.scheduledFor.toISOString())).toEqual(['2027-02-28T22:00:00.000Z', '2027-03-31T22:00:00.000Z']);
+    expect(april.text).toContain('From 2027-03-01 to 2027-03-31');
+    expect(row(april.text)).toMatch(/\s1$/);
   });
 
   it('a run is written once: the API role cannot change it', async () => {

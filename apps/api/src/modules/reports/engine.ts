@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { REPORT_ENTITY_CATALOGUE, REPORT_MAX_ROWS } from '@mt/shared';
-import type { ReportDefinition, ReportResult } from '@mt/shared';
+import type { ReportDefinition, ReportResult, ReportSchedule } from '@mt/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { addDays, resolveRange, startOfBusinessDay } from './dates';
 import { REPORTS_TIME_ZONE } from './manifest';
@@ -40,7 +40,7 @@ export const ratePct = (part: number, whole: number): number | null => (whole > 
  */
 @Injectable()
 export class ReportEngine {
-  async run(tx: Tx, def: ReportDefinition, now: Date = new Date(), opts: { completeDaysOnly?: boolean } = {}): Promise<ReportResult> {
+  async run(tx: Tx, def: ReportDefinition, now: Date = new Date(), opts: { schedule?: ReportSchedule } = {}): Promise<ReportResult> {
     const { from, to } = resolveRange(def.range, now, opts);
     // Bounds as instants, so the filter on the request time can use an index (no expression on the column).
     const [fromAt, beforeAt] = [startOfBusinessDay(from), startOfBusinessDay(addDays(to, 1))];

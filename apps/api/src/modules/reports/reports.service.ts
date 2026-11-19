@@ -185,6 +185,9 @@ export class ReportsService {
   async remove(caller: Caller, id: string, version: number) {
     await this.prisma.$transaction(async (tx) => {
       const before = await this.lock(tx, id);
+      // Deleting stops everyone's email of this report: like changing it, it needs the permission of its data. The
+      // entity column is always a known entity, also when the stored definition no longer parses.
+      await this.assertEntity(tx, caller.auth, before.entity);
       if (before.version !== version) throw conflict('version_conflict', 'Someone else changed this report. Reload and try again.');
       const row = await tx.savedReport.update({ where: { id }, data: { deletedAt: new Date(), deletedById: caller.actor.id, schedule: Prisma.DbNull, scheduleStartedAt: null, recipientUserIds: [], version: { increment: 1 } } });
       await this.audit.record(tx, { actor: caller.actor, action: 'reports.report.deleted', entityType: 'SavedReport', entityId: id, model: 'SavedReport', before: audited(before), after: audited(row) });
