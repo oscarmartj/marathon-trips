@@ -12,7 +12,7 @@ const supporter: TravellerView = { slot: 2, participationType: 'supporter', isLe
 const view = (over: Partial<BookingTravellersView> = {}): BookingTravellersView => ({ editable: true, reason: null, editableUntil: '2027-06-06', travellers: [runner, supporter], ...over });
 const detail: AccountBookingDetail = {
   booking: { reference: 'MT-4YRAQQ', status: 'deposit_paid', departureDate: '2027-06-18', returnDate: '2027-06-21', currency: 'AUD', totalMinor: '132500', depositMinor: '100000', package: { name: { 'en-AU': 'Race weekend' }, editionYear: 2027, race: { name: { 'en-AU': 'Fremantle Run' } } }, price: { subtotals: {} } },
-  plan: { reference: 'MT-4YRAQQ', currency: 'AUD', payable: false, items: [], collectedMinor: '0', outstandingMinor: '0', overpaidMinor: '0', depositDueBy: null, nextPayable: null, methods: [], liveAttempt: null },
+  plan: { reference: 'MT-4YRAQQ', currency: 'AUD', payable: false, items: [], collectedMinor: '0', outstandingMinor: '0', overpaidMinor: '0', depositDueBy: null, nextPayable: null, methods: [], liveAttempt: null, manualIntent: null },
   payments: [], documents: [],
 };
 

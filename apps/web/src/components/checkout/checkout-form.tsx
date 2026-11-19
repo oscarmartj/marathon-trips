@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import type { CheckoutTermsView, PaymentMethod, PaymentPlanView } from '@mt/shared';
+import type { CheckoutTermsView, ManualInstructionsView, PaymentMethod, PaymentPlanView } from '@mt/shared';
 import { Status } from '@/components/auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
 import { formatDate } from '@/lib/catalogue-format';
 import { acceptTermsBody, checkoutErrorKey, formatInstant, newIdempotencyKey, safeRedirect, startPaymentBody } from '@/lib/checkout';
 import { t } from '@/lib/i18n';
+import { TransferInstructions } from './transfer-instructions';
 
 /** The terms in paragraphs: blank lines separate them, as in the content manager. */
 const paragraphs = (body: string): string[] => body.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
@@ -24,6 +25,8 @@ export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; in
   const [accepted, setAccepted] = useState(initialTerms.acceptedAt !== null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The bank transfer details the API holds for this booking, from the plan or from the request just made.
+  const [manual, setManual] = useState<ManualInstructionsView | null>(plan.manualIntent);
   // One key per method: a retry of the same choice is the same payment, another method is a new one.
   const keys = useRef(new Map<string, string>());
 
@@ -54,10 +57,15 @@ export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; in
         setTerms({ ...terms, acceptedAt: a.body.acceptedAt });
       }
       if (!keys.current.has(method)) keys.current.set(method, newIdempotencyKey());
-      const r = await api<{ status: string; nextAction?: { type: string; url: string } }>(`/booking-requests/${encodeURIComponent(plan.reference)}/payments`, {
+      const r = await api<{ status: string; nextAction?: { type: string; url: string }; manual?: ManualInstructionsView }>(`/booking-requests/${encodeURIComponent(plan.reference)}/payments`, {
         method: 'POST', body: startPaymentBody(method), headers: { 'Idempotency-Key': keys.current.get(method)! },
       });
       if (r.status === 201) {
+        // A transfer has no page to go to: show where to send the money and stay here.
+        if (r.body.manual) {
+          setManual(r.body.manual);
+          return;
+        }
         const target = safeRedirect(r.body.nextAction?.url);
         if (target) {
           window.location.assign(target);
@@ -111,6 +119,8 @@ export function CheckoutForm({ plan, initialTerms }: { plan: PaymentPlanView; in
         {plan.liveAttempt ? <p className="notice" role="status">{t(plan.liveAttempt.status === 'requires_action' || plan.liveAttempt.status === 'created' ? 'checkout.attempt.open' : 'checkout.attempt.pending')}</p> : null}
         {plan.depositDueBy ? <p>{t('checkout.payNowUntil', { when: formatInstant(plan.depositDueBy) })}</p> : null}
       </section>
+
+      {manual ? <TransferInstructions instructions={manual} /> : null}
 
       <fieldset className="stack">
         <legend>{t('checkout.methodsHeading')}</legend>

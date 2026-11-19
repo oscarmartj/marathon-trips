@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { CheckoutTermsView, PaymentPlanView } from '@mt/shared';
+import type { CheckoutTermsView, ManualInstructionsView, PaymentPlanView } from '@mt/shared';
 import { CheckoutForm } from '@/components/checkout/checkout-form';
+import { TransferInstructions } from '@/components/checkout/transfer-instructions';
 import { PaymentReturn } from '@/components/checkout/payment-return';
 import { RequestConfirmation, type RequestView } from '@/components/booking/request-confirmation';
 
@@ -9,7 +10,7 @@ const plan = (over: Partial<PaymentPlanView> = {}): PaymentPlanView => ({
   reference: 'MT-4YRAQQ', currency: 'AUD', payable: true,
   items: [{ kind: 'deposit', sequence: 1, amountMinor: '100000', dueDate: '2027-01-10', paidMinor: '0' }, { kind: 'balance', sequence: 2, amountMinor: '32500', dueDate: '2027-04-18', paidMinor: '0' }],
   collectedMinor: '0', outstandingMinor: '132500', overpaidMinor: '0', depositDueBy: '2026-12-01T13:59:59.000Z', nextPayable: { sequence: 1, amountMinor: '100000' },
-  methods: ['card', 'payid_transfer'], liveAttempt: null, ...over,
+  methods: ['card', 'payid_transfer'], liveAttempt: null, manualIntent: null, ...over,
 });
 const terms = (over: Partial<CheckoutTermsView> = {}): CheckoutTermsView => ({ slug: 'terms', version: 7, digest: 'a'.repeat(64), title: 'Terms of booking', intro: 'Read first.', body: 'One clause.\n\nAnother clause.', acceptedAt: null, ...over });
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
@@ -94,5 +95,43 @@ describe('request page link', () => {
   it.each([['approved', true], ['deposit_paid', true], ['requested', false], ['declined', false], ['expired', false], ['confirmed', false]])('%s has the payment link: %s', (status, has) => {
     const html = renderToStaticMarkup(<RequestConfirmation view={view(status)} />);
     expect(html.includes('href="/checkout/MT-4YRAQQ"')).toBe(has);
+  });
+});
+
+const instructions = (over: Partial<ManualInstructionsView> = {}): ManualInstructionsView => ({
+  method: 'payid_transfer', reference: 'MT-4YRAQQ', amountMinor: '100000', currency: 'AUD', payeeName: 'Marathon Trips Pty Ltd',
+  payId: { type: 'email', value: 'pay@example.com.au' }, bank: { bsb: '062-000', accountNumber: '12345678' }, note: 'Allow one business day.',
+  expiresAt: '2026-12-01T13:59:59.000Z', ...over,
+});
+
+describe('bank transfer instructions (task 3.4)', () => {
+  it('shows_the_apis_payee_amount_and_reference_untouched', () => {
+    const t = text(renderToStaticMarkup(<TransferInstructions instructions={instructions()} />));
+    expect(t).toContain('Marathon Trips Pty Ltd');
+    expect(t).toContain('pay@example.com.au');
+    expect(t).toContain('062-000');
+    expect(t).toContain('12345678');
+    expect(t).toContain('$1,000.00');
+    expect(t).toContain('MT-4YRAQQ');
+    expect(t).toContain('Allow one business day.');
+    expect(t).toContain('Brisbane time');
+    expect(t).not.toMatch(/guaranteed|official/i);
+  });
+
+  it('leaves_out_the_payid_or_the_bank_account_when_the_api_sends_none', () => {
+    const noPayId = text(renderToStaticMarkup(<TransferInstructions instructions={instructions({ payId: null, note: null })} />));
+    expect(noPayId).not.toContain('PayID (');
+    expect(noPayId).toContain('BSB');
+    const noBank = text(renderToStaticMarkup(<TransferInstructions instructions={instructions({ bank: null })} />));
+    expect(noBank).not.toContain('BSB');
+    expect(noBank).toContain('PayID (email)');
+  });
+
+  it('checkout_shows_an_open_transfer_request_from_the_plan_and_none_when_there_is_not_one', () => {
+    const open = text(renderToStaticMarkup(<CheckoutForm plan={plan({ manualIntent: instructions() })} initialTerms={terms()} />));
+    expect(open).toContain('Pay by PayID or bank transfer');
+    expect(open).toContain('Payment reference');
+    const none = text(renderToStaticMarkup(<CheckoutForm plan={plan()} initialTerms={terms()} />));
+    expect(none).not.toContain('Payment reference');
   });
 });

@@ -9,7 +9,7 @@ const en = (s: string) => ({ 'en-AU': s });
 const plan = (over: Partial<PaymentPlanView> = {}): PaymentPlanView => ({
   reference: 'MT-4YRAQQ', currency: 'AUD', payable: true,
   items: [{ kind: 'deposit', sequence: 1, amountMinor: '100000', dueDate: '2027-01-10', paidMinor: '100000' }, { kind: 'adjustment', sequence: 2, amountMinor: '30000', dueDate: '2026-11-25', paidMinor: '0' }],
-  collectedMinor: '100000', outstandingMinor: '62500', overpaidMinor: '0', depositDueBy: null, nextPayable: { sequence: 2, amountMinor: '30000' }, methods: ['card'], liveAttempt: null, ...over,
+  collectedMinor: '100000', outstandingMinor: '62500', overpaidMinor: '0', depositDueBy: null, nextPayable: { sequence: 2, amountMinor: '30000' }, methods: ['card'], liveAttempt: null, manualIntent: null, ...over,
 });
 const detail = (over: Partial<AccountBookingDetail> = {}): AccountBookingDetail => ({
   booking: {

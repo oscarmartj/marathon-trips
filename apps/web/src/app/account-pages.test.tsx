@@ -16,7 +16,7 @@ const item = (over: Partial<AccountBookingItem> = {}): AccountBookingItem => ({
 const plan = (over: Partial<PaymentPlanView> = {}): PaymentPlanView => ({
   reference: 'MT-4YRAQQ', currency: 'AUD', payable: true,
   items: [{ kind: 'deposit', sequence: 1, amountMinor: '100000', dueDate: '2027-01-10', paidMinor: '0' }, { kind: 'balance', sequence: 2, amountMinor: '32500', dueDate: '2027-04-18', paidMinor: '0' }],
-  collectedMinor: '0', outstandingMinor: '132500', overpaidMinor: '0', depositDueBy: null, nextPayable: { sequence: 1, amountMinor: '100000' }, methods: ['card'], liveAttempt: null, ...over,
+  collectedMinor: '0', outstandingMinor: '132500', overpaidMinor: '0', depositDueBy: null, nextPayable: { sequence: 1, amountMinor: '100000' }, methods: ['card'], liveAttempt: null, manualIntent: null, ...over,
 });
 const detail = (over: Partial<AccountBookingDetail> = {}, status = 'approved'): AccountBookingDetail => ({
   booking: {

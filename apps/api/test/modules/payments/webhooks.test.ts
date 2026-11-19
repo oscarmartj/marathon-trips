@@ -356,7 +356,9 @@ describe('SQL nets (plan 3.1, section 3)', () => {
 
   it('payment_status_trigger_matrix: every pair, as the API role', async () => {
     const STATES = ['created', 'requires_action', 'pending', 'succeeded', 'failed', 'cancelled', 'expired', 'voided'] as const;
-    const ALLOWED = new Set(PAYMENT_STATUS_PAIRS.map((x) => x.join('>')));
+    // These payments came through a gateway: `succeeded > voided` is only for a confirmed bank transfer (origin 'inbound',
+    // task 3.4), so the trigger must refuse it here. The inbound case is tested in manual.test.ts.
+    const ALLOWED = new Set(PAYMENT_STATUS_PAIRS.map((x) => x.join('>')).filter((x) => x !== 'succeeded>voided'));
     const STEP = `UPDATE payments SET status = $2::"PaymentStatus", version = version + 1,
       "liveBookingId" = CASE WHEN $2 IN ('created', 'requires_action', 'pending') THEN "bookingId" END,
       "providerPaymentRef" = COALESCE("providerPaymentRef", 'sim_pay_matrix_' || left(id::text, 8)),

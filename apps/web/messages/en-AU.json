@@ -216,6 +216,24 @@
       "bnpl": "Pay later",
       "manual_other": "Other method"
     },
+    "transfer": {
+      "heading": "Pay by PayID or bank transfer",
+      "intro": "Send {amount} by PayID or bank transfer using the details below. Your booking is not paid until we have seen the money arrive.",
+      "payee": "Account name",
+      "payIdType": {
+        "email": "PayID (email)",
+        "phone": "PayID (mobile)",
+        "abn": "PayID (ABN)",
+        "org_id": "PayID (organisation ID)"
+      },
+      "bsb": "BSB",
+      "accountNumber": "Account number",
+      "amount": "Amount to send",
+      "reference": "Payment reference",
+      "referenceNote": "Write this reference exactly as shown in the transfer description. Without it we cannot match your payment to your booking.",
+      "expires": "These details are held for you until {when} (Brisbane time).",
+      "afterwards": "We confirm transfers by hand, usually within one business day. We will email you once it is confirmed."
+    },
     "termsHeading": "Booking terms",
     "termsVersion": "Terms version {version}",
     "termsText": "Text of the booking terms",
@@ -2441,6 +2459,44 @@
         "revoke": "Revoke",
         "revoked": "Payment link revoked.",
         "forbidden": "You do not have permission to send or revoke payment links."
+      },
+      "transfers": {
+        "title": "Bank transfers",
+        "intro": "Record money that arrived by PayID or bank transfer for booking {reference}. Match it by the reference the customer wrote. The booking only counts the money once you have recorded it here.",
+        "none": "No bank transfers recorded.",
+        "row": "{amount}, {state}, reference {reference}, {when}",
+        "states": {
+          "succeeded": "recorded",
+          "voided": "voided",
+          "created": "waiting"
+        },
+        "confirmHeading": "Record a transfer",
+        "method": "Method",
+        "amount": "Amount received ({currency})",
+        "reference": "Payment reference",
+        "confirm": "Record transfer",
+        "confirmed": "Transfer recorded.",
+        "replayed": "This transfer was already recorded. Nothing changed.",
+        "void": "Void",
+        "voidWarning": "Voiding removes this transfer from what the booking has paid. Use it only for a transfer recorded by mistake; to give money back, use a refund.",
+        "reason": "Reason for voiding",
+        "voidConfirm": "Void transfer",
+        "cancel": "Cancel",
+        "voided": "Transfer voided.",
+        "stepUpCancelled": "Nothing was changed because the security code was not confirmed.",
+        "forbidden": "You do not have permission to record or void transfers.",
+        "errors": {
+          "amountInvalid": "Enter the amount received, such as 1,250.00.",
+          "reasonRequired": "Give a reason for voiding this transfer.",
+          "amount_out_of_range": "That amount is outside what can be recorded.",
+          "booking_cannot_receive_payment": "This booking cannot take a payment in its current state.",
+          "currency_not_supported": "Bank transfers are not set up for this booking's currency.",
+          "no_manual_account": "No account is set up to receive bank transfers yet.",
+          "payment_not_voidable": "Only a recorded bank transfer can be voided.",
+          "reference_already_recorded": "A transfer with this reference is already recorded for another booking or amount.",
+          "version_conflict": "Someone else changed this transfer. Reload and try again.",
+          "void_would_uncover_confirmed_booking": "This booking was confirmed on this transfer. Refund or cancel the booking instead."
+        }
       },
       "amendments": {
         "title": "Changes",
