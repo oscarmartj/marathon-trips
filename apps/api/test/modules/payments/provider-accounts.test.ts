@@ -125,7 +125,10 @@ describe('creating an account (plan 4.1, 4.1)', () => {
     expect(refused.length).toBeGreaterThanOrEqual(3);
     expect(JSON.stringify(refused)).not.toContain('sk_live_');
     // The database still refuses a live row whatever the API does (0017's CHECK, kept by 4.1).
-    const row = await t.prisma.providerAccount.findFirstOrThrow();
+    // Its own row to copy: the test does not depend on accounts other files left behind.
+    const own = await t.app.get(ProviderAccountsService).createSimulatorAccount({ displayName: name('Sim') });
+    const row = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: own.id } });
+    await t.prisma.providerAccount.update({ where: { id: own.id }, data: { status: 'paused' } });
     await expect(t.prisma.providerAccount.create({ data: { ...row, id: randomUUID(), mode: 'live', webhookPathTokenHash: randomBytes(32).toString('hex') } })).rejects.toThrow(/test_mode_only/);
   });
 
@@ -508,7 +511,8 @@ describe('secrets never leave (plan 0.1, 4.7; plan 4.1, 7)', () => {
 
 describe('the boot check (plan 4.1, 4.5)', () => {
   it('startup_pauses_account_with_missing_or_planned_adapter: once, audited, one task', async () => {
-    const base = await t.prisma.providerAccount.findFirstOrThrow({ where: { adapterKey: 'simulator' } });
+    const base = await t.prisma.providerAccount.findUniqueOrThrow({ where: { id: (await t.app.get(ProviderAccountsService).createSimulatorAccount({ displayName: name('Sim') })).id } });
+    await t.prisma.providerAccount.update({ where: { id: base.id }, data: { status: 'paused' } });
     const ghost = randomUUID();
     await t.prisma.providerAccount.create({ data: { ...base, id: ghost, adapterKey: 'ghost', status: 'active', pauseReasonCode: null, version: 0, displayName: name('Ghost'), webhookPathTokenHash: randomBytes(32).toString('hex') } });
     const later = randomUUID();
