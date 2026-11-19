@@ -8,6 +8,7 @@ import type { PaymentMethod } from '@mt/shared';
 import {
   AdapterManifest, CreatePaymentInput, CreateRefundInput, DisputeReasonCode, Money, NormalisedEvent, PaymentLookup, PaymentProvider, ProviderContext, ProviderDispute,
   ProviderDisputeStatus, ProviderError, ProviderPayment, ProviderPaymentStatus, ProviderRefund, ProviderRefundStatus, RefundLookup, WebhookVerification,
+  ProviderActivity, ProviderSettlement, ProviderSettlementLine,
 } from '../../core/provider';
 import { DISPUTE_REASON_CODES } from '../../core/provider';
 
@@ -39,7 +40,7 @@ export function simulatorManifest(webOrigin: string): AdapterManifest {
     checkoutOrigin: new URL(webOrigin).origin,
     // Task 4.1: nothing typed; the API key and the webhook secret are made by the server.
     account: { fields: [], generated: [{ key: 'apiKey', prefix: 'sim_test_' }], webhookSecret: { source: 'generated' } },
-    capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed', disputes: 'events' },
+    capabilities: { refunds: 'partial', deferredCapture: false, lookupByIdempotencyKey: true, declineOutcome: 'failed', disputes: 'events', reconciliation: { activity: true, settlements: true } },
   };
 }
 
@@ -102,6 +103,12 @@ class SimAccount {
   readonly nextCancel: Array<'unavailable'> = [];
   readonly nextRetrieve: SimulatorRetrieveFault[] = [];
   createCalls = 0;
+  /** Task 4.6: when each object was created (listActivity's window), what was paid out and the payouts made. */
+  readonly createdAt = new Map<string, Date>();
+  readonly settled = new Set<string>();
+  readonly payouts: ProviderSettlement[] = [];
+  readonly nextList: Array<'unavailable' | 'timeout'> = [];
+  listCalls = 0;
   /** Cancellations that changed an object (a repeated one changes nothing). */
   effectiveCancels = 0;
 }
@@ -170,7 +177,7 @@ const view = (p: SimPayment, checkoutBase?: string): ProviderPayment => ({
   ref: p.ref,
   status: p.status,
   amount: { ...p.amount },
-  ourPaymentId: p.paymentId,
+  ...(p.paymentId ? { ourPaymentId: p.paymentId } : {}),
   ...(p.failureCode ? { failureCode: p.failureCode } : {}),
   ...(checkoutBase && p.status === 'requires_action' && p.checkoutToken ? { nextAction: { type: 'redirect' as const, url: `${checkoutBase}/${p.checkoutToken}` } } : {}),
 });
@@ -243,6 +250,7 @@ export class SimulatorProvider implements PaymentProvider {
     };
     if (p.status === 'requires_action') p.checkoutToken = this.world.newCheckout(ctx.accountId, p.ref);
     acc.payments.set(p.ref, p);
+    acc.createdAt.set(p.ref, new Date());
     acc.byKey.set(p.idempotencyKey, p.ref);
     if (outcome === 'timeout_after_create') throw new ProviderError('provider_timeout', true);
     return view(p, this.checkoutBase);
@@ -297,6 +305,7 @@ export class SimulatorProvider implements PaymentProvider {
       idempotencyKey: input.idempotencyKey, refundId: input.metadata.refundId,
     };
     acc.refunds.set(r.ref, r);
+    acc.createdAt.set(r.ref, new Date());
     acc.refundsByKey.set(input.idempotencyKey, r.ref);
     return refundView(r);
   }
@@ -320,6 +329,28 @@ export class SimulatorProvider implements PaymentProvider {
     if (acc.nextDisputeRetrieve.shift() === 'unavailable') throw new ProviderError('provider_unavailable', true);
     const d = acc.disputes.get(ref);
     return d ? disputeView(d) : null;
+  }
+
+  /** Task 4.6: what the simulated gateway recorded in the window, oldest first, SIM_PAGE items a page. */
+  async listActivity(ctx: ProviderContext, window: { from: Date; to: Date; cursor?: string }): Promise<{ items: ProviderActivity[]; next?: string }> {
+    checkCredentials(ctx);
+    const acc = this.world.account(ctx.accountId);
+    listFault(acc);
+    const at = (ref: string) => acc.createdAt.get(ref) ?? new Date(0);
+    const all: ProviderActivity[] = [
+      ...[...acc.payments.values()].map((p): ProviderActivity => ({ kind: 'payment', ref: p.ref, ...(p.paymentId ? { ourId: p.paymentId } : {}), amount: { ...p.amount }, status: p.status, occurredAt: at(p.ref) })),
+      ...[...acc.refunds.values()].map((r): ProviderActivity => ({ kind: 'refund', ref: r.ref, paymentRef: r.paymentRef, ...(r.refundId ? { ourId: r.refundId } : {}), amount: { ...r.amount }, status: r.status, occurredAt: at(r.ref) })),
+      ...[...acc.disputes.values()].map((d): ProviderActivity => ({ kind: 'dispute', ref: d.ref, paymentRef: d.paymentRef, amount: { ...d.amount }, status: d.status, occurredAt: at(d.ref) })),
+    ].filter((x) => x.occurredAt >= window.from && x.occurredAt < window.to).sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || (a.ref < b.ref ? -1 : 1));
+    return page(all, window.cursor);
+  }
+
+  /** Task 4.6: the payouts made on or after a calendar date, SIM_PAGE a page. */
+  async listSettlements(ctx: ProviderContext, since: { payoutDateFrom: string; cursor?: string }): Promise<{ items: ProviderSettlement[]; next?: string }> {
+    checkCredentials(ctx);
+    const acc = this.world.account(ctx.accountId);
+    listFault(acc);
+    return page(acc.payouts.filter((s) => s.payoutDate >= since.payoutDateFrom).map(copySettlement), since.cursor);
   }
 
   /** The webhook the gateway would send now for a dispute of this account, signed at `at` (contract suite). */
@@ -502,6 +533,28 @@ export interface SignedWebhook {
  * Test control of the simulated gateway. Moves a payment on the "gateway" side and builds the webhook it would send,
  * signed with the account's secret (the test reads it from the database). Not reachable over HTTP.
  */
+/** Task 4.6: page size of the simulator's listings, small so that tests page. */
+export const SIM_PAGE = 20;
+
+function listFault(acc: SimAccount): void {
+  acc.listCalls += 1;
+  const f = acc.nextList.shift();
+  if (f === 'unavailable') throw new ProviderError('provider_unavailable', true);
+  if (f === 'timeout') throw new ProviderError('provider_timeout', true);
+}
+
+function page<T>(all: T[], cursor?: string): { items: T[]; next?: string } {
+  const from = cursor && /^[0-9]{1,9}$/.test(cursor) ? Number(cursor) : 0;
+  const items = all.slice(from, from + SIM_PAGE);
+  return from + SIM_PAGE < all.length ? { items, next: String(from + SIM_PAGE) } : { items };
+}
+
+const copySettlement = (s: ProviderSettlement): ProviderSettlement => ({ ...s, lines: s.lines.map((l) => ({ ...l })) });
+
+/** The simulated gateway's fees (task 4.6): 1.75 % + 30 c a charge, A$15 a dispute withdrawn. Its data, not our prices. */
+export const simulatorChargeFee = (amountMinor: bigint): bigint => (amountMinor * 175n + 5_000n) / 10_000n + 30n;
+export const SIMULATOR_DISPUTE_FEE = 1_500n;
+
 export class SimulatorControl {
   constructor(private readonly world: SimulatorWorld = SIMULATOR_WORLD) {}
 
@@ -556,6 +609,7 @@ export class SimulatorControl {
     if (!p || p.status !== 'succeeded' || amountMinor <= 0n || amountMinor > refundable(acc, p)) throw new Error('simulator: refund refused');
     const r: SimRefund = { ref: `sim_ref_${randomBytes(12).toString('hex')}`, paymentRef, status, amount: { amountMinor, currency: p.amount.currency } };
     acc.refunds.set(r.ref, r);
+    acc.createdAt.set(r.ref, new Date());
     return refundView(r);
   }
 
@@ -563,6 +617,79 @@ export class SimulatorControl {
    * A cardholder disputes a payment (task 4.5): the bank opens a dispute for `amountMinor` (default the whole payment),
    * with evidence due in 14 days. Funds are not taken until withdrawDispute (or `withdrawn: true`).
    */
+  /**
+   * Task 4.6: the gateway pays out everything not paid out yet (collected payments, refunds, disputes withdrawn and
+   * reinstated), with its fees, as one settlement dated `payoutDate`.
+   */
+  payout(accountId: string, payoutDate: string): ProviderSettlement {
+    const acc = this.world.account(accountId);
+    const lines: ProviderSettlementLine[] = [];
+    const add = (key: string, l: Omit<ProviderSettlementLine, 'ref'>) => {
+      if (acc.settled.has(key)) return;
+      acc.settled.add(key);
+      lines.push({ ref: `sim_line_${randomBytes(8).toString('hex')}`, ...l });
+    };
+    for (const p of acc.payments.values()) if (p.status === 'succeeded') add(`charge:${p.ref}`, { kind: 'charge', paymentRef: p.ref, amountMinor: p.amount.amountMinor, feeMinor: simulatorChargeFee(p.amount.amountMinor) });
+    for (const r of acc.refunds.values()) if (r.status === 'succeeded') add(`refund:${r.ref}`, { kind: 'refund', paymentRef: r.paymentRef, refundRef: r.ref, amountMinor: -r.amount.amountMinor, feeMinor: 0n });
+    for (const d of acc.disputes.values()) {
+      if (d.fundsWithdrawn) add(`dw:${d.ref}`, { kind: 'dispute_withdrawal', paymentRef: d.paymentRef, disputeRef: d.ref, amountMinor: -d.amount.amountMinor, feeMinor: SIMULATOR_DISPUTE_FEE });
+      if (d.fundsReinstated) add(`dr:${d.ref}`, { kind: 'dispute_reinstatement', paymentRef: d.paymentRef, disputeRef: d.ref, amountMinor: d.amount.amountMinor, feeMinor: 0n });
+    }
+    const grossMinor = lines.reduce((s, l) => s + l.amountMinor, 0n);
+    const feesMinor = lines.reduce((s, l) => s + l.feeMinor, 0n);
+    const s: ProviderSettlement = { ref: `sim_po_${randomBytes(10).toString('hex')}`, payoutDate, currency: 'AUD', grossMinor, feesMinor, netMinor: grossMinor - feesMinor, lines };
+    acc.payouts.push(s);
+    return copySettlement(s);
+  }
+
+  /** Task 4.6: a payout written by hand (another currency, a negative one, an unknown line…). */
+  addPayout(accountId: string, s: ProviderSettlement): void {
+    this.world.account(accountId).payouts.push(copySettlement(s));
+  }
+
+  /** Task 4.6: the gateway changes a payout it already reported (a difference the reconciliation must catch). */
+  alterPayout(accountId: string, ref: string, change: (s: ProviderSettlement) => void): void {
+    const s = this.world.account(accountId).payouts.find((x) => x.ref === ref);
+    if (!s) throw new Error('simulator: unknown payout');
+    change(s);
+  }
+
+  /** Task 4.6: the gateway's record of a payment changes behind our back (an injected difference). */
+  alterPayment(accountId: string, ref: string, change: { amountMinor?: bigint; status?: ProviderPaymentStatus }): void {
+    const p = this.world.account(accountId).payments.get(ref);
+    if (!p) throw new Error('simulator: unknown payment');
+    if (change.amountMinor !== undefined) p.amount = { ...p.amount, amountMinor: change.amountMinor };
+    if (change.status) p.status = change.status;
+  }
+
+  /** Task 4.6: the gateway loses one payment. */
+  dropPayment(accountId: string, ref: string): void {
+    this.world.account(accountId).payments.delete(ref);
+  }
+
+  /** Task 4.6: a payment taken at the gateway that we never started (no id of ours). */
+  foreignPayment(accountId: string, amountMinor: bigint): ProviderPayment {
+    const acc = this.world.account(accountId);
+    const p: SimPayment = { ref: `sim_pay_${randomBytes(12).toString('hex')}`, idempotencyKey: `foreign:${randomBytes(6).toString('hex')}`, status: 'succeeded', amount: { amountMinor, currency: 'AUD' }, method: 'card', paymentId: '', returnUrl: 'https://invalid.example/' };
+    acc.payments.set(p.ref, p);
+    acc.createdAt.set(p.ref, new Date());
+    return view(p);
+  }
+
+  /** Task 4.6: the next listing calls fail. */
+  failNextList(accountId: string, ...how: Array<'unavailable' | 'timeout'>): void {
+    this.world.account(accountId).nextList.push(...how);
+  }
+
+  listCalls(accountId: string): number {
+    return this.world.account(accountId).listCalls;
+  }
+
+  /** Task 4.6: moves the creation time of an object (a test looks at old or very recent activity). */
+  backdate(accountId: string, ref: string, at: Date): void {
+    this.world.account(accountId).createdAt.set(ref, at);
+  }
+
   openDispute(accountId: string, paymentRef: string, opts: { amountMinor?: bigint; reasonCode?: DisputeReasonCode; withdrawn?: boolean; status?: ProviderDisputeStatus } = {}): ProviderDispute {
     const acc = this.world.account(accountId);
     const p = acc.payments.get(paymentRef);
@@ -573,6 +700,7 @@ export class SimulatorControl {
       fundsWithdrawn: opts.withdrawn ?? false, fundsReinstated: false,
     };
     acc.disputes.set(d.ref, d);
+    acc.createdAt.set(d.ref, new Date());
     return disputeView(d);
   }
 

@@ -77,6 +77,26 @@ export const PAYMENT_ENTITIES: EntityDef[] = [
     handlers: { export: async () => [], anonymise: async () => undefined },
   },
   { entityType: 'LedgerAccount', model: 'LedgerAccount' },
+  // Task 4.6: settlements, reconciliation runs and numbers hold gateway references, codes and amounts: no customer.
+  { entityType: 'Settlement', model: 'Settlement' },
+  { entityType: 'SettlementLine', model: 'SettlementLine' },
+  { entityType: 'ReconciliationRun', model: 'ReconciliationRun' },
+  { entityType: 'ReceiptNumber', model: 'ReceiptNumber' },
+  {
+    entityType: 'SettlementLineMatch', model: 'SettlementLineMatch', customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: { export: async () => [], anonymise: async () => undefined },
+  },
+  // Task 4.6: receipts and notes are kept as financial records when a customer is erased; they hold no personal data
+  // (no name, email or address: plan 4.6, section 4.5), so there is nothing to redact.
+  ...(['Receipt', 'ReceiptNote'] as const).map((model): EntityDef => ({
+    entityType: model, model, customerLink: { kind: 'via', entityType: 'Booking', column: 'bookingId' },
+    handlers: {
+      export: (tx: Tx, customerId) => (model === 'Receipt'
+        ? tx.receipt.findMany({ where: { payment: { booking: { customerId } } }, select: { number: true, bookingId: true, amountMinor: true, currency: true, issuedAt: true } })
+        : tx.receiptNote.findMany({ where: { receipt: { payment: { booking: { customerId } } } }, select: { number: true, kind: true, bookingId: true, amountMinor: true, currency: true, issuedAt: true } })),
+      anonymise: async () => undefined,
+    },
+  })),
   {
     // Task 5.1: a link holds no personal data, but it is a way into the customer's booking: erasure revokes it and drops
     // its token hash, so nothing can use it again.

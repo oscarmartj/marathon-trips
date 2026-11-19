@@ -9,6 +9,8 @@ export const LEDGER_ACCOUNTS = {
   overpayments: 'customer_overpayments',
   receivable: 'customer_receivable',
   clearing: (providerAccountId: string) => `provider_clearing:${providerAccountId}`,
+  /** Task 4.6: the gateways' fees, an expense of the business, taken from the clearing account by a settlement. */
+  fees: 'payment_fees',
 } as const;
 
 /** The customer accounts whose balances, per booking, are the customer money the ledger holds. */
@@ -17,6 +19,7 @@ export const CUSTOMER_ACCOUNTS: readonly string[] = [LEDGER_ACCOUNTS.funds, LEDG
 export function accountKind(code: string): LedgerAccountKindName {
   if (code.startsWith('provider_clearing:') || code === LEDGER_ACCOUNTS.receivable) return 'asset';
   if (code === LEDGER_ACCOUNTS.funds || code === LEDGER_ACCOUNTS.overpayments) return 'liability';
+  if (code === LEDGER_ACCOUNTS.fees) return 'expense';
   throw new RangeError(`unknown ledger account ${code}`);
 }
 
@@ -82,3 +85,6 @@ export function assertBalanced(lines: readonly LedgerLine[]): void {
 
 /** The key of the reallocation a plan change posts (plan 0.1, P5): one per version of the plan. */
 export const scheduleReallocationKey = (bookingId: string, version: number): string => `schedule:${bookingId}:v${version}:reallocation`;
+
+/** The key of a settlement line's fee posting (plan 0.1, P5): one per line. */
+export const settlementFeeKey = (lineId: string): string => `fee:${lineId}`;

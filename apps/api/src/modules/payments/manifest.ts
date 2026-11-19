@@ -20,6 +20,11 @@ export const PAYMENTS_PERMISSIONS = {
   refundConfirmManual: 'payments.refund.confirmManual',
   disputeManage: 'payments.dispute.manage',
   disputeEvidence: 'payments.dispute.evidence',
+  // Task 4.6: reconciliation, the customer money report and receipts.
+  reconciliationRead: 'payments.reconciliation.read',
+  reconciliationRun: 'payments.reconciliation.run',
+  clientMoneyReport: 'payments.report.clientMoney',
+  receiptRead: 'payments.receipt.read',
 } as const;
 
 const def = (key: string, description: string, requiresStepUp = false): PermissionDef => ({ key, module: 'payments', description, requiresStepUp, apiKeyScopable: false });
@@ -47,7 +52,14 @@ export const paymentsManifest = {
     def(PAYMENTS_PERMISSIONS.refundConfirmManual, 'Record where a bank transfer refund goes, see it, and confirm it was sent (with the bank reference) or cancel it', true),
     def(PAYMENTS_PERMISSIONS.disputeManage, 'Record that the evidence for a payment dispute was submitted at the gateway'),
     def(PAYMENTS_PERMISSIONS.disputeEvidence, "Download a dispute's evidence package (terms accepted, booking snapshots, payments and emails sent)", true),
+    // Task 4.6. Running a reconciliation calls the gateway and can post its fees: step-up. Owner only until Oscar decides
+    // (no seeded role gets these; the owner holds every permission).
+    def(PAYMENTS_PERMISSIONS.reconciliationRead, 'See the daily reconciliations with each payment gateway and the differences they found'),
+    def(PAYMENTS_PERMISSIONS.reconciliationRun, 'Run the reconciliation of a payment gateway account now (asks the gateway and records its fees)', true),
+    def(PAYMENTS_PERMISSIONS.clientMoneyReport, 'See the customer money report: what customers paid that is still owed to suppliers, margin not yet earned and margin earned, per trip'),
+    def(PAYMENTS_PERMISSIONS.receiptRead, "List and download a booking's receipts and notes"),
   ] satisfies PermissionDef[],
   publishes: Object.values(PAYMENT_EVENTS),
-  subscribes: [] as string[],
+  // Task 4.6: the receipts consumer.
+  subscribes: [PAYMENT_EVENTS.succeeded, PAYMENT_EVENTS.voided, PAYMENT_EVENTS.refundSucceeded, PAYMENT_EVENTS.refundReversed, PAYMENT_EVENTS.chargebackWithdrawn, PAYMENT_EVENTS.chargebackReinstated] as string[],
 } as const;

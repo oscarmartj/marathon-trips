@@ -45,6 +45,11 @@ export interface AdapterManifest {
      * events are `unsupported` and the dispute clauses of the contract suite do not apply.
      */
     disputes?: 'events';
+    /**
+     * Task 4.6: what the daily reconciliation can list at the gateway. `activity`: listActivity; `settlements`:
+     * listSettlements. Absent means neither: the reconciliation then compares our own objects one by one.
+     */
+    reconciliation?: { activity: boolean; settlements: boolean };
   };
 }
 
@@ -207,6 +212,51 @@ export interface PaymentProvider {
   parseEvent(rawBody: Buffer): NormalisedEvent | null;
   /** Names of the headers that carry the signature: stored without their value. */
   readonly signatureHeaders: readonly string[];
+  /**
+   * Task 4.6, optional (capabilities.reconciliation.activity): one page of the payments, refunds and disputes the
+   * gateway recorded in the window, oldest first. `cursor` is the previous page's `next`; no `next` means the last page.
+   */
+  listActivity?(ctx: ProviderContext, window: { from: Date; to: Date; cursor?: string }): Promise<{ items: ProviderActivity[]; next?: string }>;
+  /** Task 4.6, optional (capabilities.reconciliation.settlements): one page of the payouts made since a calendar date. */
+  listSettlements?(ctx: ProviderContext, since: { payoutDateFrom: string; cursor?: string }): Promise<{ items: ProviderSettlement[]; next?: string }>;
+}
+
+/** Task 4.6: one object the gateway recorded, as listActivity returns it (codes, references and amounts only). */
+export interface ProviderActivity {
+  kind: 'payment' | 'refund' | 'dispute';
+  ref: string;
+  /** For a refund or a dispute: the payment it belongs to, as the gateway names it. */
+  paymentRef?: string;
+  /** Our id from the metadata (a payment's or a refund's), when the gateway returns it. */
+  ourId?: string;
+  amount: Money;
+  /** The object's status at the gateway (a payment's, a refund's or a dispute's own list). */
+  status: string;
+  occurredAt: Date;
+}
+
+export type ProviderSettlementLineKind = 'charge' | 'refund' | 'dispute_withdrawal' | 'dispute_reinstatement' | 'adjustment' | 'other';
+
+/** Task 4.6: a payout and its lines. Signed minor units: a refund line is negative, a fee given back is negative. */
+export interface ProviderSettlement {
+  ref: string;
+  /** Calendar date (YYYY-MM-DD). */
+  payoutDate: string;
+  currency: string;
+  grossMinor: bigint;
+  feesMinor: bigint;
+  netMinor: bigint;
+  lines: ProviderSettlementLine[];
+}
+
+export interface ProviderSettlementLine {
+  ref: string;
+  kind: ProviderSettlementLineKind;
+  paymentRef?: string;
+  refundRef?: string;
+  disputeRef?: string;
+  amountMinor: bigint;
+  feeMinor: bigint;
 }
 
 export const PROVIDER_ERROR_CODES = ['provider_unavailable', 'provider_timeout', 'provider_busy', 'provider_rejected', 'provider_auth_failed', 'provider_not_found'] as const;
