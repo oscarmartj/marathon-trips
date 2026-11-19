@@ -143,6 +143,7 @@ function Builder({ catalogue, editing, onSaved, onCancel }: { catalogue: Catalog
         </div>
         {form.scheduled ? (
           <div className="stack" data-testid="schedule-fields">
+            <p className="field__hint">{t('admin.reports.scheduleHint')}</p>
             <div className="field">
               <label htmlFor="rb-frequency">{t('admin.reports.fields.frequency')}</label>
               <select id="rb-frequency" value={form.frequency} onChange={(e) => set({ frequency: e.target.value as 'weekly' | 'monthly' })}>

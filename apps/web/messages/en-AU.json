@@ -1222,6 +1222,7 @@
         "sending": "Emailed"
       },
       "recipientsHint": "Only staff who can see reports and this data are listed.",
+      "scheduleHint": "Each email covers the whole days since the previous one was due, up to the day before it is sent, so no day is left out or counted twice. The period above is what you see here in the panel.",
       "allRaces": "All races",
       "weekly": "Every week",
       "monthly": "Every month",

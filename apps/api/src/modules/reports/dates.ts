@@ -41,16 +41,20 @@ export function latestOccurrence(schedule: ReportSchedule, now: Date): Date {
 /** The first instant of a Brisbane calendar day (Brisbane has no daylight saving, so this is exact). */
 export const startOfBusinessDay = (date: string): Date => instant(date, '00:00');
 
+/** The latest scheduled instant strictly before `at`: for a send at `at`, the one before it. */
+export const previousOccurrence = (schedule: ReportSchedule, at: Date): Date => latestOccurrence(schedule, new Date(at.getTime() - 1));
+
 export type ReportRange = { kind: 'last_days'; days: number } | { kind: 'dates'; from: string; to: string };
 
 /**
- * The first and last Brisbane day of a report range. With `completeDaysOnly` (a scheduled send) a `last_days` range ends
- * on the day before the day of `now`, so the report covers whole days only and the next one starts where this one ended:
- * no request falls between two reports. A `dates` range is always as given.
+ * The first and last Brisbane day of a report range. On screen a `last_days` range is the last `days` days up to and
+ * including today. For a scheduled send (`schedule` given, `now` the scheduled time) a `last_days` range is the whole
+ * days from the day of the previous scheduled time up to the day before this one, whatever `days` is: consecutive sends
+ * then cover every day exactly once, also when months have 28 to 31 days. A `dates` range is always as given.
  */
-export function resolveRange(range: ReportRange, now: Date, opts: { completeDaysOnly?: boolean } = {}): { from: string; to: string } {
+export function resolveRange(range: ReportRange, now: Date, opts: { schedule?: ReportSchedule } = {}): { from: string; to: string } {
   if (range.kind === 'dates') return { from: range.from, to: range.to };
   const today = todayInBusinessZone(now);
-  const to = opts.completeDaysOnly ? addDays(today, -1) : today;
-  return { from: addDays(to, -(range.days - 1)), to };
+  if (opts.schedule) return { from: todayInBusinessZone(previousOccurrence(opts.schedule, now)), to: addDays(today, -1) };
+  return { from: addDays(today, -(range.days - 1)), to: today };
 }
