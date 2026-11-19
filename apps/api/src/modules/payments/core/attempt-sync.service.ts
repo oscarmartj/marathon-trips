@@ -84,7 +84,7 @@ export class PaymentAttemptSyncService {
   }
 
   async run(paymentId: string, action: SyncAction, now: Date = new Date()): Promise<SyncOutcome> {
-    const p = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { id: true, status: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, pendingExpiresAt: true } });
+    const p = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { id: true, status: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, pendingExpiresAt: true, createdAt: true } });
     if (!p) throw notFound();
     if (action === 'cancel_orphan') return this.cancelOrphan(p.id, p.providerAccountId, p.providerPaymentRef);
     if (!LIVE_STATUSES.includes(p.status)) return 'not_live';
@@ -118,9 +118,9 @@ export class PaymentAttemptSyncService {
     }
   }
 
-  private retrieve(p: { providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string }): Promise<ProviderPayment | null> {
+  private retrieve(p: { providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string; createdAt: Date }): Promise<ProviderPayment | null> {
     return this.gateway.call(p.providerAccountId, 'retrieve', (provider, ctx) =>
-      provider.retrievePayment(ctx, p.providerPaymentRef ? { ref: p.providerPaymentRef } : { idempotencyKey: p.idempotencyKey }));
+      provider.retrievePayment(ctx, p.providerPaymentRef ? { ref: p.providerPaymentRef } : { idempotencyKey: p.idempotencyKey, createdAt: p.createdAt }));
   }
 
   /** Cancels at the gateway an object left payable by an attempt that already ended; a late success is recorded. */
@@ -139,7 +139,7 @@ export class PaymentAttemptSyncService {
     return after.status === 'cancelled' || after.status === 'failed' || after.status === 'succeeded' ? 'applied' : 'still_pending';
   }
 
-  private async settle(p: { id: string; providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string; pendingExpiresAt: Date }, action: 'cancel' | 'expire', now: Date): Promise<SyncOutcome> {
+  private async settle(p: { id: string; providerAccountId: string; providerPaymentRef: string | null; idempotencyKey: string; pendingExpiresAt: Date; createdAt: Date }, action: 'cancel' | 'expire', now: Date): Promise<SyncOutcome> {
     const remote = await this.gw(() => this.retrieve(p));
     if (!remote) return this.unresolved(p.id, p.pendingExpiresAt, now);
     if (remote.status === 'requires_action') {

@@ -15,6 +15,7 @@ export const CONTRACT_CLAUSES = [
   'retrieve_unknown_is_null',
   'customer_payment_reflected',
   'failed_is_terminal',
+  'terminal_state_is_final',
   'succeeded_is_final',
   'cancel_is_idempotent_and_final',
   'cancel_unknown_is_not_found',
@@ -25,6 +26,13 @@ export const CONTRACT_CLAUSES = [
   'verify_and_parse_never_throw',
   'test_connection_reports_not_throws',
   'bad_credentials_are_auth_failed',
+  'refund_full_and_idempotent',
+  'refund_partial_follows_capability',
+  'refund_over_amount_refused',
+  'refund_of_unpaid_payment_refused',
+  'refund_retrieve_by_ref_and_key_agree',
+  'refund_webhook_verifies_and_resolves_payment',
+  'gateway_refund_has_no_our_id',
   'no_secret_in_results_or_errors',
 ] as const;
 

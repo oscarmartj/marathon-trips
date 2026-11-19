@@ -13,7 +13,8 @@ import { PaymentAdapterRegistry } from './registry';
 /** The environments where a test-only adapter (the simulator) may run: a closed list (plan 3.1, section 14, point 14). */
 export const TEST_ADAPTER_ENVS: readonly AppEnv[] = ['development', 'test', 'ci'];
 
-export type GatewayOperation = 'create' | 'retrieve' | 'cancel' | 'webhook' | 'test_connection';
+/** `refund` (task 3.3) is allowed on paused and retired accounts (plan 0.1, 6.4), never live outside production. */
+export type GatewayOperation = 'create' | 'retrieve' | 'cancel' | 'refund' | 'webhook' | 'test_connection';
 
 export interface AccountForCall {
   id: string;
@@ -37,7 +38,7 @@ export function callBlockReason(account: AccountForCall, manifest: AdapterManife
   if (account.mode === 'live' && env !== 'production') return 'live_call_blocked_outside_production';
   if (account.mode === 'live' && (manifest.status !== 'verified' || manifest.testOnly)) return 'adapter_not_verified_for_live';
   if (manifest.testOnly && !TEST_ADAPTER_ENVS.includes(env)) return 'test_adapter_blocked_in_environment';
-  if (op === 'create' && account.mode !== modeForEnv(env)) return 'account_mode_not_for_environment';
+  if ((op === 'create' || op === 'refund') && account.mode !== modeForEnv(env)) return 'account_mode_not_for_environment';
   if (op === 'create' && account.status !== 'active') return 'account_not_accepting_charges';
   return null;
 }

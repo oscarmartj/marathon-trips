@@ -297,7 +297,7 @@ export class PaymentAttemptsService {
   async drive(paymentId: string): Promise<{ type: 'redirect'; url: string } | undefined> {
     const p = await this.prisma.payment.findUniqueOrThrow({
       where: { id: paymentId },
-      select: { id: true, bookingId: true, paymentLinkId: true, booking: { select: { reference: true } }, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, payerCustomer: { select: { countryOfResidence: true } } },
+      select: { id: true, bookingId: true, paymentLinkId: true, booking: { select: { reference: true } }, status: true, adapterKey: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true, amountMinor: true, currency: true, method: true, createdAt: true, payerCustomer: { select: { countryOfResidence: true } } },
     });
     if (!LIVE_STATUSES.includes(p.status)) return undefined;
     let remote: ProviderPayment | null;
@@ -313,11 +313,13 @@ export class PaymentAttemptsService {
         remote = await this.gateway.call(p.providerAccountId, 'create', (provider, ctx) => provider.createPayment(ctx, {
           amount: { amountMinor: p.amountMinor, currency: p.currency }, method: p.method, idempotencyKey: p.idempotencyKey,
           metadata: { paymentId: p.id, bookingId: p.bookingId }, returnUrl: this.returnUrlOf(p), customerCountry: p.payerCustomer.countryOfResidence,
+          // Always the row's (plan 3.3, 12.5): every retry under this key sends the same parameters.
+          createdAt: p.createdAt,
         }));
       } catch (err) {
         if (!(err instanceof ProviderError)) throw this.forCustomer(err);
         if (err.retryable) throw providerUnavailable();
-        remote = await this.lookupAfterRefusal(p.providerAccountId, p.idempotencyKey);
+        remote = await this.lookupAfterRefusal(p.providerAccountId, p.idempotencyKey, p.createdAt);
         if (remote === null) {
           // The gateway refused and holds no object under our key: nothing can be charged; a new attempt may start.
           await this.record(p.id, null, 'api', err.code);
@@ -338,9 +340,9 @@ export class PaymentAttemptsService {
    * gateway whether an object exists under our key. Only a clear "none" lets the attempt fail; any doubt is a 503 and
    * the attempt stays live (plan 3.1, 14.3; review G1).
    */
-  private async lookupAfterRefusal(accountId: string, idempotencyKey: string): Promise<ProviderPayment | null> {
+  private async lookupAfterRefusal(accountId: string, idempotencyKey: string, createdAt: Date): Promise<ProviderPayment | null> {
     try {
-      return await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { idempotencyKey }));
+      return await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { idempotencyKey, createdAt }));
     } catch (err) {
       throw this.forCustomer(err);
     }

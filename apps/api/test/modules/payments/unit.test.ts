@@ -242,10 +242,10 @@ describe('simulator_signature_verification (plan 3.1, 6)', () => {
   });
   it('simulator_failed_is_terminal: a declined object cannot be charged or reused', async () => {
     control.queue('acc', 'decline');
-    const p = await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU' });
+    const p = await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU', createdAt: new Date() });
     expect(p.status).toBe('failed');
     expect((await provider.cancelPayment(ctx, p.ref)).status).toBe('failed');
-    expect((await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU' })).status).toBe('failed');
+    expect((await provider.createPayment(ctx, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k1', metadata: { paymentId: 'p', bookingId: 'b' }, returnUrl: 'https://x.test/r', customerCountry: 'AU', createdAt: new Date() })).status).toBe('failed');
   });
 });
 

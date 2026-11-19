@@ -10,7 +10,7 @@ import { PAYMENT_METHODS } from '@mt/shared';
 import { CONTRACT_CLAUSES } from '../../src/modules/payments/core/contract-clauses';
 import type { ContractClause } from '../../src/modules/payments/core/contract-clauses';
 import { PROVIDER_ERROR_CODES, ProviderError } from '../../src/modules/payments/core/provider';
-import type { CreatePaymentInput, PaymentProvider, ProviderContext, ProviderPayment, ProviderPaymentStatus } from '../../src/modules/payments/core/provider';
+import type { CreatePaymentInput, PaymentLookup, PaymentProvider, ProviderContext, ProviderPayment, ProviderPaymentStatus, ProviderRefund } from '../../src/modules/payments/core/provider';
 import { manifestProblems } from '../../src/modules/payments/core/registry';
 
 export interface SignedBody {
@@ -27,8 +27,17 @@ export interface ContractSubject {
   badCredentials(ctx: ProviderContext): ProviderContext;
   /** What a customer does on the gateway's hosted page. Throws if the gateway does not let them. */
   customerCompletes(ctx: ProviderContext, payment: ProviderPayment, outcome: 'pay' | 'decline'): Promise<void>;
+  /**
+   * Takes a payment waiting for the customer to the terminal state the gateway itself gives an unpaid object (plan 3.3,
+   * 12.4): a declined card where that ends it, the session expiring where it does not. Never by our cancelPayment.
+   */
+  endAtGateway(ctx: ProviderContext, payment: ProviderPayment): Promise<void>;
   /** The webhook the gateway would send now for this object, signed at `at` with ctx.webhookSecret. */
   webhookFor(ctx: ProviderContext, ref: string, at: Date): Promise<SignedBody>;
+  /** A refund made on the gateway's own dashboard (no id of ours), read back through the adapter. */
+  gatewayRefunds(ctx: ProviderContext, payment: ProviderPayment, amountMinor: bigint): Promise<ProviderRefund>;
+  /** The webhook the gateway would send now for this refund, signed at `at` with ctx.webhookSecret. */
+  refundWebhookFor(ctx: ProviderContext, refundRef: string, at: Date): Promise<SignedBody>;
   /** A currency the gateway refuses for this account. */
   unsupportedCurrency: string;
   /** Throws unless the environment holds test-mode credentials for this gateway (checked before any network call). */
@@ -122,14 +131,46 @@ class Harness {
       metadata: { paymentId: randomUUID(), bookingId: randomUUID() },
       returnUrl: 'https://example.com/payments/return',
       customerCountry: 'AU',
+      createdAt: new Date(),
     };
+  }
+
+  /** The lookup by our key, with the createdAt the input was built with. */
+  byKey(input: CreatePaymentInput): PaymentLookup {
+    return { idempotencyKey: input.idempotencyKey, createdAt: input.createdAt };
+  }
+
+  /** A collected payment of `amountMinor`. */
+  async paid(ctx: ProviderContext, amountMinor = 1500n): Promise<{ input: CreatePaymentInput; p: ProviderPayment }> {
+    const input = this.input({ amount: { amountMinor, currency: this.p.manifest.currencies[0]! } });
+    const p = await this.create(ctx, input);
+    await this.s.customerCompletes(ctx, p, 'pay');
+    return { input, p };
+  }
+
+  refundInput(p: ProviderPayment, amountMinor: bigint, key = `contract-refund:${randomUUID()}`) {
+    return { paymentRef: p.ref, amount: { amountMinor, currency: p.amount.currency }, idempotencyKey: key, metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() };
+  }
+
+  get refunds(): 'none' | 'full' | 'partial' {
+    return this.p.manifest.capabilities.refunds;
+  }
+
+  expectRefund(r: ProviderRefund | null, amountMinor: bigint): ProviderRefund {
+    expect(r, 'refund').not.toBeNull();
+    const q = r!;
+    expect(typeof q.ref === 'string' && q.ref.length > 0, 'refund ref').toBe(true);
+    expect(['pending', 'succeeded', 'failed', 'cancelled'], 'refund status').toContain(q.status);
+    expect(q.amount.amountMinor, 'refund amount').toBe(amountMinor);
+    expect(typeof q.paymentRef === 'string' && q.paymentRef.length > 0, 'refund paymentRef').toBe(true);
+    return q;
   }
 
   create(ctx: ProviderContext, input: CreatePaymentInput): Promise<ProviderPayment> {
     return this.value('createPayment', () => this.p.createPayment(ctx, input));
   }
 
-  retrieve(ctx: ProviderContext, by: { ref: string } | { idempotencyKey: string }): Promise<ProviderPayment | null> {
+  retrieve(ctx: ProviderContext, by: PaymentLookup): Promise<ProviderPayment | null> {
     return this.value('retrievePayment', () => this.p.retrievePayment(ctx, by));
   }
 
@@ -187,7 +228,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
 
   async create_input_has_no_card_fields() {
     // Compile-time: no card field can be added to what an adapter receives (pnpm typecheck runs this file).
-    expectTypeOf<keyof CreatePaymentInput>().toEqualTypeOf<'amount' | 'method' | 'idempotencyKey' | 'metadata' | 'returnUrl' | 'customerCountry'>();
+    expectTypeOf<keyof CreatePaymentInput>().toEqualTypeOf<'amount' | 'method' | 'idempotencyKey' | 'metadata' | 'returnUrl' | 'customerCountry' | 'createdAt'>();
     expectTypeOf<keyof CreatePaymentInput['metadata']>().toEqualTypeOf<'paymentId' | 'bookingId'>();
     expectTypeOf<keyof CreatePaymentInput['amount']>().toEqualTypeOf<'amountMinor' | 'currency'>();
   },
@@ -208,7 +249,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const a = await h.create(ctx, input);
     const b = await h.create(ctx, input);
     expect(b.ref).toBe(a.ref);
-    const byKey = await h.retrieve(ctx, { idempotencyKey: input.idempotencyKey });
+    const byKey = await h.retrieve(ctx, h.byKey(input));
     expect(byKey?.ref).toBe(a.ref);
   },
 
@@ -224,7 +265,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     } else {
       expect(r.error.retryable).toBe(false);
     }
-    const byKey = await h.retrieve(ctx, { idempotencyKey: input.idempotencyKey });
+    const byKey = await h.retrieve(ctx, h.byKey(input));
     expect(byKey?.ref).toBe(a.ref);
     expect(byKey?.amount.amountMinor).toBe(input.amount.amountMinor);
   },
@@ -241,7 +282,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const input = h.input({ amount: { amountMinor: 1500n, currency: h.s.unsupportedCurrency } });
     const e = await h.error('createPayment (unsupported currency)', () => h.p.createPayment(ctx, input));
     expect(e.retryable, 'a refusal for an unsupported currency is definitive').toBe(false);
-    expect(await h.retrieve(ctx, { idempotencyKey: input.idempotencyKey }), 'no object under the key after a definitive refusal').toBeNull();
+    expect(await h.retrieve(ctx, h.byKey(input)), 'no object under the key after a definitive refusal').toBeNull();
   },
 
   async retrieve_by_ref_and_by_key_agree(h) {
@@ -249,7 +290,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const input = h.input();
     const p = await h.create(ctx, input);
     const byRef = h.expectPayment(await h.retrieve(ctx, { ref: p.ref }), input);
-    const byKey = h.expectPayment(await h.retrieve(ctx, { idempotencyKey: input.idempotencyKey }), input);
+    const byKey = h.expectPayment(await h.retrieve(ctx, h.byKey(input)), input);
     expect(byKey.ref).toBe(p.ref);
     expect(byRef.ref).toBe(p.ref);
     expect(byKey.status).toBe(byRef.status);
@@ -257,7 +298,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
 
   async retrieve_unknown_is_null(h) {
     const ctx = await h.ctx();
-    expect(await h.retrieve(ctx, { idempotencyKey: `contract:unknown:${randomUUID()}` })).toBeNull();
+    expect(await h.retrieve(ctx, { idempotencyKey: `contract:unknown:${randomUUID()}`, createdAt: new Date() })).toBeNull();
     const r = await h.call('retrievePayment (unknown ref)', () => h.p.retrievePayment(ctx, { ref: `contract_unknown_${randomBytes(8).toString('hex')}` }));
     if (r.ok) expect(r.value).toBeNull();
     else expect([r.error.code, r.error.retryable]).toEqual(['provider_not_found', false]);
@@ -268,7 +309,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const input = h.input();
     const p = await h.create(ctx, input);
     await h.s.customerCompletes(ctx, p, 'pay');
-    for (const by of [{ ref: p.ref }, { idempotencyKey: input.idempotencyKey }]) {
+    for (const by of [{ ref: p.ref }, h.byKey(input)]) {
       const q = h.expectPayment(await h.retrieve(ctx, by), input);
       expect(q.status).toBe('succeeded');
     }
@@ -279,6 +320,17 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const input = h.input();
     const p = await h.create(ctx, input);
     await h.s.customerCompletes(ctx, p, 'decline');
+    if (h.p.manifest.capabilities.declineOutcome === 'stays_payable') {
+      // A declined card leaves the object waiting for the customer (plan 3.3, 12.4): same object, still payable. Its
+      // real end is checked by terminal_state_is_final.
+      expect((await h.retrieve(ctx, { ref: p.ref }))?.status).toBe('requires_action');
+      const again = await h.create(ctx, input);
+      expect(again.ref, 'the same key never gives a new object').toBe(p.ref);
+      expect(again.status).toBe('requires_action');
+      await h.s.customerCompletes(ctx, p, 'pay');
+      expect((await h.retrieve(ctx, { ref: p.ref }))?.status).toBe('succeeded');
+      return;
+    }
     expect((await h.retrieve(ctx, { ref: p.ref }))?.status).toBe('failed');
     const again = await h.create(ctx, input);
     expect(again.ref, 'the same key never gives a new chargeable object').toBe(p.ref);
@@ -286,6 +338,22 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     await expect(h.s.customerCompletes(ctx, p, 'pay'), 'a failed object cannot be paid').rejects.toThrow();
     expect((await h.cancel(ctx, p.ref)).status).toBe('failed');
     expect((await h.retrieve(ctx, { ref: p.ref }))?.status).toBe('failed');
+  },
+
+  async terminal_state_is_final(h) {
+    // The three checks of failed_is_terminal on the end the gateway itself gives an unpaid object (plan 3.3, 12.4).
+    const ctx = await h.ctx();
+    const input = h.input();
+    const p = await h.create(ctx, input);
+    await h.s.endAtGateway(ctx, p);
+    const end = (await h.retrieve(ctx, { ref: p.ref }))!.status;
+    expect(['failed', 'cancelled'], 'an unpaid object ends failed or cancelled').toContain(end);
+    const again = await h.create(ctx, input);
+    expect(again.ref, 'the same key never gives a new chargeable object').toBe(p.ref);
+    expect(again.status).toBe(end);
+    await expect(h.s.customerCompletes(ctx, p, 'pay'), 'an ended object cannot be paid').rejects.toThrow();
+    expect((await h.cancel(ctx, p.ref)).status).toBe(end);
+    expect((await h.retrieve(ctx, { ref: p.ref }))?.status).toBe(end);
   },
 
   async succeeded_is_final(h) {
@@ -316,7 +384,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const sequences: Array<(input: CreatePaymentInput, p: ProviderPayment) => Promise<ProviderPaymentStatus[]>> = [
       async (input, p) => {
         await h.s.customerCompletes(ctx, p, 'pay');
-        return [(await h.retrieve(ctx, { ref: p.ref }))!.status, (await h.cancel(ctx, p.ref)).status, (await h.create(ctx, input)).status, (await h.retrieve(ctx, { idempotencyKey: input.idempotencyKey }))!.status];
+        return [(await h.retrieve(ctx, { ref: p.ref }))!.status, (await h.cancel(ctx, p.ref)).status, (await h.create(ctx, input)).status, (await h.retrieve(ctx, h.byKey(input)))!.status];
       },
       async (input, p) => {
         await h.s.customerCompletes(ctx, p, 'decline');
@@ -420,12 +488,112 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const input = h.input();
     for (const [label, fn] of [
       ['createPayment', () => h.p.createPayment(ctx, input)],
-      ['retrievePayment', () => h.p.retrievePayment(ctx, { idempotencyKey: input.idempotencyKey })],
+      ['retrievePayment', () => h.p.retrievePayment(ctx, h.byKey(input))],
+      ['createRefund', () => h.p.createRefund(ctx, h.refundInput({ ref: `contract_unknown_${randomBytes(8).toString('hex')}`, status: 'succeeded', amount: input.amount }, 100n))],
+      ['retrieveRefund', () => h.p.retrieveRefund(ctx, { ref: `contract_unknown_${randomBytes(8).toString('hex')}` })],
       ['cancelPayment', () => h.p.cancelPayment(ctx, `contract_unknown_${randomBytes(8).toString('hex')}`, `contract-cancel:${randomUUID()}`)],
     ] as const) {
       const e = await h.error(`${label} (bad credentials)`, fn);
       expect([e.code, e.retryable], label).toEqual(['provider_auth_failed', false]);
     }
+  },
+
+  async refund_full_and_idempotent(h) {
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    const input = h.refundInput(p, p.amount.amountMinor);
+    if (h.refunds === 'none') {
+      const e = await h.error('createRefund (no refunds)', () => h.p.createRefund(ctx, input));
+      expect([e.code, e.retryable]).toEqual(['provider_rejected', false]);
+      return;
+    }
+    const r = h.expectRefund(await h.value('createRefund', () => h.p.createRefund(ctx, input)), p.amount.amountMinor);
+    expect(['pending', 'succeeded']).toContain(r.status);
+    const again = await h.value('createRefund (same key)', () => h.p.createRefund(ctx, input));
+    expect(again.ref, 'the same key is the same refund').toBe(r.ref);
+    const more = await h.error('createRefund (nothing left)', () => h.p.createRefund(ctx, h.refundInput(p, 1n)));
+    expect([more.code, more.retryable]).toEqual(['provider_rejected', false]);
+  },
+
+  async refund_partial_follows_capability(h) {
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx, 1500n);
+    const part = h.refundInput(p, 500n);
+    if (h.refunds !== 'partial') {
+      const e = await h.error('createRefund (partial, not supported)', () => h.p.createRefund(ctx, part));
+      expect([e.code, e.retryable]).toEqual(['provider_rejected', false]);
+      return;
+    }
+    h.expectRefund(await h.value('createRefund (part)', () => h.p.createRefund(ctx, part)), 500n);
+    h.expectRefund(await h.value('createRefund (rest)', () => h.p.createRefund(ctx, h.refundInput(p, 1000n))), 1000n);
+    const e = await h.error('createRefund (beyond)', () => h.p.createRefund(ctx, h.refundInput(p, 1n)));
+    expect([e.code, e.retryable]).toEqual(['provider_rejected', false]);
+  },
+
+  async refund_over_amount_refused(h) {
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    const input = h.refundInput(p, p.amount.amountMinor + 1n);
+    const e = await h.error('createRefund (over the amount)', () => h.p.createRefund(ctx, input));
+    expect([e.code, e.retryable]).toEqual(['provider_rejected', false]);
+    expect(await h.value('retrieveRefund (refused key)', () => h.p.retrieveRefund(ctx, { idempotencyKey: input.idempotencyKey, paymentRef: p.ref, createdAt: input.createdAt }))).toBeNull();
+  },
+
+  async refund_of_unpaid_payment_refused(h) {
+    const ctx = await h.ctx();
+    const p = await h.create(ctx, h.input());
+    const e = await h.error('createRefund (unpaid)', () => h.p.createRefund(ctx, h.refundInput(p, 100n)));
+    expect([e.code, e.retryable]).toEqual(['provider_rejected', false]);
+  },
+
+  async refund_retrieve_by_ref_and_key_agree(h) {
+    if (h.refunds === 'none') return;
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    const input = h.refundInput(p, p.amount.amountMinor);
+    const r = await h.value('createRefund', () => h.p.createRefund(ctx, input));
+    const byRef = h.expectRefund(await h.value('retrieveRefund (ref)', () => h.p.retrieveRefund(ctx, { ref: r.ref })), p.amount.amountMinor);
+    const byKey = h.expectRefund(await h.value('retrieveRefund (key)', () => h.p.retrieveRefund(ctx, { idempotencyKey: input.idempotencyKey, paymentRef: p.ref, createdAt: input.createdAt })), p.amount.amountMinor);
+    expect([byRef.ref, byKey.ref]).toEqual([r.ref, r.ref]);
+    expect(byKey.status).toBe(byRef.status);
+    expect(byRef.ourRefundId, 'a refund we started carries our id').toBe(input.metadata.refundId);
+    const unknown = await h.call('retrieveRefund (unknown)', () => h.p.retrieveRefund(ctx, { ref: `contract_unknown_${randomBytes(8).toString('hex')}` }));
+    if (unknown.ok) expect(unknown.value).toBeNull();
+    else expect([unknown.error.code, unknown.error.retryable]).toEqual(['provider_not_found', false]);
+  },
+
+  async refund_webhook_verifies_and_resolves_payment(h) {
+    if (h.refunds === 'none') return;
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx);
+    const input = h.refundInput(p, p.amount.amountMinor);
+    const r = await h.value('createRefund', () => h.p.createRefund(ctx, input));
+    const at = now();
+    const w = await h.s.refundWebhookFor(ctx, r.ref, at);
+    const v = await h.value('verifyWebhook (refund)', () => h.p.verifyWebhook(ctx, w.body, w.headers, at));
+    if (!v.ok) expect.fail(`verifyWebhook refused a valid refund webhook: ${v.code}`);
+    expect(v.event.kind).toBe('refund');
+    const ev = h.expectRefund(v.event.refund ?? null, p.amount.amountMinor);
+    expect(ev.ref).toBe(r.ref);
+    expect(ev.ourRefundId).toBe(input.metadata.refundId);
+    expect(ev.amount.currency).toBe(p.amount.currency);
+    // The core finds the payment through the gateway's name for it.
+    expect((await h.retrieve(ctx, { ref: ev.paymentRef }))?.ref).toBe(p.ref);
+    expect(await h.value('parseEvent (refund)', () => h.p.parseEvent(w.body))).toEqual(v.event);
+  },
+
+  async gateway_refund_has_no_our_id(h) {
+    if (h.refunds === 'none') return;
+    const ctx = await h.ctx();
+    const { p } = await h.paid(ctx, 1500n);
+    const r = await h.s.gatewayRefunds(ctx, p, 400n);
+    const at = now();
+    const w = await h.s.refundWebhookFor(ctx, r.ref, at);
+    const v = await h.value('verifyWebhook (dashboard refund)', () => h.p.verifyWebhook(ctx, w.body, w.headers, at));
+    if (!v.ok) expect.fail(`verifyWebhook refused a valid refund webhook: ${v.code}`);
+    const ev = h.expectRefund(v.event.refund ?? null, 400n);
+    expect(ev.ourRefundId, 'a dashboard refund carries no id of ours').toBeUndefined();
+    expect((await h.retrieve(ctx, { ref: ev.paymentRef }))?.ref).toBe(p.ref);
   },
 
   async no_secret_in_results_or_errors(h) {
@@ -441,6 +609,11 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     await h.call('createPayment (bad)', () => h.p.createPayment(bad, h.input()));
     await h.call('retrievePayment (bad)', () => h.p.retrievePayment(bad, { ref: p.ref }));
     await h.call('cancelPayment (bad)', () => h.p.cancelPayment(bad, p.ref, `contract-cancel:${p.ref}`));
+    await h.call('createRefund (bad)', () => h.p.createRefund(bad, h.refundInput(p, 100n)));
+    await h.call('retrieveRefund (bad)', () => h.p.retrieveRefund(bad, { ref: `contract_unknown_${randomBytes(8).toString('hex')}` }));
+    const { p: paid } = await h.paid(ctx);
+    const r = await h.call('createRefund', () => h.p.createRefund(ctx, h.refundInput(paid, 100n)));
+    if (r.ok) await h.call('retrieveRefund', () => h.p.retrieveRefund(ctx, { ref: r.value.ref }));
     const w = await h.s.webhookFor(ctx, p.ref, now());
     await h.call('verifyWebhook (other secret)', () => h.p.verifyWebhook(bad.webhookSecret === ctx.webhookSecret ? { ...bad, webhookSecret: randomBytes(32).toString('hex') } : bad, w.body, w.headers, now()));
     const haystack = h.seen.map(serialise).join('\n');

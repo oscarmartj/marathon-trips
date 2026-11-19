@@ -1,11 +1,13 @@
 // The simulator's local contract subject (plan 3.6, section 2.1): random accounts in a world of their own, and the
 // customer pays or declines through completeCheckout, the same code as the hosted checkout page.
 import { randomBytes, randomUUID } from 'node:crypto';
-import { SimulatorProvider, SimulatorWorld } from '../../../src/modules/payments/adapters/simulator/simulator';
+import { SimulatorControl, SimulatorProvider, SimulatorWorld } from '../../../src/modules/payments/adapters/simulator/simulator';
 import type { ContractSubject } from '../payment-provider.contract';
 
 export function simulatorLocalSubject(): ContractSubject {
-  const provider = new SimulatorProvider({ webOrigin: 'http://localhost:3000' }, new SimulatorWorld());
+  const world = new SimulatorWorld();
+  const provider = new SimulatorProvider({ webOrigin: 'http://localhost:3000' }, world);
+  const control = new SimulatorControl(world);
   return {
     provider,
     async context() {
@@ -18,8 +20,21 @@ export function simulatorLocalSubject(): ContractSubject {
       const result = provider.completeCheckout(ctx, url.slice(url.lastIndexOf('/') + 1), outcome);
       if (!result.changed) throw new Error('simulator: the payment is already finished');
     },
+    async endAtGateway(ctx, payment) {
+      // The simulator's unpaid end is a declined card (declineOutcome failed).
+      const url = payment.nextAction?.url;
+      if (!url) throw new Error('simulator: this payment has no hosted page');
+      provider.completeCheckout(ctx, url.slice(url.lastIndexOf('/') + 1), 'decline');
+    },
     async webhookFor(ctx, ref, at) {
       const w = provider.currentWebhook(ctx, ref, at);
+      return { body: w.body, headers: w.headers };
+    },
+    async gatewayRefunds(ctx, payment, amountMinor) {
+      return control.gatewayRefund(ctx.accountId, payment.ref, amountMinor);
+    },
+    async refundWebhookFor(ctx, refundRef, at) {
+      const w = provider.currentRefundWebhook(ctx, refundRef, at);
       return { body: w.body, headers: w.headers };
     },
     unsupportedCurrency: 'NZD',

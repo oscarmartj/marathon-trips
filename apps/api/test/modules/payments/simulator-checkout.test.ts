@@ -320,7 +320,7 @@ describe('the page itself (plan 3.6, 10.1)', () => {
     const provider = new SimulatorProvider({ webOrigin: WEB_ORIGIN }, world);
     const ctx = (accountId: string) => ({ accountId, mode: 'test' as const, credentials: { apiKey: `sim_test_${randomBytes(12).toString('hex')}` }, webhookSecret: randomBytes(32).toString('hex') });
     const a = ctx(randomUUID());
-    const p = await provider.createPayment(a, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k', metadata: { paymentId: randomUUID(), bookingId: randomUUID() }, returnUrl: `${WEB_ORIGIN}/payments/return`, customerCountry: 'AU' });
+    const p = await provider.createPayment(a, { amount: { amountMinor: 100n, currency: 'AUD' }, method: 'card', idempotencyKey: 'k', metadata: { paymentId: randomUUID(), bookingId: randomUUID() }, returnUrl: `${WEB_ORIGIN}/payments/return`, customerCountry: 'AU', createdAt: new Date() });
     const token = p.nextAction!.url.split('/').pop()!;
     expect(() => provider.completeCheckout(ctx(randomUUID()), token, 'pay')).toThrow(ProviderError);
     expect((await provider.retrievePayment(a, { ref: p.ref }))?.status).toBe('requires_action');

@@ -5,6 +5,7 @@ import type { AppEnv } from '@mt/shared';
 import { TEST_ADAPTER_ENVS } from '../core/gateway';
 import type { PaymentProvider } from '../core/provider';
 import { SimulatorProvider } from './simulator/simulator';
+import { StripeProvider } from './stripe/stripe';
 
 export interface AdapterOptions {
   /** Where the simulator's hosted checkout page is served: WEB_ORIGIN in development, test and ci. */
@@ -22,5 +23,7 @@ export function adapterOptions(env: AppEnv, webOrigin: string): AdapterOptions {
 }
 
 export function createAdapters(opts: AdapterOptions): PaymentProvider[] {
-  return [new SimulatorProvider({ webOrigin: opts.webOrigin })];
+  // Stripe is experimental (task 3.3): the gateway wrapper never lets it charge live, and it has no account unless one
+  // is created with `payments:stripe-test-account`.
+  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider()];
 }
