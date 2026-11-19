@@ -13,8 +13,9 @@ import { QUEUES } from '../../../platform/jobs/queues';
 import { approvalExpiryJob } from '../../bookings';
 import type { LockedBooking } from '../../bookings';
 import { CoverageFailedError, PaymentCoverageService } from './coverage.service';
+import { LedgerService } from './ledger.service';
 import type { ProviderPaymentStatus } from './provider';
-import { succeededPaymentsSource } from './payable';
+import { netCollectedSource } from './payable';
 
 type Tx = Prisma.TransactionClient;
 
@@ -63,6 +64,9 @@ export const PAYMENT_EVENTS = {
   lateSucceeded: 'payments.payment.late_succeeded',
   scheduleCreated: 'payments.schedule.created',
   scheduleSuperseded: 'payments.schedule.superseded',
+  refundSucceeded: 'payments.refund.succeeded',
+  refundFailed: 'payments.refund.failed',
+  refundReversed: 'payments.refund.reversed',
 } as const;
 
 export interface LockedPayment {
@@ -109,6 +113,7 @@ export class PaymentStateMachine {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(PaymentCoverageService) private readonly coverage: PaymentCoverageService,
     @Inject(JobsService) private readonly jobs: JobsService,
+    @Inject(LedgerService) private readonly ledger: LedgerService,
   ) {}
 
   /** Fills in the gateway reference once (the webhook can arrive before the gateway's answer). */
@@ -223,7 +228,7 @@ export class PaymentStateMachine {
    */
   private async checkOverpayment(tx: Tx, p: LockedPayment, reference: string): Promise<void> {
     const owed = await tx.paymentScheduleItem.aggregate({ where: { bookingId: p.bookingId, state: 'active' }, _sum: { amountMinor: true } });
-    const collected = await succeededPaymentsSource.collected(tx, p.bookingId, p.mode);
+    const collected = await netCollectedSource.collected(tx, p.bookingId, p.mode);
     if (collected <= (owed._sum.amountMinor ?? 0n)) return;
     await this.tasks.createSystemIn(tx, {
       title: `Overpayment on booking ${reference}`,

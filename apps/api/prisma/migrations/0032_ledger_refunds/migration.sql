@@ -357,5 +357,31 @@ CREATE CONSTRAINT TRIGGER ledger_entries_balanced AFTER INSERT ON "ledger_entrie
 REVOKE UPDATE, DELETE, TRUNCATE ON "ledger_accounts", "ledger_transactions", "ledger_entries" FROM mt_app;
 REVOKE DELETE, TRUNCATE ON "refunds" FROM mt_app;
 
+-- ---- Erasure (task 5.5): a refund still in progress blocks it like an unfinished payment (plan 3.3, 3.1) ----
+CREATE OR REPLACE FUNCTION public.privacy_active_trip_reason(p_customer uuid) RETURNS text
+  LANGUAGE sql
+  STABLE
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM public.bookings b WHERE b."customerId" = p_customer
+                   AND b.status IN ('requested', 'approved', 'deposit_paid', 'confirmed')) THEN 'open_booking'
+    WHEN EXISTS (SELECT 1 FROM public.bookings b WHERE b."customerId" = p_customer AND b.status = 'balance_paid'
+                   AND b."returnDate" >= (pg_catalog.now() AT TIME ZONE 'Australia/Brisbane')::date) THEN 'trip_not_finished'
+    WHEN EXISTS (SELECT 1 FROM public.payments p
+                  WHERE (p."payerCustomerId" = p_customer OR p."bookingId" IN (SELECT b.id FROM public.bookings b WHERE b."customerId" = p_customer))
+                    AND p.status IN ('created', 'pending', 'requires_action'))
+      OR EXISTS (SELECT 1 FROM public.refunds r JOIN public.payments p ON p.id = r."paymentId"
+                  WHERE (p."payerCustomerId" = p_customer OR r."bookingId" IN (SELECT b.id FROM public.bookings b WHERE b."customerId" = p_customer))
+                    AND r.status IN ('requested', 'pending')) THEN 'live_payment'
+    -- Money collected on a closed booking may be owed back: the customer's own bookings, and any booking where the
+    -- customer is the payer (review m5).
+    WHEN EXISTS (SELECT 1 FROM public.bookings b JOIN public.payments p ON p."bookingId" = b.id
+                  WHERE (b."customerId" = p_customer OR p."payerCustomerId" = p_customer)
+                    AND b.status IN ('cancelled', 'declined', 'expired') AND p.status = 'succeeded') THEN 'refund_may_be_due'
+  END
+$$;
+GRANT SELECT (id, "paymentId", "bookingId", status) ON "refunds" TO mt_privacy;
+
 -- Queue (pg-boss), as declared in src/platform/jobs/queues.ts: the daily ledger check.
 SELECT pgboss.create_queue('payments.ledger', '{"policy":"short","retryLimit":1,"retryDelay":300,"expireInSeconds":1800,"deleteAfterSeconds":604800}'::jsonb);

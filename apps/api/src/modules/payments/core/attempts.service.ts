@@ -19,7 +19,7 @@ import type { BookingForPayments, LockedBooking } from '../../bookings';
 import { LIVE_STATUSES, LockedPayment, PAYMENT_EVENTS, PaymentStateMachine, lockPayment } from './attempt-state';
 import { ProviderGateway } from './gateway';
 import { allocate } from './allocation';
-import { payable, succeededPaymentsSource } from './payable';
+import { payable, netCollectedSource } from './payable';
 import type { ProviderPayment } from './provider';
 import { ProviderError } from './provider';
 import { CoverageFailedError } from './coverage.service';
@@ -27,6 +27,7 @@ import { PaymentRouting } from './routing';
 import { TermsService } from './terms.service';
 import { PAYABLE_STATES, PAYMENT_TX_OPTIONS } from './payable-states';
 import { PAYMENT_SETTINGS } from './settings';
+import { bookingUnderPaymentReview, underReview } from './refunds.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -86,7 +87,7 @@ export class PaymentAttemptsService {
     const b = await readBookingForPayments(this.prisma, { reference });
     if (!b) throw notFound();
     const items = await this.prisma.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, orderBy: { sequence: 'asc' }, select: { kind: true, sequence: true, amountMinor: true, dueDate: true } });
-    const collected = await succeededPaymentsSource.collected(this.prisma, b.id, this.gateway.mode);
+    const collected = await netCollectedSource.collected(this.prisma, b.id, this.gateway.mode);
     const p = payable(items, collected);
     const split = allocate(items, collected);
     const paid = new Map(split.items.map((i) => [i.sequence, i.paidMinor]));
@@ -210,6 +211,8 @@ export class PaymentAttemptsService {
         if (!b) throw notFound();
         const [{ at }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at` as [{ at: Date }];
         this.assertPayable(b, at);
+        // A booking under review after money went out takes no new payment until Oscar closes the task (plan 3.3, 12.3).
+        if (await bookingUnderPaymentReview(tx, b.id)) throw underReview();
         // Through a link: the link must still be active and in date, checked with the booking locked (Booking → PaymentLink).
         // Its target must still be an active item of the plan, at the sequence the caller pays up to: a regenerated plan
         // (superseded items) makes the link not found (review round 1, point 2).
@@ -222,7 +225,7 @@ export class PaymentAttemptsService {
         }
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
         if (body.upToSequence !== undefined && !items.some((i) => i.sequence === body.upToSequence)) throw unprocessable('unknown_plan_item', 'There is no such item in the payment plan');
-        const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
+        const collected = await netCollectedSource.collected(tx, b.id, this.gateway.mode);
         if (again && collected !== again.expectCollected) throw alreadyRecorded();
         const due = payable(items, collected, body.upToSequence).next;
         if (!due) throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');

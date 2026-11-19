@@ -13,7 +13,9 @@ import { TasksService } from '../../../platform/common/tasks/tasks.service';
 import { PAYMENT_EVENTS } from './attempt-state';
 import { PaymentCoverageService } from './coverage.service';
 import { ProviderGateway } from './gateway';
-import { succeededPaymentsSource } from './payable';
+import { netCollectedSource } from './payable';
+import { LedgerService } from './ledger.service';
+import { scheduleReallocationKey } from './ledger';
 import { planItems } from './schedule';
 
 type Tx = Prisma.TransactionClient;
@@ -34,6 +36,7 @@ export class PaymentScheduleService {
     @Inject(ProviderGateway) private readonly gateway: ProviderGateway,
     @Inject(PaymentCoverageService) private readonly coverage: PaymentCoverageService,
     @Inject(TasksService) private readonly tasks: TasksService,
+    @Inject(LedgerService) private readonly ledger: LedgerService,
   ) {}
 
   register(hooks: BookingTransitionHooks): void {
@@ -60,6 +63,8 @@ export class PaymentScheduleService {
       fieldClasses: { items: 'nopii' }, context: { bookingId: b.id, items: items.length },
     });
     await this.outbox.publish(tx, { type: PAYMENT_EVENTS.scheduleCreated, aggregateType: 'PaymentSchedule', aggregateId: schedule.id, aggregateVersion: 1, payload: { scheduleId: schedule.id, bookingId: b.id }, actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined });
+    // Money that arrived before the plan follows it (plan 3.3, 12.7); nothing is posted when nothing was collected.
+    await this.ledger.reallocate(tx, { id: b.id, currency: b.currency }, this.gateway.mode, `approval:${b.id}:plan`);
   }
 
   /**
@@ -67,8 +72,8 @@ export class PaymentScheduleService {
    * booking with money collected cannot be cancelled yet (409, as for the paid states): refunds are parked.
    */
   async onCancel(tx: Tx, hooked: HookedBooking, ctx: BookingHookContext): Promise<void> {
-    const schedule = await tx.paymentSchedule.findUnique({ where: { bookingId: hooked.id }, select: { id: true, version: true } });
-    const collected = await succeededPaymentsSource.collected(tx, hooked.id, this.gateway.mode);
+    const schedule = await tx.paymentSchedule.findUnique({ where: { bookingId: hooked.id }, select: { id: true, version: true, currency: true } });
+    const collected = await netCollectedSource.collected(tx, hooked.id, this.gateway.mode);
     if (collected > 0n) throw conflict('cancellation_needs_payments', 'This booking has payments to settle first. Cancelling it is not available yet.');
     if (!schedule) return;
     await this.supersede(tx, hooked.id, schedule, 'booking_cancelled', ctx);
@@ -88,7 +93,7 @@ export class PaymentScheduleService {
     if (live) throw conflict('approval_expiry_blocked_by_payment', 'A payment for this booking is still in progress');
     const money = await this.coverage.money(tx, hooked.id);
     if (money.depositCovered) throw conflict('approval_expiry_blocked_by_payment', 'The deposit for this booking is paid');
-    const schedule = await tx.paymentSchedule.findUnique({ where: { bookingId: hooked.id }, select: { id: true, version: true } });
+    const schedule = await tx.paymentSchedule.findUnique({ where: { bookingId: hooked.id }, select: { id: true, version: true, currency: true } });
     if (!schedule) throw new AppError('plan_missing', 'An approved booking has no payment plan');
     await this.supersede(tx, hooked.id, schedule, 'approval_expired', ctx);
     if (money.collectedMinor > 0n) {
@@ -105,7 +110,7 @@ export class PaymentScheduleService {
   }
 
   /** Supersedes every active item in a new plan version (the plan then owes 0), with its audit entry and event. */
-  private async supersede(tx: Tx, bookingId: string, schedule: { id: string; version: number }, cause: 'booking_cancelled' | 'approval_expired', ctx: BookingHookContext): Promise<void> {
+  private async supersede(tx: Tx, bookingId: string, schedule: { id: string; version: number; currency: string }, cause: 'booking_cancelled' | 'approval_expired', ctx: BookingHookContext): Promise<void> {
     const version = schedule.version + 1;
     const bumped = await tx.paymentSchedule.updateMany({ where: { id: schedule.id, version: schedule.version }, data: { version } });
     if (bumped.count !== 1) throw conflict('payment_plan_changed', 'The payment plan changed. Try again.');
@@ -115,5 +120,7 @@ export class PaymentScheduleService {
       before: { version: schedule.version }, after: { version }, context: { bookingId, supersededItems: superseded.count, cause },
     });
     await this.outbox.publish(tx, { type: PAYMENT_EVENTS.scheduleSuperseded, aggregateType: 'PaymentSchedule', aggregateId: schedule.id, aggregateVersion: version, payload: { scheduleId: schedule.id, bookingId }, actorType: ctx.actor.type, actorId: ctx.actor.id ?? undefined });
+    // The plan owes 0: money already in moves to overpayments (plan 3.3, 1.5), one key per plan version.
+    await this.ledger.reallocate(tx, { id: bookingId, currency: schedule.currency }, this.gateway.mode, scheduleReallocationKey(bookingId, version));
   }
 }

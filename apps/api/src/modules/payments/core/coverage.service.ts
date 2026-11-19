@@ -9,7 +9,7 @@ import type { LockedBooking } from '../../bookings';
 import { allocate, coverageFacts } from './allocation';
 import type { Allocation, CoverageFacts } from './allocation';
 import { ProviderGateway } from './gateway';
-import { succeededPaymentsSource } from './payable';
+import { netCollectedSource } from './payable';
 
 type Tx = Prisma.TransactionClient;
 
@@ -53,7 +53,7 @@ export class PaymentCoverageService {
   /** Active items, what was collected in this environment's mode, its split and the coverage facts. */
   async money(db: Tx, bookingId: string): Promise<BookingMoney> {
     const items = await db.paymentScheduleItem.findMany({ where: { bookingId, state: 'active' }, select: { kind: true, sequence: true, amountMinor: true } });
-    const collected = await succeededPaymentsSource.collected(db, bookingId, this.gateway.mode);
+    const collected = await netCollectedSource.collected(db, bookingId, this.gateway.mode);
     return { ...coverageFacts(items, collected), collectedMinor: collected, allocation: allocate(items, collected) };
   }
 

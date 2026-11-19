@@ -1,7 +1,6 @@
-// What the customer can pay now (plan 3.1, section 4.3): the only place this is computed. Until task 3.2 brings the
-// allocation table, "collected" is the sum of succeeded payments in this environment's mode; with no refunds or
-// chargebacks (parked) this is exactly what allocation by sequence would give. The method is not an input: no
-// surcharge can depend on it.
+// What the customer can pay now (plan 3.1, section 4.3): the only place this is computed. "Collected" is net (task 3.3):
+// succeeded payments less succeeded refunds, in this environment's mode; a reversed refund no longer counts. Payable
+// amounts, coverage and the ledger all read this one number. The method is not an input: no surcharge can depend on it.
 
 export interface ActiveItem {
   sequence: number;
@@ -47,9 +46,13 @@ export interface CollectedAmountSource {
   collected(db: import('../../../generated/prisma/client').Prisma.TransactionClient, bookingId: string, mode: 'test' | 'live'): Promise<bigint>;
 }
 
-export const succeededPaymentsSource: CollectedAmountSource = {
+export const netCollectedSource: CollectedAmountSource = {
   async collected(db, bookingId, mode) {
-    const r = await db.payment.aggregate({ where: { bookingId, mode, status: 'succeeded' }, _sum: { amountMinor: true } });
-    return r._sum.amountMinor ?? 0n;
+    const paid = await db.payment.aggregate({ where: { bookingId, mode, status: 'succeeded' }, _sum: { amountMinor: true } });
+    const refunded = await db.refund.aggregate({ where: { bookingId, mode, status: 'succeeded' }, _sum: { amountMinor: true } });
+    const net = (paid._sum.amountMinor ?? 0n) - (refunded._sum.amountMinor ?? 0n);
+    // Refunds never exceed their payments (gateway and our cap): a negative net is a broken invariant, not money.
+    if (net < 0n) throw new RangeError('refunds exceed payments for a booking');
+    return net;
   },
 };

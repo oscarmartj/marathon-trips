@@ -70,6 +70,12 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  // Task 3.3: the daily internal check of the payment ledger.
+  paymentsLedger: {
+    name: 'payments.ledger',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 1, retryDelay: 300, expireInSeconds: 1800, deleteAfterSeconds: 604800 },
+  },
   // Task 5.6: queues the automatic balance reminders that are due (one email per plan item and offset).
   paymentsReminders: {
     name: 'payments.reminders',

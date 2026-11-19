@@ -20,7 +20,7 @@ import { TemplatesService } from '../../templates';
 import { PaymentAttemptSyncService } from './attempt-sync.service';
 import { PaymentAttemptsService } from './attempts.service';
 import { ProviderGateway } from './gateway';
-import { payable, succeededPaymentsSource } from './payable';
+import { payable, netCollectedSource } from './payable';
 import { PAYABLE_STATES, PAYMENT_TX_OPTIONS } from './payable-states';
 import { PaymentRouting } from './routing';
 import { PAYMENT_SETTINGS } from './settings';
@@ -66,7 +66,7 @@ async function usable(db: Tx, link: LinkRow, b: BookingForPayments, at: Date, mo
   const items = await db.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
   const target = items.find((i) => i.id === link.targetScheduleItemId);
   if (!target) return null;
-  const collected = await succeededPaymentsSource.collected(db, b.id, mode);
+  const collected = await netCollectedSource.collected(db, b.id, mode);
   const due = payable(items, collected, target.sequence).next;
   return due ? { targetSequence: target.sequence, amountDueMinor: due.amountMinor } : null;
 }
@@ -131,7 +131,7 @@ export class PaymentLinksService {
       if (refusal === 'approval_expired') throw conflict('approval_expired', 'The time to pay the deposit for this booking has run out');
       if (refusal) throw conflict('booking_not_payable', 'This booking cannot take a payment in its current state');
       const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
-      const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
+      const collected = await netCollectedSource.collected(tx, b.id, this.gateway.mode);
       const due = payable(items, collected).next;
       if (!due) throw conflict('nothing_to_pay', 'There is nothing to pay on this booking right now');
       const target = items.find((i) => i.sequence === due.sequence)!;

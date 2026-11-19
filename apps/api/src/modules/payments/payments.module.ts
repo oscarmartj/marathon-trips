@@ -31,6 +31,10 @@ import { WEBHOOK_MAX_BYTES, WEBHOOK_PATH_PREFIX, PaymentWebhooksService } from '
 import { PAYMENT_ENTITIES } from './entities';
 import { paymentsManifest } from './manifest';
 import { TermsService } from './core/terms.service';
+import { LedgerService } from './core/ledger.service';
+import { PaymentRefundStateMachine } from './core/refunds.service';
+import { PaymentRefundSyncService } from './core/refund-sync.service';
+import { PaymentLedgerCheckService } from './core/ledger-check.service';
 import { PaymentAmendmentService } from './core/amendment-plan.service';
 import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
@@ -44,7 +48,7 @@ import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simula
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry(createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN))), inject: [APP_CONFIG] },
     ProviderGateway, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
-    SimulatorCheckoutService,
+    SimulatorCheckoutService, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
   ],
   exports: [ProviderAccountsService, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })

@@ -16,8 +16,9 @@ import { TemplatesService } from '../../templates';
 import { ProviderGateway } from './gateway';
 import { formatMinor } from './format';
 import { mintPaymentLinkToken, PaymentLinksService } from './payment-links.service';
-import { payable, succeededPaymentsSource } from './payable';
+import { payable, netCollectedSource } from './payable';
 import { PAYMENT_TX_OPTIONS } from './payable-states';
+import { bookingUnderPaymentReview } from './refunds.service';
 import { PAYMENT_SETTINGS } from './settings';
 
 export const PAYMENT_REMINDER_TEMPLATE = { key: 'payments.balance_reminder', version: 1 } as const;
@@ -29,7 +30,7 @@ export const REMINDER_HOURS = { from: 8, to: 18 } as const;
 const MAX_PER_RUN = 500;
 
 export type ReminderSkip =
-  | 'not_due_yet' | 'already_queued' | 'not_next_item' | 'item_changed' | 'booking_not_payable' | 'payment_in_progress' | 'customer_closed' | 'recipient_suppressed' | 'link_active';
+  | 'not_due_yet' | 'already_queued' | 'not_next_item' | 'item_changed' | 'booking_not_payable' | 'payment_in_progress' | 'customer_closed' | 'recipient_suppressed' | 'link_active' | 'payment_under_review';
 
 export interface ReminderRun {
   /** The sweep did nothing because it is outside business hours, or reminders are turned off. */
@@ -147,6 +148,8 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
     return runTransaction(this.prisma, async (tx) => {
       const b = await readBookingForPayments(tx, { id: bookingId }, true);
       if (!b || !(REMINDABLE_STATES as readonly string[]).includes(b.status)) return 'booking_not_payable';
+      // No reminder while the booking is under review after a refund (plan 3.3, 12.3).
+      if (await bookingUnderPaymentReview(tx, b.id)) return 'payment_under_review';
       const item = await tx.paymentScheduleItem.findUnique({ where: { id: itemId }, select: { id: true, bookingId: true, state: true, kind: true, sequence: true, dueDate: true } });
       if (!item || item.bookingId !== b.id || item.state !== 'active' || !(REMINDABLE_KINDS as readonly string[]).includes(item.kind)) return 'item_changed';
       const offset = reminderOffset(offsets, daysBetween(today, item.dueDate.toISOString().slice(0, 10)));
@@ -155,7 +158,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
       if (await tx.outboundEmail.findFirst({ where: { dedupeKey: { in: [dedupeKey, legacyReminderDedupeKey(item.id, offset)] } }, select: { id: true } })) return 'already_queued';
       // The plan's own figure: this item must be the first one the money collected does not cover.
       const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { id: true, sequence: true, amountMinor: true } });
-      const collected = await succeededPaymentsSource.collected(tx, b.id, this.gateway.mode);
+      const collected = await netCollectedSource.collected(tx, b.id, this.gateway.mode);
       if (payable(items, collected).next?.sequence !== item.sequence) return 'not_next_item';
       if (await tx.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } })) return 'payment_in_progress';
       // A link staff sent is protected while it may be in use: it has been delivered (its token exists) or its email is
@@ -197,7 +200,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
     const minted = await mintPaymentLinkToken(ctx.tx, linkId, this.gateway.mode);
     const item = await ctx.tx.paymentScheduleItem.findUniqueOrThrow({ where: { id: head.targetScheduleItemId }, select: { sequence: true, dueDate: true, currency: true } });
     const items = await ctx.tx.paymentScheduleItem.findMany({ where: { bookingId: minted.bookingId, state: 'active' }, select: { sequence: true, amountMinor: true } });
-    const collected = await succeededPaymentsSource.collected(ctx.tx, minted.bookingId, this.gateway.mode);
+    const collected = await netCollectedSource.collected(ctx.tx, minted.bookingId, this.gateway.mode);
     const due = payable(items, collected, item.sequence).next;
     if (!due) throw new AppError(MAIL_NOT_SENDABLE, 'There is nothing left to pay on this item');
     const b = await ctx.tx.booking.findUniqueOrThrow({
@@ -237,7 +240,7 @@ export class PaymentRemindersService implements OnApplicationBootstrap {
     const b = await readBookingForPayments(ctx.tx, { id: item.bookingId });
     if (!b || !(REMINDABLE_STATES as readonly string[]).includes(b.status)) return false;
     const items = await ctx.tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { sequence: true, amountMinor: true } });
-    const collected = await succeededPaymentsSource.collected(ctx.tx, b.id, this.gateway.mode);
+    const collected = await netCollectedSource.collected(ctx.tx, b.id, this.gateway.mode);
     if (payable(items, collected).next?.sequence !== item.sequence) return false;
     // Never write to someone while they are paying.
     return !(await ctx.tx.payment.findUnique({ where: { liveBookingId: b.id }, select: { id: true } }));

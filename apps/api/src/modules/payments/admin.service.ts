@@ -30,6 +30,12 @@ export class PaymentAdminService {
       select: { id: true, attemptNumber: true, origin: true, method: true, mode: true, adapterKey: true, amountMinor: true, currency: true, status: true, providerPaymentRef: true, failureCode: true, pendingExpiresAt: true, succeededAt: true, createdAt: true, targetScheduleItemId: true },
     });
     const events = await this.prisma.webhookEvent.findMany({ where: { bookingId }, orderBy: { receivedAt: 'asc' }, select: { id: true, paymentId: true, type: true, status: true, receivedAt: true, processedAt: true, errorCode: true } });
+    const refunds = await this.prisma.refund.findMany({ where: { bookingId }, orderBy: { createdAt: 'asc' }, select: { id: true, paymentId: true, origin: true, purpose: true, mode: true, amountMinor: true, currency: true, status: true, providerRefundRef: true, failureCode: true, createdAt: true, succeededAt: true } });
+    // The ledger of the booking, read only (task 3.3): nothing in the API writes or edits it.
+    const ledger = await this.prisma.ledgerTransaction.findMany({
+      where: { bookingId }, orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, occurredAt: true, kind: true, mode: true, paymentId: true, refundId: true, reversesTransactionId: true, idempotencyKey: true, description: true, entries: { orderBy: { accountCode: 'asc' }, select: { accountCode: true, currency: true, amountMinor: true } } },
+    });
     const money = await this.coverage.money(this.prisma, bookingId);
     const succeeded = await this.prisma.payment.findMany({ where: { bookingId, mode: this.gateway.mode, status: 'succeeded' }, select: { id: true, amountMinor: true, succeededAt: true } });
     const { approvalExpiresAt, ...rest } = booking;
@@ -44,6 +50,8 @@ export class PaymentAdminService {
       schedule: schedule ? { id: schedule.id, version: schedule.version, items: schedule.items.map((i) => ({ ...i, amountMinor: str(i.amountMinor), dueDate: day(i.dueDate) })) } : null,
       payments: payments.map((p) => ({ ...p, amountMinor: str(p.amountMinor) })),
       webhookEvents: events,
+      refunds: refunds.map((r) => ({ ...r, amountMinor: str(r.amountMinor) })),
+      ledger: ledger.map((t) => ({ ...t, entries: t.entries.map((e) => ({ ...e, amountMinor: str(e.amountMinor) })) })),
     };
   }
 

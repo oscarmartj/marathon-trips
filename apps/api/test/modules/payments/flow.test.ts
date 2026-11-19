@@ -8,7 +8,7 @@ import { PaymentAttemptsService } from '../../../src/modules/payments/core/attem
 import { ProviderGateway, modeForEnv } from '../../../src/modules/payments/core/gateway';
 import { PaymentRouting } from '../../../src/modules/payments/core/routing';
 import { PaymentScheduleService } from '../../../src/modules/payments/core/schedule.service';
-import { succeededPaymentsSource } from '../../../src/modules/payments/core/payable';
+import { netCollectedSource } from '../../../src/modules/payments/core/payable';
 import { SIMULATOR_CHECKOUT_PATH } from '../../../src/modules/payments/adapters/simulator/simulator';
 import { TestApp, makeApp } from '../../support/auth';
 import { ApiError, conflict } from '../../../src/platform/http/api-error';
@@ -690,8 +690,8 @@ describe('environments (plan 0.1, P11)', () => {
     const routing = new PaymentRouting(prodGateway);
     expect(await t.prisma.providerAccount.count({ where: { status: 'active', mode: 'test' } })).toBeGreaterThan(0);
     expect(await routing.candidates(t.prisma, { method: 'card', currency: 'AUD', country: 'AU' })).toEqual([]);
-    expect(await succeededPaymentsSource.collected(t.prisma, bookingId, modeForEnv('production'))).toBe(0n);
-    expect(await succeededPaymentsSource.collected(t.prisma, bookingId, modeForEnv('test'))).toBe(p!.amountMinor);
+    expect(await netCollectedSource.collected(t.prisma, bookingId, modeForEnv('production'))).toBe(0n);
+    expect(await netCollectedSource.collected(t.prisma, bookingId, modeForEnv('test'))).toBe(p!.amountMinor);
   });
 });
 
