@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { approveBookingSchema, bookingRequestSchema, staffAmendmentPreviewSchema, staffAmendmentSchema, closeBookingSchema, createCustomerSchema, listBookingsQuerySchema, listCustomersQuerySchema, updateCustomerSchema } from '@mt/shared';
+import { approveBookingSchema, bookingRequestSchema, staffAmendmentPreviewSchema, staffAmendmentSchema, staffCancelBookingSchema, acceptQuoteSchema, closeBookingSchema, createCustomerSchema, listBookingsQuerySchema, listCustomersQuerySchema, updateCustomerSchema } from '@mt/shared';
 import type { z } from 'zod';
+import { z as zod } from 'zod';
 import { OwnedBy, RequirePermission } from '../../platform/access/access.decorators';
 import { actorOf } from '../../platform/access/actor';
 import { PrismaService } from '../../platform/database/prisma.service';
@@ -14,6 +15,8 @@ import { WaitlistService, ownsWaitlistEntry } from '../waitlist';
 import { WaitlistOffersService } from './waitlist-offers.service';
 import { BookingAdminService } from './admin.service';
 import { BookingAmendmentService } from './amendment.service';
+import { BookingCancellationService } from './cancellation.service';
+import { mapLoadError } from './request.service';
 import { CustomerAdminService } from './customer-admin.service';
 import { BOOKINGS_CRM_PERMISSIONS as C, BOOKINGS_PERMISSIONS as P } from './manifest';
 import { ownsBookingReference } from './ownership';
@@ -22,6 +25,7 @@ import { BookingRequestService } from './request.service';
 import { customerView } from './views';
 
 type In<T extends z.ZodType> = z.infer<T>;
+const cancellationQuoteQuerySchema = zod.strictObject({ operatorCancelled: zod.enum(['true', 'false']).optional() });
 const uuid = () => new ParseUUIDPipe();
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9-]{16,64}$/;
 
@@ -80,6 +84,7 @@ export class BookingsAdminController {
   constructor(
     @Inject(BookingAdminService) private readonly bookings: BookingAdminService,
     @Inject(BookingAmendmentService) private readonly amendments: BookingAmendmentService,
+    @Inject(BookingCancellationService) private readonly cancellations: BookingCancellationService,
   ) {}
 
   @Get() @RequirePermission(P.read)
@@ -101,9 +106,21 @@ export class BookingsAdminController {
     return this.bookings.transition(id, 'decline', { actor: actorOf(req), version: b.version, reason: b.reason });
   }
 
+  /** Task 6.4: what cancelling now would keep and give back, with the digest the cancel must send. */
+  @Get(':id/cancellation-quote') @RequirePermission(P.read)
+  cancellationQuote(@Param('id', uuid()) id: string, @Query(new ZodPipe(cancellationQuoteQuerySchema)) q: In<typeof cancellationQuoteQuerySchema>) {
+    return this.cancellations.quote({ id }, 'staff', { operatorCancelled: q.operatorCancelled === 'true' });
+  }
+
+  /** Task 6.4: cancels with the penalty of the booking's policy (or none when we cancel it); the API computes both. */
   @Post(':id/cancel') @HttpCode(200) @RequirePermission(P.cancel)
-  cancel(@Param('id', uuid()) id: string, @Body(new ZodPipe(closeBookingSchema)) b: In<typeof closeBookingSchema>, @Req() req: ApiRequest) {
-    return this.bookings.transition(id, 'cancel', { actor: actorOf(req), version: b.version, reason: b.reason });
+  async cancel(@Param('id', uuid()) id: string, @Body(new ZodPipe(staffCancelBookingSchema)) b: In<typeof staffCancelBookingSchema>, @Req() req: ApiRequest) {
+    try {
+      await this.cancellations.cancelByStaff(id, b, actorOf(req));
+    } catch (err) {
+      throw mapLoadError(err);
+    }
+    return this.bookings.get(id);
   }
 
   /** Oscar confirms a booking whose deposit is paid (plan 0.1, 6.2; plan 3.2, section 1.5). The answer has the final status. */
@@ -161,7 +178,10 @@ export class WaitlistEntriesController {
 
   @Post(':id/accept') @HttpCode(200)
   @OwnedBy({ kind: 'customer', resource: 'waitlist-entry', fixture: 'waitlist-entry-accept', owns: (ctx) => ownsWaitlistEntry(ctx) })
-  accept(@Param('id', uuid()) id: string, @Req() req: ApiRequest) { const actor = actorOf(req); return this.offers.accept(actor.id!, id, actor); }
+  accept(@Param('id', uuid()) id: string, @Body(new ZodPipe(acceptQuoteSchema)) b: In<typeof acceptQuoteSchema>, @Req() req: ApiRequest) {
+    const actor = actorOf(req);
+    return this.offers.accept(actor.id!, id, actor, b.cancellationPolicy);
+  }
 
   @Post(':id/withdraw') @HttpCode(200)
   @OwnedBy({ kind: 'customer', resource: 'waitlist-entry', fixture: 'waitlist-entry-withdraw', owns: (ctx) => ownsWaitlistEntry(ctx) })

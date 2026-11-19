@@ -25,7 +25,7 @@ export interface DashboardNewRequest {
 export interface DashboardPendingPayment {
   bookingId: string;
   reference: string;
-  kind: 'deposit' | 'balance' | 'instalment' | 'adjustment';
+  kind: 'deposit' | 'balance' | 'instalment' | 'adjustment' | 'penalty';
   sequence: number;
   dueDate: string;
   amountDueMinor: string;

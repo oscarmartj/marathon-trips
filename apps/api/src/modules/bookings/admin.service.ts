@@ -10,6 +10,7 @@ import { BookingStateMachine } from './state-machine';
 import type { StaffBookingEvent } from './state-machine';
 import { jsonOf } from './support';
 import { staffView } from './views';
+import { cancellationView } from './cancellation.service';
 
 /** Words of a search box matched against the customer's names and address (every word must match one of them). */
 const searchCustomer = (text: string) => [{ customer: { is: { AND: text.split(/\s+/).filter(Boolean).map((w) => ({ OR: [{ givenName: { contains: w, mode: 'insensitive' as const } }, { familyName: { contains: w, mode: 'insensitive' as const } }, { email: { contains: w, mode: 'insensitive' as const } }] })) } } }];
@@ -50,7 +51,9 @@ export class BookingAdminService {
   async get(id: string) {
     const v = await staffView(this.prisma, id);
     if (!v) throw notFound('booking_not_found', 'Booking not found');
-    return v;
+    // Task 6.4: the cancellation record, when there is one (what it kept and what may go back).
+    const c = await this.prisma.cancellation.findUnique({ where: { bookingId: id } });
+    return { ...v, cancellation: c ? cancellationView(c) : null };
   }
 
   async transition(id: string, event: StaffBookingEvent, input: { actor: AuditActor; version: number; reason?: string }) {

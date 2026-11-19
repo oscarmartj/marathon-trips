@@ -76,6 +76,11 @@ export interface RefundableView {
   currency: string;
   /** Why nothing can be refunded from the app on this payment now; null when something can. */
   blockedReason: string | null;
+  /**
+   * Task 6.4: what a refund with purpose `cancellation` would give back on this payment now (its refundable, capped by
+   * what the cancellation still allows); null when the booking has no cancellation.
+   */
+  cancellationRefundableMinor: string | null;
 }
 
 const maskPayId = (v: string) => (v.length <= 4 ? '••••' : `${v.slice(0, 1)}•••${v.slice(-4)}`);
@@ -88,6 +93,20 @@ export function destinationHint(d: Pick<RefundDestinationInput, 'payId' | 'bank'
 }
 
 export const destinationAad = (refundId: string) => `refund:${refundId}:destination`;
+
+/**
+ * What the booking's cancellation still allows to go back as cancellation refunds (task 6.4, P10): its refundable amount
+ * less every cancellation refund requested, pending or succeeded (failed and reversed ones free their part). Read with
+ * the booking and all its payments locked; null when the booking has no cancellation.
+ */
+export async function cancellationRefundCap(tx: Pick<Tx, '$queryRaw'>, bookingId: string): Promise<{ cancellationId: string; refundableMinor: bigint; remainingMinor: bigint } | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string; refundable: bigint; used: bigint }>>`
+    SELECT c.id::text AS id, c."refundableMinor" AS refundable,
+      COALESCE((SELECT sum(r."amountMinor") FROM refunds r WHERE r."cancellationId" = c.id AND r.status IN ('requested', 'pending', 'succeeded')), 0)::bigint AS used
+    FROM cancellations c WHERE c."bookingId" = ${bookingId}::uuid`;
+  const c = rows[0];
+  return c ? { cancellationId: c.id, refundableMinor: c.refundable, remainingMinor: c.refundable - c.used } : null;
+}
 
 @Injectable()
 export class AppRefundsService {
@@ -107,9 +126,11 @@ export class AppRefundsService {
   /** What each succeeded payment of a booking can give back now, for the panel. */
   async refundableView(bookingId: string): Promise<RefundableView[]> {
     const mode = this.gateway.mode;
-    const [rows, payments] = await Promise.all([
+    const [rows, payments, cap, booking] = await Promise.all([
       this.prisma.$transaction((tx) => loadRefundable(tx, bookingId, mode)),
       this.prisma.payment.findMany({ where: { bookingId, mode, status: 'succeeded' }, select: { id: true, version: true, method: true, adapterKey: true, currency: true } }),
+      cancellationRefundCap(this.prisma, bookingId),
+      this.prisma.booking.findUnique({ where: { id: bookingId }, select: { status: true } }),
     ]);
     return rows.map((r) => {
       const p = payments.find((x) => x.id === r.paymentId)!;
@@ -119,7 +140,11 @@ export class AppRefundsService {
         : r.refundableMinor === 0n ? 'nothing_to_refund'
           : !manual && caps === 'none' ? 'refunds_not_supported'
             : !manual && caps === 'full' && r.refundableMinor < r.netMinor ? 'partial_refund_not_supported' : null;
-      return { paymentId: p.id, paymentVersion: p.version, method: p.method, manual, refundableMinor: blockedReason ? '0' : r.refundableMinor.toString(), currency: p.currency, blockedReason };
+      const forCancellation = cap && booking?.status === 'cancelled' ? (blockedReason || cap.remainingMinor <= 0n ? 0n : cap.remainingMinor < r.refundableMinor ? cap.remainingMinor : r.refundableMinor) : null;
+      return {
+        paymentId: p.id, paymentVersion: p.version, method: p.method, manual, refundableMinor: blockedReason ? '0' : r.refundableMinor.toString(), currency: p.currency, blockedReason,
+        cancellationRefundableMinor: forCancellation === null ? null : forCancellation.toString(),
+      };
     });
   }
 
@@ -157,8 +182,8 @@ export class AppRefundsService {
   private async create(paymentId: string, input: RequestRefund, actor: AuditActor): Promise<{ id: string; manual: boolean }> {
     const row = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { bookingId: true, providerAccountId: true, adapterKey: true } });
     if (!row) throw notFound('payment_not_found', 'Payment not found');
-    // Plan 0.1, P9: only overpayments go back from the app until 6.4 (cancellations) and the courtesy-refund task.
-    if (input.purpose === 'cancellation') throw conflict('cancellation_refund_rejected_until_cancellations_exist', 'Refunds for a cancellation are not available yet.');
+    // Plan 0.1, P9: a price reduction goes through a change of the booking (the courtesy-refund task); a cancellation refund
+    // needs the booking's cancellation (task 6.4, checked below with the booking locked).
     if (input.purpose === 'price_reduction') throw conflict('price_reduction_refund_rejected_until_amendments_exist', 'Lower the price with a change to the booking: what was paid above it can then be refunded as an overpayment.');
     const { manifest } = await this.gateway.assertAllowed(row.providerAccountId, 'refund');
     const manual = row.adapterKey === MANUAL_KEY;
@@ -176,12 +201,23 @@ export class AppRefundsService {
       if (entry.blocked === 'late_refund_in_progress') throw conflict('late_refund_in_progress', 'A refund of this booking that was marked as not made is still being processed by the payment gateway. Resolve it first.');
       if (entry.blocked === 'external_refund_in_progress') throw conflict('external_refund_in_progress', 'A refund made at the payment gateway is still in progress on this booking. Wait for it to settle.');
       if (entry.refundableMinor <= 0n) throw conflict('nothing_to_refund', 'Nothing paid on this payment is beyond what the booking owes.');
-      if (!manual && manifest.capabilities.refunds === 'full' && entry.refundableMinor < entry.netMinor) throw conflict('partial_refund_not_supported', 'This payment gateway only refunds a payment in full.');
+      // Task 6.4 (P9, P10): a cancellation refund belongs to the booking's cancellation and all of them together never go
+      // above what it left refundable; money that came in later goes back as an overpayment return.
+      let amount = entry.refundableMinor;
+      let cancellationId: string | null = null;
+      if (input.purpose === 'cancellation') {
+        const cap = await cancellationRefundCap(tx, b.id);
+        if (!cap || b.status !== 'cancelled') throw conflict('cancellation_refund_rejected_until_cancellations_exist', 'This booking has no cancellation to refund.');
+        if (cap.remainingMinor <= 0n) throw conflict('cancellation_refund_cap_reached', 'Everything this cancellation left refundable has been refunded or is on its way. Money paid since goes back as an overpayment.');
+        cancellationId = cap.cancellationId;
+        if (cap.remainingMinor < amount) amount = cap.remainingMinor;
+      }
+      if (!manual && manifest.capabilities.refunds === 'full' && amount < entry.netMinor) throw conflict('partial_refund_not_supported', 'This payment gateway only refunds a payment in full.');
       const [inserted] = await tx.$queryRaw<Array<{ id: string }>>`
         WITH n AS (SELECT gen_random_uuid() AS id)
-        INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, purpose, reason, status, "idempotencyKey", "requestedById", "manualRefund", "updatedAt")
-        SELECT n.id, ${p.id}::uuid, ${b.id}::uuid, ${p.providerAccountId}::uuid, ${p.mode}::"PaymentMode", ${p.currency}, ${entry.refundableMinor}, 'app', ${input.purpose}::"RefundPurpose",
-               ${input.reason}, 'requested', 'refund:app:' || n.id::text, ${actor.id}::uuid, ${manual}, clock_timestamp()
+        INSERT INTO refunds (id, "paymentId", "bookingId", "providerAccountId", mode, currency, "amountMinor", origin, purpose, reason, status, "idempotencyKey", "requestedById", "manualRefund", "cancellationId", "updatedAt")
+        SELECT n.id, ${p.id}::uuid, ${b.id}::uuid, ${p.providerAccountId}::uuid, ${p.mode}::"PaymentMode", ${p.currency}, ${amount}, 'app', ${input.purpose}::"RefundPurpose",
+               ${input.reason}, 'requested', 'refund:app:' || n.id::text, ${actor.id}::uuid, ${manual}, ${cancellationId}::uuid, clock_timestamp()
         FROM n RETURNING id::text AS id`;
       const id = inserted!.id;
       // The panel sends the version it read: a second tab (or a second click) with the same version now gets 409.
@@ -189,7 +225,7 @@ export class AppRefundsService {
       if (bumped !== 1) throw conflict('stale_payment_version', 'Someone else changed this payment. Reload and try again.');
       await this.audit.record(tx, {
         actor, action: 'payments.refund.requested', entityType: 'Refund', entityId: id, model: 'Refund',
-        after: { status: 'requested', amountMinor: entry.refundableMinor.toString(), currency: p.currency, purpose: input.purpose, origin: 'app', manualRefund: manual },
+        after: { status: 'requested', amountMinor: amount.toString(), currency: p.currency, purpose: input.purpose, origin: 'app', manualRefund: manual, cancellationId },
         reason: input.reason, context: { bookingId: b.id, paymentId: p.id },
       });
       await this.outbox.publish(tx, { type: PAYMENT_EVENTS.refundRequested, aggregateType: 'Refund', aggregateId: id, aggregateVersion: 0, payload: { refundId: id, paymentId: p.id, bookingId: b.id }, actorType: actor.type, actorId: actor.id ?? undefined });

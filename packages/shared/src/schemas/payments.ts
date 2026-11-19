@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cancellationPolicyPublicViewSchema } from './cancellations';
 
 // Payments (task 3.1, plan docs/plans/3.1-payment-provider-core.md). Starting a payment carries the method and, at
 // most, how far along the plan to pay: never an amount, a currency, card data or a URL. The API takes the amount from
@@ -30,7 +31,7 @@ export type StartPayment = z.infer<typeof startPaymentSchema>;
 const minor = z.string().regex(/^\d+$/);
 
 export const paymentPlanItemViewSchema = z.object({
-  kind: z.enum(['deposit', 'balance', 'instalment', 'adjustment']),
+  kind: z.enum(['deposit', 'balance', 'instalment', 'adjustment', 'penalty']),
   sequence: z.number().int(),
   amountMinor: minor,
   dueDate: z.string(),
@@ -95,6 +96,8 @@ export type PaymentPlanView = z.infer<typeof paymentPlanViewSchema>;
 export const acceptTermsSchema = z.strictObject({
   version: z.number().int().min(0).max(1_000_000),
   digest: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Task 6.4: the digest of the booking's cancellation policy shown with the terms; null when it has none. */
+  cancellationPolicyDigest: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
 });
 export type AcceptTerms = z.infer<typeof acceptTermsSchema>;
 
@@ -107,6 +110,8 @@ export const checkoutTermsViewSchema = z.object({
   body: z.string(),
   /** When the signed-in customer accepted exactly this text for this booking; null until then. */
   acceptedAt: z.string().nullable(),
+  /** Task 6.4: the cancellation policy the booking was sold under, shown with the terms; null when it has none. */
+  cancellationPolicy: cancellationPolicyPublicViewSchema.nullable(),
 });
 export type CheckoutTermsView = z.infer<typeof checkoutTermsViewSchema>;
 

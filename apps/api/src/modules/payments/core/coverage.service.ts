@@ -70,7 +70,7 @@ export class PaymentCoverageService {
     }, actor);
   }
 
-  private async applyById(tx: Tx, bookingId: string, actor: AuditActor): Promise<void> {
+  async applyById(tx: Tx, bookingId: string, actor: AuditActor): Promise<void> {
     // The booking transition holds the lock already; taking it again in the same transaction does not wait.
     const b = await readBookingForPayments(tx, { id: bookingId }, true);
     if (!b) throw notFound('booking_not_found', 'Booking not found');

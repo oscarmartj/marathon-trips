@@ -7,7 +7,8 @@ import { APP_CONFIG } from '../../platform/database/prisma.service';
 import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { RawBodyRoutes } from '../../platform/http/raw-body';
-import { BookingAmendmentHooks, BookingTransitionHooks, BookingsModule } from '../bookings';
+import { PricingModule } from '../pricing';
+import { BookingAmendmentHooks, BookingCancellationHooks, BookingTransitionHooks, BookingsModule } from '../bookings';
 import { TemplatesModule } from '../templates';
 import { MailTemplateRegistry } from '../../platform/mail/templates';
 import { PAYMENT_LINK_TEMPLATE, PaymentLinksService } from './core/payment-links.service';
@@ -45,6 +46,7 @@ import { PaymentRefundStateMachine } from './core/refunds.service';
 import { PaymentRefundSyncService } from './core/refund-sync.service';
 import { PaymentLedgerCheckService } from './core/ledger-check.service';
 import { PaymentAmendmentService } from './core/amendment-plan.service';
+import { PaymentCancellationService } from './core/cancellation-money.service';
 import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, ProviderAccountRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
 import { AppRefundsService } from './core/app-refunds.service';
@@ -52,14 +54,14 @@ import { PaymentDisputesService } from './core/disputes.service';
 import { PaymentRefundsAdminController } from './refunds.controller';
 
 @Module({
-  imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule],
+  imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule, PricingModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
   controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
     { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
     ProviderGateway, ProviderHealthService, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
-    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService,
+    PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService, PaymentCancellationService,
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
     CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard, RoutingRulesAdminService,
     AppRefundsService, PaymentDisputesService,
@@ -81,6 +83,8 @@ export class PaymentsModule implements OnModuleInit {
     @Inject(PaymentRemindersService) private readonly reminders: PaymentRemindersService,
     @Inject(BookingAmendmentHooks) private readonly amendmentHooks: BookingAmendmentHooks,
     @Inject(PaymentAmendmentService) private readonly amendments: PaymentAmendmentService,
+    @Inject(BookingCancellationHooks) private readonly cancellationHooks: BookingCancellationHooks,
+    @Inject(PaymentCancellationService) private readonly cancellations: PaymentCancellationService,
     @Inject(InboundPaymentHooks) private readonly inbound: InboundPaymentHooks,
     @Inject(LedgerService) private readonly ledger: LedgerService,
     @Inject(ProviderAccountsAdminService) private readonly accountsAdmin: ProviderAccountsAdminService,
@@ -94,6 +98,8 @@ export class PaymentsModule implements OnModuleInit {
     this.schedule.register(this.hooks);
     this.coverage.register(this.hooks);
     this.amendments.register(this.amendmentHooks);
+    // Task 6.4: what a cancellation needs to know about the money, and its after phase.
+    this.cancellations.register(this.hooks, this.cancellationHooks);
     // Task 3.3: the ledger follows a confirmed bank transfer and its void (task 3.4's hooks), in the same transaction.
     this.inbound.onConfirmed('payments.ledger', async (tx, p) => void (await this.ledger.postPaymentSucceeded(tx, { id: p.bookingId, currency: p.currency }, p)));
     this.inbound.onVoided('payments.ledger', async (tx, p) => void (await this.ledger.postInboundVoided(tx, { id: p.bookingId, currency: p.currency }, p)));

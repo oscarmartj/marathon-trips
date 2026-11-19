@@ -41,7 +41,8 @@ export type StaffBookingEvent = 'approve' | 'decline' | 'cancel' | 'confirm';
 export const BOOKING_EVENT_TABLE: Readonly<Record<BookingEvent, Partial<Record<BookingStatus, BookingStatus>>>> = {
   approve: { requested: 'approved' },
   decline: { requested: 'declined' },
-  cancel: { requested: 'cancelled', approved: 'cancelled' },
+  // Task 6.4: paid bookings too, with the penalty of their policy (plan docs/plans/6.4-cancellation-policies.md).
+  cancel: { requested: 'cancelled', approved: 'cancelled', deposit_paid: 'cancelled', confirmed: 'cancelled', balance_paid: 'cancelled' },
   expire_request: { requested: 'expired' },
   confirm: { deposit_paid: 'confirmed' },
   expire_approval: { approved: 'expired' },
@@ -62,10 +63,6 @@ const SWEEP_EVENTS: ReadonlySet<BookingEvent> = new Set(['expire_request', 'expi
 /** Events other modules hook into (hooks.ts). */
 const HOOKED: ReadonlySet<BookingEvent> = new Set(['approve', 'cancel', 'confirm', 'expire_approval']);
 
-/** Cells that move money: a 409 until payments exist (tasks 3.2 and 6.4), never a silent cancellation. */
-export const MONEY_CELLS: Readonly<Partial<Record<BookingEvent, readonly BookingStatus[]>>> = {
-  cancel: ['deposit_paid', 'confirmed', 'balance_paid'],
-};
 
 /** The event published for each status a transition can reach. */
 const STATUS_EVENT: Partial<Record<BookingStatus, string>> = {
@@ -110,6 +107,8 @@ export interface TransitionInput {
   reason?: string;
   /** Hours an approval lasts, when the caller already read the setting (a caller inside a transaction must not read it there). */
   approvalHours?: number;
+  /** Task 6.4: the cancellation record of a `cancel` (CancellationService writes it first; the payments hook needs it). */
+  cancellation?: { id: string; penaltyMinor: bigint; dueDate: string };
 }
 
 export type TransitionResult = { changed: true; from: BookingStatus; to: BookingStatus; at: Date } | { changed: false; status: BookingStatus };
@@ -147,7 +146,6 @@ export class BookingStateMachine {
       if (!to || !due || due.getTime() > at.getTime()) return { changed: false, status: b.status };
     } else {
       if (!to) {
-        if (MONEY_CELLS[event]?.includes(b.status)) throw conflict('cancellation_needs_payments', 'This booking has payments to settle first. Cancelling it is not available yet.');
         throw conflict('transition_not_allowed', 'This booking cannot change that way in its current state');
       }
       if (input.version !== undefined && input.version !== b.version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
@@ -157,7 +155,8 @@ export class BookingStateMachine {
     const approvalExpiresAt = to === 'approved' ? new Date(at.getTime() + approvalHours * 3_600_000) : null;
     const hooked = { id: b.id, customerId: b.customerId, packageId: b.packageId, currency: b.currency, from: b.status };
     const hookedEvent = HOOKED.has(event) ? (event as HookedEvent) : null;
-    if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, { actor: input.actor, at, approvalExpiresAt });
+    const hookCtx = { actor: input.actor, at, approvalExpiresAt, ...(input.cancellation ? { cancellation: input.cancellation } : {}) };
+    if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, hookCtx);
 
     // Going back to approved after a voided transfer is not a new approval: its date stays (the window to pay starts again).
     const column = event === 'deposit_uncovered' || NO_RELEASE.has(event) ? undefined : TIME_COLUMN[to];
@@ -191,7 +190,7 @@ export class BookingStateMachine {
       payload: { bookingId: b.id, packageId: b.packageId, editionId: b.editionId, from: b.status, to }, actorType: input.actor.type, actorId: input.actor.id ?? undefined,
     });
     // After the new status is written, in the same transaction (task 3.2: the coverage rule after approval and confirmation).
-    if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, { actor: input.actor, at, approvalExpiresAt }, 'after');
+    if (hookedEvent) await this.hooks.run(hookedEvent, tx, hooked, hookCtx, 'after');
     return { changed: true, from: b.status, to, at };
   }
 

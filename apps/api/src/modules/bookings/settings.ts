@@ -37,8 +37,14 @@ export async function readAmendmentSettings(settings: SettingsService): Promise<
   };
 }
 
+/** Task 6.4 (plan decision 7): customers cancel online only once Oscar switches it on. */
+export const CANCELLATION_SETTINGS = {
+  customerEnabled: { key: 'customerCancellationsEnabled', fallback: false as boolean, schema: z.boolean(), financial: true, description: 'Customers may cancel a booking after its deposit themselves, with the penalty of its cancellation policy (never after departure)' },
+} as const;
+
 export function defineBookingSettings(settings: SettingsService): void {
   for (const s of Object.values(BOOKING_SETTINGS)) settings.define(s.key, s.schema, 1, { description: s.description });
+  for (const s of Object.values(CANCELLATION_SETTINGS)) settings.define(s.key, s.schema, 1, { description: s.description, financial: s.financial });
   for (const s of Object.values(AMENDMENT_SETTINGS)) settings.define(s.key, s.schema, 1, { description: s.description, ...('financial' in s ? { financial: s.financial } : {}) });
 }
 

@@ -179,10 +179,13 @@ export class BookingAmendmentService {
     // 4. The new snapshot and the booking's move to it (compare-and-set on the version read under the lock).
     const configuration = snapshotConfigurationSchema.parse(jsonOf(e.breakdown.configuration));
     const priceBreakdown = snapshotBreakdownSchema.parse(jsonOf(e.breakdown));
+    // Task 6.4: a change keeps the cancellation policy the booking was sold under (a trigger refuses anything else).
+    const base = await tx.bookingSnapshot.findUnique({ where: { bookingId_version: { bookingId: e.bookingId, version: e.fromVersion } }, select: { cancellationPolicyId: true } });
     await tx.bookingSnapshot.create({
       data: {
         bookingId: e.bookingId, version: to, kind: 'amendment', configuration, priceBreakdown: priceBreakdown as unknown as Prisma.InputJsonObject,
         totalMinor: e.breakdown.totalMinor, depositMinor: e.breakdown.depositMinor!, currency: e.currency, priceVersionId: e.breakdown.priceVersionId, engineVersion: e.breakdown.engineVersion,
+        cancellationPolicyId: base?.cancellationPolicyId ?? null,
       },
     });
     const moved = await this.machine.moveToSnapshot(tx, e.bookingId, e.fromVersion, {

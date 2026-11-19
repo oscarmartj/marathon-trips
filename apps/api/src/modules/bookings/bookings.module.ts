@@ -10,6 +10,8 @@ import { WaitlistModule } from '../waitlist';
 import { BookingAdminService } from './admin.service';
 import { BookingAmendmentHooks } from './amendment-hooks';
 import { BookingAmendmentService } from './amendment.service';
+import { BookingCancellationHooks } from './cancellation-hooks';
+import { BookingCancellationService } from './cancellation.service';
 import { BookingCoverage } from './coverage';
 import { BookingRequestsController, BookingsAdminController, CustomersAdminController, WaitlistEntriesController } from './controllers';
 import { CustomerAdminService } from './customer-admin.service';
@@ -33,9 +35,9 @@ import { ReferenceGenerator } from './support';
   providers: [
     BookingRequestService, BookingStateMachine, BookingAdminService, BookingExpiryService, BookingTransitionHooks, CustomerService,
     ReferenceGenerator, BookingRequestRateLimitGuard, CustomerAdminService, QuotedBookingService, BookingCoverage, WaitlistOffersService,
-    BookingAmendmentHooks, BookingAmendmentService,
+    BookingAmendmentHooks, BookingAmendmentService, BookingCancellationHooks, BookingCancellationService,
   ],
-  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage, CustomerService, BookingAmendmentHooks, BookingAmendmentService],
+  exports: [BookingTransitionHooks, BookingStateMachine, QuotedBookingService, ReferenceGenerator, BookingCoverage, CustomerService, BookingAmendmentHooks, BookingAmendmentService, BookingCancellationHooks, BookingCancellationService],
 })
 export class BookingsModule implements OnModuleInit {
   constructor(

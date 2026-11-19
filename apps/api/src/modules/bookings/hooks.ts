@@ -17,6 +17,8 @@ export interface BookingHookContext {
   at: Date;
   /** On approval: when the approval will expire (task 3.1 dates the deposit from it). */
   approvalExpiresAt?: Date | null;
+  /** On cancellation (task 6.4): the record written just before, and what the plan keeps owing. */
+  cancellation?: { id: string; penaltyMinor: bigint; dueDate: string };
 }
 
 export type BookingHook = (tx: Prisma.TransactionClient, booking: HookedBooking, ctx: BookingHookContext) => Promise<void>;

@@ -8,6 +8,7 @@ import { conflict, notFound } from '../../platform/http/api-error';
 import { PackagePricingReader, lockPackage } from '../catalogue';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { QuotedBookingService, dbNow, mapLoadError, readBookingLimits, todayInBrisbane } from '../bookings';
+import { CancellationPolicyService } from '../pricing';
 import type { BookingLimits } from '../bookings';
 import { QUOTE_TX_OPTIONS } from './quote.service';
 import { CRM_EVENTS } from './manifest';
@@ -53,19 +54,20 @@ export class QuoteAcceptanceService {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
+    @Inject(CancellationPolicyService) private readonly policies: CancellationPolicyService,
   ) {}
 
-  async accept(userId: string, reference: string, actor: AuditActor): Promise<{ bookingReference: string; created: boolean }> {
+  async accept(userId: string, reference: string, actor: AuditActor, shown: { id: string; digest: string } | null = null): Promise<{ bookingReference: string; created: boolean }> {
     // Settings are read before the transaction: inside it they would need a second connection while this one is held.
     const limits = await readBookingLimits(this.settings);
     try {
-      return await runTransaction(this.prisma, (tx) => this.acceptIn(tx, userId, reference, actor, limits), QUOTE_TX_OPTIONS);
+      return await runTransaction(this.prisma, (tx) => this.acceptIn(tx, userId, reference, actor, limits, shown), QUOTE_TX_OPTIONS);
     } catch (err) {
       throw mapLoadError(err);
     }
   }
 
-  private async acceptIn(tx: Parameters<Parameters<typeof runTransaction>[1]>[0], userId: string, reference: string, actor: AuditActor, limits: BookingLimits) {
+  private async acceptIn(tx: Parameters<Parameters<typeof runTransaction>[1]>[0], userId: string, reference: string, actor: AuditActor, limits: BookingLimits, shown: { id: string; digest: string } | null) {
     // The customer first (their user's quote only), then the quote.
     const owner = await tx.$queryRaw<Array<{ customerId: string }>>`
       SELECT q."customerId" FROM quotes q JOIN customers c ON c.id = q."customerId" WHERE q.reference = ${reference} AND q.status <> 'draft' AND c."userId" = ${userId}::uuid`;
@@ -97,11 +99,13 @@ export class QuoteAcceptanceService {
       throw conflict('quote_not_available', 'This trip has changed since the quote was made. Ask us for a new one.');
     }
     if (day(q.departureDate) <= todayInBrisbane(at)) throw conflict('package_departed', 'This trip has already started');
+    // Task 6.4 (plan section 13, M2): the cancellation policy shown with the quote is the one the package sells under now.
+    const policy = await this.policies.assertShown(tx, q.packageId, shown);
 
     const booking = await this.bookings.createApprovedFromQuote(tx, {
       quoteId: q.id, customerId: q.customerId, packageId: q.packageId, editionId: q.editionId, currency: q.currency, totalMinor: q.totalMinor, depositMinor: q.depositMinor,
       priceVersionId: q.priceVersionId, engineVersion: q.engineVersion, departureDate: day(q.departureDate), returnDate: day(q.returnDate), balanceDueDate: day(q.balanceDueDate),
-      configuration: q.configuration as never, priceBreakdown: q.priceBreakdown as never,
+      configuration: q.configuration as never, priceBreakdown: q.priceBreakdown as never, cancellationPolicyId: policy?.id ?? null,
     }, customer, actor, limits);
 
     // Compare-and-set on the locked row: the quote is accepted once, with its booking.

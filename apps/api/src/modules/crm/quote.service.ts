@@ -11,7 +11,7 @@ import { SettingsService } from '../../platform/flags/flags.service';
 import { conflict, notFound } from '../../platform/http/api-error';
 import { MailService } from '../../platform/mail/mail.service';
 import { ReferenceGenerator, dbNow, jsonOf, snapshotBreakdownSchema, snapshotConfigurationSchema, type SnapshotConfiguration, startOfDayInBrisbane, todayInBrisbane } from '../bookings';
-import { QuoteService as PricingQuoteService, REDEEM_TX_OPTIONS, publicPromoStatus } from '../pricing';
+import { CancellationPolicyService, QuoteService as PricingQuoteService, REDEEM_TX_OPTIONS, publicPromoStatus } from '../pricing';
 import { safeError } from '../../platform/errors/safe-error';
 import { QUOTE_SENT_TEMPLATE } from './emails';
 import { CRM_EVENTS } from './manifest';
@@ -55,6 +55,7 @@ export class QuoteService {
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(MailService) private readonly mail: MailService,
     @Inject(ReferenceGenerator) private readonly references: ReferenceGenerator,
+    @Inject(CancellationPolicyService) private readonly policies: CancellationPolicyService,
   ) {}
 
   async create(actor: AuditActor, body: CreateQuote) {
@@ -193,7 +194,7 @@ export class QuoteService {
       where: { reference },
       select: {
         reference: true, status: true, currency: true, totalMinor: true, depositMinor: true, departureDate: true, returnDate: true, balanceDueDate: true, expiresAt: true,
-        priceBreakdown: true, package: { select: { slug: true, name: true, edition: { select: { year: true, race: { select: { slug: true, name: true } } } } } },
+        priceBreakdown: true, packageId: true, package: { select: { slug: true, name: true, edition: { select: { year: true, race: { select: { slug: true, name: true } } } } } },
         booking: { select: { reference: true } },
       },
     });
@@ -201,7 +202,10 @@ export class QuoteService {
     const at = await this.prisma.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at`;
     const held = q.priceBreakdown as unknown as z.infer<typeof snapshotBreakdownSchema>;
     const acceptable = q.status === 'sent' && q.expiresAt !== null && q.expiresAt.getTime() > at[0]!.at.getTime();
+    // Task 6.4 (plan section 13, M2): the cancellation policy accepting would bind the customer to; sent back on accept.
+    const { policy } = await this.policies.publicForPackage(q.packageId);
     return jsonOf({
+      cancellationPolicy: policy,
       reference: q.reference, status: q.status, acceptable, expiresAt: q.expiresAt, departureDate: q.departureDate, returnDate: q.returnDate, balanceDueDate: q.balanceDueDate,
       currency: q.currency, totalMinor: q.totalMinor, depositMinor: q.depositMinor, bookingReference: q.booking?.reference ?? null,
       package: { slug: q.package.slug, name: q.package.name, editionYear: q.package.edition.year, race: q.package.edition.race },
