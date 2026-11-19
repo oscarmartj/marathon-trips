@@ -217,6 +217,17 @@ export class PaymentWebhooksService {
       if (!confirmed) throw new AppError('refund_not_confirmed_by_gateway', 'The gateway does not confirm this refund');
       remote = confirmed;
     }
+    // Task 4.4 (plan 4.4, section 7, review finding 4): a refund event without our id that no refund of ours holds yet
+    // may be the answer to our own request whose response is still on its way (Pin's refunds carry no metadata). The
+    // gateway's adapter is asked first; only if it does not know our id is the refund recorded as made outside the app.
+    // A failure of that call leaves the event failed, to be retried: never recorded as external on a guess.
+    if (!remote.ourRefundId) {
+      const known = await this.prisma.refund.findFirst({ where: { providerAccountId: accountId, providerRefundRef: remote.ref }, select: { id: true } });
+      if (!known) {
+        const reread = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrieveRefund(ctx, { ref: said.ref }));
+        if (reread?.ourRefundId && reread.ref === remote.ref) remote = { ...remote, ourRefundId: reread.ourRefundId };
+      }
+    }
     const match = remotePayment ? await this.matchPayment(accountId, remotePayment) : null;
     if (!match || !remotePayment) return this.unknownPayment(ev.id);
     // Refunds of this payment still open here: their real state first, so a stale one never blocks a real refund.

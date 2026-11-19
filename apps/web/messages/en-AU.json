@@ -67,6 +67,7 @@
     "accountTravellers": "Traveller details",
     "payLink": "Pay with your link",
     "payLinkReturn": "Your payment",
+    "payCard": "Pay by card",
     "accountPrivacy": "Privacy and marketing",
     "mailUnsubscribe": "Unsubscribe from marketing emails",
     "accountChange": "Change your booking",
@@ -4509,6 +4510,44 @@
         "generic": "We could not cancel your booking. Try again shortly, or contact us.",
         "network": "We could not reach our server. Check your connection and try again."
       }
+    }
+  },
+  "cardPage": {
+    "title": "Pay by card",
+    "intro": "Enter your card details below. They go straight to our card payment provider, never to us.",
+    "loading": "Getting your payment ready…",
+    "noscript": "This page needs JavaScript to show the secure card fields.",
+    "amount": "Amount to pay: {amount}",
+    "hostedNote": "The card fields are run by our card payment provider. Your bank may ask you to confirm the payment.",
+    "fields": {
+      "name": "Name on card",
+      "number": "Card number",
+      "expiry": "Expiry date",
+      "cvc": "Security code"
+    },
+    "pay": "Pay {amount}",
+    "paying": "Sending your payment…",
+    "processing": "We are checking your payment. This can take a few minutes. You can close this page and check your booking later.",
+    "finished": "This payment is finished.",
+    "continue": "Continue",
+    "unavailable": "Card payments are not available right now. Go back to your booking and try again later.",
+    "toAccount": "Go to your account",
+    "failed": {
+      "declined": "Your card was declined. Start again from your booking to use another card.",
+      "notAuthenticated": "Your bank did not confirm the payment. Start again from your booking to try again.",
+      "busy": "Too many payments were being made at once. Start again from your booking in a few minutes.",
+      "generic": "This payment could not be completed. Start again from your booking."
+    },
+    "errors": {
+      "notFound": "We could not find this payment. Start again from your booking.",
+      "notOpen": "This payment is no longer open. Start again from your booking.",
+      "underReview": "This booking is being reviewed. Contact us before paying.",
+      "invalid": "Something was wrong with the card details. Check them and try again.",
+      "tooMany": "Too many attempts. Wait a few minutes and try again.",
+      "checkCard": "Check your card details and try again.",
+      "fieldsUnavailable": "The secure card fields could not be loaded. Reload the page or try again later.",
+      "network": "We could not reach the server. Check your connection and try again.",
+      "generic": "Something went wrong. Start again from your booking."
     }
   }
 }

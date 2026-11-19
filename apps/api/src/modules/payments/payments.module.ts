@@ -3,7 +3,11 @@ import { PermissionRegistry } from '../../platform/access/permissions';
 import { AuthModule } from '../../platform/auth/auth.module';
 import { CommonModule } from '../../platform/common/common.module';
 import type { AppConfig } from '../../platform/config/config';
-import { APP_CONFIG } from '../../platform/database/prisma.service';
+import { APP_CONFIG, PrismaService } from '../../platform/database/prisma.service';
+import { TasksService } from '../../platform/common/tasks/tasks.service';
+import { PrismaCardSessionStore } from './core/card-sessions/prisma-store';
+import { CardSessionsService } from './core/card-sessions/card-sessions.service';
+import { CardSessionsController } from './card-sessions.controller';
 import { EntityRegistry } from '../../platform/entities/entity-registry';
 import { SettingsService } from '../../platform/flags/flags.service';
 import { RawBodyRoutes } from '../../platform/http/raw-body';
@@ -65,15 +69,21 @@ import { ConsumerRegistry } from '../../platform/events/consumers';
   imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule, PricingModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
-  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, PaymentReconciliationAdminController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
+  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, PaymentReconciliationAdminController, CardSessionsController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
-    { provide: PaymentAdapterRegistry, useFactory: (config: AppConfig) => new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN)), new ManualProvider()]), inject: [APP_CONFIG] },
+    {
+      provide: PaymentAdapterRegistry,
+      // Task 4.4: the card sessions of Pin Payments live in the database (migration 0039).
+      useFactory: (config: AppConfig, prisma: PrismaService, tasks: TasksService) =>
+        new PaymentAdapterRegistry([...createAdapters(adapterOptions(config.APP_ENV, config.WEB_ORIGIN, new PrismaCardSessionStore(prisma, tasks))), new ManualProvider()]),
+      inject: [APP_CONFIG, PrismaService, TasksService],
+    },
     ProviderGateway, ProviderHealthService, PaymentRouting, PaymentStateMachine, PaymentScheduleService, PaymentAttemptsService, PaymentAttemptSyncService,
     PaymentWebhooksService, PaymentsMaintenanceService, ProviderAccountsService, PaymentAdminService, PaymentAttemptRateLimitGuard, CheckoutRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, PaymentCoverageService, TermsService, PaymentLinksService, PaymentRemindersService, PaymentPendingService, PaymentAmendmentService, PaymentCancellationService,
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
     CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard, RoutingRulesAdminService,
     AppRefundsService, PaymentDisputesService,
-    SettlementsService, DisputeSyncService, ReconciliationService, ReceiptsService, ClientMoneyService, SupplierLedger,
+    SettlementsService, DisputeSyncService, ReconciliationService, ReceiptsService, ClientMoneyService, CardSessionsService, SupplierLedger,
   ],
   exports: [SupplierLedger, ReceiptsService, ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })

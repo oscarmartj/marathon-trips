@@ -54,6 +54,10 @@ Sin sandbox, el adaptador se queda en `experimental` y no puede pasar a modo rea
 
 Por ejemplo, una pasarela sin marca de tiempo firmada en sus webhooks. Se cambia el contrato en un plan revisado, para todos los adaptadores. Nunca se añade una excepción en el sujeto de un adaptador.
 
+Así se hizo en 4.4 (plan 4.4, §12.2 y §18 M1), por capacidad y no por adaptador:
+- `NO_GATEWAY_EVENT`: un sujeto puede responderlo a `webhookFor` solo si el manifiesto declara `capabilities.preCardSession`, que solo pone `CardSessionProvider`. El registro lo comprueba en los dos sentidos. Entonces las cláusulas de firma usan el evento de un pago cobrado, y "un evento viejo conserva su estado" se comprueba con dos eventos reales de un reembolso (`refundSettles`).
+- `capabilities.refundEventOurId: 'via_retrieve'`: los eventos de reembolso no traen nuestro id; `retrieveRefund({ ref })` sí lo trae. El núcleo lo consulta antes de anotar un reembolso como externo.
+
 ## El simulador
 
 Es el adaptador `simulator`: `testOnly`, `experimental` y sin sandbox. Su página alojada (`/api/payments/simulator/checkout/<token>`) existe solo en `development`, `test` y `ci`. Allí se paga o se rechaza un pago de prueba; el simulador entrega el webhook firmado por la misma entrada que una pasarela real. Sirve para probar a mano (`pnpm dev`) y para Playwright (3.5).
@@ -78,6 +82,16 @@ Para probarlo con el sandbox (cuando Oscar tenga la app):
 2. En el panel ("Payment gateways"), cuenta PayPal con el client ID y el secret de la app; nace pausada y enseña una vez la URL del webhook.
 3. En la app de PayPal, un webhook a esa URL con los eventos `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.PENDING`, `PAYMENT.CAPTURE.DECLINED`, `PAYMENT.CAPTURE.REFUNDED`, `PAYMENT.REFUND.PENDING` y `PAYMENT.REFUND.FAILED`. Su ID va en "Set webhook secret"; después, probar la conexión y activar.
 4. Grabar una entrega real de captura y otra de reembolso (cabeceras y cuerpo en base64, en un JSON `[{ headers, bodyBase64 }]`) y ejecutar, con `playwright` añadido antes: `SANDBOX_ADAPTER=paypal PAYPAL_SANDBOX_CLIENT_ID=… PAYPAL_SANDBOX_CLIENT_SECRET=… PAYPAL_SANDBOX_WEBHOOK_ID=… PAYPAL_SANDBOX_BUYER_EMAIL=… PAYPAL_SANDBOX_BUYER_PASSWORD=… PAYPAL_SANDBOX_RECORDED_DELIVERY=<ruta> pnpm --filter @mt/api test:sandbox`. Sin las entregas grabadas falla. Los casos de tarjeta rechazada piden las pruebas negativas del sandbox de PayPal y se completan en esa sesión.
+
+## Pin Payments (4.4)
+
+Adaptador `pin_payments`, `experimental`. Pin no tiene objeto de pago hasta que el cliente mete la tarjeta en sus campos alojados (iframes de Pin en nuestra página `/pay/card/<ref>`), así que la clase registrada es `CardSessionProvider` (`core/card-sessions/`): guarda la sesión antes de la tarjeta y las intenciones de reembolso en la base (migración 0039) y habla con Pin a través de `PinPaymentsGateway`, que implementa la interfaz estrecha `CardTokenGateway` de `core/provider.ts`. Una pasarela nueva de campos alojados implementa esa interfaz y reutiliza sesiones, página y batería. Reglas que no se tocan: un solo `POST /charges` por sesión, 3-D Secure siempre (`fallback_ok: false`), un resultado desconocido nunca reabre la sesión ni repite un reembolso. En modo prueba solo habla con `https://test-api.pinpayments.com/1`. En CI pasa la batería contra un Pin falso (`test/contract/subjects/pin-fake.ts`), con el almacén en memoria y con el de la base. Plan y supuestos A1–A18: `docs/plans/4.4-au-card-gateway.md`.
+
+Para probarlo con la cuenta de prueba de Pin (cuando Oscar la tenga):
+
+1. En el panel de Pin (modo prueba), las claves secreta y publicable, y un endpoint de webhook (Account > Webhooks) a la URL que enseña nuestro panel al crear la cuenta. Confirmar con Pin que no envía recibos a los pagadores (A13) y apagar cualquier recargo: en esta integración no hay ninguno.
+2. En el panel ("Payment gateways"), cuenta Pin Payments con las dos claves; nace pausada. "Set webhook secret" con el `key` del endpoint (la prueba de conexión comprueba que ese endpoint existe en Pin); después, probar la conexión y activar.
+3. Grabar entregas reales de un cargo y de un reembolso, y dos reintentos (`[{ headers, bodyBase64, receivedAt }]`; A1–A3, A16), y ejecutar: `SANDBOX_ADAPTER=pin_payments PIN_TEST_SECRET_KEY=… PIN_TEST_PUBLISHABLE_KEY=… PIN_TEST_WEBHOOK_KEY=… PIN_TEST_CARD_PAY=… PIN_TEST_CARD_DECLINE=… PIN_TEST_RECORDED_DELIVERY=<ruta> pnpm --filter @mt/api test:sandbox`. El desafío de 3-D Secure en el banco de pruebas puede necesitar a una persona.
 
 ## Cuentas en el panel (4.1)
 
