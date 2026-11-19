@@ -94,6 +94,33 @@ export const OWNED_ROUTE_FIXTURES: Record<string, OwnedRouteFixture> = {
       return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
     },
   },
+  // Task 4.6: receipts. The list of A's booking, and one receipt of A's paid booking (paid through the simulator).
+  'account-booking-receipts': {
+    async create(t, a, b) {
+      const path = `/account/bookings/${await approvedRequestOf(t, a)}/receipts`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
+  'account-booking-receipt': {
+    async create(t, a, b) {
+      const reference = await approvedRequestOf(t, a);
+      const { acceptCurrentTerms, deliver, eventFor, onlyAccount, sim, simulatorAccount } = await import('./payments');
+      const { ReceiptsService } = await import('../../src/modules/payments/core/receipts.service');
+      await acceptCurrentTerms(t, a, reference);
+      const acc = await simulatorAccount(t);
+      await onlyAccount(t, acc.id);
+      const res = await t.http().post(`/booking-requests/${reference}/payments`).set(STATE_HEADERS).set('Cookie', a.cookie).set('Idempotency-Key', randomUUID()).send({ method: 'card' });
+      if (res.status !== 201) throw new Error(`payment failed: ${res.status} ${JSON.stringify(res.body)}`);
+      const booking = await t.prisma.booking.findUniqueOrThrow({ where: { reference } });
+      const p = (await t.prisma.payment.findMany({ where: { bookingId: booking.id } }))[0]!;
+      sim.settle(acc.id, p.providerPaymentRef!, 'succeeded');
+      await deliver(t, acc, await eventFor(t, acc, p.id));
+      await t.app.get(ReceiptsService).sweep({ bookingIds: [booking.id] });
+      const { number } = await t.prisma.receipt.findFirstOrThrow({ where: { bookingId: booking.id } });
+      const path = `/account/bookings/${reference}/receipts/${number}`;
+      return { asOwner: () => t.http().get(path).set('Cookie', a.cookie), asOther: () => t.http().get(path).set('Cookie', b.cookie) };
+    },
+  },
   // Task 5.2: traveller details. A's booking with the deposit paid; B reads, saves and clears A's place 1.
   'account-booking-travellers': {
     async create(t, a, b) {

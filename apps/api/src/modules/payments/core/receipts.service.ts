@@ -105,7 +105,8 @@ export interface DocumentContent {
 // ATO: a business not registered for GST does not use the words "tax invoice" (plan 4.6, section 5.1), not even to deny them.
 const FOOTER_PLAIN = 'A record of money received or returned for the booking above.';
 
-export const contentSha256 = (c: DocumentContent): string => createHash('sha256').update(JSON.stringify(c)).digest('hex');
+/** SHA-256 of the content with its keys sorted (the database keeps JSON in its own key order). */
+export const contentSha256 = (c: DocumentContent): string => createHash('sha256').update(JSON.stringify(c, Object.keys(c).sort())).digest('hex');
 
 /** The document's PDF, rebuilt from its stored content with the fixed layout (the same bytes every time). */
 export function renderDocument(c: DocumentContent): Buffer {
