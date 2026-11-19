@@ -204,7 +204,8 @@ describe('refund events that are not posted (plan 3.3, 3.3 and 12.6)', () => {
     const r = sim.gatewayRefund(acc.id, p.providerPaymentRef!, 700n);
     expect((await deliver(t, acc, refundEvent(r.ref))).outcome).toBe('processed');
     expect((await t.prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe('succeeded');
-    expect((await ledgerOf(t, bookingId)).map((x) => x.kind)).toEqual(['payment', 'refund']);
+    // Both in one database transaction (same occurredAt): the payment's posting and the refund's.
+    expect((await ledgerOf(t, bookingId)).map((x) => x.kind).sort()).toEqual(['payment', 'refund']);
     expect(await check(bookingId)).toEqual([]);
   });
 
