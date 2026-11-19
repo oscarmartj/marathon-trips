@@ -39,6 +39,10 @@ export const BOOKING_EVENTS = {
   balanceReopened: 'bookings.booking.balance_reopened',
   /** Task 3.4: a confirmed transfer was voided and the deposit is no longer covered, so the booking goes back to approved. */
   depositReopened: 'bookings.booking.deposit_reopened',
+  /** Task 4.5: everything collected for a cancelled booking was given back (cancelled → refunded). */
+  refunded: 'bookings.booking.refunded',
+  /** Task 4.5: money came back to a refunded booking (a refund reversed, a chargeback reinstated): refunded → cancelled. */
+  refundReversed: 'bookings.booking.refund_reversed',
 } as const;
 
 export const bookingsManifest = {

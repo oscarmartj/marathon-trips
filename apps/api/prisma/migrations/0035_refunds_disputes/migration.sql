@@ -6,7 +6,7 @@ CREATE TYPE "DisputeStatus" AS ENUM ('open', 'evidence_submitted', 'won', 'lost'
 
 ALTER TABLE "refunds"
   ADD COLUMN "manualRefund" BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN "destinationCiphertext" BYTEA,
+  ADD COLUMN "destinationCiphertext" TEXT,
   ADD COLUMN "destinationKeyVersion" INTEGER,
   ADD COLUMN "destinationHint" TEXT,
   ADD COLUMN "confirmedById" UUID,

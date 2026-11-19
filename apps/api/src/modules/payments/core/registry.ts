@@ -125,6 +125,8 @@ export class PaymentAdapterRegistry {
 
   constructor(adapters: readonly PaymentProvider[]) {
     const problems = manifestProblems(adapters.map((a) => a.manifest));
+    // Task 4.5: an adapter that reads disputes must be able to ask the gateway for one.
+    for (const a of adapters) if (a.manifest.capabilities.disputes === 'events' && typeof a.retrieveDispute !== 'function') problems.push(`${a.manifest.key}: declares disputes without retrieveDispute`);
     if (problems.length > 0) throw new AppError('payment_adapters_invalid', `Payment adapter manifests are invalid: ${problems.join('; ')}`);
     for (const a of adapters) this.byKey.set(a.manifest.key, a);
   }

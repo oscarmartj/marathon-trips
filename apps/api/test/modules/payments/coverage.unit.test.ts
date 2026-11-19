@@ -127,8 +127,12 @@ describe('allocation_and_schedule_invariants_hold (section 2, plan 0.1 P8): 2,00
     }
   });
 
-  it('a negative amount collected is refused', () => {
-    expect(() => allocate([], -1n)).toThrow(RangeError);
+  // Task 4.5 changes what 3.2 fixed here (plan 4.5, 14.5): money out beyond money in (a chargeback after a full refund)
+  // is a receivable, no longer an impossible input. Nothing is paid and nothing is overpaid.
+  it('a negative amount collected is a receivable: no item paid, no overpayment', () => {
+    const a = allocate([{ sequence: 1, amountMinor: 500n }], -1n);
+    expect(a).toEqual({ items: [{ sequence: 1, amountMinor: 500n, paidMinor: 0n }], overpaidMinor: 0n, receivableMinor: -1n });
+    expect(payable([{ sequence: 1, amountMinor: 500n }], -1n).outstandingMinor).toBe(500n);
   });
 });
 

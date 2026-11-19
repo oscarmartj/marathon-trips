@@ -7,7 +7,7 @@ import { netCollectedSource } from './payable';
 
 type Tx = Prisma.TransactionClient;
 type Mode = 'test' | 'live';
-type Kind = 'payment' | 'refund' | 'adjustment' | 'reversal';
+type Kind = 'payment' | 'refund' | 'chargeback' | 'adjustment' | 'reversal';
 
 /** A key already posted with other content: never a second or different posting (plan 3.3, section 1.3). */
 export class LedgerKeyConflictError extends AppError {
@@ -28,6 +28,7 @@ interface Posting {
   description: string;
   paymentId?: string;
   refundId?: string;
+  disputeId?: string;
   /** For a reversal: the key of the posting it reverses. */
   reversesKey?: string;
   /** The cash side: an account and what moves in (+) or out (−). None for a reallocation. */
@@ -76,6 +77,25 @@ export class LedgerService {
     });
   }
 
+  /**
+   * The gateway took a disputed amount from us (task 4.5): `chargeback:<disputeId>:withdrawn`. The customer side is
+   * recomputed, so it comes off the overpayment, then the last items, then becomes a receivable.
+   */
+  postChargebackWithdrawn(tx: Tx, booking: BookingRef, d: { id: string; providerAccountId: string; amountMinor: bigint; mode: Mode }): Promise<string | null> {
+    return this.post(tx, booking, {
+      key: `chargeback:${d.id}:withdrawn`, kind: 'chargeback', mode: d.mode, description: 'chargeback_withdrawn', disputeId: d.id,
+      cash: { accountCode: LEDGER_ACCOUNTS.clearing(d.providerAccountId), amountMinor: -d.amountMinor },
+    });
+  }
+
+  /** The gateway gave a disputed amount back: `chargeback:<disputeId>:reinstated`, a reversal of the withdrawal. */
+  postChargebackReinstated(tx: Tx, booking: BookingRef, d: { id: string; providerAccountId: string; amountMinor: bigint; mode: Mode }): Promise<string | null> {
+    return this.post(tx, booking, {
+      key: `chargeback:${d.id}:reinstated`, kind: 'reversal', mode: d.mode, description: 'chargeback_reinstated', disputeId: d.id, reversesKey: `chargeback:${d.id}:withdrawn`,
+      cash: { accountCode: LEDGER_ACCOUNTS.clearing(d.providerAccountId), amountMinor: d.amountMinor },
+    });
+  }
+
   /** The plan changed (approval, expiry, cancellation, amendment): funds and overpayments follow it. Nothing if no change. */
   reallocate(tx: Tx, booking: BookingRef, mode: Mode, key: string): Promise<string | null> {
     return this.post(tx, booking, { key, kind: 'adjustment', mode, description: 'reallocation' });
@@ -98,7 +118,7 @@ export class LedgerService {
     const cashIn = p.cash?.amountMinor ?? 0n;
     const lines: LedgerLine[] = [
       ...(p.cash && cashIn !== 0n ? [{ accountCode: p.cash.accountCode, amountMinor: cashIn }] : []),
-      ...customerSide({ fundsMinor: target.items.reduce((s, i) => s + i.paidMinor, 0n), overpaymentsMinor: target.overpaidMinor }, balances, cashIn),
+      ...customerSide({ fundsMinor: target.items.reduce((s, i) => s + i.paidMinor, 0n), overpaymentsMinor: target.overpaidMinor, receivableMinor: -target.receivableMinor }, balances, cashIn),
     ];
     // A reallocation with nothing to move posts nothing.
     if (!p.cash && lines.length === 0) return null;
@@ -112,7 +132,7 @@ export class LedgerService {
     }
     const sha = contentSha256({
       kind: p.kind, mode: p.mode, currency: booking.currency, bookingId: booking.id, paymentId: p.paymentId ?? null, refundId: p.refundId ?? null,
-      reversesTransactionId: reversesId, description: p.description, lines,
+      disputeId: p.disputeId ?? null, reversesTransactionId: reversesId, description: p.description, lines,
     });
     for (const l of lines) {
       await tx.$executeRaw`
@@ -120,9 +140,9 @@ export class LedgerService {
         ON CONFLICT (code, currency, mode) DO NOTHING`;
     }
     const inserted = await tx.$queryRaw<Array<{ id: string }>>`
-      INSERT INTO ledger_transactions (id, kind, mode, "bookingId", "paymentId", "refundId", "reversesTransactionId", "idempotencyKey", description, "contentSha256")
+      INSERT INTO ledger_transactions (id, kind, mode, "bookingId", "paymentId", "refundId", "disputeId", "reversesTransactionId", "idempotencyKey", description, "contentSha256")
       VALUES (gen_random_uuid(), ${p.kind}::"LedgerTransactionKind", ${p.mode}::"PaymentMode", ${booking.id}::uuid, ${p.paymentId ?? null}::uuid, ${p.refundId ?? null}::uuid,
-              ${reversesId}::uuid, ${p.key}, ${p.description}, ${sha})
+              ${p.disputeId ?? null}::uuid, ${reversesId}::uuid, ${p.key}, ${p.description}, ${sha})
       ON CONFLICT ("idempotencyKey") DO NOTHING RETURNING id::text AS id`;
     if (!inserted[0]) {
       const existing = await tx.$queryRaw<Array<{ id: string; contentSha256: string }>>`SELECT id::text AS id, "contentSha256" FROM ledger_transactions WHERE "idempotencyKey" = ${p.key}`;

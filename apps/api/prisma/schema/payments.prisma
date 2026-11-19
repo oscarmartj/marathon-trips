@@ -457,7 +457,7 @@ model Refund {
   /// @nopii true for the refund of a bank transfer (task 4.5): staff send it from the bank and confirm it with its reference
   manualRefund      Boolean           @default(false)
   /// @secret the account a manual refund goes to, encrypted; only while requested (task 4.5, P13)
-  destinationCiphertext Bytes?
+  destinationCiphertext String?
   /// @nopii key version of destinationCiphertext
   destinationKeyVersion Int?
   /// @pii masked destination of a manual refund (last digits); erased with the customer

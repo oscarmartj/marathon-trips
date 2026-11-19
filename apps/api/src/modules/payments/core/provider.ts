@@ -40,6 +40,11 @@ export interface AdapterManifest {
      * waiting for the customer, who may try another card (Stripe Checkout). Checked by the contract suite.
      */
     declineOutcome: 'failed' | 'stays_payable';
+    /**
+     * Task 4.5: the adapter reads the gateway's disputes (events and retrieveDispute). Absent means none: its dispute
+     * events are `unsupported` and the dispute clauses of the contract suite do not apply.
+     */
+    disputes?: 'events';
   };
 }
 
@@ -125,10 +130,34 @@ export interface NormalisedEvent {
   /** The gateway's own event type (payment.updated, payout.paid…), as stored with the raw event. */
   type: string;
   occurredAt: Date;
-  /** Refunds, disputes and settlements are extensions for 4.5 and 4.6. */
-  kind: 'payment' | 'refund' | 'unsupported';
+  /** Settlements are an extension for 4.6. */
+  kind: 'payment' | 'refund' | 'dispute' | 'unsupported';
   payment?: ProviderPayment;
   refund?: ProviderRefund;
+  dispute?: ProviderDispute;
+}
+
+/** Why a cardholder disputed a payment, normalised (task 4.5); a gateway's code outside the list is `other`. */
+export const DISPUTE_REASON_CODES = ['fraudulent', 'product_not_received', 'product_unacceptable', 'duplicate', 'credit_not_processed', 'unrecognised', 'general', 'other'] as const;
+export type DisputeReasonCode = (typeof DISPUTE_REASON_CODES)[number];
+
+/** `closed`: ended without an outcome (an inquiry that did not become a chargeback). won, lost and closed are final. */
+export type ProviderDisputeStatus = 'open' | 'evidence_submitted' | 'won' | 'lost' | 'closed';
+
+/**
+ * A dispute as the gateway sees it now (task 4.5). The funds flags are cumulative: every event and every retrieve says
+ * whether the disputed amount was ever taken from us and whether it was given back, so order does not matter.
+ */
+export interface ProviderDispute {
+  ref: string;
+  /** The payment disputed, as the gateway names it: retrievePayment({ ref: paymentRef }) resolves it. */
+  paymentRef: string;
+  amount: Money;
+  reasonCode: DisputeReasonCode;
+  status: ProviderDisputeStatus;
+  evidenceDueBy?: Date;
+  fundsWithdrawn: boolean;
+  fundsReinstated: boolean;
 }
 
 /** `cancelled`: the gateway dropped it before any money moved. */
@@ -170,6 +199,8 @@ export interface PaymentProvider {
   /** A refund of a collected payment; refused (provider_rejected, definitive) beyond what is left or if the capability says so. */
   createRefund(ctx: ProviderContext, input: CreateRefundInput): Promise<ProviderRefund>;
   retrieveRefund(ctx: ProviderContext, by: RefundLookup): Promise<ProviderRefund | null>;
+  /** Task 4.5: required when `capabilities.disputes` is declared. Null if the gateway does not know it. */
+  retrieveDispute?(ctx: ProviderContext, ref: string): Promise<ProviderDispute | null>;
   /** No network: checks the signature over the raw body with this account's secret, and the timestamp. */
   verifyWebhook(ctx: ProviderContext, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): WebhookVerification;
   /** Reads a body that already passed verifyWebhook (when it was received), for processing later and on retries. */
