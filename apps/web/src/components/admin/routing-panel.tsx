@@ -7,6 +7,7 @@ import { lostText } from '@/lib/gateways-panel';
 import { countriesFrom, countriesText, limitFrom, limitsText, reasonText, routingWarningText, ruleErrorText } from '@/lib/routing-panel';
 import type { RoutingWarning, RuleView } from '@/lib/routing-panel';
 import { Field, Status } from '../auth/field';
+import { ACCOUNTS_CHANGED } from './gateways-panel';
 import { errorMessage, useStepUp } from './step-up';
 
 const METHODS = ['card', 'apple_pay', 'google_pay', 'payto', 'becs', 'payid_transfer', 'bpay', 'manual_other'] as const;
@@ -46,6 +47,9 @@ export function RoutingPanel() {
   }
   useEffect(() => {
     void load();
+    const reload = () => void load();
+    window.addEventListener(ACCOUNTS_CHANGED, reload);
+    return () => window.removeEventListener(ACCOUNTS_CHANGED, reload);
   }, []);
 
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.displayName ?? t('admin.gateways.unnamed');

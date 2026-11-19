@@ -83,6 +83,8 @@ export class PaymentRouting {
    * (so its backups step in). The claim is undone if the transaction rolls back.
    */
   async choose(db: Db, q: RouteQuery): Promise<{ account: AccountForCall; choice: RouteChoice } | null> {
+    // The read-only answer first (the same rows, in this transaction): nothing routable means no probe is touched.
+    if ((await this.candidates(db, q)).length === 0) return null;
     const { rules, ctx } = await this.load(db, q);
     const unavailable = new Set<string>();
     for (let i = 0; i <= ctx.accounts.size; i++) {
