@@ -7,7 +7,7 @@ import type { SecretBox } from '../../../platform/crypto/secret-box';
 import { APP_CONFIG, PrismaService } from '../../../platform/database/prisma.service';
 import { ApiError } from '../../../platform/http/api-error';
 import { SECRET_BOX } from '../../../platform/auth/staff-auth.service';
-import type { AdapterManifest, PaymentModeName, PaymentProvider, ProviderContext, WebhookVerification } from './provider';
+import type { AdapterManifest, PaymentModeName, PaymentProvider, ProviderContext, ProviderPayment, WebhookVerification } from './provider';
 import { PROVIDER_ERROR_CODES, ProviderError } from './provider';
 import { ProviderHealthService } from './provider-health.service';
 import { PaymentAdapterRegistry } from './registry';
@@ -17,7 +17,7 @@ import { countsForBreaker } from './routing-rules';
 export const TEST_ADAPTER_ENVS: readonly AppEnv[] = ['development', 'test', 'ci'];
 
 /** `refund` (task 3.3) is allowed on paused and retired accounts (plan 0.1, 6.4), never live outside production. */
-export type GatewayOperation = 'create' | 'retrieve' | 'cancel' | 'refund' | 'webhook' | 'test_connection';
+export type GatewayOperation = 'create' | 'complete' | 'retrieve' | 'cancel' | 'refund' | 'webhook' | 'test_connection';
 
 export interface AccountForCall {
   id: string;
@@ -41,12 +41,15 @@ export function callBlockReason(account: AccountForCall, manifest: AdapterManife
   if (account.mode === 'live' && env !== 'production') return 'live_call_blocked_outside_production';
   if (account.mode === 'live' && (manifest.status !== 'verified' || manifest.testOnly)) return 'adapter_not_verified_for_live';
   if (manifest.testOnly && !TEST_ADAPTER_ENVS.includes(env)) return 'test_adapter_blocked_in_environment';
-  if ((op === 'create' || op === 'refund') && account.mode !== modeForEnv(env)) return 'account_mode_not_for_environment';
-  if (op === 'create' && account.status !== 'active') return 'account_not_accepting_charges';
+  // `complete` (task 4.3: PayPal's capture) moves money like `create`, so the same rules hold.
+  if ((op === 'create' || op === 'complete' || op === 'refund') && account.mode !== modeForEnv(env)) return 'account_mode_not_for_environment';
+  if ((op === 'create' || op === 'complete') && account.status !== 'active') return 'account_not_accepting_charges';
   return null;
 }
 
 const CALL_TIMEOUT_MS = 10_000;
+/** How long a webhook delivery waits for an adapter's prepareWebhook (task 4.3): then verification fails closed. */
+export const PREPARE_WEBHOOK_TIMEOUT_MS = 5_000;
 
 /**
  * The calls that feed gateway health (plan 4.2, 15.6; review M1, B3): the breaker answers "can this account take a new
@@ -128,16 +131,32 @@ export class ProviderGateway {
     }
   }
 
+  /**
+   * Finishes an approved payment (task 4.3, plan 4.3 section 5.3) if the adapter has that step and the account may take
+   * a charge now; null when it has none or the rules refuse (a paused or retired account: never captured, no audit
+   * noise, the attempt then ends through the usual paths). Callers check the attempt is live and the booking payable.
+   */
+  async complete(accountId: string, ref: string, idempotencyKey: string): Promise<ProviderPayment | null> {
+    const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
+    const provider = account ? this.registry.get(account.adapterKey) : undefined;
+    if (!account || !provider?.completePayment) return null;
+    if (callBlockReason(account, provider.manifest, 'complete', this.config.APP_ENV)) return null;
+    return this.call(accountId, 'complete', (p, ctx) => p.completePayment!(ctx, ref, idempotencyKey));
+  }
+
   private async noteFailure(accountId: string, code: string): Promise<void> {
     if (countsForBreaker(code)) await this.health?.failure(accountId, code);
   }
 
-  /** Verifies a webhook with the secret of the account that received it (no network). */
+  /** Verifies a webhook with the secret of the account that received it (no network but the adapter's prepareWebhook). */
   async verifyWebhook(account: AccountForCall, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): Promise<WebhookVerification> {
     const provider = await this.allow(account, 'webhook');
     const { ctx } = await this.context(account);
     // No secret entered yet (task 4.1): nothing can be verified, so nothing is accepted; the adapter is not asked.
     if (ctx.webhookSecret === '') return { ok: false, code: 'bad_signature' };
+    // Task 4.3: what verification needs from the gateway (PayPal's certificate) is fetched first; any failure only
+    // means verification below fails closed.
+    if (provider.prepareWebhook) await withTimeout(provider.prepareWebhook(ctx, headers), PREPARE_WEBHOOK_TIMEOUT_MS).catch(() => undefined);
     try {
       return provider.verifyWebhook(ctx, rawBody, headers, now);
     } catch {

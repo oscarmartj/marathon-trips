@@ -376,11 +376,39 @@ export class PaymentAttemptsService {
       }
     }
     if (!remote) return undefined;
+    try {
+      remote = await this.completeIfDue(p.id, remote);
+    } catch (err) {
+      throw this.forCustomer(err);
+    }
     const ok = await this.record(p.id, remote, 'api');
     const url = remote.nextAction?.url;
     const origin = this.gateway.registry.get(p.adapterKey)?.manifest.checkoutOrigin;
     if (!ok || !url || !origin || !url.startsWith(`${origin}/`)) return undefined;
     return { type: 'redirect', url };
+  }
+
+  /**
+   * Task 4.3 (plan 4.3, section 5.3): a payment the customer approved at the gateway but not finished there (PayPal's
+   * capture) is finished only here, only while the attempt is live, the booking can pay and the account is active.
+   * Called from sync, drive and expire; never from cancel, replace, orphan or refund paths. Returns the gateway's answer
+   * after it, or `remote` unchanged when nothing is due.
+   */
+  async completeIfDue(paymentId: string, remote: ProviderPayment): Promise<ProviderPayment> {
+    if (remote.status !== 'requires_action') return remote;
+    const p = await this.prisma.payment.findUnique({ where: { id: paymentId }, select: { status: true, bookingId: true, providerAccountId: true, providerPaymentRef: true, idempotencyKey: true } });
+    if (!p || !LIVE_STATUSES.includes(p.status)) return remote;
+    // Only an object whose reference we hold (or that the gateway just named for this attempt) is ever finished.
+    if (p.providerPaymentRef !== null && p.providerPaymentRef !== remote.ref) return remote;
+    const b = await readBookingForPayments(this.prisma, { id: p.bookingId });
+    if (!b) return remote;
+    try {
+      this.assertPayable(b, new Date());
+    } catch {
+      return remote;
+    }
+    const done = await this.gateway.complete(p.providerAccountId, remote.ref, p.idempotencyKey);
+    return done ?? remote;
   }
 
   /**

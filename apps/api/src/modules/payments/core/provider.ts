@@ -170,6 +170,17 @@ export interface PaymentProvider {
   /** A refund of a collected payment; refused (provider_rejected, definitive) beyond what is left or if the capability says so. */
   createRefund(ctx: ProviderContext, input: CreateRefundInput): Promise<ProviderRefund>;
   retrieveRefund(ctx: ProviderContext, by: RefundLookup): Promise<ProviderRefund | null>;
+  /**
+   * Optional (task 4.3, plan 4.3 section 5.3): finishes a payment the customer approved at the gateway (PayPal's
+   * capture). The core calls it only for a live attempt of a payable booking on an active account (sync, drive and
+   * expire), never to cancel, replace, close an orphan or process a refund. Answers as retrievePayment would after it.
+   */
+  completePayment?(ctx: ProviderContext, ref: string, idempotencyKey: string): Promise<ProviderPayment>;
+  /**
+   * Optional (task 4.3, plan 4.3 section 7.3): fetches from the gateway, and caches, what verifyWebhook needs to check this
+   * delivery offline (PayPal's signing certificate). Called by the gateway wrapper before verifyWebhook; never throws.
+   */
+  prepareWebhook?(ctx: ProviderContext, headers: Readonly<Record<string, string>>): Promise<void>;
   /** No network: checks the signature over the raw body with this account's secret, and the timestamp. */
   verifyWebhook(ctx: ProviderContext, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): WebhookVerification;
   /** Reads a body that already passed verifyWebhook (when it was received), for processing later and on retries. */
