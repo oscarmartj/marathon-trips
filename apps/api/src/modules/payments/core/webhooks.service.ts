@@ -275,7 +275,8 @@ export class PaymentWebhooksService {
         overCap = x!.refunds + x!.withdrawn + remote.amount.amountMinor > p.amountMinor;
         // Re-review, 2: a refund from the app still in flight elsewhere on the booking may now pay twice: Oscar checks.
         const [inflight] = await tx.$queryRaw<Array<{ n: bigint }>>`
-          SELECT count(*)::bigint AS n FROM refunds WHERE "bookingId" = ${b.id}::uuid AND origin = 'app' AND status IN ('requested', 'pending')`;
+          SELECT count(*)::bigint AS n FROM refunds WHERE "bookingId" = ${b.id}::uuid AND mode = ${p.mode}::"PaymentMode" AND origin = 'app'
+            AND (status IN ('requested', 'pending') OR (status = 'failed' AND "failureCode" = 'late_pending_at_gateway'))`;
         if ((inflight?.n ?? 0n) > 0n) overCap = true;
       }
       const r = await this.refunds.createExternal(tx, b, p, remote);

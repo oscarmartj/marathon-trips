@@ -533,7 +533,8 @@ describe('review of the code (H1, H2, M2)', () => {
       // Barrier: with the booking locked by this transaction, the refund request starts and must wait for the lock.
       request = ask(late.id, { paymentVersion: late.version });
       for (let i = 0; i < 100 && !waited; i++) {
-        const [w] = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`);
+        // Only a backend of this database waiting on the booking lock (other test files run in parallel).
+        const [w] = await t.prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database() AND pid <> pg_backend_pid() AND query ILIKE '%FROM bookings b WHERE%FOR UPDATE OF b%'`);
         waited = (w?.n ?? 0n) > 0n;
         if (!waited) await new Promise((r) => setTimeout(r, 50));
       }
@@ -590,5 +591,92 @@ describe('review of the code (H1, H2, M2)', () => {
     expect(await t.prisma.task.count({ where: { sourceRef: `payments:refund_over_cap:${extRow.id}` } })).toBe(1);
     expect(await service().retryOne(r!.id, new Date(Date.now() + 2 * 60_000))).toBe('review');
     expect(simRefunds(late.providerPaymentRef!)).toHaveLength(0);
+  });
+
+  /** A refund we failed (resolved by staff) that the gateway then starts processing: late pending. */
+  async function latePending() {
+    const { bookingId, late, paid } = await overpaid(2, 2);
+    sim.queueRefund(acc.id, 'unavailable');
+    expect((await ask(late.id)).status).toBe(202);
+    const [r] = await refundsOf(bookingId);
+    expect((await admin.post(`/admin/payments/refunds/${r!.id}/resolve`, { version: r!.version })).body.status).toBe('failed');
+    sim.queueRefund(acc.id, 'pending');
+    const made = await t.app.get(ProviderGateway).call(acc.id, 'refund', (p, ctx) => p.createRefund(ctx, {
+      paymentRef: late.providerPaymentRef!, amount: { amountMinor: r!.amountMinor, currency: r!.currency }, idempotencyKey: r!.idempotencyKey,
+      metadata: { refundId: r!.id, paymentId: late.id, bookingId }, createdAt: r!.createdAt,
+    }));
+    expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, made.ref))).outcome).toBe('processed');
+    expect((await t.prisma.refund.findUniqueOrThrow({ where: { id: r!.id } })).failureCode).toBe('late_pending_at_gateway');
+    return { bookingId, late, paid, r: r!, made };
+  }
+
+  it('late_pending_reserves_its_money and counts as in flight: a grown plan is not filled with it; an external refund warns', async () => {
+    const { bookingId, late, paid, r } = await latePending();
+    expect((await balancesOf(t, bookingId)).overpaymentsMinor).toBe(late.amountMinor);
+    expect(await check(bookingId)).toEqual([]);
+    const ext = sim.gatewayRefund(acc.id, paid.providerPaymentRef!, 50n);
+    expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, ext.ref))).outcome).toBe('processed');
+    const extRow = (await refundsOf(bookingId)).find((x) => x.origin === 'external')!;
+    expect(await t.prisma.task.count({ where: { sourceRef: `payments:refund_over_cap:${extRow.id}` } })).toBe(1);
+    const owner = await connect('owner');
+    try {
+      await owner.query('BEGIN');
+      await owner.query('ALTER TABLE payment_schedule_items DISABLE TRIGGER USER');
+      await owner.query(`UPDATE payment_schedule_items SET "amountMinor" = "amountMinor" + 300 WHERE id = (SELECT id FROM payment_schedule_items WHERE "bookingId" = $1::uuid AND state = 'active' ORDER BY sequence DESC LIMIT 1)`, [bookingId]);
+      await owner.query('ALTER TABLE payment_schedule_items ENABLE TRIGGER USER');
+      await owner.query('COMMIT');
+    } finally {
+      await owner.end();
+    }
+    const { LedgerService } = await import('../../../src/modules/payments/core/ledger.service');
+    await t.prisma.$transaction((tx) => t.app.get(LedgerService).reallocate(tx, { id: bookingId, currency: 'AUD' }, 'test', `test:${randomUUID()}:reallocation`));
+    const items = (await admin.get(`/admin/payments/bookings/${bookingId}`)).body.allocation.items as Array<{ amountMinor: string; paidMinor: string }>;
+    expect(items.reduce((s, i) => s + BigInt(i.amountMinor) - BigInt(i.paidMinor), 0n)).toBe(350n); // the 300 the plan grew by and the 50 refunded at the gateway; the reserved money fills none of it
+    void r;
+  });
+
+  it('late_pending_cleared_when_the_gateway_fails_it: by webhook, the code is lifted and the booking can refund again', async () => {
+    const { bookingId, late, r, made } = await latePending();
+    sim.settleRefund(acc.id, made.ref, 'failed');
+    expect((await deliver(t, acc, sim.refundEvent(acc.secret, acc.id, made.ref))).outcome).toBe('processed');
+    expect(await t.prisma.refund.findUniqueOrThrow({ where: { id: r.id } })).toMatchObject({ status: 'failed', failureCode: 'refund_failed' });
+    expect((await refundableOf(bookingId, late.id)).refundableMinor).toBe(late.amountMinor.toString());
+    expect(await check(bookingId)).toEqual([]);
+  });
+
+  it('late_pending_exit_by_sweep_and_by_staff: a lost webhook never blocks the booking for good', async () => {
+    const { RefundSyncService } = { RefundSyncService: (await import('../../../src/modules/payments/core/refund-sync.service')).PaymentRefundSyncService };
+    // The sweep: the gateway failed it but its webhook never came.
+    const a = await latePending();
+    sim.settleRefund(acc.id, a.made.ref, 'failed');
+    const sync = t.app.get(RefundSyncService);
+    expect(await sync.due(new Date(Date.now() + 25 * 3_600_000), 10_000)).toContain(a.r.id);
+    expect(await sync.requery(a.r.id)).toBe('applied');
+    expect((await refundableOf(a.bookingId, a.late.id)).blockedReason).toBeNull();
+    // Staff: the gateway no longer knows it; resolving lifts the block (step-up, audited).
+    const b = await latePending();
+    const cur = await t.prisma.refund.findUniqueOrThrow({ where: { id: b.r.id } });
+    sim.failNextRefundRetrieve(acc.id, 'not_found');
+    const res = await admin.post(`/admin/payments/refunds/${b.r.id}/resolve`, { version: cur.version });
+    expect([res.status, res.body.failureCode]).toEqual([200, 'refund_failed']);
+    expect((await refundableOf(b.bookingId, b.late.id)).blockedReason).toBeNull();
+    expect(await t.prisma.auditLog.count({ where: { entityId: b.r.id, action: 'payments.refund.resolved' } })).toBe(2);
+  });
+
+  it('same_dispute_rule_in_request_and_sweep: a lost dispute of another payment does not stop a refund; an open one blocks the booking', async () => {
+    const { bookingId, late, paid } = await overpaid(2, 2);
+    const lost = sim.openDispute(acc.id, paid.providerPaymentRef!, { amountMinor: 100n, withdrawn: true, status: 'lost' });
+    expect((await deliver(t, acc, sim.disputeEvent(acc.secret, acc.id, lost.ref))).outcome).toBe('processed');
+    const row = await refundableOf(bookingId, late.id);
+    expect([row.blockedReason, row.refundableMinor]).toEqual([null, (late.amountMinor - 100n).toString()]);
+    const r = await ask(late.id);
+    expect([r.status, r.body.status]).toEqual([201, 'succeeded']);
+    // An open dispute on any payment blocks the whole booking, in the panel and in the request.
+    const other = await overpaid(2, 2);
+    const open = sim.openDispute(acc.id, other.paid.providerPaymentRef!);
+    expect((await deliver(t, acc, sim.disputeEvent(acc.secret, acc.id, open.ref))).outcome).toBe('processed');
+    expect((await refundableOf(other.bookingId, other.late.id)).blockedReason).toBe('booking_dispute_open');
+    const refused = await ask(other.late.id);
+    expect([refused.status, refused.body.code]).toEqual([409, 'booking_dispute_open']);
   });
 });

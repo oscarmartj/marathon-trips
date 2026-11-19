@@ -67,7 +67,7 @@ export async function bookingCash(db: import('../../../generated/prisma/client')
       (SELECT COALESCE(sum("amountMinor"), 0) FROM payments WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND status = 'succeeded')::bigint AS paid,
       (SELECT count(*) FROM payments WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND status = 'succeeded')::bigint AS payments,
       (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND status = 'succeeded')::bigint AS refunded,
-      (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND origin = 'app' AND status IN ('requested', 'pending'))::bigint AS reserved,
+      (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND ((origin = 'app' AND status IN ('requested', 'pending')) OR (origin = 'app' AND status = 'failed' AND "failureCode" = 'late_pending_at_gateway')))::bigint AS reserved,
       (SELECT COALESCE(sum("amountMinor"), 0) FROM disputes WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND "fundsWithdrawnAt" IS NOT NULL AND "fundsReinstatedAt" IS NULL)::bigint AS withdrawn`;
   const collected = r!.paid - r!.refunded - r!.withdrawn;
   return { collectedMinor: collected, reservedMinor: r!.reserved, allocatableMinor: collected - r!.reserved, everCollected: r!.payments > 0n };

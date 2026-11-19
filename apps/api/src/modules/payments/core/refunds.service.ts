@@ -98,7 +98,8 @@ export async function bookingUnderPaymentReview(db: Pick<Tx, '$queryRaw'>, booki
          -- reminders stay off even after the task is closed: what came in would pay the debt, not the plan. Oscar
          -- settles it (a transfer, a change of the booking) first.
          OR (SELECT COALESCE(sum("amountMinor"), 0) FROM payments WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND status = 'succeeded')
-            - (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND (status = 'succeeded' OR (origin = 'app' AND status IN ('requested', 'pending'))))
+            - (SELECT COALESCE(sum("amountMinor"), 0) FROM refunds WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND (status = 'succeeded' OR (origin = 'app' AND status IN ('requested', 'pending'))
+                OR (origin = 'app' AND status = 'failed' AND "failureCode" = 'late_pending_at_gateway')))
             - (SELECT COALESCE(sum("amountMinor"), 0) FROM disputes WHERE "bookingId" = ${bookingId}::uuid AND mode = ${mode}::"PaymentMode" AND "fundsWithdrawnAt" IS NOT NULL AND "fundsReinstatedAt" IS NULL) < 0) AS open`;
   return rows[0]?.open === true;
 }
@@ -201,14 +202,18 @@ export class PaymentRefundStateMachine {
     if (r.status !== 'failed' || r.origin !== 'app' || r.manualRefund) return false;
     if (remote.status === 'failed' || remote.status === 'cancelled') {
       // A refund held back as "still pending at the gateway" that the gateway then failed: nothing blocks any more.
-      await tx.$executeRaw`UPDATE refunds SET "failureCode" = 'refund_failed', "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND "failureCode" = ${LATE_PENDING_CODE}`;
+      await this.clearLatePending(tx, booking, r);
       return false;
     }
     if (r.providerRefundRef === null) await this.setReference(tx, r, remote.ref);
     if (remote.status === 'succeeded') await this.apply(tx, booking, p, r, 'late_succeeded', { source, providerRefundRef: remote.ref });
-    // Re-review, 1: still pending at the gateway: the refund stays failed here (the trigger allows no way back), but its
-    // code says so, and no refund of the booking is made from the app until the gateway settles it.
-    else await tx.$executeRaw`UPDATE refunds SET "failureCode" = ${LATE_PENDING_CODE}, "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND status = 'failed'`;
+    else {
+      // Re-review, 1 and M3: still pending at the gateway: the refund stays failed here (the trigger allows no way
+      // back), but its code says so; its money is reserved again (the plan is not filled with it) and no refund of the
+      // booking is made from the app until the gateway settles it.
+      const n = await tx.$executeRaw`UPDATE refunds SET "failureCode" = ${LATE_PENDING_CODE}, "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND status = 'failed' AND "failureCode" IS DISTINCT FROM ${LATE_PENDING_CODE}`;
+      if (n === 1) await this.ledger.reallocate(tx, booking, r.mode, `refund:${r.id}:late_pending`);
+    }
     await this.tasks.createSystemIn(tx, {
       title: `Refund on booking ${booking.reference} was made at the gateway after it was marked as not made`,
       description: remote.status === 'succeeded'
@@ -217,6 +222,14 @@ export class PaymentRefundStateMachine {
       entityType: 'Refund', entityId: r.id, sourceRef: refundReviewTaskRef(r.id),
     });
     return true;
+  }
+
+  /** The gateway failed (or does not know) a refund held as late pending: the block and the reservation are lifted. */
+  async clearLatePending(tx: Tx, booking: LockedBooking, r: LockedRefund): Promise<void> {
+    const n = await tx.$executeRaw`UPDATE refunds SET "failureCode" = 'refund_failed', "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND "failureCode" = ${LATE_PENDING_CODE}`;
+    if (n !== 1) return;
+    await this.ledger.reallocate(tx, booking, r.mode, `refund:${r.id}:late_released`);
+    await this.coverage.apply(tx, booking, SYSTEM_ACTOR);
   }
 
   /** Fills in the gateway's reference of an app refund matched by our id before the gateway answered (task 4.5). */

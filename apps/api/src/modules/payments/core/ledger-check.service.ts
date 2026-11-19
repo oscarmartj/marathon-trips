@@ -118,7 +118,7 @@ export class PaymentLedgerCheckService implements OnApplicationBootstrap {
             COALESCE((SELECT SUM(p."amountMinor") FROM payments p WHERE p."bookingId" = b.id AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded'), 0)::bigint
             - COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."bookingId" = b.id AND r.mode = ${mode}::"PaymentMode" AND r.status = 'succeeded'), 0)::bigint
             - COALESCE((SELECT SUM(d."amountMinor") FROM disputes d WHERE d."bookingId" = b.id AND d.mode = ${mode}::"PaymentMode" AND d."fundsWithdrawnAt" IS NOT NULL AND d."fundsReinstatedAt" IS NULL), 0)::bigint AS net,
-            COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."bookingId" = b.id AND r.mode = ${mode}::"PaymentMode" AND r.origin = 'app' AND r.status IN ('requested', 'pending')), 0)::bigint AS reserved
+            COALESCE((SELECT SUM(r."amountMinor") FROM refunds r WHERE r."bookingId" = b.id AND r.mode = ${mode}::"PaymentMode" AND ((r.origin = 'app' AND r.status IN ('requested', 'pending')) OR (r.origin = 'app' AND r.status = 'failed' AND r."failureCode" = 'late_pending_at_gateway'))), 0)::bigint AS reserved
           FROM bookings b
           WHERE (EXISTS (SELECT 1 FROM payments p WHERE p."bookingId" = b.id AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded')
                  OR EXISTS (SELECT 1 FROM ledger_entries e WHERE e."bookingId" = b.id AND e.mode = ${mode}::"PaymentMode"))

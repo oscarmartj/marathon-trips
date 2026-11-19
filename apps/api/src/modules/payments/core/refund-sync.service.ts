@@ -6,7 +6,7 @@ import { readBookingForPayments } from '../../bookings';
 import { lockPayment } from './attempt-state';
 import { ProviderGateway } from './gateway';
 import { PAYMENT_TX_OPTIONS } from './payable-states';
-import { PaymentRefundStateMachine, lockRefund, refundEventOf } from './refunds.service';
+import { LATE_PENDING_CODE, PaymentRefundStateMachine, lockRefund, refundEventOf } from './refunds.service';
 import { MANUAL_KEY } from '../adapters/manual/manual';
 
 /** Refunds left `requested` or `pending` this long are read again from the gateway (plan 0.1, 6.2; plan 3.3, 12.6). */
@@ -28,7 +28,12 @@ export class PaymentRefundSyncService {
   async due(now: Date, limit = 50): Promise<string[]> {
     const rows = await this.prisma.refund.findMany({
       // Task 4.5 (plan review, 4): a manual refund has no gateway to ask; it waits for Oscar's transfer (its own task).
-      where: { status: { in: ['requested', 'pending'] }, manualRefund: false, payment: { adapterKey: { not: MANUAL_KEY } }, updatedAt: { lte: new Date(now.getTime() - REFUND_REQUERY_AFTER_MS) } },
+      // Re-review, M2: a refund we failed that the gateway was still processing is asked about too, so a lost webhook
+      // never blocks the booking for good.
+      where: {
+        OR: [{ status: { in: ['requested', 'pending'] } }, { status: 'failed', origin: 'app', failureCode: LATE_PENDING_CODE, providerRefundRef: { not: null } }],
+        manualRefund: false, payment: { adapterKey: { not: MANUAL_KEY } }, updatedAt: { lte: new Date(now.getTime() - REFUND_REQUERY_AFTER_MS) },
+      },
       orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }], take: limit, select: { id: true },
     });
     return rows.map((r) => r.id);
@@ -46,7 +51,13 @@ export class PaymentRefundSyncService {
       const p = b ? await lockPayment(tx, b, row.paymentId) : null;
       const r = p ? await lockRefund(tx, p, row.id) : null;
       if (!b || !p || !r) return 'unknown_at_gateway' as const;
-      if (remote && remote.amount.amountMinor === r.amountMinor && (await this.machine.gatewayMovedFailedRefund(tx, b, p, r, remote, 'sweep'))) return 'applied' as const;
+      if (r.status === 'failed' && remote && remote.amount.amountMinor === r.amountMinor) {
+        // A late pending one: the gateway's word settles it (made, still in progress, or failed: the block is lifted).
+        // Unknown at the gateway, it stays blocked with a task below: staff resolve it.
+        const handled = await this.machine.gatewayMovedFailedRefund(tx, b, p, r, remote, 'sweep');
+        if (!handled) await this.machine.clearLatePending(tx, b, r);
+        return handled && remote.status === 'pending' ? ('still_pending' as const) : ('applied' as const);
+      }
       if (remote && remote.amount.amountMinor === r.amountMinor) {
         const to = await this.machine.apply(tx, b, p, r, refundEventOf(remote.status), { source: 'sweep', failureCode: remote.failureCode });
         if (to) return 'applied' as const;

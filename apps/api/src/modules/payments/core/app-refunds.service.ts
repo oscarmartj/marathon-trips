@@ -26,7 +26,7 @@ import { PAYMENT_TX_OPTIONS } from './payable-states';
 import { ProviderError } from './provider';
 import type { ProviderRefund } from './provider';
 import { loadRefundable } from './refundable';
-import { PaymentRefundStateMachine, lockRefund, refundEventOf, refundReviewTaskRef } from './refunds.service';
+import { LATE_PENDING_CODE, PaymentRefundStateMachine, lockRefund, refundEventOf, refundReviewTaskRef } from './refunds.service';
 import type { LockedRefund } from './refunds.service';
 
 type Tx = Prisma.TransactionClient;
@@ -115,7 +115,7 @@ export class AppRefundsService {
       const p = payments.find((x) => x.id === r.paymentId)!;
       const manual = p.adapterKey === MANUAL_KEY;
       const caps = this.gateway.registry.get(p.adapterKey)?.manifest.capabilities.refunds ?? 'none';
-      const blockedReason = r.blocked === 'disputed' ? 'payment_disputed' : r.blocked === 'external_refund_in_progress' ? 'external_refund_in_progress'
+      const blockedReason = r.blocked === 'disputed' ? 'payment_disputed' : r.blocked === 'booking_disputed' ? 'booking_dispute_open' : r.blocked === 'external_refund_in_progress' ? 'external_refund_in_progress'
         : r.refundableMinor === 0n ? 'nothing_to_refund'
           : !manual && caps === 'none' ? 'refunds_not_supported'
             : !manual && caps === 'full' && r.refundableMinor < r.netMinor ? 'partial_refund_not_supported' : null;
@@ -147,7 +147,8 @@ export class AppRefundsService {
       if (created.manual) return { status: 201, resourceType: 'Refund', resourceId: created.id };
       const status = await this.send(created.id);
       if (status === 'refused') throw conflict('refund_refused_by_gateway', 'The payment gateway refused this refund. Nothing was refunded.', { refundId: created.id });
-      return { status: status === 'unanswered' ? 202 : 201, resourceType: 'Refund', resourceId: created.id };
+      // Not sent (unanswered, or held for review): still requested, so 202, never "refunded".
+      return { status: status === 'unanswered' || status === 'review' || status === 'skipped' ? 202 : 201, resourceType: 'Refund', resourceId: created.id };
     });
     return { status: outcome.result.status, refund: await this.view(outcome.result.resourceId!) };
   }
@@ -171,6 +172,7 @@ export class AppRefundsService {
       const entry = (await loadRefundable(tx, b.id, p.mode)).find((x) => x.paymentId === p.id);
       if (!entry) throw conflict('payment_not_refundable', 'Only a payment that went through can be refunded');
       if (entry.blocked === 'disputed') throw conflict('refund_of_disputed_payment_rejected', 'This payment is disputed by the cardholder: it cannot be refunded while the dispute stands.');
+      if (entry.blocked === 'booking_disputed') throw conflict('booking_dispute_open', 'A payment of this booking is disputed: nothing is refunded from here until the dispute ends.');
       if (entry.blocked === 'external_refund_in_progress') throw conflict('external_refund_in_progress', 'A refund made at the payment gateway is still in progress on this booking. Wait for it to settle.');
       if (entry.refundableMinor <= 0n) throw conflict('nothing_to_refund', 'Nothing paid on this payment is beyond what the booking owes.');
       if (!manual && manifest.capabilities.refunds === 'full' && entry.refundableMinor < entry.netMinor) throw conflict('partial_refund_not_supported', 'This payment gateway only refunds a payment in full.');
@@ -293,9 +295,10 @@ export class AppRefundsService {
    * is free again; any gateway error changes nothing.
    */
   async resolve(refundId: string, version: number, actor: AuditActor): Promise<RefundView> {
-    const row = await this.prisma.refund.findUnique({ where: { id: refundId }, select: { id: true, bookingId: true, paymentId: true, providerAccountId: true, idempotencyKey: true, createdAt: true, origin: true, manualRefund: true, status: true, version: true, providerRefundRef: true, payment: { select: { providerPaymentRef: true } } } });
+    const row = await this.prisma.refund.findUnique({ where: { id: refundId }, select: { id: true, bookingId: true, paymentId: true, providerAccountId: true, idempotencyKey: true, createdAt: true, origin: true, manualRefund: true, status: true, version: true, providerRefundRef: true, failureCode: true, payment: { select: { providerPaymentRef: true } } } });
     if (!row) throw notFound('refund_not_found', 'Refund not found');
-    if (row.origin !== 'app' || row.manualRefund || (row.status !== 'requested' && row.status !== 'pending')) throw conflict('refund_not_resolvable', 'Only a refund from the app still waiting for its gateway can be resolved here');
+    const latePending = row.status === 'failed' && row.failureCode === LATE_PENDING_CODE;
+    if (row.origin !== 'app' || row.manualRefund || (row.status !== 'requested' && row.status !== 'pending' && !latePending)) throw conflict('refund_not_resolvable', 'Only a refund from the app still waiting for its gateway can be resolved here');
     if (row.version !== version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
     // H1: stop the sweep and hold the lease, so no request is sent while we ask the gateway and decide.
     if (row.status === 'requested' && row.providerRefundRef === null && !(await this.lease(refundId, true))) throw conflict('refund_send_in_progress', 'This refund is being sent to the gateway right now. Try again in a few minutes.');
@@ -312,7 +315,13 @@ export class AppRefundsService {
       const { b, p, r } = await this.lockRefundChain(tx, row.bookingId, row.paymentId, refundId);
       await this.unlease(tx, r.id);
       if (r.version !== version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
-      if (found) {
+      if (latePending) {
+        // Re-review, M2: the way out of a refund we failed that the gateway was still processing. Its word now settles
+        // it: made (recorded), still in progress (kept blocked) or failed or unknown (the block is lifted).
+        if (found && (found.amount.amountMinor !== r.amountMinor || found.amount.currency !== r.currency)) throw conflict('refund_amount_mismatch', 'The gateway holds this refund with another amount. Check it at the gateway.');
+        const handled = found ? await this.machine.gatewayMovedFailedRefund(tx, b, p, r, found, 'staff') : false;
+        if (!handled) await this.machine.clearLatePending(tx, b, r);
+      } else if (found) {
         if (found.amount.amountMinor !== r.amountMinor || found.amount.currency !== r.currency) throw conflict('refund_amount_mismatch', 'The gateway holds this refund with another amount. Check it at the gateway.');
         if (r.providerRefundRef === null) await this.machine.setReference(tx, r, found.ref);
         await this.machine.apply(tx, b, p, r, refundEventOf(found.status), { source: 'staff', actor, failureCode: found.failureCode, providerRefundRef: found.ref });
@@ -440,11 +449,15 @@ export class AppRefundsService {
    * A dispute on the payment (open, evidence submitted or lost), or a refund made on the gateway's dashboard since ours
    * was asked: a call now could pay the customer twice (plan review, 2).
    */
-  private async secondPayoutRisk(db: Pick<Tx, '$queryRaw'>, row: { bookingId: string; createdAt: Date }): Promise<boolean> {
-    // Re-review, 2: the cap is per booking, so any payment of the booking counts, not only this refund's.
+  private async secondPayoutRisk(db: Pick<Tx, '$queryRaw'>, row: { bookingId: string; paymentId: string; createdAt: Date }): Promise<boolean> {
+    // Re-review, 2 and 3 (M1): the same rule as refundable(): a dispute still open anywhere on the booking, or this
+    // payment's own lost dispute (a lost dispute of another payment already took its money out of the plan), or a
+    // refund made at the gateway on the booking since ours was asked.
+    const mode = this.gateway.mode;
     const [x] = await db.$queryRaw<Array<{ risk: boolean }>>`
-      SELECT (EXISTS (SELECT 1 FROM disputes d WHERE d."bookingId" = ${row.bookingId}::uuid AND d.status IN ('open', 'evidence_submitted', 'lost'))
-           OR EXISTS (SELECT 1 FROM refunds r WHERE r."bookingId" = ${row.bookingId}::uuid AND r.origin = 'external' AND r."createdAt" >= ${row.createdAt}
+      SELECT (EXISTS (SELECT 1 FROM disputes d WHERE d."bookingId" = ${row.bookingId}::uuid AND d.mode = ${mode}::"PaymentMode"
+                        AND (d.status IN ('open', 'evidence_submitted') OR (d.status = 'lost' AND d."paymentId" = ${row.paymentId}::uuid)))
+           OR EXISTS (SELECT 1 FROM refunds r WHERE r."bookingId" = ${row.bookingId}::uuid AND r.mode = ${mode}::"PaymentMode" AND r.origin = 'external' AND r."createdAt" >= ${row.createdAt}
                         AND r.status IN ('pending', 'succeeded'))) AS risk`;
     return x?.risk === true;
   }
