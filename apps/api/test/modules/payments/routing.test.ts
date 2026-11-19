@@ -663,10 +663,13 @@ describe('routing rules, more (review B1)', () => {
 describe('adapter states (plan section 7)', () => {
   it('planned_entries_listed_not_creatable', async () => {
     const list = await admin.get('/admin/payments/adapters');
-    const paypal = (list.body.items as Array<{ key: string; status: string; creatable: boolean }>).find((a) => a.key === 'paypal');
-    expect(paypal).toMatchObject({ status: 'planned', creatable: false });
-    const r = await admin.post('/admin/payments/provider-accounts', { adapterKey: 'paypal', displayName: 'PayPal', mode: 'test' });
+    const items = list.body.items as Array<{ key: string; status: string; creatable: boolean }>;
+    // PayPal was the planned example until task 4.3 made it a real, experimental adapter; GoCardless is planned.
+    const planned = items.find((a) => a.key === 'gocardless');
+    expect(planned).toMatchObject({ status: 'planned', creatable: false });
+    expect(items.find((a) => a.key === 'paypal')).toMatchObject({ status: 'experimental' });
+    const r = await admin.post('/admin/payments/provider-accounts', { adapterKey: 'gocardless', displayName: 'GoCardless', mode: 'test' });
     expect(r.status).toBeGreaterThanOrEqual(400);
-    expect(await t.prisma.providerAccount.count({ where: { adapterKey: 'paypal' } })).toBe(0);
+    expect(await t.prisma.providerAccount.count({ where: { adapterKey: 'gocardless' } })).toBe(0);
   });
 });
