@@ -7,6 +7,7 @@ import { lockPayment } from './attempt-state';
 import { ProviderGateway } from './gateway';
 import { PAYMENT_TX_OPTIONS } from './payable-states';
 import { PaymentRefundStateMachine, lockRefund, refundEventOf } from './refunds.service';
+import { MANUAL_KEY } from '../adapters/manual/manual';
 
 /** Refunds left `requested` or `pending` this long are read again from the gateway (plan 0.1, 6.2; plan 3.3, 12.6). */
 export const REFUND_REQUERY_AFTER_MS = 24 * 3_600_000;
@@ -26,7 +27,8 @@ export class PaymentRefundSyncService {
   /** Refunds still open after 24 hours, oldest first. */
   async due(now: Date, limit = 50): Promise<string[]> {
     const rows = await this.prisma.refund.findMany({
-      where: { status: { in: ['requested', 'pending'] }, updatedAt: { lte: new Date(now.getTime() - REFUND_REQUERY_AFTER_MS) } },
+      // Task 4.5 (plan review, 4): a manual refund has no gateway to ask; it waits for Oscar's transfer (its own task).
+      where: { status: { in: ['requested', 'pending'] }, manualRefund: false, payment: { adapterKey: { not: MANUAL_KEY } }, updatedAt: { lte: new Date(now.getTime() - REFUND_REQUERY_AFTER_MS) } },
       orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }], take: limit, select: { id: true },
     });
     return rows.map((r) => r.id);

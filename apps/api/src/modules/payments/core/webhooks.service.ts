@@ -16,7 +16,8 @@ import { CoverageFailedError } from './coverage.service';
 import { PAYMENT_TX_OPTIONS, PaymentAttemptsService } from './attempts.service';
 import { ACCOUNT_PUBLIC_SELECT, ProviderGateway } from './gateway';
 import type { AccountForCall } from './gateway';
-import type { ProviderPayment, ProviderRefund } from './provider';
+import type { ProviderDispute, ProviderPayment, ProviderRefund } from './provider';
+import { PaymentDisputesService } from './disputes.service';
 import { PaymentRefundStateMachine, lockRefund, refundEventOf } from './refunds.service';
 import type { RefundEvent } from './refunds.service';
 
@@ -52,6 +53,7 @@ export class PaymentWebhooksService {
     @Inject(TasksService) private readonly tasks: TasksService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(PaymentRefundStateMachine) private readonly refunds: PaymentRefundStateMachine,
+    @Inject(PaymentDisputesService) private readonly disputes: PaymentDisputesService,
   ) {}
 
   sanitiseHeaders(headers: Record<string, string | string[] | undefined>, signatureHeaders: readonly string[]): Record<string, string> {
@@ -135,6 +137,7 @@ export class PaymentWebhooksService {
     const parsed = ev.rawBody && provider ? provider.parseEvent(Buffer.from(ev.rawBody)) : null;
     if (!parsed) return this.ignore(ev.id, ev.rawBody ? 'malformed' : 'body_purged');
     if (parsed.kind === 'refund' && parsed.refund) return this.processRefund(ev, parsed.refund);
+    if (parsed.kind === 'dispute' && parsed.dispute) return this.processDispute(ev, parsed.dispute);
     if (parsed.kind !== 'payment' || !parsed.payment) return this.ignore(ev.id, 'unsupported');
     const remote = parsed.payment;
 
@@ -247,9 +250,12 @@ export class PaymentWebhooksService {
         const r = await lockRefund(tx, p, known.id);
         if (!r) throw notFound();
         if (r.amountMinor !== remote.amount.amountMinor) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_amount_mismatch');
+        // An app refund matched by our id before the gateway answered us (task 4.5): its reference is filled in now.
+        if (r.providerRefundRef !== null && r.providerRefundRef !== remote.ref) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_reference_mismatch');
+        await this.refunds.setReference(tx, r, remote.ref);
         const failedNow = remote.status === 'failed' || remote.status === 'cancelled';
         const event: RefundEvent = failedNow && r.status === 'succeeded' ? 'reversal_confirmed' : refundEventOf(remote.status);
-        await this.refunds.apply(tx, b, p, r, event, { source: 'webhook', failureCode: remote.failureCode });
+        await this.refunds.apply(tx, b, p, r, event, { source: 'webhook', failureCode: remote.failureCode, providerRefundRef: remote.ref });
         return this.processedIn(tx, ev.id, r.id);
       }
       // A refund made on the gateway's dashboard. It may not take more than is left of the payment (plan 3.3, 3.3).
@@ -257,9 +263,74 @@ export class PaymentWebhooksService {
         const held = await tx.refund.aggregate({ where: { paymentId: p.id, status: { in: ['requested', 'pending', 'succeeded'] } }, _sum: { amountMinor: true } });
         if ((held._sum.amountMinor ?? 0n) + remote.amount.amountMinor > p.amountMinor) return this.refusedRefund(tx, ev.id, b.reference, p.id, 'refund_over_payment');
       }
+      // Task 4.5 (P10): beyond what is left of the payment after its chargebacks, the gateway's refund is still recorded
+      // (the money did go); the excess is a receivable and Oscar gets a task.
+      let overCap = false;
+      if (remote.status === 'pending' || remote.status === 'succeeded') {
+        const [x] = await tx.$queryRaw<Array<{ refunds: bigint; withdrawn: bigint }>>`
+          SELECT COALESCE((SELECT sum("amountMinor") FROM refunds WHERE "paymentId" = ${p.id}::uuid AND status IN ('requested', 'pending', 'succeeded')), 0)::bigint AS refunds,
+                 COALESCE((SELECT sum("amountMinor") FROM disputes WHERE "paymentId" = ${p.id}::uuid AND "fundsWithdrawnAt" IS NOT NULL AND "fundsReinstatedAt" IS NULL), 0)::bigint AS withdrawn`;
+        overCap = x!.refunds + x!.withdrawn + remote.amount.amountMinor > p.amountMinor;
+      }
       const r = await this.refunds.createExternal(tx, b, p, remote);
+      if (overCap) {
+        await this.tasks.createSystemIn(tx, {
+          title: `Refund at the payment gateway beyond what was left on booking ${b.reference}`,
+          description: 'A refund made at the payment gateway, added to the chargebacks of this payment, is more than the payment. It is recorded; the difference is owed by the customer. Check the booking and the gateway.',
+          entityType: 'Refund', entityId: r.id, sourceRef: `payments:refund_over_cap:${r.id}`,
+        });
+      }
       return this.processedIn(tx, ev.id, r.id);
     }, PAYMENT_TX_OPTIONS);
+  }
+
+  /**
+   * A dispute event (task 4.5, plan section 5.3). Outside any transaction, through the account that received it: the
+   * payment disputed and the dispute as the gateway sees it now (its word wins over the event's). Then booking, all its
+   * payments and the dispute are locked, in that order.
+   */
+  private async processDispute(ev: { id: string; providerAccountId: string }, said: ProviderDispute): Promise<ProcessOutcome> {
+    const accountId = ev.providerAccountId;
+    const remotePayment = await this.gateway.call(accountId, 'retrieve', (provider, ctx) => provider.retrievePayment(ctx, { ref: said.paymentRef }));
+    const current = await this.gateway.call(accountId, 'retrieve', async (provider, ctx) => (provider.retrieveDispute ? provider.retrieveDispute(ctx, said.ref) : null));
+    if (!current) throw new AppError('dispute_not_confirmed_by_gateway', 'The gateway does not confirm this dispute');
+    const match = remotePayment ? await this.matchPayment(accountId, remotePayment) : null;
+    if (!match || !remotePayment || current.paymentRef !== said.paymentRef) return this.unknownPayment(ev.id);
+    return runTransaction(this.prisma, async (tx) => {
+      const b = await readBookingForPayments(tx, { id: match.bookingId }, true);
+      if (!b) throw notFound();
+      await tx.$queryRaw`SELECT id FROM payments WHERE "bookingId" = ${b.id}::uuid ORDER BY id FOR UPDATE`;
+      const p = await lockPayment(tx, b, match.id);
+      if (!p) throw notFound();
+      const status = await tx.webhookEvent.findUniqueOrThrow({ where: { id: ev.id }, select: { status: true } });
+      if (status.status !== 'received' && status.status !== 'failed') return 'skipped' as const;
+      const [owner] = await tx.$queryRaw<Array<{ erased: boolean }>>`SELECT ("anonymisedAt" IS NOT NULL) AS erased FROM customers WHERE id = ${b.customerId}::uuid`;
+      await tx.webhookEvent.update({ where: { id: ev.id }, data: { bookingId: b.id, paymentId: p.id, ...(owner?.erased ? { rawBody: null } : {}) } });
+      // The payment first (plan 0.1, P7): a dispute of money we have not seen arrive catches the payment up.
+      if (p.status !== 'succeeded' && remotePayment.status === 'succeeded') {
+        if (remotePayment.amount.amountMinor !== p.amountMinor || remotePayment.amount.currency !== p.currency || (p.providerPaymentRef !== null && p.providerPaymentRef !== remotePayment.ref)) {
+          await this.attempts.mismatchTask(tx, p, b.reference);
+          return this.ignoreIn(tx, ev.id, 'amount_or_currency_mismatch');
+        }
+        await this.machine.setReference(tx, p, remotePayment.ref);
+        await this.machine.apply(tx, b, p, 'succeeded', { source: 'webhook' });
+      }
+      if (p.status !== 'succeeded' || p.providerPaymentRef !== remotePayment.ref) return this.refusedDispute(tx, ev.id, b.reference, p.id, 'dispute_of_uncollected_payment');
+      const out = await this.disputes.applyRemote(tx, b, p, accountId, current, ev.id);
+      if (out.kind === 'refused') return this.refusedDispute(tx, ev.id, b.reference, p.id, out.code);
+      await tx.webhookEvent.update({ where: { id: ev.id }, data: { disputeId: out.disputeId, status: 'processed', processedAt: new Date(), attempts: { increment: 1 }, errorCode: null } });
+      await this.tasks.closeSystemIn(tx, `payments:webhook_failed:${ev.id}`);
+      return 'processed' as const;
+    }, PAYMENT_TX_OPTIONS);
+  }
+
+  private async refusedDispute(tx: Prisma.TransactionClient, eventId: string, reference: string, paymentId: string, code: string): Promise<'ignored'> {
+    await this.tasks.createSystemIn(tx, {
+      title: `Dispute at the payment gateway not recorded on booking ${reference}`,
+      description: `The payment gateway reported a dispute that cannot be recorded as it is (${code}). Nothing was posted; check the gateway and the booking.`,
+      entityType: 'Payment', entityId: paymentId, sourceRef: `payments:dispute_refused:${eventId}`,
+    });
+    return this.ignoreIn(tx, eventId, code);
   }
 
   /** Our payment for the gateway's: by our id among this account's payments only (finding 2), then by reference. */

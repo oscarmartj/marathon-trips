@@ -110,6 +110,17 @@ export class ProviderGateway {
     }
   }
 
+  /**
+   * The rules of a call without making one (task 4.5): a manual refund never reaches a gateway, but it is still bound
+   * by mode and environment like any refund. Returns the adapter's manifest; refuses as `call` would (409, audited).
+   */
+  async assertAllowed(accountId: string, op: GatewayOperation): Promise<{ account: AccountForCall; manifest: AdapterManifest }> {
+    const account = await this.prisma.providerAccount.findUnique({ where: { id: accountId }, select: ACCOUNT_PUBLIC_SELECT });
+    if (!account) throw new ApiError(409, 'provider_account_missing', 'The payment account no longer exists');
+    const provider = await this.allow(account, op);
+    return { account, manifest: provider.manifest };
+  }
+
   /** Verifies a webhook with the secret of the account that received it (no network). */
   async verifyWebhook(account: AccountForCall, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): Promise<WebhookVerification> {
     const provider = await this.allow(account, 'webhook');

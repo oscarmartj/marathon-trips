@@ -136,6 +136,11 @@ export class ManualTransfersService {
         if (p.origin !== 'inbound' || p.status !== 'succeeded') throw conflict('payment_not_voidable', 'Only a confirmed bank transfer can be voided');
         if (p.version !== input.version) throw conflict('version_conflict', 'Someone else changed this. Reload and try again.');
         if (!RECEIVING.includes(b.status)) throw conflict('booking_cannot_receive_payment', 'This booking cannot change its payments in its current state');
+        // Plan 0.1, 6.2 (task 4.5, plan review 1): money already sent back on this transfer, or one being sent, would vanish
+        // from what was collected while the ledger keeps it. Settle (or fail) the refund first.
+        const [held] = await tx.$queryRaw<Array<{ n: bigint }>>`
+          SELECT ((SELECT count(*) FROM refunds WHERE "paymentId" = ${p.id}::uuid AND status <> 'failed') + (SELECT count(*) FROM disputes WHERE "paymentId" = ${p.id}::uuid))::bigint AS n`;
+        if ((held?.n ?? 0n) > 0n) throw conflict('void_inbound_with_refund_rejected', 'This transfer has a refund. It cannot be voided.');
         // Oscar confirmed the booking on a covered deposit: taking that money back is a refund or a cancellation (4.5, 6.4).
         const items = await tx.paymentScheduleItem.findMany({ where: { bookingId: b.id, state: 'active' }, select: { kind: true, sequence: true, amountMinor: true } });
         const after = (await netCollectedSource.collected(tx, b.id, p.mode)) - p.amountMinor;
