@@ -27,7 +27,7 @@ export class MemoryCardSessionStore implements CardSessionStore {
     if (existing) return existing;
     const s: CardSession = {
       ...init, id: randomUUID(), ref: `cs_${randomBytes(16).toString('hex')}`, status: 'open', chargeRef: null, chargedMinor: null, failureCode: null,
-      submittedAt: null, verifyCalls: 0, expiresAt: new Date(init.createdAt.getTime() + DEFAULT_SESSION_LIFETIME_MS), version: 1,
+      authRef: null, authCardHash: null, submittedAt: null, verifyCalls: 0, expiresAt: new Date(init.createdAt.getTime() + DEFAULT_SESSION_LIFETIME_MS), version: 1,
     };
     this.sessions.set(s.id, s);
     return { ...s };
@@ -48,6 +48,13 @@ export class MemoryCardSessionStore implements CardSessionStore {
 
   async byChargeRef(accountId: string, chargeRef: string): Promise<CardSession | null> {
     return this.find((s) => s.accountId === accountId && s.chargeRef === chargeRef);
+  }
+
+  async unresolvedOfBooking(accountId: string, bookingId: string): Promise<CardSession[]> {
+    return [...this.sessions.values()]
+      .filter((s) => s.accountId === accountId && s.bookingId === bookingId && (s.status === 'submitting' || (s.status === 'failed' && s.chargeRef === null && s.submittedAt !== null && (s.failureCode === 'outcome_unknown' || s.failureCode === 'provider_busy'))))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((s) => ({ ...s }));
   }
 
   async update(s: CardSession, change: CardSessionChange): Promise<CardSession | null> {

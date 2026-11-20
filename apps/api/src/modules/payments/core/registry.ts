@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { AppError } from '../../../platform/errors/safe-error';
 import { CONTRACT_CLAUSES } from './contract-clauses';
 import { CardSessionProvider } from './card-sessions/provider';
+import { EVENTLESS_ADAPTER_KEYS } from './provider';
 import type { AdapterManifest, PaymentProvider } from './provider';
 
 const HTTPS_ORIGIN = /^https:\/\/[a-z0-9.-]+$/;
@@ -46,6 +47,7 @@ export function manifestProblems(manifests: readonly AdapterManifest[], repoRoot
     if (!(localPage ? TEST_ONLY_ORIGIN : HTTPS_ORIGIN).test(m.checkoutOrigin)) problems.push(`${m.key}: checkout origin must be an https origin`);
     problems.push(...accountSetupProblems(m));
     problems.push(...cardFieldsProblems(m));
+    problems.push(...eventlessManifestProblems(m));
     if (m.status === 'verified') {
       if (m.testOnly) problems.push(`${m.key}: a test-only adapter cannot be verified`);
       if (!m.evidence || !/^docs\/done\/[\w.-]+\.md$/.test(m.evidence)) problems.push(`${m.key}: verified without sandbox evidence (docs/done/…)`);
@@ -147,6 +149,32 @@ export function accountSetupProblems(m: AdapterManifest): string[] {
   return problems;
 }
 
+/**
+ * Task 9.1 (plan docs/plans/9.1-eway.md, sections 4.2 and 20 M1, M6): `gatewayEvents: 'none'` only for a key of the
+ * closed list; no prepared webhooks, no refund-event ids, a generated webhook secret; and never `verified` without both
+ * reconciliation (activity or settlements) and disputes, which are what replace events for money moved without us.
+ */
+export function eventlessManifestProblems(m: AdapterManifest): string[] {
+  const problems: string[] = [];
+  if (m.capabilities.gatewayEvents === undefined) return problems;
+  if (m.capabilities.gatewayEvents !== 'none') problems.push(`${m.key}: unknown gatewayEvents value`);
+  if (!EVENTLESS_ADAPTER_KEYS.includes(m.key)) problems.push(`${m.key}: gatewayEvents none is not allowed for this adapter`);
+  if (m.capabilities.refundEventOurId) problems.push(`${m.key}: refundEventOurId without events`);
+  if (m.account.webhookSecret.source !== 'generated') problems.push(`${m.key}: an adapter without events has a generated webhook secret`);
+  const reconciles = m.capabilities.reconciliation?.activity === true || m.capabilities.reconciliation?.settlements === true;
+  if (m.status === 'verified' && (!reconciles || m.capabilities.disputes !== 'events')) problems.push(`${m.key}: verified without events needs reconciliation and disputes`);
+  return problems;
+}
+
+/** Task 9.1 (plan 9.1, 20 M1): what only the provider object tells: an eventless adapter has no signature headers. */
+export function eventlessProviderProblems(a: PaymentProvider): string[] {
+  if (a.manifest.capabilities.gatewayEvents !== 'none') return [];
+  const problems: string[] = [];
+  if (a.signatureHeaders.length > 0) problems.push(`${a.manifest.key}: signature headers without events`);
+  if (typeof a.prepareWebhook === 'function') problems.push(`${a.manifest.key}: prepareWebhook without events`);
+  return problems;
+}
+
 /** A provider declares preCardSession exactly when it is a CardSessionProvider (plan 4.4, 18 M1). */
 export function preCardSessionProblems(a: PaymentProvider): string[] {
   const declares = a.manifest.capabilities.preCardSession === true;
@@ -167,6 +195,7 @@ export class PaymentAdapterRegistry {
     for (const a of adapters) if (a.manifest.capabilities.disputes === 'events' && typeof a.retrieveDispute !== 'function') problems.push(`${a.manifest.key}: declares disputes without retrieveDispute`);
     // Task 4.4 (plan 4.4, 18 M1): the marker of a session with no gateway counterpart belongs to CardSessionProvider only.
     for (const a of adapters) problems.push(...preCardSessionProblems(a));
+    for (const a of adapters) problems.push(...eventlessProviderProblems(a));
     if (problems.length > 0) throw new AppError('payment_adapters_invalid', `Payment adapter manifests are invalid: ${problems.join('; ')}`);
     for (const a of adapters) this.byKey.set(a.manifest.key, a);
   }

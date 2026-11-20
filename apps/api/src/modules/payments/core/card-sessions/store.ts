@@ -6,11 +6,22 @@ import type { PaymentModeName } from '../provider';
 
 export type CardSessionStatus = 'open' | 'submitting' | 'authenticating' | 'succeeded' | 'failed' | 'cancelled';
 
+/**
+ * Task 9.1 (plan docs/plans/9.1-eway.md, sections 4.1 and 20 m8): `after_charge`, the one charge starts 3-D Secure
+ * (Pin: open → submitting → authenticating → …); `before_charge`, 3-D Secure comes first and moves no money (eWAY:
+ * open → authenticating → submitting → …). Fixed when the session is created.
+ */
+export type CardSessionFlow = 'after_charge' | 'before_charge';
+
+/** Task 9.1 (plan 9.1, 20 M2): why a `before_charge` session can end before its one charge was ever sent. */
+export const PRE_CHARGE_FAILURES: readonly CardSessionFailure[] = ['card_not_authenticated', 'card_declined', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts'];
+
 export interface CardSession {
   id: string;
   ref: string;
   accountId: string;
   mode: PaymentModeName;
+  flow: CardSessionFlow;
   idempotencyKey: string;
   paymentId: string;
   bookingId: string;
@@ -18,6 +29,10 @@ export interface CardSession {
   currency: string;
   returnUrl: string;
   status: CardSessionStatus;
+  /** Task 9.1, `before_charge`: the gateway's authentication reference (eWAY's AccessCode), set once. */
+  authRef: string | null;
+  /** Task 9.1, `before_charge`: sha256 (hex) of the card token authenticated, set once; the charge must use the same. */
+  authCardHash: string | null;
   chargeRef: string | null;
   /** What the bound charge collected, when succeeded (normally the session's amount). */
   chargedMinor: bigint | null;
@@ -32,6 +47,7 @@ export interface CardSession {
 export interface CardSessionInit {
   accountId: string;
   mode: PaymentModeName;
+  flow: CardSessionFlow;
   idempotencyKey: string;
   paymentId: string;
   bookingId: string;
@@ -49,6 +65,8 @@ export interface CardSessionChange {
   failureCode?: CardSessionFailure | null;
   submittedAt?: Date;
   verifyCalls?: number;
+  authRef?: string;
+  authCardHash?: string;
 }
 
 export type CardRefundIntentStatus = 'new' | 'submitting' | 'bound' | 'refused';
@@ -92,7 +110,9 @@ export interface SessionChargeRow {
 }
 
 /** Tasks a card session opens for staff (plan 4.4, sections 6.3, 6.4 and 18 m7). Codes and ids only. */
-export type CardSessionTask = 'extra_charge' | 'reference_mismatch' | 'refund_conflict' | 'refund_candidates' | 'declines_spike';
+export type CardSessionTask = 'extra_charge' | 'reference_mismatch' | 'refund_conflict' | 'refund_candidates' | 'declines_spike'
+  // Task 9.1 (plan 9.1, 20 M4 and m10).
+  | 'duplicate_transaction' | 'reference_not_unique';
 
 export interface CardSessionStore {
   now(): Date;
@@ -101,6 +121,11 @@ export interface CardSessionStore {
   byRef(accountId: string, ref: string): Promise<CardSession | null>;
   byKey(accountId: string, idempotencyKey: string): Promise<CardSession | null>;
   byChargeRef(accountId: string, chargeRef: string): Promise<CardSession | null>;
+  /**
+   * Task 9.1 (plan 9.1, 20 M4): this booking's sessions on this account whose charge may exist without our knowing
+   * (`submitting`, or `failed` with an unknown outcome and no charge), oldest first.
+   */
+  unresolvedOfBooking(accountId: string, bookingId: string): Promise<CardSession[]>;
   /** Compare-and-set on `version`; null when another change came first. Refuses what `sessionTransitionProblem` refuses. */
   update(s: CardSession, change: CardSessionChange): Promise<CardSession | null>;
   /** Appends a charge seen under a session (once per charge); true when it was new. */
@@ -123,19 +148,40 @@ const FAILED_LATE_SUCCESS: readonly (CardSessionFailure | null)[] = ['outcome_un
 export function sessionTransitionProblem(s: CardSession, change: CardSessionChange): string | null {
   const to = change.status ?? s.status;
   if (to !== s.status) {
-    const allowed: Record<CardSessionStatus, readonly CardSessionStatus[]> = {
-      open: ['submitting', 'cancelled'],
-      submitting: ['authenticating', 'succeeded', 'failed'],
-      authenticating: ['succeeded', 'failed'],
-      failed: FAILED_LATE_SUCCESS.includes(s.failureCode) && s.chargeRef === null ? ['succeeded'] : [],
-      succeeded: [],
-      cancelled: [],
-    };
+    const late = FAILED_LATE_SUCCESS.includes(s.failureCode) && s.chargeRef === null && s.submittedAt !== null ? ['succeeded' as const] : [];
+    // Task 9.1 (plan 9.1, 20 M2 and m8): each flow has its own edges. Before its one charge, a before_charge session
+    // may only be sent, cancelled or fail for a pre-charge reason; it never succeeds without a charge sent.
+    const preCharge = s.flow === 'before_charge' && s.status === 'authenticating' && s.submittedAt === null;
+    const allowed: Record<CardSessionStatus, readonly CardSessionStatus[]> = s.flow === 'before_charge'
+      ? {
+        open: ['authenticating', 'cancelled'],
+        authenticating: preCharge ? ['submitting', 'cancelled', 'failed'] : [],
+        submitting: ['succeeded', 'failed'],
+        failed: late,
+        succeeded: [],
+        cancelled: [],
+      }
+      : {
+        open: ['submitting', 'cancelled'],
+        submitting: ['authenticating', 'succeeded', 'failed'],
+        authenticating: ['succeeded', 'failed'],
+        failed: late,
+        succeeded: [],
+        cancelled: [],
+      };
     if (!allowed[s.status].includes(to)) return `card_session_transition:${s.status}->${to}`;
     if (to === 'submitting' && !change.submittedAt) return 'card_session_submitted_at_required';
+    if (s.flow === 'before_charge') {
+      if (s.status === 'open' && to === 'authenticating' && !change.authCardHash) return 'card_session_auth_card_required';
+      if (s.status === 'authenticating' && to === 'submitting' && (change.authRef ?? s.authRef) === null) return 'card_session_auth_ref_required';
+      if (preCharge && to === 'failed' && !PRE_CHARGE_FAILURES.includes(change.failureCode ?? 'outcome_unknown')) return 'card_session_pre_charge_failure';
+    }
   } else if (change.failureCode !== undefined && change.failureCode !== s.failureCode) {
     return 'card_session_failure_code_fixed';
   }
+  if (s.flow === 'after_charge' && (change.authRef !== undefined || change.authCardHash !== undefined)) return 'card_session_flow';
+  if (change.authRef !== undefined && s.authRef !== null && change.authRef !== s.authRef) return 'card_session_auth_fixed';
+  if (change.authCardHash !== undefined && s.authCardHash !== null && change.authCardHash !== s.authCardHash) return 'card_session_auth_fixed';
   if (change.submittedAt && s.submittedAt) return 'card_session_submitted_once';
   if (change.chargeRef !== undefined && s.chargeRef !== null && change.chargeRef !== s.chargeRef) return 'card_session_charge_fixed';
   if (to === 'succeeded' && (change.chargeRef ?? s.chargeRef) === null) return 'card_session_success_needs_charge';
@@ -166,7 +212,7 @@ export function unwiredCardSessionStore(): CardSessionStore {
     throw new Error('card_session_store_unwired');
   };
   return {
-    now: () => new Date(), createOrGet: fail, byRef: fail, byKey: fail, byChargeRef: fail, update: fail, recordCharge: fail,
+    now: () => new Date(), createOrGet: fail, byRef: fail, byKey: fail, byChargeRef: fail, unresolvedOfBooking: fail, update: fail, recordCharge: fail,
     intentByKey: fail, intentByRefundRef: fail, submittingIntents: fail, createIntent: fail, updateIntent: fail, openTask: fail,
   };
 }

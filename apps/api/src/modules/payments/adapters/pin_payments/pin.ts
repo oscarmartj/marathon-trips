@@ -68,7 +68,7 @@ export function pinManifest(): AdapterManifest {
     countries: 'any',
     // The card page is ours: CardSessionProvider replaces this with WEB_ORIGIN. Here, the origin of Pin's fields.
     checkoutOrigin: PIN_CARD_FIELDS.frameOrigins[0],
-    cardFields: { scriptUrl: PIN_CARD_FIELDS.scriptUrl, frameOrigins: [...PIN_CARD_FIELDS.frameOrigins], challengeOrigins: { test: [...PIN_CARD_FIELDS.challengeOrigins.test], live: [] } },
+    cardFields: { driver: 'pin_hosted_fields', scriptUrl: PIN_CARD_FIELDS.scriptUrl, frameOrigins: [...PIN_CARD_FIELDS.frameOrigins], challengeOrigins: { test: [...PIN_CARD_FIELDS.challengeOrigins.test], live: [] } },
     // Plan 5.2: Pin keys carry no documented test or live marker; a test account only ever calls the test host (A4).
     account: {
       fields: [
@@ -101,6 +101,10 @@ type Answer = { status: number; body: unknown };
 export class PinPaymentsGateway implements CardTokenGateway {
   readonly manifest = pinManifest();
   readonly signatureHeaders = [PIN_SIGNATURE_HEADER] as const;
+  /** Task 9.1: Pin's charge starts 3-D Secure (plan 4.4, section 6.4), as before. */
+  readonly authentication = 'after_charge' as const;
+  readonly chargeRefPattern = CHARGE_TOKEN;
+  readonly refundRefPattern = REFUND_TOKEN;
   /** Pin documents no refund metadata (A9). */
   readonly refundEventsCarryOurId = false;
   private readonly transport: PinTransport;

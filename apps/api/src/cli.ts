@@ -11,6 +11,7 @@ import { FLAGS } from './platform/flags/flag-registry';
 import { FlagsAdminService } from './platform/flags/flags-admin.service';
 import { FeatureFlagService } from './platform/flags/flags.service';
 import { ProviderAccountsService } from './modules/payments';
+import { CardSessionsService } from './modules/payments/core/card-sessions/card-sessions.service';
 import { TEST_ADAPTER_ENVS } from './modules/payments/core/gateway';
 import { STRIPE_TEST_KEY, STRIPE_WEBHOOK_SECRET } from './modules/payments/core/accounts.service';
 import { AppError } from './platform/errors/safe-error';
@@ -25,6 +26,7 @@ import { AppError } from './platform/errors/safe-error';
  *   pnpm api:cli payments:simulator-account [--name <display name>]
  *   pnpm api:cli payments:manual-account [--name <display name>]
  *   STRIPE_TEST_SECRET_KEY=… STRIPE_TEST_WEBHOOK_SECRET=… pnpm api:cli payments:stripe-test-account [--name <display name>]
+ *   pnpm api:cli payments:card-session-bind --ref cs_… --transaction <eWAY transaction id>
  *   pnpm api:cli privacy:erasures-list > erasures.json
  *   pnpm api:cli privacy:erasures-reapply erasures.json
  *
@@ -41,10 +43,11 @@ export async function runCli(argv: string[], print: (line: string) => void = con
   if (command === 'payments:simulator-account') return runSimulatorAccount(value('name'), print);
   if (command === 'payments:manual-account') return runManualAccount(value('name'), print);
   if (command === 'payments:stripe-test-account') return runStripeTestAccount(value('name'), print);
+  if (command === 'payments:card-session-bind') return runCardSessionBind(value('ref'), value('transaction'), print);
   if (command === 'privacy:erasures-list') return runErasuresList(print);
   if (command === 'privacy:erasures-reapply') return runErasuresReapply(rest[0], print);
   if (command !== 'staff:create' && command !== 'staff:reset') {
-    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>] | payments:manual-account [--name <name>] | payments:stripe-test-account [--name <name>] | privacy:erasures-list | privacy:erasures-reapply <file>');
+    print('Usage: staff:create --email <address> [--owner] | staff:reset --email <address> | maintenance:on|off|status | payments:simulator-account [--name <name>] | payments:manual-account [--name <name>] | payments:stripe-test-account [--name <name>] | payments:card-session-bind --ref <cs_…> --transaction <id> | privacy:erasures-list | privacy:erasures-reapply <file>');
     return 2;
   }
   const email = emailSchema.safeParse(value('email'));
@@ -127,6 +130,31 @@ async function runSimulatorAccount(name: string | undefined, print: (line: strin
     const created = await app.get(ProviderAccountsService).createSimulatorAccount({ displayName: name });
     print(`Simulator account ${created.id} created (test mode). Its webhook URL, shown once:`);
     print(created.webhookUrl);
+    return 0;
+  } catch (e) {
+    print(e instanceof Error ? e.message : 'Failed');
+    return 1;
+  } finally {
+    await app.close();
+  }
+}
+
+/**
+ * Task 9.1 (plan docs/plans/9.1-eway.md, 20 m10): the way out of a card session whose reference the gateway holds on
+ * more than one transaction. Staff find the right one at the gateway; only a transaction with this session's reference,
+ * amount and currency is accepted. Audited as "system" (the console has no staff session).
+ */
+async function runCardSessionBind(ref: string | undefined, transaction: string | undefined, print: (line: string) => void): Promise<number> {
+  if (!ref || !/^cs_[0-9a-f]{32}$/.test(ref) || !transaction || !/^[0-9]{1,19}$/.test(transaction)) {
+    print('Usage: payments:card-session-bind --ref <cs_…> --transaction <transaction number>');
+    return 2;
+  }
+  process.env.JOBS_WORKERS = 'off';
+  loadConfig();
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
+  try {
+    const r = await app.get(CardSessionsService).bindByStaff(SYSTEM_ACTOR, ref, transaction);
+    print(`Card session bound; it is now ${r.status}. The booking's payment is recorded on its next read.`);
     return 0;
   } catch (e) {
     print(e instanceof Error ? e.message : 'Failed');

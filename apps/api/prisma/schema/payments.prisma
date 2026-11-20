@@ -1039,6 +1039,8 @@ model CardSession {
   providerAccount   ProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   /// @nopii the account's (trigger)
   mode              PaymentMode
+  /// @nopii after_charge (Pin) or before_charge (eWAY): fixed at insert, from the account's adapter (trigger; task 9.1)
+  flow              String          @default("after_charge")
   /// @nopii the attempt's idempotency key (booking:<id>:attempt:<n>)
   idempotencyKey    String
   /// No foreign key: contract subjects run on this table without payment rows (plan 4.4, section 11).
@@ -1053,6 +1055,10 @@ model CardSession {
   status            String          @default("open")
   /// @nopii the gateway's charge reference, set once
   chargeRef         String?
+  /// @nopii before_charge: the gateway's 3-D Secure reference (eWAY AccessCode), set once (task 9.1)
+  authRef           String?
+  /// @nopii before_charge: sha256 hex of the single-use card token authenticated, set once (task 9.1)
+  authCardHash      String?
   /// What the bound charge collected, when succeeded.
   chargedMinor      BigInt?
   /// @nopii closed list (CHECK)

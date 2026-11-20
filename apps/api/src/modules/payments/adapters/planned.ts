@@ -13,7 +13,6 @@ export interface PlannedAdapter {
 }
 
 export const PLANNED_ADAPTERS: readonly PlannedAdapter[] = [
-  { key: 'eway', displayName: 'eWAY', methods: ['card'], currencies: ['AUD'], countries: 'any' },
   { key: 'westpac_onlinepay', displayName: 'Westpac OnlinePay', methods: ['card'], currencies: ['AUD'], countries: 'any' },
   { key: 'gocardless', displayName: 'GoCardless', methods: ['payto', 'becs'], currencies: ['AUD'], countries: ['AU'] },
   { key: 'azupay', displayName: 'Azupay', methods: ['payto', 'payid_transfer'], currencies: ['AUD'], countries: ['AU'] },
