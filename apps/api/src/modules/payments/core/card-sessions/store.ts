@@ -14,7 +14,9 @@ export type CardSessionStatus = 'open' | 'submitting' | 'authenticating' | 'succ
 export type CardSessionFlow = 'after_charge' | 'before_charge';
 
 /** Task 9.1 (plan 9.1, 20 M2): why a `before_charge` session can end before its one charge was ever sent. */
-export const PRE_CHARGE_FAILURES: readonly CardSessionFailure[] = ['card_not_authenticated', 'card_declined', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts'];
+export const PRE_CHARGE_FAILURES: readonly CardSessionFailure[] = [
+  'card_not_authenticated', 'card_declined', 'insufficient_funds', 'expired_card', 'processing_error', 'suspected_fraud', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts',
+];
 
 export interface CardSession {
   id: string;

@@ -17,7 +17,7 @@ import type {
 } from '../../core/provider';
 import {
   ACCESS_CODE, CHARGE_REF, DUPLICATE, INTENT_INVOICE_REF, NOT_FOUND_ERRORS, NOT_UNIQUE_ERRORS, REFUND_REF, SECURE_FIELD_CODE, SESSION_INVOICE_REF, UNKNOWN_STATE,
-  chargeOf, codesOf, declineOf, idOf, isObj, minorOf, refundOf,
+  chargeOf, codesOf, declineOf, idOf, invoiceRefOf, isObj, minorOf, refundOf,
 } from './mapping';
 
 export const EWAY_KEY = 'eway';
@@ -169,10 +169,15 @@ export class EwayGateway implements CardTokenGateway {
   /**
    * A transaction query (by id or by our invoice reference): the transactions found; [] is a definitive "none" (A4:
    * an empty list or the not-found code); NOT_UNIQUE when eWAY refuses the reference as not unique; else unknown.
+   * A 404 is "none" only with eWAY's not-found code in its body; a bare 404 (a balancer, a moved route, maintenance)
+   * is unknown (code review, finding 2).
    */
   private async query(ctx: ProviderContext, path: string): Promise<Record<string, unknown>[] | typeof NOT_UNIQUE> {
     const a = await this.exchange(ctx, 'GET', path);
-    if (a.status === 404) return [];
+    if (a.status === 404) {
+      if (isObj(a.body) && codesOf(a.body.Errors).some((e) => NOT_FOUND_ERRORS.includes(e))) return [];
+      throw new ProviderError('provider_unavailable', true);
+    }
     if (!(a.status >= 200 && a.status < 300)) return this.fail(a.status);
     const body = this.obj(a);
     const errors = codesOf(body.Errors);
@@ -294,8 +299,12 @@ export class EwayGateway implements CardTokenGateway {
     if (!SESSION_INVOICE_REF.test(sessionRef)) return [];
     const found = await this.query(ctx, `/Transaction/InvoiceRef/${sessionRef}`);
     if (found === NOT_UNIQUE) return NOT_UNIQUE;
-    // Only an exact reference counts; an unreadable transaction makes the answer unknown, never "none".
-    return found.map((t) => EwayGateway.charge(t)).filter((c) => c.sessionRef === sessionRef);
+    // Every transaction eWAY returns for our reference must carry it, readable and exact. One that does not (unreadable,
+    // missing or another reference) makes the answer unknown, never "none": a real charge is never dropped (code
+    // review, finding 1).
+    const charges = found.map((t) => EwayGateway.charge(t));
+    if (charges.some((c) => c.sessionRef !== sessionRef)) throw new ProviderError('provider_unavailable', true);
+    return charges;
   }
 
   /** A7 (UNVERIFIED): MaxRefund is what can still be refunded, so refunds made in MYeWAY count too. */
@@ -353,8 +362,9 @@ export class EwayGateway implements CardTokenGateway {
     if (found === NOT_UNIQUE || found.length > 1) throw new ProviderError('provider_unavailable', true);
     if (found.length === 0) return null;
     const r = refundOf(found[0]);
-    // Our reference on a refund of another charge cannot be ours: unknown, never bound.
-    if (!r || r.chargeToken !== chargeToken) throw new ProviderError('provider_unavailable', true);
+    // Our reference on a refund of another charge, or a refund that does not carry our reference, cannot be bound:
+    // unknown, never bound.
+    if (!r || r.chargeToken !== chargeToken || invoiceRefOf(found[0]!) !== intentRef) throw new ProviderError('provider_unavailable', true);
     return r;
   }
 

@@ -18,7 +18,7 @@ import { webhookPathTokenHash } from '../../../src/modules/payments/core/webhook
 import { SYSTEM_ACTOR } from '../../../src/platform/audit/audit.service';
 import { TasksService } from '../../../src/platform/common/tasks/tasks.service';
 import { STATE_HEADERS, TestApp, WEB_ORIGIN, makeApp } from '../../support/auth';
-import { cleanBookingEvents } from '../../support/bookings';
+import { cleanBookingEvents, staffCancel } from '../../support/bookings';
 import { closeCatalogue } from '../../support/catalogue';
 import { ledgerOf } from '../../support/ledger';
 import { PayingCustomer, approvedBooking, cleanPayments, onlyAccount, payingCustomer, paymentsStaff, resetGatewayHealth, sendWebhook } from '../../support/payments';
@@ -305,6 +305,20 @@ describe('eWAY Secure Fields page through the API (plan 9.1)', () => {
     }
     acc = main;
     await onlyAccount(t, acc.id);
+  });
+
+  it('authorise_after_booking_cancelled_refused: the challenge passed, the booking cancelled by staff, nothing is charged', async () => {
+    const a = await checkout();
+    const code = fake.tokenise(acc.publicApiKey, 'pay');
+    const s = await submit(a.ref, code);
+    fake.challenge(acc.apiKey, s.body.accessCode, true);
+    const b = await t.prisma.booking.findUniqueOrThrow({ where: { id: a.bookingId }, select: { version: true } });
+    const cancelled = await staffCancel(admin, a.bookingId, { version: b.version, reason: 'Customer changed plans' });
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBeLessThan(300);
+    const r = await authorise(a.ref, s.body.accessCode, code);
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect(fake.chargePosts(acc.apiKey, a.ref)).toBe(0);
+    expect(await statusOf(a.p.id)).not.toBe('succeeded');
   });
 
   it('approvals other than A2000 are charges; a different amount opens the mismatch task (M3, A10)', async () => {

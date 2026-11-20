@@ -46,7 +46,13 @@ export class FakeEway {
     enrolConsumesCode?: boolean;
     notEnrolled?: boolean;
     queryHides?: number;
+    /** The next query answers this 404 (code review, finding 2). */
+    raw404?: 'empty' | 'html' | 'coded';
+    /** The next 3-D Secure enrolment is refused with this code (a decline before any charge; finding 3). */
+    enrolDecline?: string;
   } = {};
+  /** Queries return transactions without their InvoiceReference (code review, finding 1). */
+  omitInvoiceRef = false;
   /** When set, every query by invoice reference refuses as not unique (V6170). */
   notUnique = new Set<string>();
   /** References whose refunds cannot be found by InvoiceReference (A5 false). */
@@ -126,6 +132,13 @@ export class FakeEway {
       delete this.next.status;
       return json(s, { Errors: s >= 500 ? 'S9990' : 'V6000' });
     }
+    if (req.method === 'GET' && this.next.raw404) {
+      const kind = this.next.raw404;
+      delete this.next.raw404;
+      if (kind === 'html') return { status: 404, body: '<html><body>Not Found</body></html>' };
+      if (kind === 'empty') return { status: 404, body: '' };
+      return json(404, { Transactions: [], Errors: 'V6171' });
+    }
     const body = req.body ? (JSON.parse(req.body) as Record<string, unknown>) : {};
     if (req.method === 'POST' && path === '/3dsenrol') return this.enrol(a, body);
     if (req.method === 'POST' && path === '/3dsverify') return this.verify(a, body);
@@ -141,7 +154,7 @@ export class FakeEway {
         throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
       }
       const t = a.tx.get(Number(byId[1]));
-      return json(200, { Transactions: t ? [t] : [], Errors: t ? '' : 'V6171' });
+      return json(200, { Transactions: t ? [this.shown(t)] : [], Errors: t ? '' : 'V6171' });
     }
     return json(404, { Errors: 'V6000' });
   };
@@ -155,6 +168,11 @@ export class FakeEway {
 
   private enrol(a: Account, body: Record<string, unknown>): EwayResponse {
     this.timeout('enrol');
+    if (this.next.enrolDecline) {
+      const code = this.next.enrolDecline;
+      delete this.next.enrolDecline;
+      return json(200, { Errors: code });
+    }
     const c = body.Customer as Record<string, unknown> | undefined;
     if (!c || !c.FirstName || !c.LastName || !c.Email || !c.Phone) return json(200, { Errors: 'V6011' });
     const code = a.codes.get(String(body.SecuredCardData));
@@ -243,6 +261,13 @@ export class FakeEway {
     if (this.refundRefsHidden && ref.startsWith('mtr_')) return json(200, { Transactions: [], Errors: 'V6171' });
     const found = [...a.tx.values()].filter((t) => t.InvoiceReference === ref);
     if (found.length > 1) return json(200, { Transactions: [], Errors: 'V6170' });
-    return json(200, { Transactions: found, Errors: found.length === 0 ? 'V6171' : '' });
+    return json(200, { Transactions: found.map((t) => this.shown(t)), Errors: found.length === 0 ? 'V6171' : '' });
+  }
+
+  /** A transaction as a query shows it (without its InvoiceReference when that switch is on). */
+  private shown(t: Tx): Partial<Tx> {
+    if (!this.omitInvoiceRef) return t;
+    const { InvoiceReference: _ref, ...rest } = t;
+    return rest;
   }
 }

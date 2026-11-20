@@ -193,6 +193,58 @@ describe('before_charge sessions on the memory store (plan 9.1, sections 4.1, 6 
   });
 });
 
+describe('code review of PR #84: unknown is never "none", and declines before the charge', () => {
+  it('finding 1: a transaction under our reference whose InvoiceReference is missing or unreadable makes the search unknown, never "none"', async () => {
+    const { fake, provider, ctx, input, store, keys, inner } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.next.lose = 'charge';
+    await payWithSecureFields(fake, provider, ctx, p.ref, 'pay');
+    expect(fake.transactionsWith(keys.apiKey, p.ref)).toHaveLength(1);
+    fake.omitInvoiceRef = true;
+    store.expire(p.ref);
+    // Even long after the grace, the charge is never taken as never made while eWAY answers without our reference.
+    inner.advance(NOT_FOUND_GRACE_MS + 60_000);
+    await expect(provider.retrievePayment(ctx, { ref: p.ref })).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
+    const g = new EwayGateway({ transport: fake.transport });
+    await expect(g.chargesOfSession(ctx, p.ref)).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect((await store.byRef(ctx.accountId, p.ref))?.status).toBe('submitting');
+    fake.omitInvoiceRef = false;
+    expect((await provider.retrievePayment(ctx, { ref: p.ref }))?.status).toBe('succeeded');
+  });
+
+  it('finding 2: a bare or HTML 404 is unknown; a 404 with eWAY\'s not-found code is "none"', async () => {
+    const { fake, ctx } = world();
+    const g = new EwayGateway({ transport: fake.transport });
+    const ref = `cs_${'d'.repeat(32)}`;
+    for (const kind of ['empty', 'html'] as const) {
+      fake.next.raw404 = kind;
+      await expect(g.chargesOfSession(ctx, ref), kind).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
+      fake.next.raw404 = kind;
+      await expect(g.retrieveCharge(ctx, 'ewt_1'), kind).rejects.toMatchObject({ code: 'provider_unavailable' });
+      fake.next.raw404 = kind;
+      await expect(g.probe(ctx), kind).rejects.toMatchObject({ code: 'provider_unavailable' });
+    }
+    fake.next.raw404 = 'coded';
+    expect(await g.chargesOfSession(ctx, ref)).toEqual([]);
+    fake.next.raw404 = 'coded';
+    expect(await g.retrieveCharge(ctx, 'ewt_1')).toBeNull();
+  });
+
+  it('finding 3: every decline before the charge ends the session with its code, nothing charged, never stuck', async () => {
+    for (const [code, failure] of [['D4405', 'card_declined'], ['D4451', 'insufficient_funds'], ['D4454', 'expired_card'], ['D4459', 'suspected_fraud'], ['F7000', 'suspected_fraud'], ['V6148', 'provider_rejected']] as const) {
+      const { fake, provider, ctx, input, store, keys } = world();
+      const p = await provider.createPayment(ctx, input());
+      fake.next.enrolDecline = code;
+      const r = await provider.submitCard(ctx, p.ref, fake.tokenise(ctx.credentials.publicApiKey!, 'pay'), EWAY_PAYER);
+      expect(r.next.kind, code).toBe('redirect');
+      const s = (await store.byRef(ctx.accountId, p.ref))!;
+      expect([s.status, s.failureCode, s.submittedAt], code).toEqual(['failed', failure, null]);
+      expect(fake.transactionsWith(keys.apiKey, p.ref), code).toHaveLength(0);
+      expect((await provider.retrievePayment(ctx, { ref: p.ref }))?.status, code).toBe('failed');
+    }
+  });
+});
+
 describe('registry rules for gatewayEvents: none (plan 9.1, sections 4.2 and 20 M1, M6)', () => {
   const m = () => new CardSessionProvider(new EwayGateway(), new MemoryCardSessionStore(), { cardPageOrigin: 'http://localhost:3000', usable: true }).manifest;
   it('the closed list, the generated secret, no refund-event ids, and never verified without reconciliation and disputes', () => {

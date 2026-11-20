@@ -29,7 +29,8 @@ export function contentSecurityPolicy(opts: { nonce?: string; dev: boolean; card
     // Content images are https addresses chosen by staff (task 8.1); placeholders are local or data: URIs.
     `img-src 'self' https: data: blob:`,
     `font-src 'self'`,
-    `connect-src 'self'${opts.dev ? ' ws: wss:' : ''}`,
+    // Task 9.1 (plan 9.1, section 10.3): eWAY's page may call eWAY's origins from its own scripts; no other page does.
+    `connect-src 'self'${opts.secureFields === true && card ? ` ${origins.join(' ')}` : ''}${opts.dev ? ' ws: wss:' : ''}`,
     card ? `frame-src ${origins.join(' ')}` : `frame-src 'none'`,
     `frame-ancestors 'none'`,
     `object-src 'none'`,

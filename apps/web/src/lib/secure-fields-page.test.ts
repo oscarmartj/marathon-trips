@@ -45,6 +45,8 @@ describe('eWAY Secure Fields page (task 9.1)', () => {
       expect(pin).not.toContain(o);
     }
     for (const o of CARD_PAGE_FRAME_ORIGINS) expect(eway).not.toContain(o);
+    expect(/connect-src ([^;]+)/.exec(eway)![1]).toBe(`'self' ${SECURE_FIELDS_PAGE_ORIGINS.join(' ')}`);
+    expect(/connect-src ([^;]+)/.exec(pin)![1]).toBe(`'self'`);
     expect(SECURE_FIELDS_PAGE_ORIGINS).toEqual([...EWAY_CARD_FIELDS.frameOrigins]);
     const res = await proxy(request(`/pay/secure-fields/cs_${'a'.repeat(32)}`) as never);
     const csp = res.headers.get('Content-Security-Policy')!;

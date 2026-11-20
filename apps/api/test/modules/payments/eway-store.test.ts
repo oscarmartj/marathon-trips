@@ -141,6 +141,15 @@ describe('eWAY card sessions on the database (plan 9.1, sections 11 and 20 M2, m
     expect(await upd(s.id, `status = 'authenticating', "authCardHash" = '${hash}'`)).toBe('ok');
     expect(await upd(s.id, `status = 'failed', "failureCode" = 'card_not_authenticated'`)).toBe('ok');
     expect(await upd(s.id, `status = 'succeeded', "chargeRef" = 'ewt_9', "chargedMinor" = 100`)).toBe('card_session_transition');
+    // Every decline before the charge is a pre-charge failure (code review, finding 3); an unknown outcome is not.
+    for (const code of ['card_declined', 'insufficient_funds', 'expired_card', 'processing_error', 'suspected_fraud', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts']) {
+      s = await mk();
+      expect(await upd(s.id, `status = 'authenticating', "authCardHash" = '${hash}'`)).toBe('ok');
+      expect(await upd(s.id, `status = 'failed', "failureCode" = '${code}'`), code).toBe('ok');
+    }
+    s = await mk();
+    expect(await upd(s.id, `status = 'authenticating', "authCardHash" = '${hash}'`)).toBe('ok');
+    expect(await upd(s.id, `status = 'failed', "failureCode" = 'outcome_unknown'`)).not.toBe('ok');
   });
 
   it('reference shapes follow the adapter: ewt_/ewr_ only on eWAY accounts, ch_/rf_ only elsewhere (m8)', async () => {

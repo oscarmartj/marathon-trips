@@ -27,7 +27,7 @@ ALTER TABLE "card_sessions"
     OR ("status" IN ('authenticating', 'failed') AND "submittedAt" IS NOT NULL)
     OR ("flow" = 'before_charge' AND "status" = 'authenticating' AND "submittedAt" IS NULL AND "authCardHash" IS NOT NULL AND "chargeRef" IS NULL)
     OR ("flow" = 'before_charge' AND "status" = 'failed' AND "submittedAt" IS NULL AND "authCardHash" IS NOT NULL AND "chargeRef" IS NULL
-        AND "failureCode" IN ('card_not_authenticated', 'card_declined', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts')));
+        AND "failureCode" IN ('card_not_authenticated', 'card_declined', 'insufficient_funds', 'expired_card', 'processing_error', 'suspected_fraud', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts')));
 
 ALTER TABLE "card_session_charges"
   DROP CONSTRAINT "card_session_charges_ref_check",
@@ -108,7 +108,7 @@ BEGIN
     OR (OLD.status = 'authenticating' AND OLD."submittedAt" IS NULL AND OLD."chargeRef" IS NULL AND NEW.status = 'submitting' AND NEW."authRef" IS NOT NULL)
     OR (OLD.status = 'authenticating' AND OLD."submittedAt" IS NULL AND NEW.status = 'cancelled')
     OR (OLD.status = 'authenticating' AND OLD."submittedAt" IS NULL AND NEW.status = 'failed' AND NEW."chargeRef" IS NULL
-        AND NEW."failureCode" IN ('card_not_authenticated', 'card_declined', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts'))
+        AND NEW."failureCode" IN ('card_not_authenticated', 'card_declined', 'insufficient_funds', 'expired_card', 'processing_error', 'suspected_fraud', 'provider_rejected', 'provider_auth_failed', 'too_many_attempts'))
     OR (OLD.status = 'submitting' AND NEW.status IN ('succeeded', 'failed'))
     OR (OLD.status = 'failed' AND NEW.status = 'succeeded' AND OLD."failureCode" IN ('outcome_unknown', 'provider_busy') AND OLD."chargeRef" IS NULL AND OLD."submittedAt" IS NOT NULL)
   ) THEN

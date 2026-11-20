@@ -110,7 +110,9 @@ Lo que hace distinta a eWAY:
 - **`D4494`** (duplicado) abre una tarea y vuelve a leer las sesiones sin resolver de la misma reserva.
 - **Reembolsos con nuestra referencia** (`mtr_…`); se enlazan por coincidencia exacta.
 - **Referencia en varias transacciones.** Si eWAY la tiene en más de una, se abre una tarea y el personal la enlaza con `pnpm api:cli payments:card-session-bind --ref cs_… --transaction <id>`.
-- **Datos del pagador.** El 3-D Secure 2 pide nombre, correo y teléfono del pagador del cobro; sin teléfono, 409 `card_session_phone_required`.
+- **Datos del pagador.** El 3-D Secure 2 pide nombre, correo y teléfono del pagador del cobro; si al pagador le falta el teléfono, el nombre o el apellido, 409 `card_session_phone_required`.
+- **Un `TransactionStatus: false` con un código fuera de la lista** (`mapping.ts`) se toma como resultado desconocido: la sesión sigue en `submitting`, el intento sigue vivo y bloquea otro pago de la reserva (P2), y a las 24 h salta la tarea "Payment attempt unresolved". El personal lo comprueba en MYeWAY, y el código se añade a la lista en un PR revisado.
+- **Una búsqueda que no se puede leer** (una transacción sin nuestra referencia, o un 404 sin el código de "no existe" de eWAY) es desconocida, nunca "no existe": no se da un cobro por perdido.
 
 En CI pasa la batería contra un eWAY falso (`test/contract/subjects/eway-fake.ts`), con el almacén en memoria y con el de la base (`test/modules/payments/eway-store.test.ts`). Plan, supuestos A1–A14 y cambios de la revisión: `docs/plans/9.1-eway.md` (sección 20).
 
