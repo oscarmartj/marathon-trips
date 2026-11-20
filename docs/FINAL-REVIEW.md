@@ -12,6 +12,19 @@ Todo lo que en modo autónomo se decidió, se dejó sin verificar o necesita tus
 - [ ] Validar el GST con tu contable (por componente, 1.1).
 - [ ] Cumplir los 8 hallazgos vinculantes del plan 0.1 al retomar el dinero (`docs/BLOCKED.md`).
 
+## Prioridad al cerrar la fase 4 (2026-11-20): dinero
+
+Lo nuevo de 3.3, 3.4, 4.1 a 4.6, 6.2 y 6.4, por importancia. Todo funciona contra simuladores y falsos; nada cobra en real. Detalle en `docs/done/` y en la sección "Fase 4 y dinero" más abajo.
+
+1. **Sin sandbox real, ningún adaptador es `verified`:** Stripe, PayPal y Pin son `experimental`; sus supuestos (PayPal A1 a A9, Pin A1 a A18) solo se probaron contra falsos. Hacer un pago de prueba completo con claves de cada una antes de nada (`docs/BLOCKED.md`).
+2. **GST y contable:** sin GST en los recibos; `gstRegistered:true` da error. Preguntas y cuenta fiduciaria en `docs/BLOCKED.md`; las afirmaciones del ATO del plan 4.6 están sin verificar. Además `fundsAfterMinor` se ordena por `createdTxId`: corregirlo antes de cablear el GST (4.6).
+3. **6.2 D7:** la fórmula de "dinero a apartar" ya no garantiza "nunca guardar menos de lo retenido"; no es la opción más conservadora. Confirmar con el contable (6.2).
+4. **Permisos del dinero, hoy solo owner:** `manage` y `manageCredentials` (se pueden dar a cualquier rol), `payments.refund.*`, `payments.dispute.*`, `payments.routingRule.manage`, `reconciliation.run`, `report.clientMoney`, `suppliers.payment.*`, los de cancelación y `operator_cancelled`; la cancelación online del cliente está apagada.
+5. **Retención para reclamaciones (GDPR art. 17(3)(e), APP 11.2)** en disputas (4.5).
+6. **Publicar la página `terms`** antes de ningún pago; revisar el historial del repositorio público; paso de Docker para la IP real (S-04); S-13 y S-14; casilla `serviceMessageAck`.
+7. **Decisión:** `copy.test.ts` prohíbe "cancelled", la ortografía australiana; la regex debería marcar "canceled" (6.4).
+8. **Rondas de revisión por encima del tope de 3** por instrucción de Oscar: 8.5 y 4.5 cinco; 4.4, 4.6 y 6.4 de dos a tres. 4.5 se fusionó antes de que su verificador informara sobre `7f057c1` (después limpio, CI verde en la cabeza final); 4.6 se fusionó sin tercera pasada del revisor tras las correcciones (verificador, CI y pruebas); 6.2 se fusionó tras corregir una prueba inestable que halló el verificador.
+
 ## Prioridad al cerrar la fase 8 (2026-11-19)
 
 Todo lo abierto, por importancia: seguridad y legal, luego corrección y por último pulido. Cada punto lleva su fuente; el detalle por fase está más abajo.
@@ -135,7 +148,7 @@ Sección «Revisión de Oscar» de `docs/phases/phase-2.md` y lo que dejan los `
 - **Sin verificar:** `prisma migrate diff` de las migraciones 0007 a 0017 (sin motor local; lo valida CI); lector de pantalla y teclado completo del panel de precios y del constructor (2.2b, 2.3).
 - **Rama remota obsoleta** `task/8.1-web-foundation`: borrar a mano (`docs/BLOCKED.md`).
 
-### Fase 3 (cerrada con el dinero parcial; 3.3 y 3.4 reabiertas el 2026-11-19)
+### Fase 3 (cerrada; 3.3 y 3.4 hechas el 2026-11-19, ver "Fase 4 y dinero")
 
 Hechas 3.1, 3.2, 3.5 y 3.6, solo contra el simulador; 3.3 (Stripe) y 3.4 (PayID) reabiertas el 2026-11-19, aún no hechas. Evidencia en `docs/done/3.1.md`, `3.2.md`, `3.5.md` y `3.6.md`. Llegan también 5.4, 6.5, 7.3, 7.4 y 7.6, fusionadas fuera de su fase.
 
@@ -149,6 +162,22 @@ Hechas 3.1, 3.2, 3.5 y 3.6, solo contra el simulador; 3.3 (Stripe) y 3.4 (PayID)
 - **Proceso:** un verificador ejecutó por error `docker/db/init/01-roles.sql` (tiene `\connect marathon_trips`) contra la base local de desarrollo `marathon_trips`; es idempotente y no se borró nada. Ahora se les dice que creen su propia base a mano, sin ese archivo.
 - **Sin verificar:** `prisma migrate diff` de 0018 a 0023 (sin motor local; lo valida CI); `backup.test.ts` (pide superusuario); lector de pantalla del checkout y de los paneles nuevos; `test:sandbox` contra un sandbox real.
 
+### Fase 4 y dinero (cerrada, `docs/done/4.close.md`; incluye 3.3, 3.4, 6.2 y 6.4)
+
+Sección «Revisión de Oscar» de `docs/phases/phase-4.md`: crear, pausar y retirar una cuenta de pasarela a mano y leer los informes del `reviewer`. Los 8 criterios cumplen con prueba automática, contra simuladores y falsos.
+
+- **4.1:** nada ata una cuenta a su identidad en la pasarela (rotar una cuenta activa a la clave de otra cuenta de Stripe autentica); `manage` y `manageCredentials` se pueden asignar a cualquier rol; `createStripeTestAccount` inserta cuentas activas sin prueba de conexión.
+- **4.2:** un cliente cuyo intento vivo coincidió con la caída de la pasarela sigue bloqueado en esa reserva hasta que conteste (P2 intacto; el aviso `live_attempts_on_unreachable_account` lista esas reservas).
+- **4.3 (PayPal):** cancelar la reserva justo antes de la captura deja un cobro tardío (se registra); un 422 desconocido en `drive` vuelve a mandar a PayPal sin `failureCode`; la tarea de M2 enlaza al WebhookEvent, no al pago ni a la reserva; una captura con 401/404 se reintenta sin fin y el intento sigue vivo hasta la tarea de 24 h. Quien elige "Card" puede acabar en la página de PayPal.
+- **4.4 (Pin):** contrato enmendado por capacidad (`preCardSession` da `NO_GATEWAY_EVENT` y `refundEventOurId: 'via_retrieve'`, solo `CardSessionProvider`; precedente: sujeto de Stripe en `subjects/stripe.ts:119`); un estado de webhook desconocido queda `ignored` sin tarea; sin FK de pago, reserva ni reembolso en las tablas de sesiones de tarjeta; la `returnUrl` lleva la referencia de la reserva; `settle` no relee sesiones `succeeded`; un 3-D Secure abandonado bloquea la reserva hasta la tarea de 24 h; decidir si se aceptan tarjetas sin 3-D Secure.
+- **4.5:** ventana de `resolve`; sin barrido de disputas si se pierde el webhook final (lo cubre 4.6); `courtesy_refund_lowers_total_without_reopening_balance` sin tarea dueña (seguimiento); seguimiento de reembolsos externos. Un pago en disputa no se reembolsa; el paquete de pruebas no se envía por API.
+- **4.6:** Stripe y PayPal no listan actividad (el informe dice "fees not imported"); el consumidor espera al barrido horario; la tarea de atraso trata `mismatch` y `partial` como correctos; `fundsAfterMinor` por `createdTxId` (ver arriba); sin exportación CSV; sin e2e propios.
+- **6.4:** la penalización por encima de lo cobrado no se reclama; la fecha de una solicitud bloqueada vale 14 días; ruta `operator_cancelled`; los reembolsos los envía el personal; el editor de tramos de importe fijo solo admite AUD.
+- **6.2:** solo registra pagos ya hechos, no envía dinero; desviaciones D2 (`CostItem` sin `mode`), D3 (sin conversión de moneda; pasa a 6.6), D4 y D7; el catálogo en-AU entero va en el JavaScript público y el presupuesto de bytes no tiene margen: tarea para sacar `admin.*` (mirar el PR de 6.6).
+- **Observaciones de 3.3 y 3.4:** variantes de referencia como "MT ABC123"; `.rejects.toThrow()` sin mensaje en `manual.test.ts:385`; colisiones de ID de extracto entre bancos; cursor guardado antes de las tareas; `paymentLedgerCheckCursor` editable desde el panel; prueba inestable `flow.test.ts:597`; `ledger.test.ts` no se repite sobre la misma base.
+- **Tareas de seguimiento a registrar:** (a) sacar `admin.*` del JavaScript público; (b) reembolso de cortesía de 4.5; (c) registrar reembolsos externos; (d) verificación por sandbox de cada pasarela cuando Oscar dé cuentas.
+- **Sin verificar:** `test:sandbox` de las tres pasarelas, e2e de recibos y conciliación, script real de Pin, `prisma migrate diff` (solo CI) y `backup.test.ts`.
+
 ### Fase 5 (cerrada, `docs/done/5.close.md`)
 
 Sección «Revisión de Oscar» de `docs/phases/phase-5.md`: hacer el recorrido completo como cliente y como administrador con un paquete realista; no abrir la fase 6 antes. Los cinco criterios cumplen con prueba automática (`rehearsal.spec.ts` y las de 5.1 a 5.6, contra el simulador, sin recibos ni reembolsos).
@@ -158,7 +187,7 @@ Sección «Revisión de Oscar» de `docs/phases/phase-5.md`: hacer el recorrido 
 - **Decisiones de 5.1 a 5.6:** enlaces de pago de un solo uso (caducan a los 7 días o al vencer el depósito, solo al correo de la reserva); documentos generados al pedirlos; datos mínimos de viajeros sin pasaporte ni datos médicos; borrado solo por owner con step-up y 409 con viaje o dinero vivo; la baja de marketing también suprime las alertas.
 - **Sin verificar:** correo real (solo buzón de pruebas), lector de pantalla, `compose-smoke` solo en CI, borrar a un cliente de punta a punta (pide un viaje terminado). El revisor de 5.2 no tuvo ronda final.
 
-### Fase 6 (cerrada sin 6.2, 6.4 y 6.6, reabiertas el 2026-11-19; `docs/done/6.close.md`)
+### Fase 6 (6.2 y 6.4 hechas el 2026-11-20, 6.6 en marcha; `docs/done/6.close.md`)
 
 Sección «Revisión de Oscar» de `docs/phases/phase-6.md`: simular un viaje con un cambio y una cancelación y comprobar los números a mano. **No se puede hacer entera**: sin 6.4 no hay penalización ni reembolso y sin 6.6 no hay resultado por viaje. Lo que sí se puede: un cambio (6.3) con su diferencia, una cancelación que promociona a la lista de espera (6.5) y costes y cobertura de stock por proveedor (6.1).
 

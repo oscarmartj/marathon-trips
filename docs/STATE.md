@@ -6,12 +6,12 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Ahora
 
-Actualizado tras 7.fix-3, 7.fix-4 y 7.fix-5 (2026-11-19). Migraciones en `main`: 0001 a 0031.
+Actualizado tras 4.close (2026-11-20). Migraciones en `main`: 0001 a 0040.
 
-- **Fases 0, 1, 2, 3, 5, 6, 7 y 8 cerradas** (detalle en `docs/done/*.close.md`); fase 8 con 8.5 hecha con pendientes (S-04, S-13, S-14). **Dinero retomado el 2026-11-19** (decisión de Oscar): sin modo real, claves reales ni cuentas externas.
-- **Fases 4 y 9 abiertas; reabiertas las partes de las fases 3 y 6** (3.3, 3.4, 6.2, 6.4, 6.6; 9.x tras la fase 4 y 8.5). **Siguiente: 3.3 y 3.4 en marcha** y después 4.x; requisitos P1–P12 y hallazgos en `docs/plans/phase-0-architecture.md`.
-- **Arreglos posteriores al cierre fusionados:** 7.fix-3 (#67, exportaciones), 7.fix-4 (#66, informes) y 7.fix-5 (#68, CSV de la plataforma), tras las revisiones de Opus de 7.2 y 7.7.
-- **Siguiente paso: la revisión de Oscar** con `docs/FINAL-REVIEW.md` (ordenado por importancia) y lo externo en `docs/BLOCKED.md`. Nada se abre al público ni cobra antes.
+- **Fases 0, 1, 2, 3, 4, 5, 6 (menos 6.6), 7 y 8 cerradas o con su dinero hecho** (detalle en `docs/done/*.close.md`). Fase 4 (4.1 a 4.6) con los 8 criterios probados; 3.3, 3.4, 6.2 y 6.4 hechas. **Todo el dinero va contra simuladores y falsos: sin modo real, claves reales ni cuentas externas; Stripe, PayPal y Pin son `experimental`.**
+- **En marcha:** 6.6 (otro hilo). **Siguiente:** fase 9 (9.1 a 9.4; sus dependencias, fase 4 y 8.5, ya están hechas) y el cierre de 6.6.
+- **Seguimientos por registrar:** sacar el catálogo `admin.*` del JavaScript público (el constructor de paquetes queda unos 75 bytes bajo el límite; mirar si 6.6 lo hace); reembolso de cortesía (`courtesy_refund_lowers_total_without_reopening_balance`); registrar reembolsos externos; verificación por sandbox de cada pasarela cuando Oscar aporte cuentas.
+- **Siguiente paso de Oscar:** `docs/FINAL-REVIEW.md` (ordenado por importancia) y lo externo en `docs/BLOCKED.md` (sandbox de Stripe, PayPal y Pin, contable, permisos). Nada se abre al público ni cobra antes.
 - **Antes de abrir:** paso de Docker de la guía para la IP real (S-04), publicar la página `terms`, asignar los permisos nuevos y revisar el historial del repositorio (público desde el 2026-11-19).
 
 ## Pendiente de Oscar
@@ -20,7 +20,7 @@ Actualizado tras 7.fix-3, 7.fix-4 y 7.fix-5 (2026-11-19). Migraciones en `main`:
 
 ## Hecho
 
-Fases 0, 1, 2, 3 (de 3.3 y 3.4, en marcha), 5, 6 (de 6.2, 6.4 y 6.6, pendientes), 7 y 8 completas; más 1.fix-1, 7.fix-1, 7.fix-2, 7.fix-3, 7.fix-4, 7.fix-5 y el arreglo de CI: ver `docs/done/`.
+Fases 0, 1, 2, 3, 4, 5, 7 y 8 completas; fase 6 sin 6.6 (en marcha); más 1.fix-1, 7.fix-1, 7.fix-2, 7.fix-3, 7.fix-4, 7.fix-5 y el arreglo de CI: ver `docs/done/`.
 
 ## Sin verificar
 
