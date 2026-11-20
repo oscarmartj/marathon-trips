@@ -16,7 +16,7 @@ ALTER TABLE "card_sessions"
   ADD CONSTRAINT "card_sessions_charge_ref_check" CHECK ("chargeRef" IS NULL
     OR ("flow" = 'after_charge' AND "chargeRef" ~ '^ch_[A-Za-z0-9_-]{10,40}$')
     OR ("flow" = 'before_charge' AND "chargeRef" ~ '^ewt_[0-9]{1,19}$')),
-  ADD CONSTRAINT "card_sessions_auth_ref_check" CHECK ("authRef" IS NULL OR ("flow" = 'before_charge' AND "authRef" ~ '^[A-Za-z0-9_-]{10,512}$')),
+  ADD CONSTRAINT "card_sessions_auth_ref_check" CHECK ("authRef" IS NULL OR ("flow" = 'before_charge' AND "authRef" ~ '^[A-Za-z0-9_-]+$' AND length("authRef") BETWEEN 10 AND 512)),
   ADD CONSTRAINT "card_sessions_auth_card_check" CHECK ("authCardHash" IS NULL OR ("flow" = 'before_charge' AND "authCardHash" ~ '^[0-9a-f]{64}$')),
   -- 0039's rule (submittedAt exactly when no longer open, cancelled while unsent) plus, for before_charge only (M2):
   -- authenticating before the charge is sent, cancelled or failed before it, never succeeded without it.
