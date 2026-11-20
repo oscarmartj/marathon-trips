@@ -5,7 +5,7 @@ import type { CustomFieldEntity } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { type CustomFieldDef, type FormValue, type FormValues, customFieldPatch, fieldLabel, initialValues, offeredOptions } from '@/lib/custom-fields-panel';
 import { enAU } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 /**
  * The active custom fields for one kind of record: null while loading, an empty list when there are none or when this

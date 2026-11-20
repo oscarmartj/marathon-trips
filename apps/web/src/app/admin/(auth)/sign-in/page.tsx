@@ -1,6 +1,6 @@
 import { AuthFrame } from '@/components/auth-frame';
 import { StaffSignInForm } from '@/components/auth/staff-sign-in-form';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default function Page() {
   return (

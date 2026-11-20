@@ -1,6 +1,6 @@
 import { AdminPage } from '@/components/admin-page';
 import { AdjustmentsPanel } from '@/components/admin/pricing/adjustments-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const one = (v: string | string[] | undefined): string | undefined => {

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { CLAIM_KINDS, DISTANCE_KINDS, RACE_STATUSES, type ClaimKind } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { enAU, withEnAU, wholeNumber } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { useStepUp } from '../step-up';
 import { ActionButton, type BodySubmit, EntityForm, Section, catalogueError, formatDay, outcome, useLoad } from './kit';

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import en from '../../messages/en-AU.json';
+import enPublic from '../../messages/en-AU.json';
+import enAdmin from '../../messages/en-AU.admin.json';
 import { PAYMENT_ERROR_CODES, SCHEDULE_BUCKETS, bucketLabel, paymentErrorMessage, recordBody } from './supplier-payments';
 
+const en = { ...enPublic, ...enAdmin };
 const get = (path: string): unknown => path.split('.').reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], en);
 
 describe('supplier payment pages (task 6.2)', () => {

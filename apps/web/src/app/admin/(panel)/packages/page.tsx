@@ -1,6 +1,6 @@
 import { AdminPage } from '@/components/admin-page';
 import { PackagesPanel } from '@/components/admin/catalogue/packages-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default function Page() {
   return (

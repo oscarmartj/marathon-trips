@@ -1,7 +1,7 @@
 // Pure helpers of the supplier payment pages (task 6.2). Amounts are digit strings from the API: they are formatted,
 // never added up here. The only amount typed in is what the bank debited in another currency, parsed to minor units.
 import { toMinor } from './supplier-format';
-import { t } from './i18n';
+import { t } from './i18n-admin';
 
 export const PAYMENT_ERROR_CODES = ['cost_items_currency_mismatch', 'paid_on_in_future', 'paid_on_too_old', 'base_currency_same_as_payment', 'cost_item_zero_amount'] as const;
 

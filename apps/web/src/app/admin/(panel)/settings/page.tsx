@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { AdminPage } from '@/components/admin-page';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default function Page() {
   return (

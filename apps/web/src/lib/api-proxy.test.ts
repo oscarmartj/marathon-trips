@@ -20,6 +20,11 @@ describe('web proxy to the API', () => {
     expect(back.get('retry-after')).toBe('3');
   });
 
+  it('forwards the row count of a CSV download (task 6.6)', () => {
+    expect(responseHeaders(new Response('', { headers: { 'x-row-count': '12', 'x-secret-thing': 'no' } })).get('x-row-count')).toBe('12');
+    expect(responseHeaders(new Response('', { headers: { 'x-secret-thing': 'no' } })).get('x-secret-thing')).toBeNull();
+  });
+
   it('spoofed_forwarded_for_via_web_proxy_ignored', () => {
     const spoofed = new Headers({ 'x-forwarded-for': '198.51.100.7' });
     expect(forwardHeaders(spoofed, 0).get('x-forwarded-for')).toBeNull();

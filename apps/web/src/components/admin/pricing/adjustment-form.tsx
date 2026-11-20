@@ -9,7 +9,7 @@ import {
   adjustmentBody, adjustmentPatch, creationFields, emptyAdjustmentForm, patchIsEmpty, rowToForm,
   type AdjustmentForm, type FormFailure,
 } from '@/lib/pricing-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { type Action, type AsyncAction, isVersionConflict, CheckField, CheckGroup, SelectField, TextField, useRunner } from './pricing-kit';
 
 export interface ScopeOption {

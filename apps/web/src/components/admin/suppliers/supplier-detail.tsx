@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { ALLOTMENT_KINDS, COST_BASES } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { fromMinor, formatMinor, toMinor } from '@/lib/supplier-format';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { ActionButton, EntityForm, type FieldDef, Section, formatDay, outcome, useLoad } from '../catalogue/kit';

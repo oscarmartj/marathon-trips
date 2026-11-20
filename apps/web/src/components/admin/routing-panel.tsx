@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type ApiResult } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { lostText } from '@/lib/gateways-panel';
 import { countriesFrom, countriesText, limitFrom, limitsText, reasonText, routingWarningText, ruleErrorText } from '@/lib/routing-panel';
 import type { RoutingWarning, RuleView } from '@/lib/routing-panel';

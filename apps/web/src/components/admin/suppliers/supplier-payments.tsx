@@ -2,7 +2,7 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { formatMinor } from '@/lib/supplier-format';
 import { newIdempotencyKey, paymentErrorMessage, recordBody } from '@/lib/supplier-payments';
 import { Field, Status } from '../../auth/field';

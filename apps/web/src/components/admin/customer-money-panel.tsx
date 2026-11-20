@@ -1,6 +1,6 @@
 'use client';
 
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { moneyOrDash } from '@/lib/reconciliation-panel';
 import { formatMoney } from '@/lib/builder';
 import { Section, useLoad } from './catalogue/kit';

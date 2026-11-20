@@ -1,6 +1,6 @@
 import { AdminPage } from '@/components/admin-page';
 import { TripListsPanel } from '@/components/admin/triplists/trip-lists-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default function Page() {
   return (

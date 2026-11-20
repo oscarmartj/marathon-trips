@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { StaffPrivacyView } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { formatDate } from '@/lib/catalogue-format';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../auth/field';
 import { errorMessage, useStepUp } from './step-up';
 

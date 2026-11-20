@@ -6,7 +6,7 @@ import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
 import { tierLineIn } from '@/lib/cancellation';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
 import { crmError } from './crm-kit';

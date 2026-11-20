@@ -25,6 +25,10 @@ export const PAYMENTS_PERMISSIONS = {
   reconciliationRun: 'payments.reconciliation.run',
   clientMoneyReport: 'payments.report.clientMoney',
   receiptRead: 'payments.receipt.read',
+  // Task 6.6: trip result, cash forecast and the accountant's files.
+  tripResultReport: 'payments.report.tripResult',
+  cashForecastReport: 'payments.report.cashForecast',
+  accountantExport: 'payments.export.accountant',
 } as const;
 
 const def = (key: string, description: string, requiresStepUp = false): PermissionDef => ({ key, module: 'payments', description, requiresStepUp, apiKeyScopable: false });
@@ -58,6 +62,10 @@ export const paymentsManifest = {
     def(PAYMENTS_PERMISSIONS.reconciliationRun, 'Run the reconciliation of a payment gateway account now (asks the gateway and records its fees)', true),
     def(PAYMENTS_PERMISSIONS.clientMoneyReport, 'See the customer money report: what customers paid that is still owed to suppliers, margin not yet earned and margin earned, per trip'),
     def(PAYMENTS_PERMISSIONS.receiptRead, "List and download a booking's receipts and notes"),
+    // Task 6.6. They show margin and supplier costs; the export sends figures out of the app, so it needs step-up. Owner only until Oscar decides.
+    def(PAYMENTS_PERMISSIONS.tripResultReport, 'See the result of each trip: revenue earned against supplier costs, per currency, with penalties, refunds and fees'),
+    def(PAYMENTS_PERMISSIONS.cashForecastReport, 'See the cash forecast: customer instalments and supplier payments by date, per currency'),
+    def(PAYMENTS_PERMISSIONS.accountantExport, "Download the accountant's CSV files: trip results, ledger movements and supplier payments", true),
   ] satisfies PermissionDef[],
   publishes: Object.values(PAYMENT_EVENTS),
   // Task 4.6: the receipts consumer.

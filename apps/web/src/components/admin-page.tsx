@@ -4,7 +4,7 @@ import { NavLinks } from './nav-links';
 import { SignOutButton } from './admin/sign-out-button';
 import { GlobalSearch } from './admin/global-search';
 import { adminRoutes } from '@/lib/routes';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 /**
  * Admin page frame: sidebar plus the page's single h1. Each admin page passes its own path so the

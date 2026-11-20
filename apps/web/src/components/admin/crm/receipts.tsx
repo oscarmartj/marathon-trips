@@ -1,7 +1,7 @@
 'use client';
 
 import { formatMoney } from '@/lib/builder';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { adminReceiptHref, receiptKindLabel } from '@/lib/reconciliation-panel';
 import { Section, useLoad } from '../catalogue/kit';
 import { formatMoment } from './crm-kit';

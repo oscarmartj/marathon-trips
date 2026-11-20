@@ -2,7 +2,7 @@
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { TagChip } from './tag-chip';
 import { type Meta, type TableRow, type TagView, errText, formatDate, maybe } from './shared';

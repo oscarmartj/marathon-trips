@@ -1,6 +1,6 @@
 import { AuthFrame } from '@/components/auth-frame';
 import { EnrolForm } from '@/components/auth/enrol-form';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default function Page() {
   return (

@@ -1,6 +1,6 @@
 import { AdminPage } from '@/components/admin-page';
 import { FlagsPanel } from '@/components/admin/flags-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default function Page() {
   return (

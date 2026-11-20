@@ -8,7 +8,7 @@ export const FORWARD_REQUEST_HEADERS = ['cookie', 'origin', 'x-mt-csrf', 'conten
 // Task 8.5 (S-08): the API's own security headers reach the browser too (nosniff, no framing, no Referer, and its strict
 // Content-Security-Policy), instead of the page policy; see `apiSecurityHeader` for the one exception.
 export const FORWARD_RESPONSE_HEADERS = [
-  'content-type', 'retry-after', 'cache-control', 'x-request-id', 'content-disposition',
+  'content-type', 'retry-after', 'cache-control', 'x-request-id', 'content-disposition', 'x-row-count',
   'content-security-policy', 'x-content-type-options', 'x-frame-options', 'referrer-policy',
 ] as const;
 

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { api } from '@/lib/api-client';
 import { tierLine } from '@/lib/cancellation';
 import { bpsToText, parseMoney, parsePercent } from '@/lib/pricing-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section, useLoad } from '../catalogue/kit';
 import { isVersionConflict, useRunner } from './pricing-kit';
 

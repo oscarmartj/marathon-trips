@@ -2,7 +2,7 @@
 
 import { type FormEvent, useMemo, useState } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { type RuleForm, type RuleView, type RunView, bodyFromForm, codeKey, formFromRule, reasonKey, stepKey } from '@/lib/automations-panel';
 import { Status } from '../../auth/field';
 import { Section, useLoad } from '../catalogue/kit';

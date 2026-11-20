@@ -7,7 +7,7 @@ import { api, type ApiResult } from '@/lib/api-client';
 import {
   CUSTOMER_VISIBLE_ENTITIES, RULE_KEYS, type BodyResult, type CustomFieldDef, definitionBody, definitionFormValues, fieldLabel, updateDefinitionBody,
 } from '@/lib/custom-fields-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { ActionButton, EntityForm, type FieldDef, Section, catalogueError, outcome, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';

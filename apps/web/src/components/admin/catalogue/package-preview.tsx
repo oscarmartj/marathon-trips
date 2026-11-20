@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { bpsToPercent, enAU, minorToDollars } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { formatDay, useLoad } from './kit';
 

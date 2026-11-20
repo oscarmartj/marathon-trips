@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { catalogueError } from '../catalogue/kit';
 
