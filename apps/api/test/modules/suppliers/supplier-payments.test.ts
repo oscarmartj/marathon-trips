@@ -156,20 +156,26 @@ describe('failure paths of recording (section 10)', () => {
   });
 
   it('paid_on_brisbane_boundary through the API: at 13:59:59.999Z tomorrow\'s Brisbane date is refused, at 14:00Z it is today', async () => {
-    const s = await newSupplier();
-    const c = await newCost(s.id);
-    // Today's UTC date, so the faked clock stays within hours of the real one (sessions and step-up keep working).
-    const utcDay = new Date().toISOString().slice(0, 10);
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      vi.setSystemTime(new Date(`${utcDay}T13:59:59.999Z`));
-      const before = await pay(s.id, body([c], { paidOn: daysFrom(utcDay, 1) }));
-      expect([before.status, before.body.code]).toEqual([422, 'paid_on_in_future']);
-      vi.setSystemTime(new Date(`${utcDay}T14:00:00.000Z`));
-      const after = await pay(s.id, body([c], { paidOn: daysFrom(utcDay, 1) }));
-      expect(after.status).toBe(201);
-    } finally {
-      vi.useRealTimers();
+    // Only Date is faked, and the staff member signs in INSIDE the frozen clock, so the session (2 h idle, 12 h absolute)
+    // and the step-up are measured against the same clock as the request, whatever the real time of day. Three days
+    // far apart (one is today) show the result does not depend on how far the fake clock is from the real one.
+    const realDay = new Date().toISOString().slice(0, 10);
+    for (const day of [realDay, '2030-07-01', '2031-03-10']) {
+      const s = await newSupplier();
+      const c = await newCost(s.id);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        vi.setSystemTime(new Date(`${day}T13:59:00.000Z`));
+        const staff = await adminWith(t, [SP.paymentRecord]);
+        vi.setSystemTime(new Date(`${day}T13:59:59.999Z`));
+        const before = await pay(s.id, body([c], { paidOn: daysFrom(day, 1) }), key(), staff);
+        expect([day, before.status, before.body.code]).toEqual([day, 422, 'paid_on_in_future']);
+        vi.setSystemTime(new Date(`${day}T14:00:00.000Z`));
+        const after = await pay(s.id, body([c], { paidOn: daysFrom(day, 1) }), key(), staff);
+        expect([day, after.status]).toEqual([day, 201]);
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
