@@ -9,6 +9,7 @@ import { ZodPipe } from '../../src/platform/http/zod.pipe';
 import { AccessGuard } from '../../src/platform/access/access.guard';
 import { AccessService, OWNER_ROLE, computeEffective } from '../../src/platform/access/access.service';
 import { PERMISSIONS, PermissionRegistry } from '../../src/platform/access/permissions';
+import { FlagRegistry } from '../../src/platform/flags/flag-registry';
 import { SessionService } from '../../src/platform/auth/session.service';
 import { APP_CONFIG, PrismaService } from '../../src/platform/database/prisma.service';
 import { configureApp } from '../../src/platform/http/configure-app';
@@ -140,11 +141,20 @@ describe('permissions (plan 4.3)', () => {
     const owner = await createStaff(t, { owner: true });
     const cookie = await signInStaff(t, owner);
     await stepUpOld(owner.id);
-    for (const r of stepUpRoutes) {
-      const path = r.path.replace(':id', owner.id).replace(':key', 'some_role');
-      const res = await t.http()[r.method.toLowerCase() as 'post'](path).set(STATE_HEADERS).set('Cookie', cookie).send({});
-      expect(res.status, `${r.method} ${r.path}`).toBe(403);
-      expect(res.body.code, `${r.method} ${r.path}`).toBe('step_up_required');
+    // Task 6.2: a module whose flag is off (or not yet created in a fresh database) answers 404 before any permission
+    // check, so every module is switched on here, whatever ran before this file, and put back afterwards.
+    const moduleFlags = t.app.get(FlagRegistry).all().filter((f) => f.key.startsWith('module.')).map((f) => f.key);
+    const before = await t.prisma.featureFlag.findMany({ where: { key: { in: moduleFlags } }, select: { key: true, enabled: true } });
+    for (const key of moduleFlags) await t.prisma.featureFlag.upsert({ where: { key }, create: { key, enabled: true, description: '' }, update: { enabled: true } });
+    try {
+      for (const r of stepUpRoutes) {
+        const path = r.path.replace(':id', owner.id).replace(':key', 'some_role');
+        const res = await t.http()[r.method.toLowerCase() as 'post'](path).set(STATE_HEADERS).set('Cookie', cookie).send({});
+        expect(res.status, `${r.method} ${r.path}`).toBe(403);
+        expect(res.body.code, `${r.method} ${r.path}`).toBe('step_up_required');
+      }
+    } finally {
+      for (const f of before) await t.prisma.featureFlag.update({ where: { key: f.key }, data: { enabled: f.enabled } });
     }
   });
 

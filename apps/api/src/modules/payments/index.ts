@@ -11,3 +11,6 @@ export type { PendingCollection, PendingCollections } from './core/pending.servi
 // Task 4.6: receipts and notes, for the customer area.
 export { ReceiptsService } from './core/receipts.service';
 export type { DocumentView } from './core/receipts.service';
+// Task 6.2: posting the supplier payments the suppliers module records.
+export { SupplierLedger } from './core/supplier-ledger.service';
+export type { SupplierPaymentRef } from './core/ledger.service';

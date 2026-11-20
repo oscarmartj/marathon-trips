@@ -47,4 +47,6 @@ export default function globalSetup(): void {
   process.env.E2E_STAFF_29 = create();
   // Payment gateway accounts in the panel (admin-gateways.spec.ts, task 4.1): an owner.
   process.env.E2E_STAFF_30 = create();
+  // Supplier payments, recorded and voided in the panel (supplier-payments.spec.ts, task 6.2): an owner.
+  process.env.E2E_STAFF_31 = create();
 }

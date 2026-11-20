@@ -101,10 +101,13 @@ describe('customer money report rules (plan 4.6, 5.0 and review R2)', () => {
     expect(none).toMatchObject({ owedToSuppliersMinor: null, marginNotEarnedMinor: null, marginEarnedMinor: 0n, keepSeparateMinor: 70_000n });
     const overCost = tripMoney({ bookings: [b({ fundsMinor: 70_000n })], supplierCostMinor: 90_000n, paidToSuppliersMinor: 0n, today: '2028-01-01' });
     expect(overCost).toMatchObject({ owedToSuppliersMinor: 70_000n, marginEarnedMinor: 0n, keepSeparateMinor: 70_000n });
-    // When 6.2 records payments larger than the cost, margin stays at 0 and nothing kept is lowered below the money held.
+    // Payments larger than the customer money applied: margin stays at 0. Task 6.2 (plan 6.2 section 6, decision D7, approved
+    // by the plan review) replaced the placeholder expectation "keep 70,000" written before payments existed: customer money
+    // spent on suppliers has left the account, so it is no longer kept aside, and the rest is shown as the business's own.
     const overPaid = tripMoney({ bookings: [b({ fundsMinor: 70_000n })], supplierCostMinor: 10_000n, paidToSuppliersMinor: 90_000n, today: '2026-01-01' });
     expect(overPaid.marginNotEarnedMinor).toBe(0n);
-    expect(overPaid.keepSeparateMinor).toBe(70_000n);
+    expect(overPaid.keepSeparateMinor).toBe(0n);
+    expect(overPaid.paidBeyondCustomerMoneyMinor).toBe(20_000n);
   });
 
   it('a missing return date counts as not travelled', () => {

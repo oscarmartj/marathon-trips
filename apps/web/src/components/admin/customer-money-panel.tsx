@@ -5,10 +5,14 @@ import { moneyOrDash } from '@/lib/reconciliation-panel';
 import { formatMoney } from '@/lib/builder';
 import { Section, useLoad } from './catalogue/kit';
 
-interface Money { heldMinor: string; overpaymentsMinor: string; customerDebtMinor: string; owedToSuppliersMinor: string | null; marginNotEarnedMinor: string | null; marginEarnedMinor: string; keepSeparateMinor: string; feesMinor: string; tripTravelled: boolean }
-interface Row { packageId: string; trip: string; currency: string; bookings: number; costsNote: 'ok' | 'no_supplier_costs' | 'costs_in_other_currency'; feesImported: boolean; money: Money }
-interface Total { currency: string; heldMinor: string; keepSeparateMinor: string; marginEarnedMinor: string; customerDebtMinor: string; feesMinor: string }
-interface Report { asOf: string; today: string; rows: Row[]; totals: Total[] }
+interface Money {
+  heldMinor: string; overpaymentsMinor: string; customerDebtMinor: string; owedToSuppliersMinor: string | null; marginNotEarnedMinor: string | null; marginEarnedMinor: string; keepSeparateMinor: string; feesMinor: string;
+  paidToSuppliersMinor: string; paidBeyondCustomerMoneyMinor: string; tripTravelled: boolean;
+}
+interface Row { packageId: string; trip: string; currency: string; bookings: number; costsNote: 'ok' | 'no_supplier_costs' | 'costs_in_other_currency'; feesImported: boolean; money: Money; otherCurrencyPaid: Array<{ currency: string; amountMinor: string }> }
+interface Total { currency: string; heldMinor: string; keepSeparateMinor: string; marginEarnedMinor: string; customerDebtMinor: string; feesMinor: string; paidToSuppliersMinor: string; paidBeyondCustomerMoneyMinor: string }
+interface Unlinked { currency: string; costMinor: string; paidMinor: string; unpaidMinor: string }
+interface Report { asOf: string; today: string; rows: Row[]; totals: Total[]; unlinked: Unlinked[] }
 
 /** The customer money report (task 4.6): every figure is the API's; the page only formats them. */
 export function CustomerMoneyPanel() {
@@ -23,7 +27,7 @@ export function CustomerMoneyPanel() {
             <caption>{t('admin.customerMoney.caption')}</caption>
             <thead>
               <tr>
-                {(['trip', 'bookings', 'held', 'owed', 'notEarned', 'over', 'debt', 'earned', 'keep', 'fees'] as const).map((k) => <th key={k} scope="col">{t(`admin.customerMoney.${k}`)}</th>)}
+                {(['trip', 'bookings', 'held', 'paid', 'ownMoney', 'owed', 'notEarned', 'over', 'debt', 'earned', 'keep', 'fees'] as const).map((k) => <th key={k} scope="col">{t(`admin.customerMoney.${k}`)}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -33,9 +37,12 @@ export function CustomerMoneyPanel() {
                     {r.trip}
                     {r.costsNote !== 'ok' ? <><br /><small>{t(`admin.customerMoney.notes.${r.costsNote}`)}</small></> : null}
                     {!r.feesImported ? <><br /><small>{t('admin.customerMoney.feesNotImported')}</small></> : null}
+                    {r.otherCurrencyPaid.length > 0 ? <><br /><small>{t('admin.customerMoney.otherCurrencyPaid', { list: r.otherCurrencyPaid.map((o) => formatMoney(o.amountMinor, o.currency)).join(', ') })}</small></> : null}
                   </th>
                   <td>{r.bookings}</td>
                   <td>{formatMoney(r.money.heldMinor, r.currency)}</td>
+                  <td>{formatMoney(r.money.paidToSuppliersMinor, r.currency)}</td>
+                  <td>{formatMoney(r.money.paidBeyondCustomerMoneyMinor, r.currency)}</td>
                   <td>{moneyOrDash(r.money.owedToSuppliersMinor, r.currency)}</td>
                   <td>{moneyOrDash(r.money.marginNotEarnedMinor, r.currency)}</td>
                   <td>{formatMoney(r.money.overpaymentsMinor, r.currency)}</td>
@@ -54,8 +61,16 @@ export function CustomerMoneyPanel() {
           <h3>{t('admin.customerMoney.totalsHeading')}</h3>
           <ul>
             {data.totals.map((x) => (
-              <li key={x.currency}>{t('admin.customerMoney.totalRow', { currency: x.currency, held: formatMoney(x.heldMinor, x.currency), keep: formatMoney(x.keepSeparateMinor, x.currency), earned: formatMoney(x.marginEarnedMinor, x.currency), debt: formatMoney(x.customerDebtMinor, x.currency), fees: formatMoney(x.feesMinor, x.currency) })}</li>
+              <li key={x.currency}>{t('admin.customerMoney.totalRow', { currency: x.currency, held: formatMoney(x.heldMinor, x.currency), keep: formatMoney(x.keepSeparateMinor, x.currency), earned: formatMoney(x.marginEarnedMinor, x.currency), debt: formatMoney(x.customerDebtMinor, x.currency), fees: formatMoney(x.feesMinor, x.currency), paid: formatMoney(x.paidToSuppliersMinor, x.currency), own: formatMoney(x.paidBeyondCustomerMoneyMinor, x.currency) })}</li>
             ))}
+          </ul>
+        </>
+      ) : null}
+      {data.unlinked.length > 0 ? (
+        <>
+          <h3>{t('admin.customerMoney.unlinkedHeading')}</h3>
+          <ul>
+            {data.unlinked.map((u) => <li key={u.currency}>{t('admin.customerMoney.unlinkedRow', { currency: u.currency, cost: formatMoney(u.costMinor, u.currency), paid: formatMoney(u.paidMinor, u.currency), unpaid: formatMoney(u.unpaidMinor, u.currency) })}</li>)}
           </ul>
         </>
       ) : null}

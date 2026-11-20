@@ -120,6 +120,12 @@ export const QUEUES = {
     data: z.object({}).strict(),
     options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
   },
+  // Task 6.2: opens and closes the tasks for upcoming and overdue supplier payments and passed release dates.
+  suppliersPaymentAlerts: {
+    name: 'suppliers.payment_alerts',
+    data: z.object({}).strict(),
+    options: { policy: 'short', retryLimit: 2, retryDelay: 60, expireInSeconds: 600, deleteAfterSeconds: 604800 },
+  },
   // Task 7.7: makes the scheduled report runs that are due and queues their emails.
   reportsTick: {
     name: 'reports.tick',

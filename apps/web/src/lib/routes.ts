@@ -63,6 +63,7 @@ export const adminRoutes: readonly RouteDef[] = [
   { path: '/admin/cancellation-policies/[id]', file: 'admin/(panel)/cancellation-policies/[id]/page.tsx', labelKey: 'admin.nav.cancellationPolicy' },
   { path: '/admin/hotels', file: 'admin/(panel)/hotels/page.tsx', labelKey: 'admin.nav.hotels', nav: true },
   { path: '/admin/suppliers', file: 'admin/(panel)/suppliers/page.tsx', labelKey: 'admin.nav.suppliers', nav: true },
+  { path: '/admin/suppliers/payments', file: 'admin/(panel)/suppliers/payments/page.tsx', labelKey: 'admin.nav.supplierPayments', nav: true },
   { path: '/admin/suppliers/[id]', file: 'admin/(panel)/suppliers/[id]/page.tsx', labelKey: 'admin.nav.supplier' },
   { path: '/admin/content', file: 'admin/(panel)/content/page.tsx', labelKey: 'admin.nav.content', nav: true },
   { path: '/admin/content/[kind]', file: 'admin/(panel)/content/[kind]/page.tsx', labelKey: 'admin.nav.contentKind' },

@@ -606,6 +606,9 @@ model LedgerTransaction {
   reversesTransactionId String?               @db.Uuid
   disputeId             String?               @db.Uuid
   dispute               Dispute?              @relation(fields: [disputeId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
+  /// task 6.2: the supplier payment this posting records or reverses (never with a booking)
+  supplierPaymentId     String?               @db.Uuid
+  supplierPayment       SupplierPayment?      @relation(fields: [supplierPaymentId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   reverses              LedgerTransaction?    @relation("LedgerReversal", fields: [reversesTransactionId, mode], references: [id, mode], onDelete: Restrict, onUpdate: Restrict)
   reversedBy            LedgerTransaction[]   @relation("LedgerReversal")
   /// @nopii one per business fact (plan 0.1, P5): payment:<id>:succeeded, refund:<id>:succeeded…
@@ -624,6 +627,7 @@ model LedgerTransaction {
   @@index([paymentId])
   @@index([refundId])
   @@index([disputeId])
+  @@index([supplierPaymentId])
   @@map("ledger_transactions")
 }
 

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../generated/prisma/client';
 import { AppError } from '../../../platform/errors/safe-error';
 import { allocate } from './allocation';
-import { CUSTOMER_ACCOUNTS, LEDGER_ACCOUNTS, LedgerLine, accountKind, assertBalanced, contentSha256, customerSide, settlementFeeKey } from './ledger';
+import { CUSTOMER_ACCOUNTS, LEDGER_ACCOUNTS, LedgerLine, accountKind, assertBalanced, contentSha256, customerSide, settlementFeeKey, supplierPaymentKey, supplierPaymentLines, supplierPaymentVoidedKey } from './ledger';
 import { netCollectedSource } from './payable';
 
 type Tx = Prisma.TransactionClient;
@@ -14,6 +14,16 @@ export class LedgerKeyConflictError extends AppError {
   constructor() {
     super('ledger_key_conflict', 'A ledger posting with this key already exists with other content');
   }
+}
+
+/** Task 6.2: what the ledger needs of a supplier payment. */
+export interface SupplierPaymentRef {
+  id: string;
+  mode: Mode;
+  amountMinor: bigint;
+  currency: string;
+  baseAmountMinor: bigint | null;
+  baseCurrency: string | null;
 }
 
 interface BookingRef {
@@ -116,6 +126,28 @@ export class LedgerService {
     return this.insert(tx, booking, { key: settlementFeeKey(f.lineId), kind: 'fee', mode: f.mode, description: 'settlement_fee', paymentId: f.paymentId, refundId: f.refundId, disputeId: f.disputeId }, lines, null);
   }
 
+  /**
+   * Task 6.2: a supplier payment recorded by staff, `supplier_payment:<id>` (plan 0.1, P5). No booking: the customer
+   * accounts never move. The caller holds the payment's cost items locked and inserted the payment in this transaction.
+   */
+  postSupplierPayment(tx: Tx, sp: SupplierPaymentRef): Promise<string> {
+    const lines = supplierPaymentLines(sp);
+    assertBalanced(lines);
+    return this.insertSupplier(tx, { key: supplierPaymentKey(sp.id), kind: 'supplier_payment', sp, lines, reversesId: null });
+  }
+
+  /** Task 6.2: the void of a supplier payment, `supplier_payment:<id>:voided`: every line of the original, mirrored. */
+  async postSupplierPaymentVoided(tx: Tx, sp: SupplierPaymentRef): Promise<string> {
+    const original = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id::text AS id FROM ledger_transactions WHERE "idempotencyKey" = ${supplierPaymentKey(sp.id)} AND "supplierPaymentId" = ${sp.id}::uuid`;
+    if (!original[0]) throw new AppError('ledger_reversal_without_original', 'There is no posting to reverse');
+    const entries = await tx.$queryRaw<Array<{ accountCode: string; currency: string; amountMinor: bigint }>>`
+      SELECT "accountCode", currency, "amountMinor" FROM ledger_entries WHERE "transactionId" = ${original[0].id}::uuid ORDER BY "accountCode", currency`;
+    const lines: LedgerLine[] = entries.map((e) => ({ accountCode: e.accountCode, currency: e.currency, amountMinor: -e.amountMinor }));
+    assertBalanced(lines);
+    return this.insertSupplier(tx, { key: supplierPaymentVoidedKey(sp.id), kind: 'reversal', sp, lines, reversesId: original[0].id });
+  }
+
   /** What the ledger holds for a booking in its customer accounts (liabilities as positive). */
   async customerBalances(tx: Tx, bookingId: string, currency: string, mode: Mode): Promise<{ fundsMinor: bigint; overpaymentsMinor: bigint; receivableMinor: bigint }> {
     const rows = await tx.$queryRaw<Array<{ code: string; total: bigint }>>`
@@ -146,6 +178,37 @@ export class LedgerService {
       reversesId = original[0].id;
     }
     return this.insert(tx, booking, p, lines, reversesId);
+  }
+
+  /** Task 6.2: a booking-less posting of a supplier payment, each line (and its account) in its own currency. */
+  private async insertSupplier(tx: Tx, p: { key: string; kind: 'supplier_payment' | 'reversal'; sp: SupplierPaymentRef; lines: LedgerLine[]; reversesId: string | null }): Promise<string> {
+    const description = p.kind === 'reversal' ? 'supplier_payment_voided' : 'supplier_payment_recorded';
+    const sha = contentSha256({
+      kind: p.kind, mode: p.sp.mode, currency: p.sp.currency, bookingId: null, paymentId: null, refundId: null, supplierPaymentId: p.sp.id,
+      reversesTransactionId: p.reversesId, description, lines: p.lines,
+    });
+    // Plan review, point 12: the account of each line exists in that line's currency.
+    for (const l of p.lines) {
+      await tx.$executeRaw`
+        INSERT INTO ledger_accounts (id, code, kind, currency, mode) VALUES (gen_random_uuid(), ${l.accountCode}, ${accountKind(l.accountCode)}::"LedgerAccountKind", ${l.currency!}, ${p.sp.mode}::"PaymentMode")
+        ON CONFLICT (code, currency, mode) DO NOTHING`;
+    }
+    const inserted = await tx.$queryRaw<Array<{ id: string }>>`
+      INSERT INTO ledger_transactions (id, kind, mode, "bookingId", "supplierPaymentId", "reversesTransactionId", "idempotencyKey", description, "contentSha256")
+      VALUES (gen_random_uuid(), ${p.kind}::"LedgerTransactionKind", ${p.sp.mode}::"PaymentMode", NULL, ${p.sp.id}::uuid, ${p.reversesId}::uuid, ${p.key}, ${description}, ${sha})
+      ON CONFLICT ("idempotencyKey") DO NOTHING RETURNING id::text AS id`;
+    if (!inserted[0]) {
+      const existing = await tx.$queryRaw<Array<{ id: string; contentSha256: string }>>`SELECT id::text AS id, "contentSha256" FROM ledger_transactions WHERE "idempotencyKey" = ${p.key}`;
+      if (existing[0]?.contentSha256 === sha) return existing[0].id;
+      throw new LedgerKeyConflictError();
+    }
+    const txId = inserted[0].id;
+    for (const l of p.lines) {
+      await tx.$executeRaw`
+        INSERT INTO ledger_entries (id, "transactionId", mode, "accountCode", currency, "amountMinor", "bookingId")
+        VALUES (gen_random_uuid(), ${txId}::uuid, ${p.sp.mode}::"PaymentMode", ${l.accountCode}, ${l.currency!}, ${l.amountMinor}, NULL)`;
+    }
+    return txId;
   }
 
   /** Writes one posting under its key: the same content again returns its id; other content is a conflict. */
