@@ -108,7 +108,7 @@ Comprobado el 2026-11-11.
 
 ## 4b. Actualización del 2026-11-20 (hilo 9.1, oleada B)
 
-Solo lo comprobado hoy en la página oficial citada; lo demás de la sección 2 sigue como estaba. Leídas con el cliente automático, que resume: las frases entre comillas son las que devolvió.
+Solo lo comprobado hoy en la página oficial citada; lo demás de la sección 2 sigue como estaba. Leídas con el cliente automático, que resume: las frases entre comillas son las que devolvió. **eWAY: todo SIN VERIFICAR.** eway.io y eway.com.au solo se leyeron con esa herramienta; el revisor del plan no pudo abrirlas desde el proxy de los agentes, así que nada de eWAY está confirmado hasta la ejecución en el sandbox.
 
 | Pasarela | Comprobado el 2026-11-20 | Fuente |
 |---|---|---|
