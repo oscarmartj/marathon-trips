@@ -1058,7 +1058,10 @@
       "checkCard": "Check your card details and try again.",
       "fieldsUnavailable": "The secure card fields could not be loaded. Reload the page or try again later.",
       "network": "We could not reach the server. Check your connection and try again.",
-      "generic": "Something went wrong. Start again from your booking."
-    }
+      "generic": "Something went wrong. Start again from your booking.",
+      "phoneRequired": "Your bank needs your full name and a phone number to confirm card payments. Add them to your account details, then try again.",
+      "challengeUnavailable": "Your bank's check could not be shown. Reload the page or try again later."
+    },
+    "secureFieldsNote": "The card fields are run by our card payment provider. Your bank will ask you to confirm the payment before anything is charged."
   }
 }

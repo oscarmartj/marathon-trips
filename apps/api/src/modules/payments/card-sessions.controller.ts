@@ -4,7 +4,7 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { CARD_SESSION_REF_PATTERN, cardSubmitSchema } from '@mt/shared';
+import { CARD_SESSION_REF_PATTERN, cardSubmitSchema, secureFieldsAuthoriseSchema, secureFieldsSubmitSchema } from '@mt/shared';
 import { Public } from '../../platform/access/access.decorators';
 import { ZodPipe } from '../../platform/http/zod.pipe';
 import type { ApiRequest } from '../../platform/http/request-context';
@@ -12,6 +12,8 @@ import { CardSessionsService } from './core/card-sessions/card-sessions.service'
 
 const refSchema = z.object({ ref: z.string().regex(CARD_SESSION_REF_PATTERN) }).strict();
 const submitSchema = cardSubmitSchema.extend({ ref: z.string().regex(CARD_SESSION_REF_PATTERN) }).strict();
+const secureSubmitSchema = secureFieldsSubmitSchema.extend({ ref: z.string().regex(CARD_SESSION_REF_PATTERN) }).strict();
+const secureAuthoriseSchema = secureFieldsAuthoriseSchema.extend({ ref: z.string().regex(CARD_SESSION_REF_PATTERN) }).strict();
 
 function noStore(res: Response): void {
   res.setHeader('Cache-Control', 'no-store');
@@ -34,6 +36,22 @@ export class CardSessionsController {
   submit(@Body(new ZodPipe(submitSchema)) b: z.infer<typeof submitSchema>, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
     noStore(res);
     return this.sessions.submit(b.ref, b.cardToken, req.ip);
+  }
+
+  /** Task 9.1: eWAY's card page sends its Secure Fields code once; the answer starts 3-D Secure (no money moves). */
+  @Post('secure-fields/submit') @HttpCode(200)
+  @Public('card session holders: submit the gateway single-use Secure Fields code once to start 3-D Secure; the amount is the session\'s')
+  secureSubmit(@Body(new ZodPipe(secureSubmitSchema)) b: z.infer<typeof secureSubmitSchema>, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
+    noStore(res);
+    return this.sessions.submit(b.ref, b.secureFieldCode, req.ip, 'before_charge');
+  }
+
+  /** Task 9.1: after eWAY's 3-D Secure challenge, the one charge of the session (plan 9.1, section 6.4). */
+  @Post('secure-fields/authorise') @HttpCode(200)
+  @Public('card session holders: after 3-D Secure, charge the session once with the authenticated card; the amount is the session\'s')
+  secureAuthorise(@Body(new ZodPipe(secureAuthoriseSchema)) b: z.infer<typeof secureAuthoriseSchema>, @Req() req: ApiRequest, @Res({ passthrough: true }) res: Response) {
+    noStore(res);
+    return this.sessions.authorise(b.ref, b.accessCode, b.secureFieldCode, req.ip);
   }
 
   /** Where the gateway sends the customer after 3-D Secure: always on to the session's own return page. */

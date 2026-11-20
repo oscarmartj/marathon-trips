@@ -64,6 +64,13 @@ export interface ContractSubject {
   disputeWebhookFor?(ctx: ProviderContext, ref: string, at: Date): Promise<SignedBody>;
   /** Task 4.6, required when the manifest declares `reconciliation.settlements`: the gateway pays out what it holds. */
   paysOut?(ctx: ProviderContext, payoutDate: string): Promise<void>;
+  /**
+   * Task 9.1 (plan docs/plans/9.1-eway.md, 20 M7), required when the manifest declares `gatewayEvents: 'none'`: the
+   * fake gateway acts on the next money request of this kind, then its answer is lost (a timeout); and how many money
+   * requests of that kind the gateway received for this payment (its charges, or its refunds).
+   */
+  loseNextAnswer?(ctx: ProviderContext, kind: 'charge' | 'refund'): Promise<void>;
+  postCount?(ctx: ProviderContext, kind: 'charge' | 'refund', paymentRef: string): Promise<number>;
   /** A currency the gateway refuses for this account. */
   unsupportedCurrency: string;
   /** Throws unless the environment holds test-mode credentials for this gateway (checked before any network call). */
@@ -180,6 +187,20 @@ export class Harness {
     return { input, p };
   }
 
+  /**
+   * Task 9.1 (plan 9.1, sections 4.2 and 20 M7): the gateway sends no events. The webhook clauses then check the read
+   * path instead: what the gateway did when our answer was lost is found by a read, linked, and never sent again.
+   */
+  get eventless(): boolean {
+    return this.p.manifest.capabilities.gatewayEvents === 'none';
+  }
+
+  /** The two hooks an eventless subject must bring (plan 9.1, 20 M7). */
+  readHooks(): { lose: NonNullable<ContractSubject['loseNextAnswer']>; posts: NonNullable<ContractSubject['postCount']> } {
+    expect(typeof this.s.loseNextAnswer === 'function' && typeof this.s.postCount === 'function', 'an eventless subject brings loseNextAnswer and postCount').toBe(true);
+    return { lose: this.s.loseNextAnswer!.bind(this.s), posts: this.s.postCount!.bind(this.s) };
+  }
+
   /** Whether the provider's payments wait for a card on our page with no gateway object (task 4.4, plan 4.4 18 M1). */
   get preCardSession(): boolean {
     return this.p.manifest.capabilities.preCardSession === true;
@@ -191,6 +212,7 @@ export class Harness {
    * A signature does not depend on the object's state, so no check is lost.
    */
   async signedFor(ctx: ProviderContext, p: ProviderPayment, at: Date): Promise<SignedBody> {
+    expect(this.eventless, 'no signed webhook from a gateway without events').toBe(false);
     const w = await this.s.webhookFor(ctx, p.ref, at);
     if (w !== NO_GATEWAY_EVENT) return w;
     expect(this.preCardSession, 'NO_GATEWAY_EVENT only with capabilities.preCardSession').toBe(true);
@@ -285,6 +307,27 @@ async function previousStateWithoutGatewayEvent(h: Harness, ctx: ProviderContext
   expect([o.event.providerEventId, n.event.providerEventId]).not.toContain(v2.event.providerEventId);
 }
 
+/** Bodies an eventless adapter must refuse, whatever they look like (plan 9.1, section 4.2): never accepted, never thrown. */
+const EVENTLESS_BODIES = [
+  Buffer.from(JSON.stringify({ TransactionID: 12345678, TransactionStatus: true, TotalAmount: 1500, InvoiceReference: `cs_${'0'.repeat(32)}`, ResponseMessage: 'A2000' })),
+  Buffer.from(JSON.stringify({ type: 'charge.captured', data: { token: 'ch_x', success: true } })),
+  Buffer.from('{}'),
+];
+
+/** Task 9.1: an eventless adapter accepts no delivery and parses nothing; every webhook check of the subject is absent. */
+async function eventlessRefusesEverything(h: Harness, ctx: ProviderContext): Promise<void> {
+  expect(h.p.signatureHeaders, 'no signature headers without events').toEqual([]);
+  const headerSets: Record<string, string>[] = [{}, { 'webhook-signature': 'x' }, { 'pin-signature': 't=1,v1=x' }, { 'stripe-signature': 't=1,v1=x' }];
+  for (const body of EVENTLESS_BODIES) {
+    for (const headers of headerSets) {
+      for (const when of [now(), new Date(Date.now() - HOUR), new Date(Date.now() + HOUR)]) {
+        expect((await h.value('verifyWebhook (no events)', () => h.verify(ctx, body, headers, when))).ok, 'an adapter without events accepts no delivery').toBe(false);
+      }
+    }
+    expect(await h.value('parseEvent (no events)', () => h.p.parseEvent(body))).toBeNull();
+  }
+}
+
 /** One implementation per clause; the type makes a missing or extra clause a compile error. */
 export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Promise<void> } = {
   async context_is_test_mode(h) {
@@ -304,7 +347,9 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     for (const c of m.currencies) expect(c).toMatch(/^[A-Z]{3}$/);
     expect(m.methods.length).toBeGreaterThan(0);
     for (const method of m.methods) expect(PAYMENT_METHODS as readonly string[]).toContain(method);
-    expect(h.p.signatureHeaders.length).toBeGreaterThan(0);
+    // Task 9.1 (plan 9.1, 4.2): an adapter without events has no signature headers; every other one has some.
+    if (h.eventless) expect(h.p.signatureHeaders.length, 'no signature headers without events').toBe(0);
+    else expect(h.p.signatureHeaders.length).toBeGreaterThan(0);
     for (const name of h.p.signatureHeaders) expect(name).toMatch(/^[a-z0-9-]+$/);
     expect(m.currencies).not.toContain(h.s.unsupportedCurrency);
   },
@@ -489,6 +534,22 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const ctx = await h.ctx();
     const input = h.input();
     const p = await h.create(ctx, input);
+    if (h.eventless) {
+      // Plan 9.1, 20 M7: the charge is made and its answer lost; a read finds it, links it, and nothing is sent again.
+      const { lose, posts } = h.readHooks();
+      expect(await h.s.webhookFor(ctx, p.ref, now()), 'no event at all').toBe(NO_GATEWAY_EVENT);
+      await lose(ctx, 'charge');
+      await h.s.customerCompletes(ctx, p, 'pay');
+      const byRef = h.expectPayment(await h.retrieve(ctx, { ref: p.ref }), input);
+      const byKey = h.expectPayment(await h.retrieve(ctx, h.byKey(input)), input);
+      expect(byRef.status, 'the lost answer is found by a read').toBe('succeeded');
+      expect([byKey.ref, byKey.status]).toEqual([p.ref, 'succeeded']);
+      expect(await posts(ctx, 'charge', p.ref), 'one charge request, never sent again').toBe(1);
+      expect((await h.retrieve(ctx, { ref: p.ref }))?.status).toBe('succeeded');
+      expect(await posts(ctx, 'charge', p.ref), 'reads send nothing').toBe(1);
+      await eventlessRefusesEverything(h, ctx);
+      return;
+    }
     await h.s.customerCompletes(ctx, p, 'pay');
     const at = now();
     const w = await h.s.webhookFor(ctx, p.ref, at);
@@ -513,6 +574,26 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   async webhook_previous_state_and_duplicate(h) {
     const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
+    if (h.eventless) {
+      // Plan 9.1, 20 M7: a refund made and its answer lost; the read by our key finds it with our id, and a retry with
+      // the same key sends nothing. Before payment the read says the customer must act; after, it never goes back.
+      const { lose, posts } = h.readHooks();
+      expect((await h.retrieve(ctx, { ref: p.ref }))?.status, 'before payment').toBe('requires_action');
+      await h.s.customerCompletes(ctx, p, 'pay');
+      expect((await h.retrieve(ctx, { ref: p.ref }))?.status, 'after payment').toBe('succeeded');
+      if (h.refunds === 'none') return;
+      const input = h.refundInput(p, p.amount.amountMinor);
+      await lose(ctx, 'refund');
+      const lost = await h.call('createRefund (answer lost)', () => h.p.createRefund(ctx, input));
+      if (!lost.ok) expect(lost.error.retryable, 'a lost answer is retryable').toBe(true);
+      const byKey = h.expectRefund(await h.value('retrieveRefund (key)', () => h.p.retrieveRefund(ctx, { idempotencyKey: input.idempotencyKey, paymentRef: p.ref, createdAt: input.createdAt })), p.amount.amountMinor);
+      expect(byKey.ourRefundId, 'the refund found carries our id').toBe(input.metadata.refundId);
+      const again = await h.value('createRefund (same key again)', () => h.p.createRefund(ctx, input));
+      expect(again.ref, 'the same refund').toBe(byKey.ref);
+      expect(await posts(ctx, 'refund', p.ref), 'one refund request, never sent again').toBe(1);
+      expect((await h.retrieve(ctx, { ref: p.ref }))?.status, 'a refund never moves the payment back').toBe('succeeded');
+      return;
+    }
     const before = await h.s.webhookFor(ctx, p.ref, now());
     if (before === NO_GATEWAY_EVENT) return previousStateWithoutGatewayEvent(h, ctx, p);
     await h.s.customerCompletes(ctx, p, 'pay');
@@ -531,6 +612,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
 
   async webhook_rejections(h) {
     const ctx = await h.ctx();
+    if (h.eventless) return eventlessRefusesEverything(h, ctx);
     const p = await h.create(ctx, h.input());
     const at = now();
     const w = await h.signedFor(ctx, p, at);
@@ -553,13 +635,13 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
   async verify_and_parse_never_throw(h) {
     const ctx = await h.ctx();
     const p = await h.create(ctx, h.input());
-    const w = await h.signedFor(ctx, p, now());
+    const w = h.eventless ? { body: EVENTLESS_BODIES[0]!, headers: {} as Record<string, string> } : await h.signedFor(ctx, p, now());
     const bodies = [Buffer.alloc(0), Buffer.from('not json'), Buffer.from([0xff, 0xfe, 0x00, 0xc3, 0x28]), Buffer.alloc(256 * 1024, 0x7b), Buffer.from('null'), Buffer.from('[]'), Buffer.from('{"id":1}')];
     for (const body of bodies) {
       expect((await h.value('verifyWebhook (garbage)', () => h.verify(ctx, body, w.headers, now()))).ok).toBe(false);
       expect(await h.value('parseEvent (garbage)', () => h.p.parseEvent(body))).toBeNull();
     }
-    const huge = Object.fromEntries(h.p.signatureHeaders.map((n) => [n, 'x'.repeat(10 * 1024)]));
+    const huge = Object.fromEntries((h.eventless ? ['webhook-signature'] : h.p.signatureHeaders).map((n) => [n, 'x'.repeat(10 * 1024)]));
     expect((await h.value('verifyWebhook (huge header)', () => h.verify(ctx, w.body, { ...w.headers, ...huge }, now()))).ok).toBe(false);
   },
 
@@ -654,6 +736,14 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const { p } = await h.paid(ctx);
     const input = h.refundInput(p, p.amount.amountMinor);
     const r = await h.value('createRefund', () => h.p.createRefund(ctx, input));
+    if (h.eventless) {
+      // Plan 9.1, 4.2: what a refund event would tell the core, the read tells: our id, and the payment it belongs to.
+      const read = h.expectRefund(await h.value('retrieveRefund (ref)', () => h.p.retrieveRefund(ctx, { ref: r.ref })), p.amount.amountMinor);
+      expect(read.ourRefundId, 'a refund we started carries our id').toBe(input.metadata.refundId);
+      expect(read.amount.currency).toBe(p.amount.currency);
+      expect((await h.retrieve(ctx, { ref: read.paymentRef }))?.ref).toBe(p.ref);
+      return;
+    }
     const at = now();
     const w = await h.s.refundWebhookFor(ctx, r.ref, at);
     const v = await h.value('verifyWebhook (refund)', () => h.verify(ctx, w.body, w.headers, at));
@@ -680,6 +770,12 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const ctx = await h.ctx();
     const { p } = await h.paid(ctx, 1500n);
     const r = await h.s.gatewayRefunds(ctx, p, 400n);
+    if (h.eventless) {
+      const read = h.expectRefund(await h.value('retrieveRefund (dashboard refund)', () => h.p.retrieveRefund(ctx, { ref: r.ref })), 400n);
+      expect(read.ourRefundId, 'a dashboard refund carries no id of ours').toBeUndefined();
+      expect((await h.retrieve(ctx, { ref: read.paymentRef }))?.ref).toBe(p.ref);
+      return;
+    }
     const at = now();
     const w = await h.s.refundWebhookFor(ctx, r.ref, at);
     const v = await h.value('verifyWebhook (dashboard refund)', () => h.verify(ctx, w.body, w.headers, at));
@@ -766,7 +862,7 @@ export const CLAUSE_IMPLS: { readonly [K in ContractClause]: (h: Harness) => Pro
     const { p: paid } = await h.paid(ctx);
     const r = await h.call('createRefund', () => h.p.createRefund(ctx, h.refundInput(paid, 100n)));
     if (r.ok) await h.call('retrieveRefund', () => h.p.retrieveRefund(ctx, { ref: r.value.ref }));
-    const w = await h.signedFor(ctx, p, now());
+    const w = h.eventless ? { body: EVENTLESS_BODIES[0]!, headers: {} as Record<string, string> } : await h.signedFor(ctx, p, now());
     await h.call('verifyWebhook (other secret)', () => h.verify(bad.webhookSecret === ctx.webhookSecret ? { ...bad, webhookSecret: randomBytes(32).toString('hex') } : bad, w.body, w.headers, now()));
     const haystack = h.seen.map(serialise).join('\n');
     // The secrets of every context handed out in this suite (C3 to C19 used their own accounts), each field once.

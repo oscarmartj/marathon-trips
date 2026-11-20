@@ -58,6 +58,8 @@ Así se hizo en 4.4 (plan 4.4, §12.2 y §18 M1), por capacidad y no por adaptad
 - `NO_GATEWAY_EVENT`: un sujeto puede responderlo a `webhookFor` solo si el manifiesto declara `capabilities.preCardSession`, que solo pone `CardSessionProvider`. El registro lo comprueba en los dos sentidos. Entonces las cláusulas de firma usan el evento de un pago cobrado, y "un evento viejo conserva su estado" se comprueba con dos eventos reales de un reembolso (`refundSettles`).
 - `capabilities.refundEventOurId: 'via_retrieve'`: los eventos de reembolso no traen nuestro id; `retrieveRefund({ ref })` sí lo trae. El núcleo lo consulta antes de anotar un reembolso como externo.
 
+En 9.1 se añadió `capabilities.gatewayEvents: 'none'` para una pasarela que no envía eventos de servidor a servidor (eWAY). Es estructural, no una excepción: lista cerrada de claves, sin cabeceras de firma, y las cláusulas de webhook se sustituyen por comprobaciones de lectura más estrictas (plan 9.1, §4.2 y §20 M7).
+
 ## El simulador
 
 Es el adaptador `simulator`: `testOnly`, `experimental` y sin sandbox. Su página alojada (`/api/payments/simulator/checkout/<token>`) existe solo en `development`, `test` y `ci`. Allí se paga o se rechaza un pago de prueba; el simulador entrega el webhook firmado por la misma entrada que una pasarela real. Sirve para probar a mano (`pnpm dev`) y para Playwright (3.5).
@@ -92,6 +94,33 @@ Para probarlo con la cuenta de prueba de Pin (cuando Oscar la tenga):
 1. En el panel de Pin (modo prueba), las claves secreta y publicable, y un endpoint de webhook (Account > Webhooks) a la URL que enseña nuestro panel al crear la cuenta. Confirmar con Pin que no envía recibos a los pagadores (A13) y apagar cualquier recargo: en esta integración no hay ninguno.
 2. En el panel ("Payment gateways"), cuenta Pin Payments con las dos claves; nace pausada. "Set webhook secret" con el `key` del endpoint (la prueba de conexión comprueba que ese endpoint existe en Pin); después, probar la conexión y activar.
 3. Grabar entregas reales de un cargo y de un reembolso, y dos reintentos (`[{ headers, bodyBase64, receivedAt }]`; A1–A3, A16), y ejecutar: `SANDBOX_ADAPTER=pin_payments PIN_TEST_SECRET_KEY=… PIN_TEST_PUBLISHABLE_KEY=… PIN_TEST_WEBHOOK_KEY=… PIN_TEST_CARD_PAY=… PIN_TEST_CARD_DECLINE=… PIN_TEST_RECORDED_DELIVERY=<ruta> pnpm --filter @mt/api test:sandbox`. El desafío de 3-D Secure en el banco de pruebas puede necesitar a una persona.
+
+## eWAY (9.1)
+
+Adaptador `eway`, `experimental`. **Todo lo de eWAY está sin verificar**: se leyó la referencia Rapid v3 con una herramienta que resume, y el revisor del plan no pudo abrir eway.io. Clase registrada: `CardSessionProvider` sobre `EwayGateway`, que declara `authentication: 'before_charge'`.
+
+Flujo: los Secure Fields de eWAY en nuestra página `/pay/secure-fields/<ref>`, que tiene su propia CSP. Primero se inicia el 3-D Secure (`3dsenrol`), que no mueve dinero. El banco pide la confirmación con `Cerberus.run`. Después llega el único `POST /Transaction` de la sesión (`submittedAt`, una vez), con nuestra referencia en `InvoiceReference`.
+
+Lo que hace distinta a eWAY:
+- **Sin eventos.** eWAY no avisa nunca al servidor. El adapter declara `capabilities.gatewayEvents: 'none'`, que solo se admite para las claves de `EVENTLESS_ADAPTER_KEYS`. Rechaza toda entrega de webhook (`malformed`).
+- **La batería se adapta sin perder comprobaciones.** Sustituye las cláusulas de webhook por las de lectura: una respuesta perdida después de que eWAY actuó se encuentra leyendo, se enlaza y no se reenvía (hooks `loseNextAnswer` y `postCount` del sujeto).
+- **No puede pasar a `verified`.** El registro lo impide sin conciliación (actividad o liquidaciones) ni disputas, y eWAY todavía no tiene ninguna de las dos: seguimiento 9.1-F2.
+- **Sin clave de idempotencia.** Un solo envío por sesión; ante un resultado desconocido se busca por `InvoiceReference` y nunca se reenvía.
+- **Un cobro desconocido no se da por perdido enseguida.** Solo pasa a `failed`/`outcome_unknown` con un "no existe" definitivo, pasados 15 minutos desde el envío y la caducidad de la sesión.
+- **`D4494`** (duplicado) abre una tarea y vuelve a leer las sesiones sin resolver de la misma reserva.
+- **Reembolsos con nuestra referencia** (`mtr_…`); se enlazan por coincidencia exacta.
+- **Referencia en varias transacciones.** Si eWAY la tiene en más de una, se abre una tarea y el personal la enlaza con `pnpm api:cli payments:card-session-bind --ref cs_… --transaction <id>`.
+- **Datos del pagador.** El 3-D Secure 2 pide nombre, correo y teléfono del pagador del cobro; si al pagador le falta el teléfono, el nombre o el apellido, 409 `card_session_phone_required`.
+- **Un `TransactionStatus: false` con un código fuera de la lista** (`mapping.ts`) se toma como resultado desconocido: la sesión sigue en `submitting`, el intento sigue vivo y bloquea otro pago de la reserva (P2), y a las 24 h salta la tarea "Payment attempt unresolved". El personal lo comprueba en MYeWAY, y el código se añade a la lista en un PR revisado.
+- **Una búsqueda que no se puede leer** (una transacción sin nuestra referencia, o un 404 sin el código de "no existe" de eWAY) es desconocida, nunca "no existe": no se da un cobro por perdido.
+
+En CI pasa la batería contra un eWAY falso (`test/contract/subjects/eway-fake.ts`), con el almacén en memoria y con el de la base (`test/modules/payments/eway-store.test.ts`). Plan, supuestos A1–A14 y cambios de la revisión: `docs/plans/9.1-eway.md` (sección 20).
+
+Para probarlo con el sandbox (cuando Oscar tenga la cuenta de partner de eWAY, gratuita):
+
+1. En MYeWAY (sandbox), la clave de API, la contraseña y la clave pública (`epk-…`). Respuestas del sandbox en "Use Cents Value". Recargos apagados. Confirmar con eWAY por escrito los supuestos A1, A5 y A14.
+2. En el panel ("Payment gateways"), una cuenta eWAY con las tres claves; nace pausada. No hay webhook que configurar. Probar la conexión y activar.
+3. Escribir el guion de navegador para Secure Fields y `Cerberus` (Playwright, añadido solo para esa ejecución) y ejecutar `SANDBOX_ADAPTER=eway EWAY_SANDBOX_API_KEY=… EWAY_SANDBOX_API_PASSWORD=… EWAY_SANDBOX_PUBLIC_KEY=… EWAY_SANDBOX_BROWSER_SCRIPT=<ruta> pnpm --filter @mt/api test:sandbox`. Aunque pase, eWAY sigue `experimental` hasta 9.1-F2.
 
 ## Cuentas en el panel (4.1)
 

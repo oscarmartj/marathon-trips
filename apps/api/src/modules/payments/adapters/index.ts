@@ -7,6 +7,7 @@ import { CardSessionProvider } from '../core/card-sessions/provider';
 import type { CardSessionStore } from '../core/card-sessions/store';
 import { unwiredCardSessionStore } from '../core/card-sessions/store';
 import type { PaymentProvider } from '../core/provider';
+import { EwayGateway } from './eway/eway';
 import { PayPalProvider } from './paypal/paypal';
 import { PinPaymentsGateway } from './pin_payments/pin';
 import { SimulatorProvider } from './simulator/simulator';
@@ -48,5 +49,8 @@ export function createAdapters(opts: AdapterOptions): PaymentProvider[] {
   // CardSessionProvider holds the session before the card is submitted; test accounts only reach test-api.pinpayments.com.
   const cardPageOrigin = opts.cardPageOrigin ?? opts.webOrigin;
   const pin = new CardSessionProvider(new PinPaymentsGateway(), opts.cardSessions ?? unwiredCardSessionStore(), { cardPageOrigin, usable: cardPageOrigin !== INERT_CARD_PAGE_ORIGIN });
-  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider(), pin];
+  // eWAY is experimental too (task 9.1): Secure Fields on our page, 3-D Secure before the one charge, and no events, so
+  // every state is read from eWAY; it cannot become verified without reconciliation and disputes (registry).
+  const eway = new CardSessionProvider(new EwayGateway(), opts.cardSessions ?? unwiredCardSessionStore(), { cardPageOrigin, usable: cardPageOrigin !== INERT_CARD_PAGE_ORIGIN });
+  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider(), pin, eway];
 }

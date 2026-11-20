@@ -35,6 +35,7 @@ export function expiringStore(inner: CardSessionStore): CardSessionStore & { exp
     byRef: async (a, r) => view(await inner.byRef(a, r)),
     byKey: async (a, k) => view(await inner.byKey(a, k)),
     byChargeRef: async (a, c) => view(await inner.byChargeRef(a, c)),
+    unresolvedOfBooking: async (a, b) => (await inner.unresolvedOfBooking(a, b)).map((s) => view(s)),
     update: async (s, c) => view(await inner.update(s, c)),
     recordCharge: (s, c) => inner.recordCharge(s, c),
     intentByKey: (a, k) => inner.intentByKey(a, k),

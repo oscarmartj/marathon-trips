@@ -16,6 +16,17 @@ export interface AdapterView {
   webhookSecret: { source: 'entered'; label: string } | { source: 'generated' };
   creatable: boolean;
   creatableReason: string | null;
+  /** Task 9.1: what the adapter can do, from its manifest; null for a planned entry. */
+  capabilities?: AdapterCapabilities | null;
+}
+
+export interface AdapterCapabilities {
+  refunds: 'none' | 'full' | 'partial';
+  deferredCapture: boolean;
+  disputes: boolean;
+  reconciliation: { activity: boolean; settlements: boolean } | null;
+  gatewayEvents: 'signed' | 'none';
+  cardEntry: 'gateway_page' | 'card_fields' | 'simulated' | 'manual';
 }
 
 export interface AccountView {
@@ -60,6 +71,21 @@ export function actionsFor(a: Pick<AccountView, 'allowedTransitions'>): Array<{ 
 /** Why an adapter cannot have an account here, in words. */
 export const creatableText = (a: Pick<AdapterView, 'creatable' | 'creatableReason'>): string =>
   a.creatable ? t('admin.gateways.catalogue.creatable') : t(`admin.gateways.catalogue.reason.${a.creatableReason && KNOWN_REASONS.has(a.creatableReason) ? a.creatableReason : 'adapter_unavailable'}`);
+
+const CARD_ENTRY_KEYS: Record<AdapterCapabilities['cardEntry'], string> = {
+  gateway_page: 'cardEntryGatewayPage', card_fields: 'cardEntryCardFields', simulated: 'cardEntrySimulated', manual: 'cardEntryManual',
+};
+const REFUND_KEYS: Record<AdapterCapabilities['refunds'], string> = { partial: 'refundsPartial', full: 'refundsFull', none: 'refundsNone' };
+
+/** Task 9.1 (plan docs/plans/9.1-eway.md, section 13): an adapter's capabilities in words, from closed lists only. */
+export function capabilitiesText(c: AdapterCapabilities | null | undefined): string[] {
+  const k = (key: string) => t(`admin.gateways.catalogue.capability.${key}`);
+  if (!c) return [k('none')];
+  const out = [k(CARD_ENTRY_KEYS[c.cardEntry] ?? 'cardEntryGatewayPage'), k(REFUND_KEYS[c.refunds] ?? 'refundsNone'), k(c.gatewayEvents === 'none' ? 'eventsNone' : 'eventsSigned')];
+  if (c.disputes) out.push(k('disputes'));
+  if (c.reconciliation && (c.reconciliation.activity || c.reconciliation.settlements)) out.push(k('reconciliation'));
+  return out;
+}
 
 /** A warning in words, naming the account by its display name (never by anything secret). */
 export function warningText(w: Warning, accounts: ReadonlyArray<Pick<AccountView, 'id' | 'displayName'>>): string {
