@@ -182,7 +182,12 @@ export class EwayGateway implements CardTokenGateway {
     const body = this.obj(a);
     const errors = codesOf(body.Errors);
     if (errors.some((e) => NOT_UNIQUE_ERRORS.includes(e))) return NOT_UNIQUE;
-    if (errors.some((e) => NOT_FOUND_ERRORS.includes(e))) return [];
+    if (errors.some((e) => NOT_FOUND_ERRORS.includes(e))) {
+      // "Not found" only when nothing else is said: a not-found code next to transactions contradicts itself, so it is
+      // unknown, never "none" (code review, note a).
+      if (body.Transactions !== undefined && !(Array.isArray(body.Transactions) && body.Transactions.length === 0)) throw new ProviderError('provider_unavailable', true);
+      return [];
+    }
     if (errors.length > 0) throw new ProviderError('provider_unavailable', true);
     if (!Array.isArray(body.Transactions)) throw new ProviderError('provider_unavailable', true);
     if (body.Transactions.length > 50 || !body.Transactions.every(isObj)) throw new ProviderError('provider_unavailable', true);

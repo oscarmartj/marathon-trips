@@ -48,6 +48,8 @@ export class FakeEway {
     queryHides?: number;
     /** The next query answers this 404 (code review, finding 2). */
     raw404?: 'empty' | 'html' | 'coded';
+    /** The next query by reference answers the not-found code together with the transactions it holds (note a). */
+    contradict?: boolean;
     /** The next 3-D Secure enrolment is refused with this code (a decline before any charge; finding 3). */
     enrolDecline?: string;
   } = {};
@@ -260,6 +262,10 @@ export class FakeEway {
     }
     if (this.refundRefsHidden && ref.startsWith('mtr_')) return json(200, { Transactions: [], Errors: 'V6171' });
     const found = [...a.tx.values()].filter((t) => t.InvoiceReference === ref);
+    if (this.next.contradict && found.length > 0) {
+      delete this.next.contradict;
+      return json(200, { Transactions: found.map((t) => this.shown(t)), Errors: 'V6171' });
+    }
     if (found.length > 1) return json(200, { Transactions: [], Errors: 'V6170' });
     return json(200, { Transactions: found.map((t) => this.shown(t)), Errors: found.length === 0 ? 'V6171' : '' });
   }

@@ -146,7 +146,7 @@ export class CardSessionsService {
         SELECT c.email, c."givenName", c."familyName", c.phone FROM payments p JOIN customers c ON c.id = p."payerCustomerId" WHERE p.id = ${session.paymentId}::uuid`;
       if (!payer?.email) throw conflict('card_session_not_open', 'This payment is no longer open. Start again from your booking.');
       if (!needsNameAndPhone) return { email: payer.email, ipAddress };
-      if (!payer.phone || !payer.givenName || !payer.familyName) throw conflict('card_session_phone_required', 'Add a phone number to your account to pay by card, then try again.');
+      if (!payer.phone || !payer.givenName || !payer.familyName) throw conflict('card_session_phone_required', 'Add your full name and a phone number to your account to pay by card, then try again.');
       return { email: payer.email, ipAddress, givenName: payer.givenName, familyName: payer.familyName, phone: payer.phone };
     }, PAYMENT_TX_OPTIONS);
   }

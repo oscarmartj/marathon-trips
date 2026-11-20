@@ -316,7 +316,7 @@ describe('eWAY Secure Fields page through the API (plan 9.1)', () => {
     const cancelled = await staffCancel(admin, a.bookingId, { version: b.version, reason: 'Customer changed plans' });
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBeLessThan(300);
     const r = await authorise(a.ref, s.body.accessCode, code);
-    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect(r.status).toBe(409);
     expect(fake.chargePosts(acc.apiKey, a.ref)).toBe(0);
     expect(await statusOf(a.p.id)).not.toBe('succeeded');
   });

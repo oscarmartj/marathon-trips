@@ -230,6 +230,20 @@ describe('code review of PR #84: unknown is never "none", and declines before th
     expect(await g.retrieveCharge(ctx, 'ewt_1')).toBeNull();
   });
 
+  it('note a: a not-found code next to transactions is unknown, never "none": a lost charge is never taken as never made', async () => {
+    const { fake, provider, ctx, input, store, inner, keys } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.next.lose = 'charge';
+    await payWithSecureFields(fake, provider, ctx, p.ref, 'pay');
+    expect(fake.transactionsWith(keys.apiKey, p.ref)).toHaveLength(1);
+    store.expire(p.ref);
+    inner.advance(NOT_FOUND_GRACE_MS + 60_000);
+    fake.next.contradict = true;
+    await expect(provider.retrievePayment(ctx, { ref: p.ref })).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
+    expect((await store.byRef(ctx.accountId, p.ref))?.status).toBe('submitting');
+    expect((await provider.retrievePayment(ctx, { ref: p.ref }))?.status).toBe('succeeded');
+  });
+
   it('finding 3: every decline before the charge ends the session with its code, nothing charged, never stuck', async () => {
     for (const [code, failure] of [['D4405', 'card_declined'], ['D4451', 'insufficient_funds'], ['D4454', 'expired_card'], ['D4459', 'suspected_fraud'], ['F7000', 'suspected_fraud'], ['V6148', 'provider_rejected']] as const) {
       const { fake, provider, ctx, input, store, keys } = world();
