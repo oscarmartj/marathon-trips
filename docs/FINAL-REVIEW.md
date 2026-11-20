@@ -12,6 +12,19 @@ Todo lo que en modo autónomo se decidió, se dejó sin verificar o necesita tus
 - [ ] Validar el GST con tu contable (por componente, 1.1).
 - [ ] Cumplir los 8 hallazgos vinculantes del plan 0.1 al retomar el dinero (`docs/BLOCKED.md`).
 
+## Prioridad al cerrar la fase 6 (2026-11-20)
+
+Lo nuevo de 6.2, 6.4 y 6.6 y lo que cambia lo anterior, por importancia. Sigue todo contra simuladores y falsos. Detalle en `docs/done/6.close.md` y en la sección "Fase 6" más abajo.
+
+1. **Contable, fórmula de "dinero a reservar" (6.2, D7):** cambiada; con lo pagado a proveedores a 0 da lo mismo que 4.6, pero ya no garantiza "nunca guardar menos de lo retenido" y no es la opción más conservadora. Confirmar si el dinero de clientes puede pagar proveedores y devolver anticipos propios. Sin GST en el resultado por viaje (6.6).
+2. **Resultado por viaje incompleto (6.6):** sin comisiones de pasarela ("fees not imported"); la comprobación "costs" compara `cost_items` consigo misma, no con el libro; saldo corriente de la previsión desde 0. Probar la exportación para el contable con step-up y abrir el CSV en su hoja.
+3. **Permisos nuevos solo de owner que debes asignar:** `payments.report.tripResult`, `payments.report.cashForecast`, `payments.export.accountant` (6.6), `suppliers.payment.record|void` (6.2) y `pricing.cancellationPolicy.*` y `operator_cancelled` (6.4); la cancelación online del cliente viene apagada.
+4. **Decisión: `copy.test.ts` y "cancelled"** (`apps/web/src/lib/copy.test.ts`, línea 33): la regex prohíbe "cancelled", que es la ortografía australiana; debería marcar "canceled". Los textos evitan la palabra y la prueba no se tocó (6.4).
+5. **Catálogo de textos del panel (6.6):** se dividió en `en-AU.admin.json` y `lib/i18n-admin.ts` para no subir el límite de 200 000 bytes de JavaScript público; un test de importaciones vigila que `app/` (salvo `app/admin`) no lo importe. Queda como tarea, si procede, sacar `admin.*` del todo del JavaScript público.
+6. **Seguimientos por registrar:** reembolso de cortesía (`courtesy_refund_lowers_total_without_reopening_balance`), registro de reembolsos externos, verificación por sandbox de cada pasarela cuando des cuentas.
+7. **Proceso:** rondas de revisión por encima del tope de 3 por tu instrucción permanente (4.4, 4.6 y 6.4; 4.5 cinco, 8.5 cinco). 4.6 se fusionó sin tercera pasada del revisor; 6.2 sin revisor sobre el commit final (verificador, CI y los deltas exactos de las correcciones); 4.5 antes de que su verificador informase sobre `7f057c1` (después limpio).
+8. **Hallazgos menores del revisor de 6.6 no corregidos:** ninguno bloqueante (aprobar en la ronda 1; los menores se corrigieron en su rama).
+
 ## Prioridad al cerrar la fase 4 (2026-11-20): dinero
 
 Lo nuevo de 3.3, 3.4, 4.1 a 4.6, 6.2 y 6.4, por importancia. Todo funciona contra simuladores y falsos; nada cobra en real. Detalle en `docs/done/` y en la sección "Fase 4 y dinero" más abajo.
@@ -187,14 +200,18 @@ Sección «Revisión de Oscar» de `docs/phases/phase-5.md`: hacer el recorrido 
 - **Decisiones de 5.1 a 5.6:** enlaces de pago de un solo uso (caducan a los 7 días o al vencer el depósito, solo al correo de la reserva); documentos generados al pedirlos; datos mínimos de viajeros sin pasaporte ni datos médicos; borrado solo por owner con step-up y 409 con viaje o dinero vivo; la baja de marketing también suprime las alertas.
 - **Sin verificar:** correo real (solo buzón de pruebas), lector de pantalla, `compose-smoke` solo en CI, borrar a un cliente de punta a punta (pide un viaje terminado). El revisor de 5.2 no tuvo ronda final.
 
-### Fase 6 (6.2 y 6.4 hechas el 2026-11-20, 6.6 en marcha; `docs/done/6.close.md`)
+### Fase 6 (cerrada el 2026-11-20, `docs/done/6.close.md`; incluye 6.2, 6.4 y 6.6)
 
-Sección «Revisión de Oscar» de `docs/phases/phase-6.md`: simular un viaje con un cambio y una cancelación y comprobar los números a mano. **No se puede hacer entera**: sin 6.4 no hay penalización ni reembolso y sin 6.6 no hay resultado por viaje. Lo que sí se puede: un cambio (6.3) con su diferencia, una cancelación que promociona a la lista de espera (6.5) y costes y cobertura de stock por proveedor (6.1).
+Sección «Revisión de Oscar» de `docs/phases/phase-6.md`: simular un viaje con un cambio y una cancelación y comprobar los números a mano. Ya se puede hacer entera, contra el simulador: un cambio (6.3) con su diferencia, una cancelación con penalización y reembolso (6.4) que promociona a la lista de espera (6.5), costes y pagos a proveedores (6.1, 6.2) y el resultado por viaje con su CSV (6.6). Los cuatro criterios cumplen con prueba automática; dos con matiz (cupo contratado del proveedor y comisiones, abajo).
 
 - **Límites conocidos de 6.5:** solo se ofrece al liberarse plazas (no al subir la capacidad ni al unirse con hueco); «el primero al que le cabe» puede dejar esperando siempre a un grupo grande; el correo de oferta es texto simple (sin plantilla 5.4) y sin recordatorio previo; el panel de la lista es de solo lectura; `inventory_movements` no referencia la entrada; el camino de reintento por interbloqueo no tiene prueba.
 - **Límites conocidos de 6.3:** si un cambio llega entre que se encola un recordatorio y se envía, ese correo queda `failed` y ese desfase se pierde (quedan el siguiente, la lista de cobros y la tarea de vencido); el crédito pendiente es una tarea manual; los cambios del cliente están apagados por defecto (`customerAmendmentsEnabled`, activar en Ajustes cuando se quiera); el estado se comprueba por disparador al insertar el cambio, no en `mt_booking_guard`.
 - **Límite de 6.1:** el cupo contratado solo se compara con el stock, no se decrementa al cancelar; el panel no tiene e2e de navegador.
 - **Sin verificar:** `prisma migrate diff` de 0009, 0022 y 0029 (solo CI), lector de pantalla.
+- **6.2:** solo registra pagos ya hechos, no envía dinero; D2 (`CostItem` sin `mode`), D3 (sin conversión de moneda; el hallazgo 3 pasó a 6.6 y está probado), D4 y D7 (fórmula de "dinero a reservar", ver arriba); un coste de 0 da 422; sin formulario de cuotas en el panel (la ruta sigue); el catálogo en-AU entero iba en el JavaScript público con el límite sin margen.
+- **6.4:** penalización por encima de lo cobrado no se reclama; solicitud bloqueada vale 14 días; `approved` y `requested` no retienen nada; reembolsos los envía el personal; editor de importes fijos solo en AUD; sin correos de cancelación; cancelación online apagada.
+- **6.6:** resultado por viaje y moneda, previsión de caja por fecha de Brisbane (saldo desde 0, solo fechas con movimientos) y CSV para el contable con permiso, step-up y auditoría; sin comisiones importadas, sin GST; un solo caso de mutación del límite de Brisbane no se hizo a mano; catálogo `admin.*` separado del JavaScript público.
+- **Sin verificar (6.2, 6.4, 6.6):** `prisma migrate diff` de 0038 a 0040 (solo CI), `backup.test.ts`, e2e de cancelación y de 6.6 y el presupuesto de JavaScript (los cubre CI), lector de pantalla.
 
 ### Fase 7 (cerrada, `docs/done/7.close.md`)
 
