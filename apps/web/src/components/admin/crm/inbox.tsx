@@ -6,7 +6,7 @@ import { BOOKING_STATUSES } from '@mt/shared';
 import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';
 import { RecordNotes, crmError, formatMoment, fullName, statusLabel } from './crm-kit';

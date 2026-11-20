@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Status } from '../auth/field';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { accountsOf, differenceLabel, entityLabel, runStatusLabel, sideText } from '@/lib/reconciliation-panel';
 import type { DifferenceRow, RunRow } from '@/lib/reconciliation-panel';
 import { Section, useLoad } from './catalogue/kit';

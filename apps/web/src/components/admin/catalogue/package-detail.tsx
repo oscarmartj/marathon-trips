@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { EXTRA_KINDS, PARTICIPATION_TYPES, ROOM_TYPES, SALE_STATUSES } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { bpsToPercent, dollarsToMinor, enAU, minorToDollars, percentToBps, slugify, wholeNumber, withEnAU, withOptionalEnAU } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';
 import { ActionButton, type ApiCall, EntityForm, type Outcome, Section, catalogueError, outcome, useLoad } from './kit';

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Itinerary, ItineraryItem, ListedTraveller, RoomingList, TransferList, TripListKind, TripSummary } from '@mt/shared';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { guestName, listPath, tripLabel } from '@/lib/trip-lists-panel';
 import { Status } from '../../auth/field';
 import { Section, formatDay, useLoad } from '../catalogue/kit';

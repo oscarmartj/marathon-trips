@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { type ColumnMeta, type Filter, type Meta, type QueryState, type TagView, maybe } from './shared';
 

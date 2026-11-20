@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { DashboardView } from '@mt/shared';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { bookingPath, editionPath, formatInstant, presentSections, racePath, tripLine } from '@/lib/dashboard-panel';
 import { formatMinor } from '@/lib/supplier-format';
 import { Status } from '../../auth/field';

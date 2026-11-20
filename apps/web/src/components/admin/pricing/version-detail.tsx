@@ -6,7 +6,7 @@ import { api } from '@/lib/api-client';
 import { enAU } from '@/lib/catalogue-panel';
 import { formatInstant } from '@/lib/panel-time';
 import { versionPhase, type VersionDetail, type VersionList } from '@/lib/pricing-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { Section, useLoad } from '../catalogue/kit';
 import { useRunner } from './pricing-kit';

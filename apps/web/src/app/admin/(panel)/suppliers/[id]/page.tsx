@@ -1,6 +1,6 @@
 import { AdminPage } from '@/components/admin-page';
 import { SupplierDetail } from '@/components/admin/suppliers/supplier-detail';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

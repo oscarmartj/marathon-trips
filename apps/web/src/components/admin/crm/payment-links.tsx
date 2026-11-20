@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section, useLoad } from '../catalogue/kit';
 import { crmError, formatMoment } from './crm-kit';
 

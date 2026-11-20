@@ -1,5 +1,5 @@
 import { enAU } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import type { MissingJson } from '@/lib/pricing-panel';
 import type { PricedPackage } from './pricing-types';
 

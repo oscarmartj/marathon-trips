@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { type CalendarItem, addableKinds, calendarPath, createBody, isStored, tripLabel } from '@/lib/keydates-panel';
 import { Status } from '../../auth/field';
 import { ActionButton, EntityForm, type FieldDef, Section, catalogueError, formatDay, outcome, useLoad } from '../catalogue/kit';

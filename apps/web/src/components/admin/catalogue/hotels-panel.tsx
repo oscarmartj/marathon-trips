@@ -2,7 +2,7 @@
 
 import { api } from '@/lib/api-client';
 import { enAU, wholeNumber, withOptionalEnAU } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { ActionButton, EntityForm, type FieldDef, Section, outcome, useLoad } from './kit';
 

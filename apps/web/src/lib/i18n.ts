@@ -23,12 +23,31 @@ export const currentLocale = (): Locale => requestLocale();
 /** A site path in the request's language: `/races` for the default, `/es-ES/races` for another. */
 export const lp = (path: string): string => localePath(path, currentLocale());
 
-function lookup(locale: Locale, key: string): string | undefined {
-  let node: string | Json | undefined = catalogues[locale];
+// Task 6.6: trees registered after the fact. The staff panel's copy (the `admin` namespace) lives in its own file and is
+// registered by `i18n-admin.ts`, which only panel modules import, so it never ships in the public JavaScript.
+const registered: Partial<Record<Locale, Json[]>> = {};
+/** Adds a tree of messages to a language. Called once by `i18n-admin.ts`. */
+export function registerMessages(locale: Locale, tree: Json): void {
+  const list = (registered[locale] ??= []);
+  if (!list.includes(tree)) list.push(tree);
+}
+
+function walk(root: Json | undefined, key: string): string | undefined {
+  let node: string | Json | undefined = root;
   for (const part of key.split('.')) {
     node = typeof node === 'object' ? node[part] : undefined;
   }
   return typeof node === 'string' ? node : undefined;
+}
+
+function lookup(locale: Locale, key: string): string | undefined {
+  const found = walk(catalogues[locale], key);
+  if (found !== undefined) return found;
+  for (const tree of registered[locale] ?? []) {
+    const f = walk(tree, key);
+    if (f !== undefined) return f;
+  }
+  return undefined;
 }
 
 /**
@@ -48,5 +67,5 @@ export function t(key: string, params: Record<string, string | number> = {}, loc
 
 /** The raw catalogue, for tests that check every key. */
 export function messageCatalogue(locale: Locale = DEFAULT_LOCALE): Json {
-  return catalogues[locale];
+  return Object.assign({}, catalogues[locale], ...(registered[locale] ?? []));
 }

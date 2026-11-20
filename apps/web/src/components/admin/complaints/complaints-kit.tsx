@@ -1,7 +1,7 @@
 'use client';
 
 import { COMPLAINT_DUE_SOON_DAYS } from '@mt/shared';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { badgeClass, type DeadlineStateValue } from '@/lib/complaints-panel';
 import { catalogueError, formatDay } from '../catalogue/kit';
 

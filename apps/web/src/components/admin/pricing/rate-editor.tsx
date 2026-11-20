@@ -6,7 +6,7 @@ import {
   cellsDiffer, cellsToBody, droppedRateCount, extraCell, formatMinor, missingCell, parseMoney, participationCell, rateShapeOf, ratesToCells, roomCell,
   type CellFailure, type Cells, type VersionDetail,
 } from '@/lib/pricing-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section } from '../catalogue/kit';
 import { type AsyncAction, TextField, isVersionConflict, useRunner } from './pricing-kit';
 import { describeMissing, namesOf } from './pricing-names';
