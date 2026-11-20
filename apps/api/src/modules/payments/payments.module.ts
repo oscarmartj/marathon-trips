@@ -51,12 +51,16 @@ import { PaymentRefundSyncService } from './core/refund-sync.service';
 import { PaymentLedgerCheckService } from './core/ledger-check.service';
 import { PaymentAmendmentService } from './core/amendment-plan.service';
 import { PaymentCancellationService } from './core/cancellation-money.service';
-import { CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, ProviderAccountRateLimitGuard } from './rate-limit.guard';
+import { AccountantExportRateLimitGuard, CheckoutRateLimitGuard, PaymentAttemptRateLimitGuard, PaymentLinkRateLimitGuard, PaymentLinkStartRateLimitGuard, ProviderAccountRateLimitGuard } from './rate-limit.guard';
 import { SimulatorCheckoutService, simulatorCheckoutControllers } from './simulator-checkout/checkout.controller';
 import { AppRefundsService } from './core/app-refunds.service';
 import { PaymentDisputesService } from './core/disputes.service';
 import { PaymentRefundsAdminController } from './refunds.controller';
 import { PaymentReconciliationAdminController } from './reconciliation.controller';
+import { PaymentFinanceReportsController } from './finance-reports.controller';
+import { AccountantExportService } from './core/accountant-export.service';
+import { CashForecastService } from './core/cash-forecast.service';
+import { TripResultService } from './core/trip-result.service';
 import { SupplierLedger } from './core/supplier-ledger.service';
 import { ClientMoneyService } from './core/client-money.service';
 import { DisputeSyncService } from './core/dispute-sync.service';
@@ -69,7 +73,7 @@ import { ConsumerRegistry } from '../../platform/events/consumers';
   imports: [AuthModule, CommonModule, BookingsModule, TemplatesModule, PricingModule],
   // The simulator's hosted checkout exists only in development, test and ci (plan 3.6, 10.6); APP_ENV is the variable
   // the configuration is parsed from.
-  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, PaymentReconciliationAdminController, CardSessionsController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
+  controllers: [PaymentCustomerController, PaymentLinksController, PaymentWebhooksController, PaymentsAdminController, ProviderAccountsAdminController, RoutingRulesAdminController, PaymentRefundsAdminController, PaymentReconciliationAdminController, PaymentFinanceReportsController, CardSessionsController, ...simulatorCheckoutControllers(process.env.APP_ENV)],
   providers: [
     {
       provide: PaymentAdapterRegistry,
@@ -83,7 +87,7 @@ import { ConsumerRegistry } from '../../platform/events/consumers';
     SimulatorCheckoutService, ManualMethodsService, ManualTransfersService, InboundPaymentHooks, LedgerService, PaymentRefundStateMachine, PaymentRefundSyncService, PaymentLedgerCheckService,
     CollectionCoverageGuard, ProviderAccountsAdminService, ProviderAccountsBootCheck, ProviderAccountRateLimitGuard, RoutingRulesAdminService,
     AppRefundsService, PaymentDisputesService,
-    SettlementsService, DisputeSyncService, ReconciliationService, ReceiptsService, ClientMoneyService, CardSessionsService, SupplierLedger,
+    SettlementsService, DisputeSyncService, ReconciliationService, ReceiptsService, ClientMoneyService, CardSessionsService, SupplierLedger, TripResultService, CashForecastService, AccountantExportService, AccountantExportRateLimitGuard,
   ],
   exports: [SupplierLedger, ReceiptsService, ProviderAccountsService, ProviderAccountsAdminService, InboundPaymentHooks, PaymentAttemptsService, PaymentAttemptSyncService, PaymentPendingService, TermsService],
 })

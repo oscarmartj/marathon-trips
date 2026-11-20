@@ -30,3 +30,4 @@ export * from './schemas/trip-ops';
 export * from './schemas/organiser-exports';
 export * from './schemas/card-sessions';
 export * from './schemas/cancellations';
+export * from './schemas/finance-reports';

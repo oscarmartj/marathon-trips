@@ -48,7 +48,8 @@
       "cancellationPolicies": "Cancellation policies",
       "cancellationPolicy": "Cancellation policy",
       "reconciliation": "Reconciliation",
-      "customerMoney": "Customer money"
+      "customerMoney": "Customer money",
+      "tripResults": "Trip results"
     },
     "placeholder": "This admin page is a placeholder. Its content arrives in a later task.",
     "dashboard": {
@@ -3474,6 +3475,116 @@
       "passed": "Passed",
       "releaseTotal": "At stake, {currency}: {amount}",
       "noReleases": "No held places."
+    },
+    "tripResults": {
+      "title": "Trip results and cash forecast",
+      "intro": "What each trip has earned against what it has cost, what you expect to receive and pay, and the files for your accountant. Every figure comes from the app. Each currency stands alone: nothing is converted.",
+      "asOf": "As at {when} (Brisbane). Today is {today}.",
+      "loadError": "The figures could not be loaded.",
+      "results": {
+        "title": "Results by trip",
+        "none": "No trips have bookings or supplier costs yet.",
+        "caption": "Result of each trip, in the trip's own currency",
+        "currency": "Currency",
+        "trip": "Trip",
+        "kept": "Customer money kept",
+        "earned": "Revenue earned",
+        "notEarned": "Not yet earned",
+        "penalties": "Penalties kept",
+        "refunded": "Refunded",
+        "fees": "Gateway fees",
+        "costRecorded": "Supplier costs recorded",
+        "costPaid": "Supplier costs paid",
+        "resultCash": "Result so far (cash)",
+        "resultExpected": "Result expected",
+        "resultEarned": "Result earned",
+        "notFinal": "Not final yet",
+        "bookings": "{count} bookings, {called} called off",
+        "warnings": {
+          "otherCurrencyLeftOut": "Costs in other currencies are not in this result.",
+          "feesNotImported": "Fees not imported for some payments, so fees may be understated.",
+          "noSupplierCosts": "No supplier costs are recorded for this trip yet."
+        },
+        "otherCurrency": "{currency}: {recorded} recorded, {paid} paid, {left} left out of the result",
+        "counted": "Counted from your bank statement: {debited} for {paid} of {currency}",
+        "totalsHeading": "Totals by currency",
+        "totalRow": "{currency}: {trips} trips. Kept {kept}. Earned {earned}. Result so far {cash}. Result expected {expected}. Final results {final} from {settled} finished trips.",
+        "unlinkedHeading": "Supplier costs with no trip",
+        "unlinkedRow": "{currency}: {cost} recorded, {paid} paid, {unpaid} unpaid. These are not in any trip's result.",
+        "checksHeading": "Checks against the ledger and the cost items",
+        "checkRow": "{currency}, {what}: report {reported}, ledger {ledger}. {outcome}",
+        "checkMatches": "Matches.",
+        "checkDiffers": "Does not match.",
+        "checkNames": {
+          "customer_money": "customer money",
+          "fees": "gateway fees",
+          "supplier_paid": "paid to suppliers",
+          "costs": "supplier costs"
+        },
+        "fxHeading": "Payments with a bank amount you typed",
+        "fxNone": "No supplier payment has a bank amount typed in another currency.",
+        "fxRow": "{supplier} paid from {bank}: {payments} payments, {supplierAmount} for {bankAmount}. Average rate {rate} {bankCurrency} per {supplierCurrency}.",
+        "fxLedger": "{currency}: payments say {fromPayments}, the ledger says {inLedger}. {outcome}",
+        "footer": "Revenue is earned when a booking is called off or its trip has finished, and only on money collected. Costs in another currency are never converted: only a payment where you typed both amounts, for one trip, with the bank paying in the trip's currency, is counted. The rate shown is worked out from your two amounts and is for information only. This is not tax advice."
+      },
+      "forecast": {
+        "title": "Cash forecast",
+        "from": "From",
+        "to": "To",
+        "show": "Show forecast",
+        "none": "Nothing is expected or owed in this period.",
+        "caption": "Expected money in and out by date, in {currency}",
+        "date": "Date",
+        "instalments": "Instalments due",
+        "tentative": "Approved, deposit unpaid",
+        "penalties": "Cancellation penalties",
+        "suppliers": "Supplier payments",
+        "net": "Net of instalments and suppliers",
+        "running": "Running net",
+        "otherCaption": "Dates outside the running net, in {currency}",
+        "bucket": "Period",
+        "buckets": {
+          "overdue": "Overdue",
+          "earlier": "Before the period starts",
+          "later": "After the period ends",
+          "undated": "Supplier costs with no date",
+          "all": "Everything above and below"
+        },
+        "apartHeading": "Kept apart, never netted",
+        "apartRow": "{currency}: customer debt {debt}. Customer money to give back {back}. Refunds in progress {flight}.",
+        "tripsHeading": "Each trip on its own",
+        "tripsCaption": "Expected and owed for each trip, over every date",
+        "noTrip": "Supplier costs with no trip",
+        "footer": "The net counts only instalments of confirmed bookings less supplier payments. Approved bookings that have not paid a deposit and penalties are shown beside it, not in it. The app does not know your bank balance, so the running net starts at nothing."
+      },
+      "export": {
+        "title": "Files for your accountant",
+        "intro": "CSV files that open in a spreadsheet. Each download is recorded in the audit log, and you will be asked for a fresh authenticator code. Files carry no customer names, emails or notes you typed.",
+        "dataset": "File",
+        "datasets": {
+          "trip_result": "Results by trip",
+          "ledger": "Ledger movements",
+          "supplier_payments": "Supplier payments"
+        },
+        "from": "First day",
+        "to": "Last day",
+        "download": "Download CSV",
+        "working": "Preparing the file.",
+        "done": "The file was downloaded: {rows} rows.",
+        "note": "Results by trip is as at today and ignores the dates. The other files cover the dates you choose, up to 366 days, in Brisbane time.",
+        "errors": {
+          "range_invalid": "The last day is before the first day.",
+          "range_too_long": "Choose 366 days or fewer.",
+          "export_too_large": "That is too many rows for one file. Choose fewer dates.",
+          "validation_failed": "Check the dates and try again.",
+          "rate_limited": "Too many downloads. Try again later."
+        }
+      },
+      "errors": {
+        "range_invalid": "The last day is before the first day.",
+        "range_too_long": "Choose two years or fewer.",
+        "validation_failed": "Check the dates and currency."
+      }
     }
   }
 }
