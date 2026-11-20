@@ -1,7 +1,7 @@
 // Payment routing rules on the "Payment gateways" page (task 4.2, plan docs/plans/4.2-routing-rules.md, section 9).
 // Pure, so it is tested without a browser. The API decides what is valid and which account takes a payment; the page
 // only turns typed dollars into an integer string of cents (no floats) and the API's codes into words.
-import { t } from './i18n';
+import { t } from './i18n-admin';
 import { formatMinor, parseMoney } from './pricing-panel';
 
 export interface RuleView {

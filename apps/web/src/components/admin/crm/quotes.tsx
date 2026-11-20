@@ -7,7 +7,7 @@ import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
 import { localisedText } from '@/lib/catalogue';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section, formatDay, useLoad } from '../catalogue/kit';
 import { crmError, formatMoment, fullName, statusLabel } from './crm-kit';
 

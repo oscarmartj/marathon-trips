@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { Field, Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { toMinor } from '@/lib/supplier-format';
 import { Section, useLoad } from '../catalogue/kit';
 import { useStepUp } from '../step-up';

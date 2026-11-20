@@ -3,7 +3,7 @@
 import { WAITLIST_STATUSES } from '@mt/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 
 interface Row {

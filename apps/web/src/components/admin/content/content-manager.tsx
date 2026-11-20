@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { BANNER_TONES, MENU_LOCATIONS, PAGE_KINDS, REDIRECT_CODES } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { type AdminKind, CREATE_ONLY, HAS_STATUS, type Row, contentBody, contentInitial, publicPath } from '@/lib/content-admin';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { ActionButton, EntityForm, type FieldDef, Section, formatDay, label, outcome, useLoad } from '../catalogue/kit';
 

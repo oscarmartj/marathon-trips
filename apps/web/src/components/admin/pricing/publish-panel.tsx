@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { api } from '@/lib/api-client';
 import { formatInstant, localToIso, offsetAtLocal } from '@/lib/panel-time';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import type { VersionDetail, VersionList } from '@/lib/pricing-panel';
 import { Section } from '../catalogue/kit';
 import { type AsyncAction, TextField, isVersionConflict, useRunner } from './pricing-kit';

@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { api } from '@/lib/api-client';
 import { formatLineAmount, formatMinor, toQuoteRequest, travellerCount, type QuoteFormState, type VersionRow } from '@/lib/pricing-panel';
 import { isBreakdown } from '@/lib/quote-loader';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section, formatDay } from '../catalogue/kit';
 import { CheckField, Live, SelectField, TextField, useRunner } from './pricing-kit';
 import { namesOf, type Names } from './pricing-names';

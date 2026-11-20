@@ -5,7 +5,7 @@ import { COMPLAINT_OUTCOMES, type ComplaintStatus } from '@mt/shared';
 import { useState, type FormEvent } from 'react';
 import { api } from '@/lib/api-client';
 import { historyKey, isReopen, nextStatuses, transitionBody } from '@/lib/complaints-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { EntityForm, Section, formatDay, useLoad } from '../catalogue/kit';
 import { RecordNotes, formatMoment, fullName } from '../crm/crm-kit';

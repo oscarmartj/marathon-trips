@@ -1,7 +1,7 @@
 // Pure helpers of the reconciliation, customer money and receipts panels (task 4.6). Amounts are digit strings from the
 // API: they are formatted, never added up here.
 import { formatMoney } from './builder';
-import { t } from './i18n';
+import { t } from './i18n-admin';
 
 export interface RunRow {
   id: string;

@@ -1,7 +1,7 @@
 // The "Payment gateways" admin page (task 4.1): what the page shows for each account and warning. Pure, so it is
 // tested without a browser. The API decides everything (what may change, what is lost, what passed); the page never
 // holds a credential after a request ends and never shows one.
-import { t } from './i18n';
+import { t } from './i18n-admin';
 
 export type AccountStatus = 'active' | 'paused' | 'retired' | 'archived';
 

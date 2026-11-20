@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { brand, brandCssVariables } from '@mt/shared/brand';
 import { SkipLink } from '@/components/skip-link';
 import { siteUrl } from '@/lib/site';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import '../globals.css';
 
 // The admin area is never indexed, and the staff panel is in the default language only.

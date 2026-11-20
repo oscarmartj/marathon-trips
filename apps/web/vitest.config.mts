@@ -4,5 +4,5 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   esbuild: { jsx: 'automatic' },
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-  test: { include: ['src/**/*.test.{ts,tsx}'], allowOnly: false },
+  test: { include: ['src/**/*.test.{ts,tsx}'], allowOnly: false, setupFiles: ['./src/test/admin-messages.ts'] },
 });

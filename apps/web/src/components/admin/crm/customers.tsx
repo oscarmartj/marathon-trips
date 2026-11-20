@@ -6,7 +6,7 @@ import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
 import { localisedText } from '@/lib/catalogue';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { EntityForm, type FieldDef, Section, type Values, useLoad } from '../catalogue/kit';
 import { RecordNotes, crmError, formatMoment, fullName, statusLabel } from './crm-kit';
 import { NewQuoteForm } from './quotes';

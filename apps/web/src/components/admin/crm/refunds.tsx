@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { Field, Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { canMarkEvidence, canRequest, canResolve, destinationBody, isLatePending, manualStep, newIdempotencyKey, refundAmount, refundBody, refundPurpose } from '@/lib/refunds-panel';
 import type { DisputeRow, RefundRow, RefundableRow } from '@/lib/refunds-panel';
 import { Section, useLoad } from '../catalogue/kit';

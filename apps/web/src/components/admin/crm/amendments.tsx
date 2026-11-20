@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
 import { formatMoney } from '@/lib/builder';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { amendmentErrorKey, formFrom, staffBody, travellerKey } from '@/lib/amendments';
 import type { AmendmentPreview, ConfigurationView, FormTraveller, Participation, StaffForm } from '@/lib/amendments';
 import { Section, useLoad } from '../catalogue/kit';

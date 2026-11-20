@@ -5,7 +5,7 @@ import { COMPLAINT_ATTENTION, COMPLAINT_CATEGORIES, COMPLAINT_CHANNELS, COMPLAIN
 import { type FormEvent, useState } from 'react';
 import { api } from '@/lib/api-client';
 import { emptyFilters, createBody, listParams, type ListFilters } from '@/lib/complaints-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { EntityForm, type FieldDef, Section, useLoad } from '../catalogue/kit';
 import { DeadlineBadge, type Deadlines, SOON, complaintError } from './complaints-kit';

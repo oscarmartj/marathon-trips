@@ -6,7 +6,7 @@ import { api } from '@/lib/api-client';
 import { enAU } from '@/lib/catalogue-panel';
 import { formatInstant } from '@/lib/panel-time';
 import { bpsToText, formatMinor } from '@/lib/pricing-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Section, useLoad } from '../catalogue/kit';
 import { AdjustmentFormView, type Audience, type ScopeOption } from './adjustment-form';
 import { isVersionConflict, useRunner } from './pricing-kit';

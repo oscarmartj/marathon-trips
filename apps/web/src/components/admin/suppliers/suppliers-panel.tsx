@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { SUPPLIER_KINDS } from '@mt/shared';
 import { useState } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { CustomFieldFilter } from '../custom-fields/custom-field-filter';
 import { problemMessage, useCustomFieldDefs, useCustomFieldForm } from '../custom-fields/custom-field-inputs';

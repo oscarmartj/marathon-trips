@@ -98,3 +98,23 @@ export class ProviderAccountRateLimitGuard implements CanActivate {
     return true;
   }
 }
+
+/** Task 6.6: accountant files per hour, per staff user and per IP. In memory, like the other limits. */
+@Injectable()
+export class AccountantExportRateLimitGuard implements CanActivate {
+  private perUser = new WindowLimiter(10, 3_600_000);
+  private perIp = new WindowLimiter(100, 3_600_000);
+
+  /** For tests: forget every count. */
+  reset(): void {
+    this.perUser = new WindowLimiter(10, 3_600_000);
+    this.perIp = new WindowLimiter(100, 3_600_000);
+  }
+
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<ApiRequest>();
+    if (!this.perIp.allow(`accountant-export:ip:${req.ip ?? 'unknown'}`)) throw tooManyRequests(3600);
+    if (!this.perUser.allow(`accountant-export:user:${req.auth?.userId ?? 'none'}`)) throw tooManyRequests(3600);
+    return true;
+  }
+}

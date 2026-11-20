@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import {
   type BuilderForm, type Entity, type ReportResult, type SavedReportView, FUNNEL_RANGES, TIMES, cell, columnsOf, editableHere, emptyForm, formOf, funnelPath, groupsOf,
   saveBody, toggleColumn, toggleRecipient, withEntity,

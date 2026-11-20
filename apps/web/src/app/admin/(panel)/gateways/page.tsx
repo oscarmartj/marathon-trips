@@ -1,7 +1,7 @@
 import { AdminPage } from '@/components/admin-page';
 import { GatewaysPanel } from '@/components/admin/gateways-panel';
 import { RoutingPanel } from '@/components/admin/routing-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default function Page() {
   return (

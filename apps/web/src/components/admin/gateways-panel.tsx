@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type ApiResult } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { actionsFor, creatableText, credentialsFrom, lostText, statusText, testResultText, warningText } from '@/lib/gateways-panel';
 import type { AccountStatus, AccountView, AdapterView, Warning } from '@/lib/gateways-panel';
 import { Field, Status } from '../auth/field';

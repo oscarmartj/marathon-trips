@@ -29,7 +29,7 @@ describe('reconciliation, customer money and receipts panels (task 4.6)', () => 
   });
 
   it('no_tax_invoice_or_gst_in_web_copy while GST registration cannot be switched on (review R12 g)', () => {
-    const messages = readFileSync(new URL('../../messages/en-AU.json', import.meta.url), 'utf8');
+    const messages = ['en-AU.json', 'en-AU.admin.json'].map((f) => readFileSync(new URL(`../../messages/${f}`, import.meta.url), 'utf8')).join('\n');
     expect(/tax invoice/i.test(messages)).toBe(false);
     expect(/\bGST\b/.test(messages)).toBe(false);
   });

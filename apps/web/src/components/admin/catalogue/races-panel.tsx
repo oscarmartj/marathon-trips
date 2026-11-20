@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { RACE_STATUSES, RACE_TYPES } from '@mt/shared';
 import { api } from '@/lib/api-client';
 import { enAU, slugify, wholeNumber, withEnAU } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { RaceCsv } from './catalogue-csv';
 import { CustomFieldFilter } from '../custom-fields/custom-field-filter';
 import { problemMessage, useCustomFieldForm } from '../custom-fields/custom-field-inputs';

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { CustomFieldEntity } from '@mt/shared';
 import { buildFilter, fieldLabel, filterOps, filterParam } from '@/lib/custom-fields-panel';
 import { enAU } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { useCustomFieldDefs } from './custom-field-inputs';
 
 /** Operators the filter bar offers; "is one of" stays an API-only option. */

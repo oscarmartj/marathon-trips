@@ -5,7 +5,7 @@ import type { TemplateChannelValue } from '@mt/shared';
 import { TEMPLATE_CHANNELS } from '@mt/shared';
 import { Status } from '../../auth/field';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { type TemplateDefinition, type TemplateRow, actionsFor, createBody, placeholder } from '@/lib/templates-panel';
 import { Section, useLoad } from '../catalogue/kit';
 

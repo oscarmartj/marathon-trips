@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { formatMinor } from '@/lib/supplier-format';
 import { SCHEDULE_BUCKETS, bucketLabel } from '@/lib/supplier-payments';
 import { Field, Status } from '../../auth/field';

@@ -1,7 +1,7 @@
 import { AdminPage } from '@/components/admin-page';
 import { CustomerDetail } from '@/components/admin/crm/customers';
 import { PrivacyPanel } from '@/components/admin/privacy-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

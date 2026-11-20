@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { SALE_STATUSES } from '@mt/shared';
 import { enAU } from '@/lib/catalogue-panel';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import { Status } from '../../auth/field';
 import { Section, formatDay, useLoad } from './kit';
 import { CustomFieldFilter } from '../custom-fields/custom-field-filter';

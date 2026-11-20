@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { AUTOMATION_ACTION_TYPES, AUTOMATION_EMAIL_TEMPLATES } from '@mt/shared';
 import { api } from '@/lib/api-client';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 import {
   type ActionRow, type ConditionRow, type RuleForm, EVENT_TYPES, WEEKDAYS, blankAction, factsFor, operatorsFor, valuesFor,
 } from '@/lib/automations-panel';

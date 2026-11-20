@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { AdminPage } from '@/components/admin-page';
 import { ContentManager } from '@/components/admin/content/content-manager';
 import { isAdminKind } from '@/lib/content-admin';
-import { t } from '@/lib/i18n';
+import { t } from '@/lib/i18n-admin';
 
 export default async function Page({ params }: { params: Promise<{ kind: string }> }) {
   const { kind } = await params;
