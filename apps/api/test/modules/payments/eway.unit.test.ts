@@ -244,6 +244,35 @@ describe('code review of PR #84: unknown is never "none", and declines before th
     expect((await provider.retrievePayment(ctx, { ref: p.ref }))?.status).toBe('succeeded');
   });
 
+  it('note b: a 404 with the not-found code that still lists the charge is unknown, by reference and by id; a 200 by id too', async () => {
+    const { fake, provider, ctx, input, store, inner, keys } = world();
+    const p = await provider.createPayment(ctx, input());
+    fake.next.lose = 'charge';
+    await payWithSecureFields(fake, provider, ctx, p.ref, 'pay');
+    const [tx] = fake.transactionsWith(keys.apiKey, p.ref);
+    const g = new EwayGateway({ transport: fake.transport });
+    fake.next.raw404 = 'contradict';
+    await expect(g.chargesOfSession(ctx, p.ref)).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
+    fake.next.raw404 = 'contradict';
+    await expect(g.retrieveCharge(ctx, `ewt_${tx!.TransactionID}`)).rejects.toMatchObject({ code: 'provider_unavailable' });
+    fake.next.contradict = true;
+    await expect(g.retrieveCharge(ctx, `ewt_${tx!.TransactionID}`)).rejects.toMatchObject({ code: 'provider_unavailable' });
+    // Through the provider, past the grace: the session is never ended as "never charged" on such an answer.
+    store.expire(p.ref);
+    inner.advance(NOT_FOUND_GRACE_MS + 60_000);
+    const viaProvider = new CardSessionProvider(new EwayGateway({ transport: async (r) => {
+      const res = await fake.transport(r);
+      // Every search by our reference answers 404 + V6171 while still listing the charge.
+      if (r.url.includes(`/InvoiceRef/${p.ref}`)) return { status: 404, body: JSON.stringify({ Transactions: fake.transactionsWith(keys.apiKey, p.ref), Errors: 'V6171' }) };
+      return res;
+    } }), store, { cardPageOrigin: 'http://localhost:3000', usable: true });
+    await expect(viaProvider.retrievePayment(ctx, { ref: p.ref })).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect((await store.byRef(ctx.accountId, p.ref))?.status).toBe('submitting');
+    // A plain coded 404 that lists nothing is still "none".
+    fake.next.raw404 = 'coded';
+    expect(await g.chargesOfSession(ctx, `cs_${'e'.repeat(32)}`)).toEqual([]);
+  });
+
   it('finding 3: every decline before the charge ends the session with its code, nothing charged, never stuck', async () => {
     for (const [code, failure] of [['D4405', 'card_declined'], ['D4451', 'insufficient_funds'], ['D4454', 'expired_card'], ['D4459', 'suspected_fraud'], ['F7000', 'suspected_fraud'], ['V6148', 'provider_rejected']] as const) {
       const { fake, provider, ctx, input, store, keys } = world();

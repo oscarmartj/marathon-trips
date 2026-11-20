@@ -47,7 +47,7 @@ export class FakeEway {
     notEnrolled?: boolean;
     queryHides?: number;
     /** The next query answers this 404 (code review, finding 2). */
-    raw404?: 'empty' | 'html' | 'coded';
+    raw404?: 'empty' | 'html' | 'coded' | 'contradict';
     /** The next query by reference answers the not-found code together with the transactions it holds (note a). */
     contradict?: boolean;
     /** The next 3-D Secure enrolment is refused with this code (a decline before any charge; finding 3). */
@@ -138,6 +138,14 @@ export class FakeEway {
       const kind = this.next.raw404;
       delete this.next.raw404;
       if (kind === 'html') return { status: 404, body: '<html><body>Not Found</body></html>' };
+      if (kind === 'contradict') {
+        // A 404 with the not-found code that still lists what it holds for that reference or id (note b).
+        const p = new URL(req.url).pathname;
+        const ref = /^\/Transaction\/InvoiceRef\/([^/]+)$/.exec(p)?.[1];
+        const id = /^\/Transaction\/([0-9]+)$/.exec(p)?.[1];
+        const listed = [...a.tx.values()].filter((t) => (ref !== undefined && t.InvoiceReference === decodeURIComponent(ref)) || (id !== undefined && t.TransactionID === Number(id)));
+        return json(404, { Transactions: listed.map((t) => this.shown(t)), Errors: 'V6171' });
+      }
       if (kind === 'empty') return { status: 404, body: '' };
       return json(404, { Transactions: [], Errors: 'V6171' });
     }
@@ -156,6 +164,10 @@ export class FakeEway {
         throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
       }
       const t = a.tx.get(Number(byId[1]));
+      if (this.next.contradict && t) {
+        delete this.next.contradict;
+        return json(200, { Transactions: [this.shown(t)], Errors: 'V6171' });
+      }
       return json(200, { Transactions: t ? [this.shown(t)] : [], Errors: t ? '' : 'V6171' });
     }
     return json(404, { Errors: 'V6000' });

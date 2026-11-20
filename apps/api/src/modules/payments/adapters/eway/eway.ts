@@ -111,6 +111,14 @@ export interface EwayOptions {
 
 type Answer = { status: number; body: unknown };
 
+/**
+ * Whether a not-found answer lists nothing: `Transactions` absent or an empty list. Anything else (transactions, or a
+ * value we cannot read, such as null) contradicts the not-found code, so the answer is unknown, never "none" (A4).
+ */
+function nothingListed(body: Record<string, unknown>): boolean {
+  return body.Transactions === undefined || (Array.isArray(body.Transactions) && body.Transactions.length === 0);
+}
+
 export class EwayGateway implements CardTokenGateway {
   readonly manifest = ewayManifest();
   readonly signatureHeaders = [] as const;
@@ -175,7 +183,8 @@ export class EwayGateway implements CardTokenGateway {
   private async query(ctx: ProviderContext, path: string): Promise<Record<string, unknown>[] | typeof NOT_UNIQUE> {
     const a = await this.exchange(ctx, 'GET', path);
     if (a.status === 404) {
-      if (isObj(a.body) && codesOf(a.body.Errors).some((e) => NOT_FOUND_ERRORS.includes(e))) return [];
+      // The same rule as a 200 below (code review, notes a and b): "none" only with the not-found code and nothing else.
+      if (isObj(a.body) && codesOf(a.body.Errors).some((e) => NOT_FOUND_ERRORS.includes(e)) && nothingListed(a.body)) return [];
       throw new ProviderError('provider_unavailable', true);
     }
     if (!(a.status >= 200 && a.status < 300)) return this.fail(a.status);
@@ -185,7 +194,7 @@ export class EwayGateway implements CardTokenGateway {
     if (errors.some((e) => NOT_FOUND_ERRORS.includes(e))) {
       // "Not found" only when nothing else is said: a not-found code next to transactions contradicts itself, so it is
       // unknown, never "none" (code review, note a).
-      if (body.Transactions !== undefined && !(Array.isArray(body.Transactions) && body.Transactions.length === 0)) throw new ProviderError('provider_unavailable', true);
+      if (!nothingListed(body)) throw new ProviderError('provider_unavailable', true);
       return [];
     }
     if (errors.length > 0) throw new ProviderError('provider_unavailable', true);
