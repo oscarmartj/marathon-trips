@@ -44,6 +44,7 @@ export const publicRoutes: readonly RouteDef[] = [
   { path: '/pay', file: '[locale]/pay/page.tsx', labelKey: 'nav.payLink' },
   { path: '/pay/return', file: '[locale]/pay/return/page.tsx', labelKey: 'nav.payLinkReturn' },
   { path: '/pay/card/[ref]', file: '[locale]/pay/card/[ref]/page.tsx', labelKey: 'nav.payCard' },
+  { path: '/pay/secure-fields/[ref]', file: '[locale]/pay/secure-fields/[ref]/page.tsx', labelKey: 'nav.payCard' },
   { path: '/account/sign-in', file: '[locale]/account/sign-in/page.tsx', labelKey: 'nav.signIn' },
   { path: '/account/sign-in/verify', file: '[locale]/account/sign-in/verify/page.tsx', labelKey: 'nav.verifySignIn' },
 ];

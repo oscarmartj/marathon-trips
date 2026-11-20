@@ -1741,6 +1741,21 @@
           "adapter_unavailable": "Not available yet",
           "account_mode_not_for_environment": "Test accounts are not added in this environment",
           "test_adapter_blocked_in_environment": "Only for development and testing"
+        },
+        "capabilities": "Can do",
+        "capability": {
+          "refundsPartial": "Partial refunds",
+          "refundsFull": "Full refunds only",
+          "refundsNone": "No refunds",
+          "disputes": "Reads disputes",
+          "reconciliation": "Daily reconciliation from the gateway",
+          "eventsSigned": "Signed gateway events",
+          "eventsNone": "No gateway events: payments and refunds are read from the gateway",
+          "cardEntryGatewayPage": "Card typed on the gateway's page",
+          "cardEntryCardFields": "Card typed in the gateway's fields on our page",
+          "cardEntrySimulated": "Simulated payments",
+          "cardEntryManual": "Paid by bank transfer",
+          "none": "Not installed yet"
         }
       },
       "adapterStatus": {
@@ -4535,7 +4550,10 @@
       "checkCard": "Check your card details and try again.",
       "fieldsUnavailable": "The secure card fields could not be loaded. Reload the page or try again later.",
       "network": "We could not reach the server. Check your connection and try again.",
-      "generic": "Something went wrong. Start again from your booking."
-    }
+      "generic": "Something went wrong. Start again from your booking.",
+      "phoneRequired": "Your bank needs a phone number to confirm card payments. Add one to your account details, then try again.",
+      "challengeUnavailable": "Your bank's check could not be shown. Reload the page or try again later."
+    },
+    "secureFieldsNote": "The card fields are run by our card payment provider. Your bank will ask you to confirm the payment before anything is charged."
   }
 }

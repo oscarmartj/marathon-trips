@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type ApiResult } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
-import { actionsFor, creatableText, credentialsFrom, lostText, statusText, testResultText, warningText } from '@/lib/gateways-panel';
+import { actionsFor, capabilitiesText, creatableText, credentialsFrom, lostText, statusText, testResultText, warningText } from '@/lib/gateways-panel';
 import type { AccountStatus, AccountView, AdapterView, Warning } from '@/lib/gateways-panel';
 import { Field, Status } from '../auth/field';
 import { errorMessage, useStepUp } from './step-up';
@@ -308,6 +308,7 @@ export function GatewaysPanel() {
               <th scope="col">{t('admin.gateways.catalogue.adapterStatus')}</th>
               <th scope="col">{t('admin.gateways.catalogue.methods')}</th>
               <th scope="col">{t('admin.gateways.catalogue.currencies')}</th>
+              <th scope="col">{t('admin.gateways.catalogue.capabilities')}</th>
               <th scope="col">{t('admin.gateways.catalogue.availability')}</th>
             </tr>
           </thead>
@@ -318,6 +319,7 @@ export function GatewaysPanel() {
                 <td>{t(`admin.gateways.adapterStatus.${a.status}`)}</td>
                 <td>{a.methods.map((m) => t(`admin.gateways.method.${m}`)).join(', ')}</td>
                 <td>{a.currencies.join(', ')}</td>
+                <td><ul className="plain-list">{capabilitiesText(a.capabilities).map((x) => <li key={x}>{x}</li>)}</ul></td>
                 <td>{creatableText(a)}</td>
               </tr>
             ))}

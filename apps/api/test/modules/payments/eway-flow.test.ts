@@ -9,6 +9,7 @@ import { PrismaCardSessionStore } from '../../../src/modules/payments/core/card-
 import { CardSessionProvider } from '../../../src/modules/payments/core/card-sessions/provider';
 import { CardSessionsService } from '../../../src/modules/payments/core/card-sessions/card-sessions.service';
 import { PaymentAttemptSyncService } from '../../../src/modules/payments/core/attempt-sync.service';
+import { ReconciliationService } from '../../../src/modules/payments/core/reconciliation.service';
 import { credentialsAad, webhookSecretAad, ProviderGateway } from '../../../src/modules/payments/core/gateway';
 import type { PaymentProvider } from '../../../src/modules/payments/core/provider';
 import { PaymentAdapterRegistry } from '../../../src/modules/payments/core/registry';
@@ -255,6 +256,11 @@ describe('eWAY Secure Fields page through the API (plan 9.1)', () => {
       paymentRef: b.ref, amount: { amountMinor: b.p.amountMinor, currency: 'AUD' }, idempotencyKey: `late:${randomUUID()}`, metadata: { refundId: randomUUID(), paymentId: b.p.id, bookingId: b.bookingId }, createdAt: new Date(),
     }));
     expect(r.status).toBe('succeeded');
+    // Plan 9.1, 20 M5: once the attempt is no longer live, the daily reconciliation is what rereads it. It reports the
+    // late money with a task; it does not record it (staff do, with the refund above or a manual registration).
+    const run = await t.app.get(ReconciliationService).runAccount(acc.id, { now: new Date(Date.now() + 2 * 86_400_000) });
+    expect(run?.differences.map((d) => [d.code, d.entityId])).toContainEqual(['payment_status_differs', b.p.id]);
+    expect(await statusOf(b.p.id)).toBe('failed');
   });
 
   it('duplicate_after_unknown_reveals_earlier_charge (M4)', async () => {

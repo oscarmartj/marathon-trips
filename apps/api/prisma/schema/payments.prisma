@@ -1057,7 +1057,7 @@ model CardSession {
   chargeRef         String?
   /// @nopii before_charge: the gateway's 3-D Secure reference (eWAY AccessCode), set once (task 9.1)
   authRef           String?
-  /// @nopii before_charge: sha256 hex of the single-use card token authenticated, set once (task 9.1)
+  /// @secret before_charge: SHA-256 hex of the single-use card token authenticated, set once (task 9.1)
   authCardHash      String?
   /// What the bound charge collected, when succeeded.
   chargedMinor      BigInt?

@@ -9,7 +9,7 @@ import {
   CARD_SESSION_REF, NOT_UNIQUE, ProviderError,
 } from '../provider';
 import type {
-  AdapterManifest, AuthenticationPayer, CardChargeOutcome, CardTokenGateway, CreatePaymentInput, CreateRefundInput, GatewayCharge, GatewayRefund, NormalisedEvent, PaymentLookup,
+  AdapterManifest, CardChargeOutcome, CardTokenGateway, CreatePaymentInput, CreateRefundInput, GatewayCharge, GatewayRefund, NormalisedEvent, PaymentLookup,
   PaymentProvider, ProviderContext, ProviderPayment, ProviderRefund, RefundLookup, WebhookVerification,
 } from '../provider';
 import type { CardRefundIntent, CardSession, CardSessionChange, CardSessionStore } from './store';

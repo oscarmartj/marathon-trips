@@ -91,6 +91,16 @@ describe('eWAY card sessions on the database (plan 9.1, sections 11 and 20 M2, m
     }
   });
 
+  it('concurrent_refunds_same_key_one_post (the database holds one intent per key)', async () => {
+    const ctx = await subject.context();
+    const p = await subject.provider.createPayment(ctx, input());
+    await subject.customerCompletes(ctx, p, 'pay');
+    const charge = Number((await store.byRef(ctx.accountId, p.ref))!.chargeRef!.slice(4));
+    const same = { paymentRef: p.ref, amount: { amountMinor: 500n, currency: 'AUD' }, idempotencyKey: `same:${randomUUID()}`, metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() };
+    await Promise.allSettled(Array.from({ length: 5 }, () => subject.provider.createRefund(ctx, same)));
+    expect(fake.refundPosts(ctx.credentials.apiKey!, charge)).toBe(1);
+  });
+
   it('flow_fixed_from_the_account: an eWAY account gets before_charge sessions, a Pin account after_charge (m8)', async () => {
     const ew = await subject.context();
     const pin = await account('pin_payments', { secretKey: 'x'.repeat(20), publishableKey: 'y'.repeat(20) });
