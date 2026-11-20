@@ -6,12 +6,12 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Ahora
 
-Actualizado tras 4.close (2026-11-20). Migraciones en `main`: 0001 a 0040.
+Actualizado tras 6.close (2026-11-20). Migraciones en `main`: 0001 a 0040.
 
-- **Fases 0, 1, 2, 3, 4, 5, 6 (menos 6.6), 7 y 8 cerradas o con su dinero hecho** (detalle en `docs/done/*.close.md`). Fase 4 (4.1 a 4.6) con los 8 criterios probados; 3.3, 3.4, 6.2 y 6.4 hechas. **Todo el dinero va contra simuladores y falsos: sin modo real, claves reales ni cuentas externas; Stripe, PayPal y Pin son `experimental`.**
-- **En marcha:** 6.6 (otro hilo). **Siguiente:** fase 9 (9.1 a 9.4; sus dependencias, fase 4 y 8.5, ya están hechas) y el cierre de 6.6.
-- **Seguimientos por registrar:** sacar el catálogo `admin.*` del JavaScript público (el constructor de paquetes queda unos 75 bytes bajo el límite; mirar si 6.6 lo hace); reembolso de cortesía (`courtesy_refund_lowers_total_without_reopening_balance`); registrar reembolsos externos; verificación por sandbox de cada pasarela cuando Oscar aporte cuentas.
-- **Siguiente paso de Oscar:** `docs/FINAL-REVIEW.md` (ordenado por importancia) y lo externo en `docs/BLOCKED.md` (sandbox de Stripe, PayPal y Pin, contable, permisos). Nada se abre al público ni cobra antes.
+- **Fases 0 a 8 cerradas** (detalle en `docs/done/*.close.md`). Fase 6 completa (6.1 a 6.6) con los 4 criterios probados; dos quedan parciales: el cupo contratado del proveedor no se decrementa al cancelar y el resultado por viaje no cuadra contra comisiones de pasarela (no importadas) ni GST. **Todo el dinero va contra simuladores y falsos: sin modo real, claves reales ni cuentas externas; Stripe, PayPal y Pin son `experimental`.**
+- **Siguiente:** fase 9 (9.1 a 9.4; sus dependencias, fase 4 y 8.5, ya están hechas).
+- **Seguimientos por registrar:** sacar `admin.*` del JavaScript público (6.6 lo separó en `en-AU.admin.json`; queda ver si hace falta más); reembolso de cortesía (`courtesy_refund_lowers_total_without_reopening_balance`); registrar reembolsos externos; verificación por sandbox de cada pasarela cuando Oscar aporte cuentas.
+- **Siguiente paso de Oscar:** `docs/FINAL-REVIEW.md` (ordenado por importancia) y lo externo en `docs/BLOCKED.md` (sandbox, contable, permisos, decisión sobre "cancelled"). Nada se abre al público ni cobra antes.
 - **Antes de abrir:** paso de Docker de la guía para la IP real (S-04), publicar la página `terms`, asignar los permisos nuevos y revisar el historial del repositorio (público desde el 2026-11-19).
 
 ## Pendiente de Oscar
@@ -20,7 +20,7 @@ Actualizado tras 4.close (2026-11-20). Migraciones en `main`: 0001 a 0040.
 
 ## Hecho
 
-Fases 0, 1, 2, 3, 4, 5, 7 y 8 completas; fase 6 sin 6.6 (en marcha); más 1.fix-1, 7.fix-1, 7.fix-2, 7.fix-3, 7.fix-4, 7.fix-5 y el arreglo de CI: ver `docs/done/`.
+Fases 0 a 8 completas; más 1.fix-1, 7.fix-1, 7.fix-2, 7.fix-3, 7.fix-4, 7.fix-5 y el arreglo de CI: ver `docs/done/`.
 
 ## Sin verificar
 

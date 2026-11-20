@@ -85,6 +85,9 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 | 2026-11-20 | El dinero sigue siendo solo de simulador: Stripe, PayPal y Pin son `experimental` contra falsos; sin modo real en ningún sitio, con `CHECK (mode = 'test')` en las cuentas de pasarela; `verified` exige sandbox real aportado por Oscar | 3.3, 4.1 a 4.6; se levanta con una migración futura y el visto bueno de Oscar |
 | 2026-11-20 | 6.2 (D7): lo pagado a proveedores con dinero de clientes ya no se guarda aparte y el exceso sale como "dinero propio"; deja de garantizar "nunca guardar menos de lo retenido" (no es la opción más conservadora; a confirmar con el contable) | 6.2 |
 | 2026-11-20 | 4.5 necesitó cinco rondas de revisión y 4.4, 4.6 y 6.4 de dos a tres, por encima de las 3 habituales, por instrucción de Oscar; 4.5 se fusionó antes del informe de su verificador (después limpio) y 4.6 sin tercera pasada del revisor | 4.4 a 4.6, 6.4 |
+| 2026-11-20 | 6.6: catálogo de textos de administración separado del JavaScript público (`en-AU.admin.json`, `lib/i18n-admin.ts`) para no subir el límite de 200 000 bytes ni recortar textos; deshacer volviendo a unir los dos JSON | 6.6 |
+| 2026-11-20 | 6.6: permisos nuevos `payments.report.tripResult`, `payments.report.cashForecast` y `payments.export.accountant`, solo del propietario y no válidos para claves de API; saldo corriente de la previsión desde 0 y GST desactivado | 6.6 |
+| 2026-11-20 | Fase 6 cerrada: 6.4 (por encima del tope de 3 rondas, por instrucción de Oscar) y 6.2 se fusionaron con el verificador y CI en verde; 6.2 sin revisor sobre el commit final, solo los deltas exactos de las correcciones | 6.close |
 
 ## Abiertas
 
@@ -102,3 +105,5 @@ Una línea por decisión, con fecha. Si una decisión cambia, se añade otra lí
 - Página `terms`: publicarla antes de cualquier pago (3.5 se niega sin ella).
 - `copy.test.ts` prohíbe "cancelled" (ortografía australiana): decidir si la regex debería marcar "canceled" (6.4).
 - Permisos de dinero de las fases 3, 4 y 6 (solo owner) y retención para reclamaciones en disputas: ver `docs/BLOCKED.md`.
+- Seguimientos de dinero sin tarea dueña: reembolso de cortesía (4.5), registro de reembolsos externos, sacar `admin.*` del JavaScript público y verificación por sandbox de cada pasarela cuando Oscar aporte cuentas.
+- Permisos de 6.6 (`payments.report.tripResult`, `payments.report.cashForecast`, `payments.export.accountant`): asignarlos en el panel de roles.
