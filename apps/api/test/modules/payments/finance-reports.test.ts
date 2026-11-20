@@ -201,13 +201,21 @@ describe('the result of a trip (plan section 3)', () => {
   });
 
   it('test_mode_rows_not_in_production: with the live mode the trip is not there', async () => {
-    const w = await pricedWorld(admin);
+    const { w, policy } = await policyWorld();
+    const paidBooking = await approved(c, w, policy);
+    await payUpTo(paidBooking.reference, paidBooking.bookingId);
+    const test = rowOf(await report(), w.pkg.id).result;
+    expect([test.bookings, test.expectedRevenueMinor === '0']).toEqual([1, false]);
     const s = await supplier();
     await pay(s.id, [await cost(s.id, w.pkg.id, '4000')]);
     const spy = vi.spyOn(t.app.get(ProviderGateway), 'mode', 'get').mockReturnValue('live');
     try {
       const live = await report();
-      expect(live.rows.find((x) => x.packageId === w.pkg.id)?.result.costPaidMinor ?? '0').toBe('0');
+      const row = live.rows.find((x) => x.packageId === w.pkg.id);
+      // Neither the costs nor a booking made in the test mode count in the live one (a booking has no mode: its ledger does).
+      expect(row?.result.costPaidMinor ?? '0').toBe('0');
+      expect(row?.result.bookings ?? 0).toBe(0);
+      expect(row?.result.expectedRevenueMinor ?? '0').toBe('0');
     } finally {
       spy.mockRestore();
     }

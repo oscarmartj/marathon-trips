@@ -34,4 +34,28 @@ describe('admin catalogue stays out of the public bundle (task 6.6)', () => {
       if (/from '(@\/lib\/i18n|\.\/i18n)'/.test(src) && /['"`]admin\./.test(src) && !/routes\.ts$/.test(r)) throw new Error(`${r} uses an admin key through the public i18n module`);
     }
   });
+
+  it('nothing the public pages import, directly or through other modules, reaches the admin catalogue', () => {
+    // The global test setup registers the admin copy, so a unit test cannot see a public page that needs it; the import graph can.
+    const resolve = (from: string, spec: string): string | null => {
+      const base = spec.startsWith('@/') ? join(SRC, spec.slice(2)) : spec.startsWith('.') ? join(from, '..', spec) : null;
+      if (!base) return null;
+      return [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')].find((c) => { try { return statSync(c).isFile(); } catch { return false; } }) ?? null;
+    };
+    const roots = files(SRC).filter((f) => !isTest(f) && /^app\/(?!admin\/)/.test(rel(f)));
+    expect(roots.length).toBeGreaterThan(0);
+    const seen = new Map<string, string>();
+    const stack = roots.map((f) => [f, rel(f)] as const);
+    while (stack.length) {
+      const [f, via] = stack.pop()!;
+      if (seen.has(f)) continue;
+      seen.set(f, via);
+      const src = code(f);
+      if (/en-AU\.admin/.test(src) || (f.endsWith('lib/i18n-admin.ts') && !roots.includes(f))) throw new Error(`${via} reaches the admin catalogue through ${rel(f)}`);
+      for (const m of src.matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)) {
+        const next = resolve(f, m[1]!);
+        if (next && !seen.has(next)) stack.push([next, `${via} > ${rel(next)}`]);
+      }
+    }
+  });
 });

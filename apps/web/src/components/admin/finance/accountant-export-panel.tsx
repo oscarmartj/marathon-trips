@@ -33,7 +33,9 @@ export function AccountantExportPanel() {
       link.href = URL.createObjectURL(blob);
       link.download = name;
       link.click();
-      URL.revokeObjectURL(link.href);
+      // Revoked later: some browsers cancel the download if the address goes at once.
+      const href = link.href;
+      setTimeout(() => URL.revokeObjectURL(href), 10_000);
       return { status: 200, body: { rows: res.headers.get('X-Row-Count') ?? '' } };
     });
     if (r.status === 200) setMessage({ text: t('admin.tripResults.export.done', { rows: String(r.body.rows ?? '') }), tone: 'info' });

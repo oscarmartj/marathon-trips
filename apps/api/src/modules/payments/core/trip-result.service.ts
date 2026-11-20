@@ -66,7 +66,7 @@ export class TripResultService {
         EXISTS (SELECT 1 FROM payments p JOIN provider_accounts a ON a.id = p."providerAccountId"
                 WHERE p."bookingId" = b.id AND p.mode = ${mode}::"PaymentMode" AND p.status = 'succeeded' AND a."adapterKey" = ANY(${withoutSettlements}::text[])) AS "unimportedFees"
       FROM bookings b LEFT JOIN ledger_entries e ON e."bookingId" = b.id AND e.mode = ${mode}::"PaymentMode" AND e.currency = b.currency
-      WHERE b.status NOT IN ('requested', 'declined', 'expired') OR EXISTS (SELECT 1 FROM ledger_entries x WHERE x."bookingId" = b.id AND x.mode = ${mode}::"PaymentMode")
+      WHERE EXISTS (SELECT 1 FROM ledger_entries x WHERE x."bookingId" = b.id AND x.mode = ${mode}::"PaymentMode")
       GROUP BY b.id ORDER BY b."packageId", b.id`;
 
     const refundRows = await tx.$queryRaw<Array<{ packageId: string; currency: string; purpose: string | null; amount: bigint }>>`
@@ -155,6 +155,8 @@ export class TripResultService {
       ...reconcile('customer_money', repMoney, ledgerMap('money', -1n)),
       ...reconcile('fees', repFees, ledgerMap(LEDGER_ACCOUNTS.fees, 1n)),
       ...reconcile('supplier_paid', repPaid, ledgerMap(LEDGER_ACCOUNTS.supplierPayable, 1n)),
+      // Not a ledger check: both sides come from cost_items, one grouped by trip and the other by currency, so it catches a cost
+      // counted twice or left out of every row (a duplicate or a lost item), not a difference with the ledger.
       ...reconcile('costs', repCost, new Map(costItems.map((c) => [c.currency, c.total]))),
     ];
 
