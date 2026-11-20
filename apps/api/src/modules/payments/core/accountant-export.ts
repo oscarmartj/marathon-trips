@@ -31,7 +31,7 @@ export function renderExport(header: readonly string[], rows: readonly (readonly
     if (r.length !== header.length) throw new RangeError('a row has the columns of the header');
     return r.map(exportCell).join(',');
   })];
-  return `﻿${lines.join('\r\n')}\r\n`;
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
 }
 
 const yes = (b: boolean): string => (b ? 'Yes' : 'No');
