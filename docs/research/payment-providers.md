@@ -143,6 +143,23 @@ Leído con el cliente automático, que resume: **todo SIN VERIFICAR** hasta el s
 
 **Orden de la oleada C que sale de aquí:** 1) **Airwallex**, sandbox sin trámite y encaja en el contrato sin cambios (viajes restringido: confirmación por escrito); 2) **Westpac PayWay** (seguimiento 9.2-F1), test facility gratuita pero sin eventos encontrados y con cuenta de empresa Westpac; 3) Adyen, Checkout.com y Square, cuando el contrato admita firmas sin marca de tiempo (9.2-F4); BPOINT descartada.
 
+## 4d. Actualización del 2026-11-25 (hilo 9.3, oleada D)
+
+Leído con el cliente automático, que resume: **todo SIN VERIFICAR** hasta el sandbox. Detalle y supuestos A1–A14 en `docs/plans/9.3-stripe-pay-later.md` (§2 y §3). Ninguna fila dice que el proveedor acepte este negocio.
+
+| Proveedor | Comprobado el 2026-11-25 | Fuente |
+|---|---|---|
+| Afterpay vía Stripe | Cuenta en AU; solo B2C; confirmación inmediata; acceso "Instant provisional access"; AU Pay in 4 de A$1 a A$4.000; solo nacional. **Prohibidos:** "Pre-orders", MCC 5962 "Direct Marketing - Travel", 4411 cruceros; 7011 hoteles y 7012 multipropiedad "Restricted"; 4722 (agencias) no aparece. Reembolsos parciales en 120 días, asíncronos (hasta 10 días hábiles), no cancelables; disputas completas en 120 días por `charge.dispute.created`; Checkout Sessions | https://docs.stripe.com/payments/afterpay-clearpay |
+| Zip vía Stripe | Cuenta en AU o US; confirmación inmediata; liquidación T+2; AU: Zip Pay A$1–1.000 y Zip Money A$1.000–50.000 (plazos sin intereses de más de 3 meses y límites de más de A$5.000 exigen cualificación del comercio); solo nacional; sin captura manual; reembolsos parciales en 180 días, en AU al saldo Zip del cliente; disputas AU por `charge.dispute.created`, 12 días para responder; la lista AU de MCC prohibidos no tiene viajes | https://docs.stripe.com/payments/zip |
+| Klarna vía Stripe | AU como país de cuenta y de cliente; AU Pay in 4 A$1–2.000 y pago completo A$0–4.000; reembolsos en 180 días; no se reembolsa un pago en disputa; categorías prohibidas sin viajes; "You can't impose fees or higher prices for Klarna purchases"; aviso de DDO si se promociona Pay in 4 | https://edge-docs.stripe.com/payments/klarna ; https://docs.stripe.com/payments/klarna/compliance |
+| Comisiones de Stripe AU | Afterpay 6 % + A$0,30; Klarna 4,99 % + A$0,55 (disputa perdida A$25); Zip 5,49 % + A$0,30 hasta 6 meses, 7 % a 12, 9 % a 24 y 11 % a 36 meses (disputa perdida A$4); Alipay y WeChat Pay 2,9 % + A$0,30 | https://stripe.com/au/pricing/local-payment-methods |
+| Afterpay directo | Sin sandbox autoservicio: "Your Afterpay account manager will provide you with sandbox credentials" | https://developers.cash.app/afterpay/guides/api-development/test-environments |
+| PayPal Pay in 4 (AU) | "included at your standard PayPal rate"; por debajo de A$2.000; el comercio cobra por adelantado y entero; se enciende el "messaging" en el Messaging Centre. Si la página de aprobación de Orders v2 lo ofrece: sin confirmar | https://www.paypal.com/au/campaign/enable-pay-later |
+
+**No se pudo leer:** la variante Checkout de "Accept an Afterpay payment" (dirección de envío o facturación, páginas de prueba), las equivalentes de Klarna y Zip, las condiciones completas de Afterpay en Stripe, las instrucciones éticas de Klarna y las API directas de Zip y Klarna. BPAY: exige código de biller de un banco patrocinador (cuenta externa); no se consultó.
+
+**Orden de la oleada D que sale de aquí:** 1) **Afterpay, Klarna y Zip a través de Stripe Checkout** (adaptador `stripe_bnpl`, cuenta de Stripe propia), porque tiene sandbox autoservicio y encaja en el contrato sin cambios; nace apagado y depende de que Stripe acepte viajes prepagados por escrito; 2) PayPal Pay in 4, a confirmar dentro del PayPal existente (9.3-F1); 3) BPAY como método manual propio cuando haya código de biller (9.3-F2); Alipay y WeChat Pay, solo si hay clientes que los usen (9.3-F3).
+
 ## 5. Pendiente de confirmar
 
 - Política de viajes de Pin Payments, eWAY, Airwallex, Square, Westpac, Windcave y GoCardless.
