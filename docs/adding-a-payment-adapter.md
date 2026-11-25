@@ -122,6 +122,41 @@ Para probarlo con el sandbox (cuando Oscar tenga la cuenta de partner de eWAY, g
 2. En el panel ("Payment gateways"), una cuenta eWAY con las tres claves; nace pausada. No hay webhook que configurar. Probar la conexión y activar.
 3. Escribir el guion de navegador para Secure Fields y `Cerberus` (Playwright, añadido solo para esa ejecución) y ejecutar `SANDBOX_ADAPTER=eway EWAY_SANDBOX_API_KEY=… EWAY_SANDBOX_API_PASSWORD=… EWAY_SANDBOX_PUBLIC_KEY=… EWAY_SANDBOX_BROWSER_SCRIPT=<ruta> pnpm --filter @mt/api test:sandbox`. Aunque pase, eWAY sigue `experimental` hasta 9.1-F2.
 
+## Airwallex (9.2)
+
+Adaptador `airwallex`, `experimental`. **Todo lo de Airwallex está sin verificar**: se leyó su documentación con una herramienta que resume. Clase registrada: `AirwallexProvider`, un `PaymentProvider` normal como Stripe, sin sesión de tarjeta, sin capacidad nueva y sin migración. Plan, supuestos A1–A25 y las dos rondas de revisión: `docs/plans/9.2-airwallex.md` (§19 y §20).
+
+Lo que hace distinta a Airwallex:
+- **Checkout Session** (beta, versión de API `2026-05-29`, `AIRWALLEX_API_VERSION`). El cliente paga en la página alojada de Airwallex. Solo se permiten tarjetas (`payment_method_types: ['card']`), así que no se ofrece pago aplazado.
+- **Nuestra referencia es el `merchant_order_id`** que le damos (`mt-<id de pago>-<createdAt>`). Lo llevan la sesión y el PaymentIntent, así que los eventos casan sin red. Antes de cada creación se busca la sesión, para que nunca haya dos.
+- **Importes en decimal.** Se convierten exactos con bigint y el texto fuente del JSON, nunca con coma flotante. Solo se lee AUD: `"1250"` en JPY o `"12.500"` en KWD son ilegibles.
+- **Toda lista se comprueba elemento a elemento.** Si Airwallex ignorase un filtro, nunca se tomaría el pago de otro cliente. Un elemento sin los campos que lo identifican es "desconocido" (se reintenta) hasta que el sandbox confirme A25 (`GET_RETURNS_ORDER_FIELDS`). **No crear checkout sessions desde la web de Airwallex:** una sesión ajena en la ventana bloquea los cobros de ese tramo (hasta 6 h 10 min) hasta que se confirme A25.
+- **Reembolsos** con nuestra referencia en `metadata`. Cuentan como hechos solo en `SETTLED`; `RECEIVED` y `ACCEPTED` son `pending` (D5).
+- **Sin disputas ni conciliación declaradas** (seguimiento 9.2-F6). Cualquier evento con `dispute`, `chargeback` o `reversal` en el nombre abre una tarea de revisión. Lo mismo un evento de reembolso ilegible.
+
+En CI pasa la batería contra un Airwallex falso (`test/contract/subjects/airwallex-fake.ts`, con un modo que ignora filtros). Las pruebas propias están en `test/modules/payments/airwallex.unit.test.ts` y `airwallex-flow.test.ts`.
+
+Para probarlo con el sandbox (cuando Oscar tenga la cuenta de sandbox, que es autoservicio):
+
+1. En la web de sandbox, crear la clave de API (client ID y API key) con permisos de Checkout Session y Payments.
+2. Crear **una sola** suscripción de webhook por cuenta (cada suscripción tiene su propio secreto), con la versión `2026-05-29`, apuntando a la URL que enseña nuestro panel. Debe incluir:
+   - `checkout_session.created` y `checkout_session.cancelled`;
+   - todos los `payment_intent.*` y todos los `refund.*`;
+   - **todos** los eventos de disputas (todo lo que lleve `dispute`, `chargeback` o `reversal`).
+3. Apagar los recargos y comprobar que no salen recibos llamados "tax invoice" (A17).
+4. En el panel ("Payment gateways"), dar de alta la cuenta con las dos claves; nace pausada. Usar "Set webhook secret" con el secreto de la suscripción; después, probar la conexión y activar.
+5. **Rotar el secreto:** crear el nuevo en Airwallex, ponerlo con "Set webhook secret" (se prueba antes de cambiar) y retirar el viejo. Las entregas firmadas con el viejo entre medias se rechazan y Airwallex las reintenta.
+6. Grabar entregas reales (`[{ headers, bodyBase64, receivedAt }]`):
+   - un `checkout_session.created` (A20);
+   - un `payment_intent.succeeded`;
+   - un `refund.*`;
+   - y **el mismo evento dos veces**: nuestro endpoint responde 500 durante más de 300 s y se graba el reintento, que debe llegar con un `x-timestamp` nuevo (A19).
+   Comprobar A2 con al menos dos pagos.
+7. Con `playwright` añadido solo para esa ejecución, ejecutar `SANDBOX_ADAPTER=airwallex AIRWALLEX_SANDBOX_CLIENT_ID=… AIRWALLEX_SANDBOX_API_KEY=… AIRWALLEX_SANDBOX_WEBHOOK_SECRET=… AIRWALLEX_SANDBOX_CARD_PAY=… AIRWALLEX_SANDBOX_CARD_DECLINE=… AIRWALLEX_SANDBOX_RECORDED_DELIVERY=<ruta> pnpm --filter @mt/api test:sandbox`. Sin esas entregas la ejecución falla.
+8. Una comprobación a mano: crear una sesión, esperar más de una hora y leerla. Debe dar `EXPIRED`, y nuestro estado `cancelled`. Anotarlo en el `docs/done/` de la ejecución.
+
+Si A19 resulta falsa (los reintentos conservan el `x-timestamp` original), Airwallex sigue `experimental` hasta 9.2-F6. Mientras tanto, reembolsar solo desde nuestro panel.
+
 ## Cuentas en el panel (4.1)
 
 Página "Payment gateways" (`/admin/gateways`), con los permisos `payments.providerAccount.manage` y `payments.providerAccount.manageCredentials`, los dos con segundo factor. Solo modo prueba: `CHECK (mode = 'test')` sigue en `provider_accounts` y la API rechaza `live` antes de nada. Quitarlo será una migración futura, solo con un adaptador `verified` y la aprobación de Oscar (plan 4.1, sección 14).
