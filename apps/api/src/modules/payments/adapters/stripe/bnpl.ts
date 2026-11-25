@@ -2,6 +2,7 @@
 // page, as a separate adapter key with its own Stripe account (plan 4.2). `experimental`: proven only against the fake of
 // test/contract/subjects/stripe-fake.ts. It is the Stripe class with a pay-later session; what differs is below. No
 // provider has approved this business: nothing here says otherwise.
+import { randomBytes } from 'node:crypto';
 import type { PaymentMethod } from '@mt/shared';
 import type { AdapterManifest, CreatePaymentInput, CreateRefundInput, NormalisedEvent, ProviderContext, ProviderPayment, ProviderRefund, WebhookVerification } from '../../core/provider';
 import { ProviderError } from '../../core/provider';
@@ -141,7 +142,9 @@ export class StripeBnplProvider extends StripeProvider {
     const pi = mid.payment_intent;
     if (isObj(pi) && typeof pi.id === 'string' && typeof pi.status === 'string' && OPEN_PI.has(pi.status)) {
       // Refused or not answered: the read below decides, and an open PaymentIntent is never called cancelled.
-      await this.call(ctx, { method: 'POST', path: `/v1/payment_intents/${encodeURIComponent(pi.id)}/cancel` }, `${idempotencyKey}:pi`).catch(() => undefined);
+      // A key per run (code review 3): Stripe may keep an earlier refusal under a fixed key; the read below decides,
+      // and cancelling a PaymentIntent twice cannot move money.
+      await this.call(ctx, { method: 'POST', path: `/v1/payment_intents/${encodeURIComponent(pi.id)}/cancel` }, `${idempotencyKey}:pi:${randomBytes(8).toString('hex')}`).catch(() => undefined);
     }
     const after = await this.getSession(ctx, ref);
     if (!after) throw new ProviderError('provider_not_found', false);

@@ -39,6 +39,9 @@ export const LATE_PENDING_CODE = 'late_pending_at_gateway';
 export const refundEventOf = (s: ProviderRefundStatus): 'pending' | 'succeeded' | 'failed' => (s === 'cancelled' ? 'failed' : s);
 
 /** The refund table of plan 0.1, 6.2 (rows without app requests): null is "no change". Forward only. */
+/** Task 9.3: the task opened when a refund fails at the gateway after it was accepted. */
+export const refundFailedTaskRef = (refundId: string): string => `payments:refund_failed:${refundId}`;
+
 export function nextRefundStatus(from: RefundStatusName, event: RefundEvent): RefundStatusName | null {
   switch (event) {
     case 'pending':
@@ -187,7 +190,7 @@ export class PaymentRefundStateMachine {
       await this.tasks.createSystemIn(tx, {
         title: `Refund failed at the payment gateway on booking ${booking.reference}`,
         description: 'The payment gateway accepted a refund and later reported that it failed, so the customer has not received this money. Refund the customer another way and keep the bank reference for the accountant, then check the booking.',
-        entityType: 'Refund', entityId: r.id, sourceRef: `payments:refund_failed:${r.id}`,
+        entityType: 'Refund', entityId: r.id, sourceRef: refundFailedTaskRef(r.id),
       });
     }
     if (to === 'failed' && r.origin === 'app') {
@@ -224,6 +227,8 @@ export class PaymentRefundStateMachine {
       const n = await tx.$executeRaw`UPDATE refunds SET "failureCode" = ${LATE_PENDING_CODE}, "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND status = 'failed' AND "failureCode" IS DISTINCT FROM ${LATE_PENDING_CODE}`;
       if (n === 1) await this.ledger.reallocate(tx, booking, r.mode, `refund:${r.id}:late_pending`);
     }
+    // Task 9.3 (code review 2): the refund moved after all, so the task telling staff to refund another way is done.
+    await this.tasks.closeSystemIn(tx, refundFailedTaskRef(r.id));
     await this.tasks.createSystemIn(tx, {
       title: `Refund on booking ${booking.reference} was made at the gateway after it was marked as not made`,
       description: remote.status === 'succeeded'

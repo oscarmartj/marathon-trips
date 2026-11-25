@@ -9,7 +9,9 @@ import { StripeBnplProvider } from '../../../src/modules/payments/adapters/strip
 import { signStripe } from '../../../src/modules/payments/adapters/stripe/mapping';
 import { StripeProvider } from '../../../src/modules/payments/adapters/stripe/stripe';
 import { ProviderAccountsService } from '../../../src/modules/payments';
+import { AppRefundsService } from '../../../src/modules/payments/core/app-refunds.service';
 import { PaymentAttemptSyncService } from '../../../src/modules/payments/core/attempt-sync.service';
+import { refundFailedTaskRef } from '../../../src/modules/payments/core/refunds.service';
 import { ProviderGateway, credentialsAad, webhookSecretAad } from '../../../src/modules/payments/core/gateway';
 import type { PaymentProvider } from '../../../src/modules/payments/core/provider';
 import { PaymentAdapterRegistry } from '../../../src/modules/payments/core/registry';
@@ -240,6 +242,27 @@ describe('pay later through the API (plan 9.3)', () => {
       expect((await c.pay(reference, { method: 'bnpl' })).status).toBe(201);
     });
 
+    it('booking cancelled or attempt replaced while the customer is at the provider: the PaymentIntent is cancelled; if Stripe refuses, the attempt stays live', async () => {
+      for (const action of ['cancel', 'replace'] as const) {
+        const { p } = await checkout();
+        const pi = fake.startAtProvider(bnpl.key, p!.providerPaymentRef!);
+        await sync().run(p!.id, action);
+        expect(await statusOf(p!.id)).toBe('cancelled');
+        expect(fake.account(bnpl.key).intents.get(pi)!.status).toBe('canceled');
+      }
+      const { p } = await checkout();
+      fake.startAtProvider(bnpl.key, p!.providerPaymentRef!);
+      fake.account(bnpl.key).refusePiCancel = true;
+      try {
+        await expect(sync().run(p!.id, 'cancel')).rejects.toMatchObject({ code: 'provider_unavailable', retryable: true });
+        expect(await statusOf(p!.id)).toBe('requires_action');
+      } finally {
+        fake.account(bnpl.key).refusePiCancel = false;
+      }
+      await sync().run(p!.id, 'cancel');
+      expect(await statusOf(p!.id)).toBe('cancelled');
+    });
+
     it('refund_partial_then_idempotent from the panel', async () => {
       const { b } = await overpaid();
       const asked = await panelRefund(b.id);
@@ -282,6 +305,26 @@ describe('pay later through the API (plan 9.3)', () => {
       expect((await sendWebhook(t, bnpl, failed)).body.duplicate).toBe(true);
       expect(await deliverTo(bnpl, event(bnpl, r.providerRefundRef!, { type: 'refund.failed' }))).toBe('processed');
       expect(await tasks()).toHaveLength(1);
+      // The gateway moves it after all (code review 2): the "refund another way" task closes, the review task opens.
+      fake.setRefundStatus(bnpl.key, r.providerRefundRef!, 'succeeded');
+      expect(await deliverTo(bnpl, event(bnpl, r.providerRefundRef!, { type: 'refund.updated' }))).toBe('processed');
+      expect((await tasks()).map((x) => x.status)).toEqual(['done']);
+      expect(await t.prisma.task.count({ where: { entityId: r.id, status: 'open' } })).toBe(1);
+    });
+
+    it('refund_refused_on_sweep_retry_opens_one_task (code review 1): no answer first (202), refused when the sweep retries', async () => {
+      const { b } = await overpaid();
+      fake.account(bnpl.key).faults.push(500);
+      const asked = await panelRefund(b.id);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(202);
+      const r = await t.prisma.refund.findFirstOrThrow({ where: { paymentId: b.id } });
+      expect(r.status).toBe('requested');
+      fake.ageCharge(bnpl.key, b.providerPaymentRef!, 200 * DAY_S);
+      await t.app.get(AppRefundsService).retryOne(r.id);
+      expect((await t.prisma.refund.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('failed');
+      expect(await t.prisma.task.count({ where: { sourceRef: refundFailedTaskRef(r.id) } })).toBe(1);
+      await t.app.get(AppRefundsService).retryOne(r.id);
+      expect(await t.prisma.task.count({ where: { sourceRef: refundFailedTaskRef(r.id) } })).toBe(1);
     });
 
     it('dispute_event_opens_dispute', async () => {
