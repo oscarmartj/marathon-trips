@@ -7,6 +7,7 @@ import { CardSessionProvider } from '../core/card-sessions/provider';
 import type { CardSessionStore } from '../core/card-sessions/store';
 import { unwiredCardSessionStore } from '../core/card-sessions/store';
 import type { PaymentProvider } from '../core/provider';
+import { AirwallexProvider } from './airwallex/airwallex';
 import { EwayGateway } from './eway/eway';
 import { PayPalProvider } from './paypal/paypal';
 import { PinPaymentsGateway } from './pin_payments/pin';
@@ -52,5 +53,7 @@ export function createAdapters(opts: AdapterOptions): PaymentProvider[] {
   // eWAY is experimental too (task 9.1): Secure Fields on our page, 3-D Secure before the one charge, and no events, so
   // every state is read from eWAY; it cannot become verified without reconciliation and disputes (registry).
   const eway = new CardSessionProvider(new EwayGateway(), opts.cardSessions ?? unwiredCardSessionStore(), { cardPageOrigin, usable: cardPageOrigin !== INERT_CARD_PAGE_ORIGIN });
-  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider(), pin, eway];
+  // Airwallex is experimental too (task 9.2): Checkout Sessions on its hosted page; test accounts only reach
+  // api.sandbox.airwallex.com.
+  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider(), pin, eway, new AirwallexProvider()];
 }
