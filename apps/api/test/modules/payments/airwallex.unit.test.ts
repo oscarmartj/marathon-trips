@@ -116,7 +116,7 @@ describe('references, manifest and catalogue (plan 4, 6.1, 12)', () => {
 const MANIFESTS_BEFORE_9_2 = '5ca2eebbfa70a819f00cadcdff9b9b1b975e23e86988e0874f928de2c2fe5a4e';
 
 describe('webhook signatures (plan 7, 19.7, 20.4, 20.6)', () => {
-  const secret = 'whsec_0123456789abcdef0123';
+  const secret = `test-signing-secret-${'0'.repeat(16)}`;
   const body = Buffer.from('{"id":"evt_1","name":"refund.settled","created_at":"2026-11-25T00:00:00Z","data":{"object":{}}}');
   const at = new Date('2026-11-25T00:00:00.000Z');
   const ctx: ProviderContext = { accountId: randomUUID(), mode: 'test', credentials: {}, webhookSecret: secret };
