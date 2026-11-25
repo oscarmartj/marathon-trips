@@ -99,6 +99,8 @@ function criteriaMismatch(r: RuleRow, q: RouteQuery, ctx: RouteContext): Exclusi
   const account = ctx.accounts.get(r.providerAccountId);
   const m = account ? ctx.manifest(account.adapterKey) : undefined;
   if (m && !ruleInsideManifest(r, m)) return 'outside_adapter';
+  // Task 9.3 (plan 9.3, 19 point 6): an amount the adapter can never take is outside it, whatever the rule's limits.
+  if (m?.amountRange && q.amountMinor !== null && (q.amountMinor < m.amountRange.minMinor || q.amountMinor > m.amountRange.maxMinor)) return 'outside_adapter';
   return null;
 }
 
@@ -189,6 +191,13 @@ export function amountGaps(rules: readonly RuleRow[], ctx: RouteContext, q: Omit
   for (const r of rules) {
     if (r.minAmountMinor !== null && r.minAmountMinor >= 1n) points.add(r.minAmountMinor);
     if (r.maxAmountMinor !== null && r.maxAmountMinor < MAX_LIMIT_MINOR) points.add(r.maxAmountMinor + 1n);
+    // Task 9.3: an adapter's own amount range is a boundary too.
+    const account = ctx.accounts.get(r.providerAccountId);
+    const range = account ? ctx.manifest(account.adapterKey)?.amountRange : undefined;
+    if (range) {
+      points.add(range.minMinor);
+      if (range.maxMinor < MAX_LIMIT_MINOR) points.add(range.maxMinor + 1n);
+    }
   }
   const sorted = [...points].filter((p) => p >= 1n && p <= MAX_LIMIT_MINOR).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const gaps: Array<{ fromMinor: bigint; toMinor: bigint }> = [];

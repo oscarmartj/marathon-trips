@@ -175,6 +175,34 @@ Para probarlo con el sandbox (cuando Oscar tenga la cuenta de sandbox, que es au
 
 Si A19 resulta falsa (los reintentos conservan el `x-timestamp` original), Airwallex sigue `experimental` hasta 9.2-F6. Mientras tanto, reembolsar solo desde nuestro panel.
 
+## Stripe pago aplazado (9.3)
+
+Adaptador `stripe_bnpl`, `experimental`: Afterpay, Klarna y Zip en el Checkout alojado de Stripe. **Todo lo de Stripe, Afterpay, Klarna y Zip está sin verificar** (leído con una herramienta que resume), y **ningún proveedor ha aprobado este negocio**: Afterpay prohíbe "Pre-orders" y el MCC 5962 de viajes, y un viaje prepagado puede contar como tal. Clase registrada: `StripeBnplProvider` (`adapters/stripe/bnpl.ts`), la de Stripe con otra sesión. Plan, supuestos A1–A16 y la revisión: `docs/plans/9.3-stripe-pay-later.md` (§19).
+
+Lo que lo hace distinto:
+- **Nace apagado.** Una cuenta nueva no recibe reglas de enrutado (`defaultRules` se salta `bnpl`). Para ofrecerlo, el personal añade una regla `bnpl` (AU, AUD). El manifiesto declara `amountRange` de A$1 a A$5.000, así que fuera de ese tramo nunca se ofrece aunque la regla no tenga límites.
+- **Métodos por importe**, en orden fijo: Afterpay hasta A$4.000, Klarna hasta A$2.000 (Pay in 4) y Zip hasta A$5.000. Solo clientes de AU. Nunca `card`, nunca recargo. El importe sale del plan de pagos.
+- **Necesita su propia cuenta de Stripe**, distinta de la de tarjeta. Si las dos cuentas del panel usaran la misma cuenta de Stripe, cada una recibiría los eventos de la otra. Por eso este adaptador ignora las sesiones con `card`; aun así, la cuenta de tarjeta abriría tareas de "pago desconocido" con los eventos de pago aplazado. Esas tareas piden ahora no registrar nada a mano.
+- **Una sesión caducada se lee por su PaymentIntent** (Afterpay da 3 horas al cliente; la sesión vive 45 minutos). Mientras el PaymentIntent siga abierto, el intento sigue vivo. `cancelPayment` primero caduca la sesión, después cancela el PaymentIntent y por último vuelve a leer. Nunca devuelve `requires_action`: si Stripe no deja cancelar, el error es reintentable y salta la tarea de 24 h.
+- **Plazos de reembolso:** Afterpay 120 días y Klarna y Zip 180. Pasado el plazo menos un día, el reembolso se rechaza antes de llamar a Stripe y el personal ve un 409. Hoy la app no tiene forma de registrar un reembolso por transferencia de un pago de pasarela (9.3-F7). Si un reembolso falla después de aceptarse, el núcleo abre la tarea "Refund failed at the payment gateway on booking …", una sola vez por reembolso.
+- **Comisiones** (Stripe AU, sin verificar): Afterpay 6 % + A$0,30; Klarna 4,99 % + A$0,55; Zip del 5,49 % al 11 % + A$0,30 según el plazo. No se pueden repercutir.
+- **Sin promoción en la web:** solo la etiqueta "Pay later", nunca "interest-free" ni recargo. Sin verificar: en 2025 Australia pasó a regular el pago aplazado como crédito. Esta nota no afirma que el negocio cumpla ni que el dato sea exacto; los prestamistas son los proveedores.
+
+En CI pasa la batería contra el Stripe falso (`test/contract/subjects/stripe-bnpl.ts`). Las pruebas propias están en `test/modules/payments/stripe-bnpl.unit.test.ts` y `stripe-bnpl-flow.test.ts`.
+
+Para probarlo con el sandbox (cuando Oscar tenga **una segunda cuenta de Stripe** solo para pago aplazado):
+1. En su Dashboard, en modo prueba:
+   - activar Afterpay, Klarna y Zip;
+   - comprobar que no hay recargos;
+   - crear un endpoint de webhook a la URL del panel, con la versión `STRIPE_API_VERSION` y estos eventos: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `refund.created`, `refund.updated`, `refund.failed` y todos los `charge.dispute.*`.
+2. En el panel, dar de alta una cuenta "Stripe pay later" con su clave de prueba. Después: "Set webhook secret", probar la conexión y activar. La regla `bnpl` se añade solo cuando Oscar decida ofrecerlo.
+3. Con `playwright` añadido solo para esa ejecución: `SANDBOX_ADAPTER=stripe_bnpl STRIPE_BNPL_SANDBOX_SECRET_KEY=… STRIPE_BNPL_SANDBOX_WEBHOOK_SECRET=… pnpm --filter @mt/api test:sandbox`. Comprobar a mano:
+   - A1: la página no muestra tarjetas;
+   - A3: Checkout pide lo que necesita cada proveedor;
+   - A15: qué hace Stripe con un PaymentIntent abierto cuando caduca la sesión;
+   - A16: el tipo y la fecha del cargo.
+4. Preguntar a Stripe por escrito si acepta viajes prepagados (depósito y saldo) de un sole trader con ABN para los tres métodos. Preguntar a PayPal si Pay in 4 aparece en la página de aprobación de Orders v2 (9.3-F1).
+
 ## Cuentas en el panel (4.1)
 
 Página "Payment gateways" (`/admin/gateways`), con los permisos `payments.providerAccount.manage` y `payments.providerAccount.manageCredentials`, los dos con segundo factor. Solo modo prueba: `CHECK (mode = 'test')` sigue en `provider_accounts` y la API rechaza `live` antes de nada. Quitarlo será una migración futura, solo con un adaptador `verified` y la aprobación de Oscar (plan 4.1, sección 14).

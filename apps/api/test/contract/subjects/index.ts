@@ -10,6 +10,7 @@ import { paypalLocalSubject, paypalSandboxSubject } from './paypal';
 import { pinLocalSubject, pinSandboxSubject } from './pin';
 import { simulatorLocalSubject } from './simulator';
 import { stripeLocalSubject, stripeSandboxSubject } from './stripe';
+import { stripeBnplLocalSubject, stripeBnplSandboxSubject } from './stripe-bnpl';
 
 export const LOCAL_SUBJECTS: Readonly<Record<string, SubjectFactory>> = {
   simulator: simulatorLocalSubject,
@@ -18,6 +19,7 @@ export const LOCAL_SUBJECTS: Readonly<Record<string, SubjectFactory>> = {
   pin_payments: () => pinLocalSubject(),
   eway: () => ewayLocalSubject(),
   airwallex: () => airwallexLocalSubject(),
+  stripe_bnpl: () => stripeBnplLocalSubject(),
 };
 
 /** Stripe's sandbox (task 3.3) and PayPal's (task 4.3): unverified until Oscar's sandbox keys exist. */
@@ -27,6 +29,7 @@ export const SANDBOX_SUBJECTS: Readonly<Record<string, SubjectFactory>> = {
   pin_payments: pinSandboxSubject,
   eway: ewaySandboxSubject,
   airwallex: airwallexSandboxSubject,
+  stripe_bnpl: stripeBnplSandboxSubject,
 };
 
 /** The adapters as the API builds them (the web origin only shapes the simulator's hosted page). */

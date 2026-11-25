@@ -46,6 +46,8 @@ export function manifestProblems(manifests: readonly AdapterManifest[], repoRoot
     const localPage = m.testOnly || m.capabilities.preCardSession === true;
     if (!(localPage ? TEST_ONLY_ORIGIN : HTTPS_ORIGIN).test(m.checkoutOrigin)) problems.push(`${m.key}: checkout origin must be an https origin`);
     problems.push(...accountSetupProblems(m));
+    // Task 9.3: an adapter's own amount range is positive and not empty.
+    if (m.amountRange && !(m.amountRange.minMinor > 0n && m.amountRange.minMinor <= m.amountRange.maxMinor)) problems.push(`${m.key}: amount range must be positive and not empty`);
     problems.push(...cardFieldsProblems(m));
     problems.push(...eventlessManifestProblems(m));
     if (m.status === 'verified') {

@@ -241,6 +241,9 @@ export class AppRefundsService {
   async send(refundId: string, opts: { leased?: boolean } = {}): Promise<'settled' | 'unanswered' | 'refused' | 'review' | 'skipped'> {
     // One sender at a time (H1): the request, the sweep and staff resolving it each take the lease first.
     if (!opts.leased && !(await this.lease(refundId))) return 'skipped';
+    // Task 9.3 (plan 9.3, code review 1): a retry by the sweep is not seen by anyone (staff got a 202 long before), so
+    // what it records counts as the sweep's: a refusal then opens the refund-failed task.
+    const source = opts.leased ? ('sweep' as const) : ('api' as const);
     const row = await this.prisma.refund.findUnique({ where: { id: refundId }, select: { id: true, paymentId: true, bookingId: true, providerAccountId: true, amountMinor: true, currency: true, idempotencyKey: true, createdAt: true, status: true, origin: true, manualRefund: true, providerRefundRef: true, requestAttempts: true, payment: { select: { providerPaymentRef: true } } } });
     if (!row || row.origin !== 'app' || row.manualRefund || row.status !== 'requested' || row.providerRefundRef) return 'skipped';
     if (await this.secondPayoutRisk(this.prisma, row)) return this.toReview(refundId, 'payment_disputed_or_refunded_elsewhere');
@@ -260,15 +263,15 @@ export class AppRefundsService {
       const { b, p, r } = await this.lockRefundChain(tx, row.bookingId, row.paymentId, refundId);
       await this.unlease(tx, r.id);
       if (remote) {
-        if (await this.machine.gatewayMovedFailedRefund(tx, b, p, r, remote, 'api')) return 'review' as const;
+        if (await this.machine.gatewayMovedFailedRefund(tx, b, p, r, remote, source)) return 'review' as const;
         if (r.providerRefundRef === null) await this.machine.setReference(tx, r, remote.ref);
-        const to = await this.machine.apply(tx, b, p, r, refundEventOf(remote.status), { source: 'api', failureCode: remote.failureCode, providerRefundRef: remote.ref });
+        const to = await this.machine.apply(tx, b, p, r, refundEventOf(remote.status), { source, failureCode: remote.failureCode, providerRefundRef: remote.ref });
         if (to === null && r.status === 'requested') await this.bumpAttempt(tx, r.id, null);
         return 'settled' as const;
       }
       if (r.status !== 'requested') return 'settled' as const;
       if (error && !error.retryable) {
-        await this.machine.apply(tx, b, p, r, 'failed', { source: 'api', failureCode: error.code });
+        await this.machine.apply(tx, b, p, r, 'failed', { source, failureCode: error.code });
         return 'refused' as const;
       }
       const attempts = row.requestAttempts + 1;

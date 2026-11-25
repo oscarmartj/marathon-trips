@@ -108,7 +108,7 @@ export class StripeProvider implements PaymentProvider {
   readonly manifest = stripeManifest();
   readonly signatureHeaders = [STRIPE_SIGNATURE_HEADER] as const;
   private readonly transport: StripeTransport;
-  private readonly now: () => Date;
+  protected readonly now: () => Date;
 
   constructor(opts: StripeOptions = {}) {
     this.transport = opts.transport ?? fetchTransport;
@@ -118,14 +118,14 @@ export class StripeProvider implements PaymentProvider {
   // ---- HTTP ----
 
   /** The secret key of the account, refused before any call if it is not a key of the account's mode. */
-  private key(ctx: ProviderContext): string {
+  protected key(ctx: ProviderContext): string {
     const k = ctx.credentials.secretKey ?? '';
     const re = ctx.mode === 'live' ? /^(sk|rk)_live_[A-Za-z0-9]{10,250}$/ : /^(sk|rk)_test_[A-Za-z0-9]{10,250}$/;
     if (!re.test(k)) throw new ProviderError('provider_auth_failed', false);
     return k;
   }
 
-  private async call(ctx: ProviderContext, req: Omit<StripeRequest, 'headers'>, idempotencyKey?: string): Promise<{ ok: true; body: Obj; replayed: boolean } | { ok: false; error: ReturnType<typeof stripeError> }> {
+  protected async call(ctx: ProviderContext, req: Omit<StripeRequest, 'headers'>, idempotencyKey?: string): Promise<{ ok: true; body: Obj; replayed: boolean } | { ok: false; error: ReturnType<typeof stripeError> }> {
     const headers: Record<string, string> = { authorization: `Bearer ${this.key(ctx)}`, 'stripe-version': STRIPE_API_VERSION };
     if (idempotencyKey) headers['idempotency-key'] = idempotencyKey;
     let res: StripeResponse;
@@ -150,14 +150,14 @@ export class StripeProvider implements PaymentProvider {
     return { ok: false, error: stripeError(res.status, body) };
   }
 
-  private async must(ctx: ProviderContext, req: Omit<StripeRequest, 'headers'>, idempotencyKey?: string): Promise<Obj> {
+  protected async must(ctx: ProviderContext, req: Omit<StripeRequest, 'headers'>, idempotencyKey?: string): Promise<Obj> {
     const r = await this.call(ctx, req, idempotencyKey);
     if (r.ok) return r.body;
     if (r.error === 'idempotency_error') throw new ProviderError('provider_rejected', false);
     throw new ProviderError(r.error.code, r.error.retryable);
   }
 
-  private async getSession(ctx: ProviderContext, id: string): Promise<Obj | null> {
+  protected async getSession(ctx: ProviderContext, id: string): Promise<Obj | null> {
     const r = await this.call(ctx, { method: 'GET', path: `/v1/checkout/sessions/${encodeURIComponent(id)}`, query: [['expand[]', 'payment_intent']] });
     if (r.ok) return r.body;
     if (r.error !== 'idempotency_error' && r.error.code === 'provider_not_found') return null;
@@ -165,10 +165,15 @@ export class StripeProvider implements PaymentProvider {
     throw new ProviderError(r.error.code, r.error.retryable);
   }
 
-  private toPayment(o: unknown): ProviderPayment {
+  protected toPayment(o: unknown): ProviderPayment {
     const p = sessionToPayment(o);
     if (!p) throw new ProviderError('provider_unavailable', true);
     return p;
+  }
+
+  /** Task 9.3 (plan 9.3, section 4.1): the session's parameters; the pay-later adapter changes only its methods. */
+  protected sessionParams(input: CreatePaymentInput): Array<[string, string]> {
+    return sessionParams(input);
   }
 
   // ---- PaymentProvider ----
@@ -193,7 +198,7 @@ export class StripeProvider implements PaymentProvider {
       if (found) return found;
       throw new ProviderError('provider_rejected', false);
     }
-    const r = await this.call(ctx, { method: 'POST', path: '/v1/checkout/sessions', form: sessionParams(input) }, input.idempotencyKey);
+    const r = await this.call(ctx, { method: 'POST', path: '/v1/checkout/sessions', form: this.sessionParams(input) }, input.idempotencyKey);
     if (!r.ok) {
       // Another request under this key exists (other parameters): the object is that one, looked up (plan 3.3, 12.5).
       if (r.error === 'idempotency_error') {

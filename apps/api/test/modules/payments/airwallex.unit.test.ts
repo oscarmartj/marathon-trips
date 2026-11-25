@@ -101,12 +101,12 @@ describe('references, manifest and catalogue (plan 4, 6.1, 12)', () => {
     expect(EVENTLESS_ADAPTER_KEYS).toEqual(['eway']);
     expect(GET_RETURNS_ORDER_FIELDS).toBe(false);
     const adapters = createAdapters({ webOrigin: 'http://localhost:3000' });
-    expect(adapters.map((a) => a.manifest.key)).toEqual(['simulator', 'stripe', 'paypal', 'pin_payments', 'eway', 'airwallex']);
+    expect(adapters.map((a) => a.manifest.key)).toEqual(['simulator', 'stripe', 'paypal', 'pin_payments', 'eway', 'airwallex', 'stripe_bnpl']);
     expect(catalogueCapabilities(adapters.find((a) => a.manifest.key === 'airwallex')!.manifest)).toEqual({ refunds: 'partial', deferredCapture: false, disputes: false, reconciliation: null, gatewayEvents: 'signed', cardEntry: 'gateway_page' });
   });
 
   it('existing_manifests_unchanged: the other adapters are as they were before task 9.2', () => {
-    const adapters = createAdapters({ webOrigin: 'http://localhost:3000' }).filter((a) => a.manifest.key !== 'airwallex');
+    const adapters = createAdapters({ webOrigin: 'http://localhost:3000' }).filter((a) => a.manifest.key !== 'airwallex' && a.manifest.key !== 'stripe_bnpl');
     const hash = createHash('sha256').update(JSON.stringify(adapters.map((a) => [a.manifest, [...a.signatureHeaders]]))).digest('hex');
     expect(hash).toBe(MANIFESTS_BEFORE_9_2);
   });
