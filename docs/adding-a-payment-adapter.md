@@ -50,6 +50,24 @@ Todo eso lo hace el núcleo: guardas de modo y entorno, descifrado de credencial
 
 Sin sandbox, el adaptador se queda en `experimental` y no puede pasar a modo real: `ProviderGateway` lo impide y no hay forma de saltárselo.
 
+## Prueba semanal de contrato (9.4)
+
+El flujo `.github/workflows/weekly-sandbox-contract.yml` corre cada domingo (19:23 UTC) y a mano (Actions > "Weekly sandbox contract" > Run workflow). Pregunta al registro qué adaptadores están en `status: 'verified'` (`apps/api/scripts/weekly-sandbox-plan.ts`) y ejecuta `test:sandbox` solo de ellos, uno por trabajo. Hoy ninguno lo está: el flujo termina en verde y su resumen dice «0 verified adapters, nothing to test». Eso no verifica ninguna pasarela. Un fallo se ve como un trabajo en rojo en Actions; no envía correos ni mensajes.
+
+Para que un adaptador entre en la prueba semanal:
+
+1. Hace falta una cuenta de sandbox del proveedor, que crea Oscar. Después pasa a `verified` por el paso 7 de arriba, en un PR revisado, con su línea de `test:sandbox` en `docs/done/`. Un `verified` sin sujeto de sandbox hace fallar CI (`weekly.test.ts`); `experimental` nunca entra en la lista.
+2. Oscar crea estos secretos de repositorio (Settings > Secrets and variables > Actions). Nunca van en un archivo. Solo claves de modo prueba: la suite rechaza el resto.
+
+| Adaptador | Secretos |
+|---|---|
+| `stripe` | `STRIPE_SANDBOX_SECRET_KEY`, `STRIPE_SANDBOX_WEBHOOK_SECRET` |
+| `paypal` | `PAYPAL_SANDBOX_CLIENT_ID`, `PAYPAL_SANDBOX_CLIENT_SECRET`, `PAYPAL_SANDBOX_WEBHOOK_ID`, `PAYPAL_SANDBOX_BUYER_EMAIL`, `PAYPAL_SANDBOX_BUYER_PASSWORD`, `PAYPAL_SANDBOX_RECORDED_DELIVERY_B64` |
+| `pin_payments` | `PIN_TEST_SECRET_KEY`, `PIN_TEST_PUBLISHABLE_KEY`, `PIN_TEST_WEBHOOK_KEY`, `PIN_TEST_CARD_PAY`, `PIN_TEST_CARD_DECLINE`, `PIN_TEST_RECORDED_DELIVERY_B64`, `PIN_TEST_ACS_SCRIPT_B64` |
+| `eway` | `EWAY_SANDBOX_API_KEY`, `EWAY_SANDBOX_API_PASSWORD`, `EWAY_SANDBOX_PUBLIC_KEY`, `EWAY_SANDBOX_BROWSER_SCRIPT_B64` |
+
+Los `*_B64` son los archivos de entrega grabada o de guion de navegador, en base64; el flujo los escribe fuera del repositorio. Un adaptador nuevo con otras variables añade sus secretos al bloque `env` del flujo (`weekly.test.ts` comprueba que cada uno sale de `secrets.*`). Si el sujeto necesita `playwright`, se añade como dependencia de desarrollo en el mismo PR que lo pasa a `verified`.
+
 ## Si la batería no encaja con una pasarela
 
 Por ejemplo, una pasarela sin marca de tiempo firmada en sus webhooks. Se cambia el contrato en un plan revisado, para todos los adaptadores. Nunca se añade una excepción en el sujeto de un adaptador.
