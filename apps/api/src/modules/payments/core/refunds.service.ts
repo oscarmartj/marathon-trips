@@ -180,6 +180,16 @@ export class PaymentRefundStateMachine {
       await this.ledger.postRefundSucceeded(tx, booking, r);
       await this.afterMoneyOut(tx, booking, { refundId: r.id }, actor);
     }
+    if (to === 'failed' && r.origin === 'app' && !r.manualRefund && (ctx.source === 'webhook' || ctx.source === 'sweep')) {
+      // Task 9.3 (plan docs/plans/9.3-stripe-pay-later.md, 19 point 2b): the gateway reported the failure after our
+      // request, so nobody saw it (a refusal at request time is a 409 to staff; staff actions are seen by staff). One
+      // task per refund: createSystemIn returns the open one, and a duplicate event makes no transition.
+      await this.tasks.createSystemIn(tx, {
+        title: `Refund failed at the payment gateway on booking ${booking.reference}`,
+        description: 'The payment gateway accepted a refund and later reported that it failed, so the customer has not received this money. Refund the customer another way and keep the bank reference for the accountant, then check the booking.',
+        entityType: 'Refund', entityId: r.id, sourceRef: `payments:refund_failed:${r.id}`,
+      });
+    }
     if (to === 'failed' && r.origin === 'app') {
       // The money it held back is free again (plan 0.1, P10): the plan may now be filled with it.
       await this.ledger.reallocate(tx, booking, r.mode, `refund:${r.id}:released`);

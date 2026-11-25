@@ -4,7 +4,7 @@
 // type-checked, never run here (no keys): the customer's part drives Stripe Checkout in a browser.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { signStripe } from '../../../src/modules/payments/adapters/stripe/mapping';
-import { StripeProvider } from '../../../src/modules/payments/adapters/stripe/stripe';
+import { StripeProvider, type StripeOptions } from '../../../src/modules/payments/adapters/stripe/stripe';
 import type { ProviderContext } from '../../../src/modules/payments/core/provider';
 import type { ContractSubject } from '../payment-provider.contract';
 import { FakeStripe } from './stripe-fake';
@@ -21,8 +21,9 @@ interface PwPage {
 }
 interface PwBrowser { newPage(): Promise<PwPage>; close(): Promise<void> }
 
-export function stripeLocalSubject(fake = new FakeStripe()): ContractSubject {
-  const provider = new StripeProvider({ transport: fake.transport, now: () => fake.now() });
+export function stripeLocalSubject(fake = new FakeStripe(), make: (o: StripeOptions) => StripeProvider = (o) => new StripeProvider(o)): ContractSubject {
+  // Task 9.3: the pay-later adapter is the same class family; its subject passes its own constructor.
+  const provider = make({ transport: fake.transport, now: () => fake.now() });
   const keyOf = (ctx: ProviderContext) => ctx.credentials.secretKey!;
   return {
     provider,

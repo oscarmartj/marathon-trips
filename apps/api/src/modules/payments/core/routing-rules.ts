@@ -99,6 +99,8 @@ function criteriaMismatch(r: RuleRow, q: RouteQuery, ctx: RouteContext): Exclusi
   const account = ctx.accounts.get(r.providerAccountId);
   const m = account ? ctx.manifest(account.adapterKey) : undefined;
   if (m && !ruleInsideManifest(r, m)) return 'outside_adapter';
+  // Task 9.3 (plan 9.3, 19 point 6): an amount the adapter can never take is outside it, whatever the rule's limits.
+  if (m?.amountRange && q.amountMinor !== null && (q.amountMinor < m.amountRange.minMinor || q.amountMinor > m.amountRange.maxMinor)) return 'outside_adapter';
   return null;
 }
 

@@ -12,6 +12,7 @@ import { EwayGateway } from './eway/eway';
 import { PayPalProvider } from './paypal/paypal';
 import { PinPaymentsGateway } from './pin_payments/pin';
 import { SimulatorProvider } from './simulator/simulator';
+import { StripeBnplProvider } from './stripe/bnpl';
 import { StripeProvider } from './stripe/stripe';
 
 export interface AdapterOptions {
@@ -55,5 +56,7 @@ export function createAdapters(opts: AdapterOptions): PaymentProvider[] {
   const eway = new CardSessionProvider(new EwayGateway(), opts.cardSessions ?? unwiredCardSessionStore(), { cardPageOrigin, usable: cardPageOrigin !== INERT_CARD_PAGE_ORIGIN });
   // Airwallex is experimental too (task 9.2): Checkout Sessions on its hosted page; test accounts only reach
   // api.sandbox.airwallex.com.
-  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider(), pin, eway, new AirwallexProvider()];
+  // Stripe pay later is experimental too (task 9.3): Afterpay, Klarna and Zip on Stripe Checkout, through a Stripe account
+  // of its own; born off (no default routing rule for bnpl).
+  return [new SimulatorProvider({ webOrigin: opts.webOrigin }), new StripeProvider(), new PayPalProvider(), pin, eway, new AirwallexProvider(), new StripeBnplProvider()];
 }

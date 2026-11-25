@@ -150,7 +150,7 @@ export class PaymentWebhooksService {
       return runTransaction(this.prisma, async (tx) => {
         await this.tasks.createSystemIn(tx, {
           title: 'Payment webhook for an unknown payment',
-          description: 'A payment gateway sent an event for a payment we cannot match. If money came in, register it against the right booking.',
+          description: 'A payment gateway sent an event for a payment this gateway account does not hold. Check at the gateway which booking and which of our gateway accounts the money belongs to: it may already be recorded through another account that shares the same gateway account. Do not record a payment by hand from this task.',
           entityType: 'WebhookEvent', entityId: ev.id, sourceRef: `payments:unknown_event:${ev.id}`,
         });
         return this.ignoreIn(tx, ev.id, 'unknown_payment');
@@ -378,7 +378,7 @@ export class PaymentWebhooksService {
     return runTransaction(this.prisma, async (tx) => {
       await this.tasks.createSystemIn(tx, {
         title: 'Payment webhook for an unknown payment',
-        description: 'A payment gateway sent an event for a payment we cannot match. If money came in or went out, register it against the right booking.',
+        description: 'A payment gateway sent an event for a payment this gateway account does not hold. Check at the gateway which booking and which of our gateway accounts the money belongs to: it may already be recorded through another account that shares the same gateway account. Do not record a payment by hand from this task.',
         entityType: 'WebhookEvent', entityId: eventId, sourceRef: `payments:unknown_event:${eventId}`,
       });
       return this.ignoreIn(tx, eventId, 'unknown_payment');

@@ -30,6 +30,12 @@ export interface AdapterManifest {
   /** Where its redirect URLs may point; anything else is never handed to a customer. */
   checkoutOrigin: string;
   /**
+   * Task 9.3 (plan docs/plans/9.3-stripe-pay-later.md, section 19 point 6): the smallest and largest single payment the
+   * adapter can ever take, in minor units of its currencies. Routing treats an amount outside it as outside the adapter,
+   * so a rule without limits never offers it where it would always fail. Absent: no limit of its own.
+   */
+  amountRange?: { minMinor: bigint; maxMinor: bigint };
+  /**
    * Task 4.4: the gateway's hosted card fields, for an adapter whose card is typed into the gateway's iframes on our own
    * card page (plan docs/plans/4.4-au-card-gateway.md, section 5.1). Fixed in code; only the mode selects.
    */

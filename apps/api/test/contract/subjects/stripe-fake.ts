@@ -22,7 +22,7 @@ interface Session extends Obj {
 
 interface Intent extends Obj {
   id: string;
-  status: 'succeeded' | 'requires_payment_method' | 'processing' | 'canceled';
+  status: 'succeeded' | 'requires_payment_method' | 'processing' | 'canceled' | 'requires_action';
   amount: number;
   currency: string;
   metadata: Record<string, string>;
@@ -56,6 +56,10 @@ class FakeAccount {
   readonly sessions = new Map<string, Session>();
   readonly intents = new Map<string, Intent>();
   readonly refunds = new Map<string, Refund>();
+  /** Task 9.3: the charges of paid intents (GET /v1/payment_intents/:id?expand[]=latest_charge). */
+  readonly charges = new Map<string, Obj>();
+  /** Task 9.3 (plan 9.3, A15): Stripe refuses to cancel a PaymentIntent that Checkout created. */
+  refusePiCancel = false;
   /** Idempotency-Key → hash of the request and the saved answer. */
   readonly saved = new Map<string, { hash: string; res: StripeResponse }>();
   /** Status codes the next requests answer with (a 500 is saved under its key, as Stripe does). */
@@ -141,6 +145,20 @@ export class FakeStripe {
       const s = acc.sessions.get(decodeURIComponent(m[1]!));
       return s ? json(200, this.view(acc, s, expandPi)) : error(404, 'invalid_request_error', 'resource_missing');
     }
+    if ((m = /^\/v1\/payment_intents\/([^/]+)\/cancel$/.exec(req.path)) && req.method === 'POST') {
+      const pi = acc.intents.get(decodeURIComponent(m[1]!));
+      if (!pi) return error(404, 'invalid_request_error', 'resource_missing');
+      if (acc.refusePiCancel || !['requires_payment_method', 'requires_action'].includes(pi.status)) return error(400, 'invalid_request_error', 'payment_intent_unexpected_state');
+      pi.status = 'canceled';
+      return json(200, pi);
+    }
+    if ((m = /^\/v1\/payment_intents\/([^/]+)$/.exec(req.path)) && req.method === 'GET') {
+      const pi = acc.intents.get(decodeURIComponent(m[1]!));
+      if (!pi) return error(404, 'invalid_request_error', 'resource_missing');
+      const expandCharge = (req.query ?? []).some(([k, v]) => k === 'expand[]' && v === 'latest_charge');
+      const charge = typeof pi.latest_charge === 'string' ? acc.charges.get(pi.latest_charge) : undefined;
+      return json(200, { ...pi, latest_charge: expandCharge && charge ? charge : pi.latest_charge ?? null });
+    }
     if (req.method === 'POST' && req.path === '/v1/refunds') return this.createRefund(acc, nest(req.form ?? []));
     if (req.method === 'GET' && req.path === '/v1/refunds') {
       const pi = q.get('payment_intent');
@@ -179,12 +197,21 @@ export class FakeStripe {
     if (f.mode !== 'payment' || currency !== 'aud' || !Number.isSafeInteger(amount) || amount < 50 || amount > 99_999_999) return error(400, 'invalid_request_error');
     if (!Number.isSafeInteger(expiresAt) || expiresAt < now + 30 * 60 || expiresAt > now + 24 * 3600) return error(400, 'invalid_request_error', 'parameter_invalid_integer');
     if (typeof f.success_url !== 'string' || typeof f.cancel_url !== 'string') return error(400, 'invalid_request_error');
+    // Task 9.3: pay-later types are kept on the session (A11); Stripe refuses a mix with cards, an unknown type, or a type
+    // whose documented range does not hold the amount (A2, A13). Card sessions are unchanged.
+    const types = Object.values((f.payment_method_types as Obj | undefined) ?? {}).map(String);
+    const payLater = types.some((t) => t !== 'card');
+    if (payLater) {
+      const ranges: Record<string, [number, number]> = { afterpay_clearpay: [100, 400_000], klarna: [100, 400_000], zip: [100, 5_000_000] };
+      if (types.length === 0 || types.some((t) => !ranges[t] || amount < ranges[t]![0] || amount > ranges[t]![1])) return error(400, 'invalid_request_error', 'payment_method_unactivated');
+    }
     const s: Session = {
       id: id('cs'), object: 'checkout.session', status: 'open', payment_status: 'unpaid', amount_total: amount, currency, payment_intent: null,
       metadata: { ...((f.metadata as Record<string, string>) ?? {}) }, client_reference_id: f.client_reference_id ?? null, created: now, expires_at: expiresAt,
       livemode: false, mode: 'payment', success_url: f.success_url, url: '',
       pi_metadata: { ...(((f.payment_intent_data as Obj | undefined)?.metadata as Record<string, string>) ?? {}) },
     };
+    if (payLater) s.payment_method_types = types;
     s.url = `https://checkout.stripe.com/c/pay/${s.id}`;
     acc.sessions.set(s.id, s);
     return json(200, this.view(acc, s, false));
@@ -235,7 +262,50 @@ export class FakeStripe {
     const s = this.openSession(key, sessionId);
     const pi: Intent = { id: id('pi'), object: 'payment_intent', status: 'succeeded', amount: s.amount_total, currency: s.currency, metadata: { ...(s.pi_metadata as Record<string, string>) }, livemode: false };
     this.account(key).intents.set(pi.id, pi);
+    // Task 9.3: only pay-later sessions get a charge object; card sessions are as before.
+    if (Array.isArray(s.payment_method_types)) this.charge(key, pi, s);
     Object.assign(s, { status: 'complete', payment_status: 'paid', payment_intent: pi.id });
+  }
+
+  /** Task 9.3: the charge of a paid pay-later intent, of the session's first method, made now. */
+  private charge(key: string, pi: Intent, s: Session): void {
+    const ch = { id: id('ch'), object: 'charge', created: this.seconds(), payment_method_details: { type: Array.isArray(s.payment_method_types) ? String(s.payment_method_types[0]) : 'card' } };
+    this.account(key).charges.set(ch.id, ch);
+    pi.latest_charge = ch.id;
+  }
+
+  /** Task 9.3: moves a paid session's charge back in time (a refund window that has passed). */
+  ageCharge(key: string, sessionId: string, seconds: number): void {
+    const acc = this.account(key);
+    const s = acc.sessions.get(sessionId);
+    const pi = s?.payment_intent ? acc.intents.get(s.payment_intent) : undefined;
+    const ch = pi && typeof pi.latest_charge === 'string' ? acc.charges.get(pi.latest_charge) : undefined;
+    if (!ch) throw new Error('fake stripe: no charge');
+    ch.created = (ch.created as number) - seconds;
+  }
+
+  /** Task 9.3: the customer goes on to the pay-later provider: a PaymentIntent waiting there, the session still open. */
+  startAtProvider(key: string, sessionId: string): string {
+    const s = this.openSession(key, sessionId);
+    const pi: Intent = { id: id('pi'), object: 'payment_intent', status: 'requires_action', amount: s.amount_total, currency: s.currency, metadata: { ...(s.pi_metadata as Record<string, string>) }, livemode: false };
+    this.account(key).intents.set(pi.id, pi);
+    s.payment_intent = pi.id;
+    return pi.id;
+  }
+
+  /**
+   * Task 9.3: the customer approves at the provider, perhaps after the session expired (A15, its worst reading: Stripe
+   * leaves the PaymentIntent open). A cancelled PaymentIntent cannot be approved.
+   */
+  approveAtProvider(key: string, sessionId: string): void {
+    const acc = this.account(key);
+    const s = acc.sessions.get(sessionId);
+    const pi = s?.payment_intent ? acc.intents.get(s.payment_intent) : undefined;
+    if (!s || !pi || pi.status !== 'requires_action') throw new Error('fake stripe: nothing waiting at the provider');
+    pi.status = 'succeeded';
+    this.charge(key, pi, s);
+    this.expireIfDue(s);
+    if (s.status === 'open') Object.assign(s, { status: 'complete', payment_status: 'paid' });
   }
 
   /** A declined card (4000 0000 0000 0002): Checkout shows the error and the session stays open. */
