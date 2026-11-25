@@ -1432,6 +1432,21 @@
           "adapter_unavailable": "Not available yet",
           "account_mode_not_for_environment": "Test accounts are not added in this environment",
           "test_adapter_blocked_in_environment": "Only for development and testing"
+        },
+        "capabilities": "Can do",
+        "capability": {
+          "refundsPartial": "Partial refunds",
+          "refundsFull": "Full refunds only",
+          "refundsNone": "No refunds",
+          "disputes": "Reads disputes",
+          "reconciliation": "Daily reconciliation from the gateway",
+          "eventsSigned": "Signed gateway events",
+          "eventsNone": "No gateway events: payments and refunds are read from the gateway",
+          "cardEntryGatewayPage": "Card typed on the gateway's page",
+          "cardEntryCardFields": "Card typed in the gateway's fields on our page",
+          "cardEntrySimulated": "Simulated payments",
+          "cardEntryManual": "Paid by bank transfer",
+          "none": "Not installed yet"
         }
       },
       "adapterStatus": {

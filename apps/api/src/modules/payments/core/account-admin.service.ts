@@ -18,6 +18,7 @@ import { CollectionCoverageGuard } from './coverage-guard';
 import { ProviderGateway, callBlockReason } from './gateway';
 import type { ConnectionTestCode } from './gateway';
 import { ManualMethodsService } from './manual-methods.service';
+import type { AdapterManifest } from './provider';
 import { PAYMENT_SETTINGS } from './settings';
 import { WEBHOOK_PATH_PREFIX, webhookPathTokenHash } from './webhooks.service';
 
@@ -38,6 +39,25 @@ export type AccountWarning =
 
 /** More archive checks, added by later tasks (4.5: open disputes; 4.6: unsettled clearing balance). Codes only. */
 export type ArchiveCheck = (tx: Tx, accountId: string) => Promise<string[]>;
+
+/**
+ * Task 9.1 (plan docs/plans/9.1-eway.md, section 13): what each installed adapter can do, as the catalogue shows it.
+ * Read from its manifest only; planned entries have none.
+ */
+export type CatalogueCapabilities = ReturnType<typeof catalogueCapabilities>;
+
+export function catalogueCapabilities(m: AdapterManifest) {
+  const c = m.capabilities;
+  const cardEntry = m.testOnly ? 'simulated' as const : m.cardFields ? 'card_fields' as const : m.methods.every((x) => x === 'payid_transfer' || x === 'manual_other') ? 'manual' as const : 'gateway_page' as const;
+  return {
+    refunds: c.refunds,
+    deferredCapture: c.deferredCapture,
+    disputes: c.disputes === 'events',
+    reconciliation: c.reconciliation ? { activity: c.reconciliation.activity, settlements: c.reconciliation.settlements } : null,
+    gatewayEvents: c.gatewayEvents === 'none' ? 'none' as const : 'signed' as const,
+    cardEntry,
+  };
+}
 
 /**
  * The panel's side of gateway accounts (task 4.1, plan docs/plans/4.1-provider-accounts-panel.md): the adapter catalogue,
@@ -68,7 +88,7 @@ export class ProviderAccountsAdminService {
       const blocked = creationBlockReason(m, 'test', this.config.APP_ENV);
       return {
         key: m.key, displayName: m.displayName, status: m.status, testOnly: m.testOnly, methods: [...m.methods], currencies: [...m.currencies],
-        countries: m.countries === 'any' ? 'any' : [...m.countries], refunds: m.capabilities.refunds,
+        countries: m.countries === 'any' ? 'any' : [...m.countries], refunds: m.capabilities.refunds, capabilities: catalogueCapabilities(m) as CatalogueCapabilities | null,
         credentialFields: m.account.fields.map((f) => ({ key: f.key, label: f.label })),
         webhookSecret: m.account.webhookSecret.source === 'entered' ? { source: 'entered' as const, label: m.account.webhookSecret.label } : { source: 'generated' as const },
         creatable: blocked === null, creatableReason: blocked, mode: 'test' as const,
@@ -76,7 +96,7 @@ export class ProviderAccountsAdminService {
     }).concat(PLANNED_ADAPTERS.filter((p) => !this.gateway.registry.get(p.key)).map((p) => ({
       // Catalogue entries only (task 4.2, plan section 7): nothing can be created or routed to them.
       key: p.key, displayName: p.displayName, status: 'planned' as const, testOnly: false, methods: [...p.methods], currencies: [...p.currencies],
-      countries: p.countries === 'any' ? 'any' : [...p.countries], refunds: 'none' as const, credentialFields: [], webhookSecret: { source: 'generated' as const },
+      countries: p.countries === 'any' ? 'any' : [...p.countries], refunds: 'none' as const, capabilities: null, credentialFields: [], webhookSecret: { source: 'generated' as const },
       creatable: false, creatableReason: 'adapter_unavailable', mode: 'test' as const,
     })));
   }

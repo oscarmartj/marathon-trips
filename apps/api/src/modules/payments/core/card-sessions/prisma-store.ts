@@ -8,13 +8,13 @@ import type { TasksService } from '../../../../platform/common/tasks/tasks.servi
 import type { PaymentModeName } from '../provider';
 import type {
   CardRefundIntent, CardRefundIntentChange, CardRefundIntentInit, CardRefundIntentStatus, CardRefundLastAnswer, CardSession, CardSessionChange, CardSessionInit,
-  CardSessionStatus, CardSessionStore, CardSessionTask, SessionChargeRow,
+  CardSessionFlow, CardSessionStatus, CardSessionStore, CardSessionTask, SessionChargeRow,
 } from './store';
 import { DEFAULT_SESSION_LIFETIME_MS, SESSION_MARGIN_MS, intentTransitionProblem, sessionTransitionProblem } from './store';
 
 interface SessionRow {
-  id: string; ref: string; providerAccountId: string; mode: PaymentModeName; idempotencyKey: string; paymentId: string; bookingId: string;
-  currency: string; amountMinor: bigint; returnUrl: string; status: string; chargeRef: string | null; chargedMinor: bigint | null; failureCode: string | null;
+  id: string; ref: string; providerAccountId: string; mode: PaymentModeName; flow: string; idempotencyKey: string; paymentId: string; bookingId: string;
+  currency: string; amountMinor: bigint; returnUrl: string; status: string; authRef: string | null; authCardHash: string | null; chargeRef: string | null; chargedMinor: bigint | null; failureCode: string | null;
   submittedAt: Date | null; verifyCalls: number; createdAt: Date; expiresAt: Date; version: number;
 }
 interface IntentRow {
@@ -23,7 +23,7 @@ interface IntentRow {
 }
 
 const toSession = (r: SessionRow): CardSession => ({
-  id: r.id, ref: r.ref, accountId: r.providerAccountId, mode: r.mode, idempotencyKey: r.idempotencyKey, paymentId: r.paymentId, bookingId: r.bookingId,
+  id: r.id, ref: r.ref, accountId: r.providerAccountId, mode: r.mode, flow: r.flow as CardSessionFlow, authRef: r.authRef, authCardHash: r.authCardHash, idempotencyKey: r.idempotencyKey, paymentId: r.paymentId, bookingId: r.bookingId,
   amountMinor: r.amountMinor, currency: r.currency, returnUrl: r.returnUrl, status: r.status as CardSessionStatus, chargeRef: r.chargeRef, chargedMinor: r.chargedMinor,
   failureCode: r.failureCode as CardSessionFailure | null, submittedAt: r.submittedAt, verifyCalls: r.verifyCalls, createdAt: r.createdAt, expiresAt: r.expiresAt, version: r.version,
 });
@@ -38,6 +38,8 @@ const TASK_TITLES: Record<CardSessionTask, string> = {
   refund_conflict: 'Card refund answered twice',
   refund_candidates: 'Card refund cannot be matched',
   declines_spike: 'Many declined cards on one account',
+  duplicate_transaction: 'Card payment refused as a duplicate',
+  reference_not_unique: 'Card payment reference found more than once',
 };
 const TASK_TEXT: Record<CardSessionTask, string> = {
   extra_charge: 'The gateway reports a charge under a card session that is not the session\'s own. If it collected money, refund it or register it against the right booking.',
@@ -45,6 +47,8 @@ const TASK_TEXT: Record<CardSessionTask, string> = {
   refund_conflict: 'A refund request was answered with a refund other than the one already recorded for it. Check both refunds at the gateway.',
   refund_candidates: 'More than one refund at the gateway could be the answer to one request of ours. Check them at the gateway and resolve the refund.',
   declines_spike: 'More than 20 cards were declined on this account within an hour. Someone may be testing cards; nothing was blocked.',
+  duplicate_transaction: 'The gateway refused a card payment as a duplicate of one it already processed. An earlier attempt on the same booking may have been charged without being recorded: check the gateway and the booking.',
+  reference_not_unique: 'The gateway holds more than one transaction under one card session reference, so the payment cannot be read. Find the right transaction at the gateway and bind it with payments:card-session-bind.',
 };
 
 const isUniqueViolation = (err: unknown): boolean => (err as { code?: string })?.code === 'P2002';
@@ -68,7 +72,7 @@ export class PrismaCardSessionStore implements CardSessionStore {
     try {
       const row = await this.prisma.cardSession.create({
         data: {
-          ref: `cs_${randomBytes(16).toString('hex')}`, providerAccountId: init.accountId, mode: init.mode, idempotencyKey: init.idempotencyKey, paymentId: init.paymentId,
+          ref: `cs_${randomBytes(16).toString('hex')}`, providerAccountId: init.accountId, mode: init.mode, flow: init.flow, idempotencyKey: init.idempotencyKey, paymentId: init.paymentId,
           bookingId: init.bookingId, currency: init.currency, amountMinor: init.amountMinor, returnUrl: init.returnUrl, expiresAt, createdAt: init.createdAt,
         },
       });
@@ -94,6 +98,17 @@ export class PrismaCardSessionStore implements CardSessionStore {
   async byChargeRef(accountId: string, chargeRef: string): Promise<CardSession | null> {
     const r = await this.prisma.cardSession.findFirst({ where: { providerAccountId: accountId, chargeRef } });
     return r ? toSession(r as SessionRow) : null;
+  }
+
+  async unresolvedOfBooking(accountId: string, bookingId: string): Promise<CardSession[]> {
+    const rows = await this.prisma.cardSession.findMany({
+      where: {
+        providerAccountId: accountId, bookingId,
+        OR: [{ status: 'submitting' }, { status: 'failed', chargeRef: null, submittedAt: { not: null }, failureCode: { in: ['outcome_unknown', 'provider_busy'] } }],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map((r) => toSession(r as SessionRow));
   }
 
   async update(s: CardSession, change: CardSessionChange): Promise<CardSession | null> {

@@ -67,15 +67,33 @@ export interface AdapterManifest {
      * preCardSession (a CardSessionProvider keeps the refund intents that back it).
      */
     refundEventOurId?: 'via_retrieve';
+    /**
+     * Task 9.1 (plan docs/plans/9.1-eway.md, sections 4.2 and 20 M1, M6): the gateway sends no server-to-server event
+     * at all (eWAY): every state is read from the gateway. Only adapter keys in EVENTLESS_ADAPTER_KEYS may declare it;
+     * its signature headers are empty, it cannot be `verified` without reconciliation and disputes, and the contract
+     * suite replaces the webhook checks with checks of the read path (an answer lost after the gateway acted is found
+     * by a read, linked, and never sent again).
+     */
+    gatewayEvents?: 'none';
   };
 }
 
+/** Task 9.1 (plan 9.1, 20 M6): the closed list of adapters that may declare `gatewayEvents: 'none'`. */
+export const EVENTLESS_ADAPTER_KEYS: readonly string[] = ['eway'];
+
 /** Task 4.4: the hosted card fields of a gateway (script, iframe origins, 3-D Secure challenge origins by mode). */
 export interface CardFieldsConfig {
+  /**
+   * Task 9.1: which client code the card page runs, and on which path it is served (each path has its own CSP).
+   * `pin_hosted_fields` at /pay/card (task 4.4); `eway_secure_fields` at /pay/secure-fields.
+   */
+  driver: CardFieldsDriver;
   scriptUrl: string;
   frameOrigins: readonly string[];
   challengeOrigins: Readonly<Record<PaymentModeName, readonly string[]>>;
 }
+
+export type CardFieldsDriver = 'pin_hosted_fields' | 'eway_secure_fields';
 
 /** A credential staff type in the panel: its value is validated against `pattern` (anchored), encrypted and never shown. */
 export interface CredentialField {
@@ -358,7 +376,40 @@ export interface CardChargeRequest {
   paymentId: string;
   /** Where the gateway sends the customer back after 3-D Secure. */
   callbackUrl: string;
+  /**
+   * Task 9.1, `before_charge` gateways only: the result of the authentication that came first. Opaque, in memory for
+   * one request: never stored or logged.
+   */
+  authentication?: AuthenticationProof;
 }
+
+/** Task 9.1: what a `before_charge` gateway's authentication gave (eWAY's ThreeDSecureAuth). Never stored or logged. */
+export interface AuthenticationProof {
+  readonly opaque: Readonly<Record<string, string>>;
+}
+
+/** Task 9.1: the payer as 3-D Secure 2 needs them (from the payment's payer, plan 9.1 20 m9). Sent to the gateway only. */
+export interface AuthenticationPayer {
+  givenName: string;
+  familyName: string;
+  email: string;
+  phone: string;
+}
+
+/** Task 9.1: the start of a `before_charge` authentication. Moves no money. */
+export type AuthenticationStart =
+  | { kind: 'challenge'; authRef: string }
+  | { kind: 'declined'; code: CardDeclineCode }
+  | { kind: 'refused'; code: 'provider_rejected' | 'provider_auth_failed' };
+
+/** Task 9.1: what the gateway says of an authentication once the customer finished it. Moves no money. */
+export type AuthenticationResult = { authenticated: true; proof: AuthenticationProof } | { authenticated: false };
+
+/**
+ * Task 9.1 (plan 9.1, 20 m10): what a search by our session reference gave when the gateway refuses it because the
+ * reference is on more than one object. Staff resolve it (`payments:card-session-bind`).
+ */
+export const NOT_UNIQUE = 'not_unique' as const;
 
 /**
  * What a charge request gave. An unknown outcome (timeout, 5xx, 409) is not a value: the gateway throws a retryable
@@ -368,7 +419,12 @@ export type CardChargeOutcome =
   | { kind: 'charged'; charge: GatewayCharge }
   | { kind: 'challenge'; charge: GatewayCharge; redirectUrl?: string }
   | { kind: 'declined'; code: CardDeclineCode; chargeToken?: string }
-  | { kind: 'refused'; code: 'provider_rejected' | 'provider_auth_failed' | 'provider_busy' };
+  | { kind: 'refused'; code: 'provider_rejected' | 'provider_auth_failed' | 'provider_busy' }
+  /**
+   * Task 9.1 (plan 9.1, 20 M4): the gateway refused it as a duplicate of an operation it already saw. Never read as "no
+   * money": an earlier attempt of the same booking may have charged without our knowing.
+   */
+  | { kind: 'duplicate' };
 
 export interface GatewayRefund {
   token: string;
@@ -389,6 +445,14 @@ export type GatewayRefundOutcome = { kind: 'created'; refund: GatewayRefund } | 
  */
 export interface CardTokenGateway {
   readonly manifest: AdapterManifest;
+  /**
+   * Task 9.1 (plan 9.1, section 4.1): `after_charge`, the charge starts 3-D Secure (Pin); `before_charge`, 3-D Secure
+   * comes first and the one charge carries its result (eWAY), through beginAuthentication and completeAuthentication.
+   */
+  readonly authentication: 'after_charge' | 'before_charge';
+  /** Task 9.1 (plan 9.1, section 4.3): the shapes of this gateway's charge and refund references. */
+  readonly chargeRefPattern: RegExp;
+  readonly refundRefPattern: RegExp;
   /** Whether the gateway's refund events carry our refund id; if not, CardSessionProvider declares refundEventOurId. */
   readonly refundEventsCarryOurId: boolean;
   readonly signatureHeaders: readonly string[];
@@ -399,11 +463,26 @@ export interface CardTokenGateway {
   /** The charge a 3-D Secure session token belongs to, once the customer is back; null if unknown. */
   verifyAuthentication(ctx: ProviderContext, sessionToken: string): Promise<GatewayCharge | null>;
   retrieveCharge(ctx: ProviderContext, token: string): Promise<GatewayCharge | null>;
-  /** Every charge whose metadata names this session (plan 4.4, section 6.3 step 5). */
-  chargesOfSession(ctx: ProviderContext, sessionRef: string): Promise<GatewayCharge[]>;
+  /**
+   * Every charge whose metadata names this session (plan 4.4, section 6.3 step 5). An empty list is a definitive "none";
+   * anything the gateway cannot answer for sure throws a retryable error. NOT_UNIQUE: the gateway refuses the search
+   * because the reference is on more than one object (plan 9.1, 20 m10).
+   */
+  chargesOfSession(ctx: ProviderContext, sessionRef: string): Promise<GatewayCharge[] | typeof NOT_UNIQUE>;
+  /** Task 9.1, `before_charge` only: starts 3-D Secure for a card token. Moves no money. */
+  beginAuthentication?(ctx: ProviderContext, req: { amount: Money; cardToken: string; payer: AuthenticationPayer }): Promise<AuthenticationStart>;
+  /** Task 9.1, `before_charge` only: what the authentication gave. Moves no money; an unknown answer throws (retryable). */
+  completeAuthentication?(ctx: ProviderContext, authRef: string): Promise<AuthenticationResult>;
+  /**
+   * Task 9.1 (plan 9.1, section 7): the refund the gateway holds under our own reference for the intent (eWAY's
+   * InvoiceReference), or null for a definitive "none". With it, a submitting intent binds by exact match, never by the
+   * time window.
+   */
+  refundByOurRef?(ctx: ProviderContext, intentRef: string, chargeToken: string): Promise<GatewayRefund | null>;
   /** Pending refunds of a charge are part of `refunds`; `refunded` is the gateway's own total. */
   refundState(ctx: ProviderContext, chargeToken: string): Promise<{ charge: GatewayCharge; refunded: bigint } | null>;
-  createRefund(ctx: ProviderContext, chargeToken: string, amount: Money): Promise<GatewayRefundOutcome>;
+  /** `intentRef`: our reference for the refund (task 9.1), sent where the gateway keeps one (eWAY); Pin ignores it. */
+  createRefund(ctx: ProviderContext, chargeToken: string, amount: Money, intentRef?: string): Promise<GatewayRefundOutcome>;
   retrieveRefund(ctx: ProviderContext, token: string): Promise<GatewayRefund | null>;
   listRefunds(ctx: ProviderContext, chargeToken: string): Promise<GatewayRefund[]>;
   verifyWebhook(ctx: ProviderContext, rawBody: Buffer, headers: Readonly<Record<string, string>>, now: Date): WebhookVerification;
