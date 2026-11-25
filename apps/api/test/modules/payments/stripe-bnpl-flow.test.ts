@@ -312,6 +312,32 @@ describe('pay later through the API (plan 9.3)', () => {
       expect(await t.prisma.task.count({ where: { entityId: r.id, status: 'open' } })).toBe(1);
     });
 
+    it('a refund failed at the gateway, then pending, then failed again: the refund-another-way task stays open, once', async () => {
+      const { b } = await overpaid();
+      fake.account(bnpl.key).nextRefund.push('pending');
+      expect([201, 202]).toContain((await panelRefund(b.id)).status);
+      const r = await t.prisma.refund.findFirstOrThrow({ where: { paymentId: b.id } });
+      const ref = r.providerRefundRef!;
+      const open = () => t.prisma.task.count({ where: { sourceRef: refundFailedTaskRef(r.id), status: 'open' } });
+      const all = () => t.prisma.task.count({ where: { sourceRef: refundFailedTaskRef(r.id) } });
+      fake.setRefundStatus(bnpl.key, ref, 'failed');
+      expect(await deliverTo(bnpl, event(bnpl, ref, { type: 'refund.failed' }))).toBe('processed');
+      expect([await open(), await all()]).toEqual([1, 1]);
+      fake.setRefundStatus(bnpl.key, ref, 'pending');
+      expect(await deliverTo(bnpl, event(bnpl, ref, { type: 'refund.updated' }))).toBe('processed');
+      expect([await open(), await all()]).toEqual([1, 1]);
+      fake.setRefundStatus(bnpl.key, ref, 'failed');
+      expect(await deliverTo(bnpl, event(bnpl, ref, { type: 'refund.failed' }))).toBe('processed');
+      expect((await t.prisma.refund.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('failed');
+      expect([await open(), await all()]).toEqual([1, 1]);
+      // Pending once more, then succeeded: only then is it closed.
+      fake.setRefundStatus(bnpl.key, ref, 'pending');
+      expect(await deliverTo(bnpl, event(bnpl, ref, { type: 'refund.updated' }))).toBe('processed');
+      fake.setRefundStatus(bnpl.key, ref, 'succeeded');
+      expect(await deliverTo(bnpl, event(bnpl, ref, { type: 'refund.updated' }))).toBe('processed');
+      expect([await open(), await all()]).toEqual([0, 1]);
+    });
+
     it('refund_refused_on_sweep_retry_opens_one_task (code review 1): no answer first (202), refused when the sweep retries', async () => {
       const { b } = await overpaid();
       fake.account(bnpl.key).faults.push(500);

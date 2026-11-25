@@ -227,8 +227,10 @@ export class PaymentRefundStateMachine {
       const n = await tx.$executeRaw`UPDATE refunds SET "failureCode" = ${LATE_PENDING_CODE}, "updatedAt" = clock_timestamp() WHERE id = ${r.id}::uuid AND status = 'failed' AND "failureCode" IS DISTINCT FROM ${LATE_PENDING_CODE}`;
       if (n === 1) await this.ledger.reallocate(tx, booking, r.mode, `refund:${r.id}:late_pending`);
     }
-    // Task 9.3 (code review 2): the refund moved after all, so the task telling staff to refund another way is done.
-    await this.tasks.closeSystemIn(tx, refundFailedTaskRef(r.id));
+    // Task 9.3 (code review 2 and its delta review): only money actually refunded closes the task telling staff to refund
+    // another way. A refund still pending at the gateway may fail again, and then nothing would tell staff the customer is
+    // owed, so the task stays open until the gateway settles it.
+    if (remote.status === 'succeeded') await this.tasks.closeSystemIn(tx, refundFailedTaskRef(r.id));
     await this.tasks.createSystemIn(tx, {
       title: `Refund on booking ${booking.reference} was made at the gateway after it was marked as not made`,
       description: remote.status === 'succeeded'
