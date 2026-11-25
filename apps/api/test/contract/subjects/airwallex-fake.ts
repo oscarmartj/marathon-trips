@@ -72,12 +72,19 @@ export class FakeAirwallex {
   listsWithoutOrderFields = false;
   /** When set, a GET of one session or intent also omits them. */
   getsWithoutOrderFields = false;
+  /** Code review 9.2, point 1: refund list items (and, if set, a GET of one refund) come without their metadata object. */
+  refundListsWithoutMetadata = false;
+  refundGetsWithoutMetadata = false;
+  /** Code review 9.2, point 1: when false, a repeated request_id is not recognised (A24 false): a second object is made. */
+  rememberRequestIds = true;
   /** Refunds settle at once (SETTLED) unless set to stay RECEIVED or to go ACCEPTED. */
   refundOutcome: 'SETTLED' | 'RECEIVED' | 'ACCEPTED' | 'FAILED' = 'SETTLED';
   /** Every request, for tests that count them. */
   readonly log: Array<{ method: string; path: string; body?: string }> = [];
   /** Tests set these: the next matching request is processed, then its answer is lost (a timeout). */
   private lose: Array<(req: AirwallexRequest) => boolean> = [];
+  /** Tests set these: something happens at Airwallex just before the next matching request is handled. */
+  private before: Array<{ match: (req: AirwallexRequest) => boolean; run: () => void }> = [];
   /** Tests set these: the next matching request fails with this status before doing anything. */
   private fail: Array<{ match: (req: AirwallexRequest) => boolean; status: number; code?: string }> = [];
 
@@ -105,6 +112,10 @@ export class FakeAirwallex {
     this.lose.push(match);
   }
 
+  beforeNext(match: (req: AirwallexRequest) => boolean, run: () => void): void {
+    this.before.push({ match, run });
+  }
+
   failNext(match: (req: AirwallexRequest) => boolean, status: number, code?: string): void {
     this.fail.push({ match, status, code });
   }
@@ -113,6 +124,8 @@ export class FakeAirwallex {
     const u = new URL(req.url);
     if (u.origin !== 'https://api.sandbox.airwallex.com') throw new Error(`fake airwallex: unexpected host ${u.origin}`);
     this.log.push({ method: req.method, path: u.pathname, ...(req.body ? { body: req.body } : {}) });
+    const b = this.before.findIndex((x) => x.match(req));
+    if (b >= 0) this.before.splice(b, 1)[0]!.run();
     const f = this.fail.findIndex((x) => x.match(req));
     if (f >= 0) {
       const [x] = this.fail.splice(f, 1);
@@ -176,11 +189,11 @@ export class FakeAirwallex {
     if (path === '/api/v1/pa/refunds/create' && req.method === 'POST') return this.createRefund(a, body, req.body ?? '');
     if (path === '/api/v1/pa/refunds' && req.method === 'GET') {
       const pi = q.get('payment_intent_id');
-      return this.list(q, [...a.refunds.values()].filter((r) => this.ignoreFilters || !pi || r.paymentIntentId === pi).map((r) => this.refundJson(r)));
+      return this.list(q, [...a.refunds.values()].filter((r) => this.ignoreFilters || !pi || r.paymentIntentId === pi).map((r) => this.refundJson(r, this.refundListsWithoutMetadata)));
     }
     if ((m = /^\/api\/v1\/pa\/refunds\/([^/]+)$/.exec(path)) && req.method === 'GET') {
       const r = a.refunds.get(m[1]!);
-      return r ? json(200, this.refundJson(r)) : json(404, { code: 'resource_not_found', message: 'no refund' });
+      return r ? json(200, this.refundJson(r, this.refundGetsWithoutMetadata)) : json(404, { code: 'resource_not_found', message: 'no refund' });
     }
     return json(404, { code: 'resource_not_found', message: `no route ${req.method} ${path}` });
   }
@@ -207,7 +220,7 @@ export class FakeAirwallex {
   private createSession(a: FakeAccount, b: Obj): AirwallexResponse {
     const requestId = String(b.request_id ?? '');
     if (!requestId || requestId.length > 64) return json(400, { code: 'validation_error', message: 'request_id' });
-    if (a.requestIds.has(requestId)) return json(400, { code: 'duplicate_request_id', message: 'duplicate' });
+    if (this.rememberRequestIds && a.requestIds.has(requestId)) return json(400, { code: 'duplicate_request_id', message: 'duplicate' });
     const items = b.line_items as Array<{ quantity: number; price: { currency: string; unit_amount: string } }> | undefined;
     const pio = b.payment_intent_data as { merchant_order_id?: string } | undefined;
     const po = b.payment_options as { payment_method_types?: string[]; auto_capture?: boolean } | undefined;
@@ -230,7 +243,7 @@ export class FakeAirwallex {
   private createRefund(a: FakeAccount, b: Obj, raw: string): AirwallexResponse {
     const requestId = String(b.request_id ?? '');
     if (!requestId || requestId.length > 64) return json(400, { code: 'validation_error', message: 'request_id' });
-    if (a.requestIds.has(requestId)) return json(400, { code: 'duplicate_request_id', message: 'duplicate' });
+    if (this.rememberRequestIds && a.requestIds.has(requestId)) return json(400, { code: 'duplicate_request_id', message: 'duplicate' });
     const i = a.intents.get(String(b.payment_intent_id ?? ''));
     if (!i) return json(404, { code: 'resource_not_found', message: 'no intent' });
     // The amount must be a JSON number written as a decimal literal (A21): read it from the raw text.
@@ -258,8 +271,8 @@ export class FakeAirwallex {
     return { id: i.id, status: i.status, amount: new RawNumber(i.amount), currency: i.currency, created_at: new Date(i.created).toISOString(), ...(withoutOrderFields || i.merchantOrderId === undefined ? {} : { merchant_order_id: i.merchantOrderId }), captured_amount: new RawNumber(i.status === 'SUCCEEDED' ? i.amount : '0') };
   }
 
-  refundJson(r: Refund): Obj {
-    return { id: r.id, status: r.status, amount: new RawNumber(r.amount), currency: r.currency, payment_intent_id: r.paymentIntentId, metadata: r.metadata, created_at: new Date(r.created).toISOString() };
+  refundJson(r: Refund, withoutMetadata = false): Obj {
+    return { id: r.id, status: r.status, amount: new RawNumber(r.amount), currency: r.currency, payment_intent_id: r.paymentIntentId, ...(withoutMetadata ? {} : { metadata: r.metadata }), created_at: new Date(r.created).toISOString() };
   }
 
   // ---- What the customer, the gateway and staff do ----

@@ -161,6 +161,11 @@ export interface RefundView extends ProviderRefund {
   keyHash?: string;
   /** Our ref from the metadata, unchecked: the caller checks it against the intent before using it. */
   metaRef?: string;
+  /**
+   * Whether the object carried a `metadata` object at all (code review 9.2, point 1). Without one, nothing says whether
+   * it is ours: the caller reads it again, and otherwise treats it as unknown, never as "not ours".
+   */
+  metadataPresent: boolean;
 }
 
 /** D5: money counts as gone only once SETTLED; RECEIVED and ACCEPTED are pending. */
@@ -174,12 +179,13 @@ export function refundView(o: unknown): RefundView | null {
   const amountMinor = fromAirwallexAmount(o.amount, currency);
   const status = REFUND_STATUS[str(o.status) ?? ''];
   if (!id || !PATH_ID.test(id) || !intentId || !INTENT_ID.test(intentId) || amountMinor === null || !currency || !status) return null;
+  const metadataPresent = isObj(o.metadata);
   const meta = isObj(o.metadata) ? o.metadata : {};
   const ourRefundId = str(meta.mt_refund_id);
   const keyHash = str(meta.mt_refund_key);
   const metaRef = str(meta.mt_ref);
   return {
-    ref: id, status, amount: { amountMinor, currency }, paymentRef: intentId, intentId,
+    ref: id, status, amount: { amountMinor, currency }, paymentRef: intentId, intentId, metadataPresent,
     ...(ourRefundId && UUID.test(ourRefundId) ? { ourRefundId } : {}),
     ...(keyHash && /^[0-9a-f]{64}$/.test(keyHash) ? { keyHash } : {}),
     ...(metaRef && AIRWALLEX_REF.test(metaRef) ? { metaRef } : {}),
@@ -238,7 +244,10 @@ export function parseAirwallexEvent(rawBody: Buffer): NormalisedEvent | null {
     const r = refundView(object);
     // A refund we cannot read may still be money gone: a review task, never dropped (plan 20.7).
     if (!r) return unsupported('reversal');
-    return { ...head, kind: 'refund', refund: refundOut(r, r.metaRef ?? null) };
+    // The payment is named by the refund's own intent, never by our metadata (code review 9.2, point 4): the core
+    // resolves it with retrievePayment, which reads the intent's own merchant_order_id. A refund event without a
+    // metadata object claims no id of ours; the core then asks retrieveRefund, which says "unknown" (retried).
+    return { ...head, kind: 'refund', refund: refundOut(r, null) };
   }
   const lower = name.toLowerCase();
   if (lower.includes('dispute') || lower.includes('chargeback')) return unsupported('dispute');

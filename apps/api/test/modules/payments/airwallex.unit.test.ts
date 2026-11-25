@@ -181,7 +181,8 @@ describe('events (plan 7, 19.1, 19.4, 20.7)', () => {
   it('refund statuses (D5): received and accepted are pending, settled succeeded, failed failed', () => {
     const refund = (status: string) => parseAirwallexEvent(ev(`refund.${status.toLowerCase()}`, { id: 'rfd_1', status, amount: '__NUM__5.00', currency: 'AUD', payment_intent_id: 'int_abc123', metadata: { mt_ref: ref, mt_refund_id: randomUUID() } }))!;
     expect(['RECEIVED', 'ACCEPTED', 'SETTLED', 'FAILED'].map((s) => refund(s).refund?.status)).toEqual(['pending', 'pending', 'succeeded', 'failed']);
-    expect([refund('SETTLED').refund?.paymentRef, refund('SETTLED').refund?.amount.amountMinor]).toEqual([ref, 500n]);
+    // The payment is named by the refund's own intent, never by our metadata (code review, point 4).
+    expect([refund('SETTLED').refund?.paymentRef, refund('SETTLED').refund?.amount.amountMinor]).toEqual(['int_abc123', 500n]);
   });
 });
 
@@ -450,10 +451,89 @@ describe('refunds (plan 8)', () => {
     const made = await provider.createRefund(ctx, ours);
     const w = signedDelivery(ctx.webhookSecret, fake.refundEvent(id, made.ref, new Date()), new Date());
     const v = provider.verifyWebhook(ctx, w.body, w.headers, new Date());
-    expect(v.ok && [v.event.refund?.paymentRef, v.event.refund?.ourRefundId]).toEqual([p.ref, ours.metadata.refundId]);
+    if (!v.ok) throw new Error('refused');
+    expect(v.event.refund?.ourRefundId).toBe(ours.metadata.refundId);
+    expect((await provider.retrievePayment(ctx, { ref: v.event.refund!.paymentRef }))?.ref).toBe(p.ref);
   });
 
   it('the fake writes amounts as numbers (A21): RawNumber stays exact through the adapter', () => {
     expect(new RawNumber('12.50').text).toBe('12.50');
+  });
+});
+
+describe('code review of 9.2 (points 1 to 5)', () => {
+  const refundOf = (ref: string, amountMinor: bigint, key = randomUUID()) => ({ paymentRef: ref, amount: { amountMinor, currency: 'AUD' }, idempotencyKey: key, metadata: { refundId: randomUUID(), paymentId: randomUUID(), bookingId: randomUUID() }, createdAt: new Date() });
+  const refundCount = (fake: FakeAirwallex, id: string) => fake.account(id).refunds.size;
+
+  it('1: a lost refund answer, lists without metadata and request ids forgotten (A24 false): at most one refund', async () => {
+    const { fake, provider, ctx, id } = fakeWith();
+    fake.rememberRequestIds = false;
+    fake.refundListsWithoutMetadata = true;
+    fake.refundOutcome = 'RECEIVED';
+    const p = await provider.createPayment(ctx, input({ amount: { amountMinor: 100_000n, currency: 'AUD' } }));
+    fake.pay(id, p.ref);
+    const r = refundOf(p.ref, 30_000n);
+    fake.loseNext((q) => q.url.endsWith(REFUND));
+    expect((await providerError(() => provider.createRefund(ctx, r))).retryable).toBe(true);
+    // The list lacks metadata, its GET has it: recognised by its key, never posted again.
+    const again = await provider.createRefund(ctx, r);
+    expect([refundCount(fake, id), again.amount.amountMinor]).toEqual([1, 30_000n]);
+    // Neither the list nor the GET carries metadata: unknown (retried), never a second refund.
+    fake.refundGetsWithoutMetadata = true;
+    const s = refundOf(p.ref, 30_000n);
+    fake.refundListsWithoutMetadata = false;
+    fake.loseNext((q) => q.url.endsWith(REFUND));
+    await providerError(() => provider.createRefund(ctx, s));
+    fake.refundListsWithoutMetadata = true;
+    for (let i = 0; i < 3; i++) expect((await providerError(() => provider.createRefund(ctx, s))).code).toBe('provider_unavailable');
+    expect(refundCount(fake, id)).toBe(2);
+    expect((await providerError(() => provider.retrieveRefund(ctx, { idempotencyKey: s.idempotencyKey, paymentRef: p.ref, createdAt: s.createdAt }))).retryable).toBe(true);
+  });
+
+  it('1: a refund list item without payment_intent_id is unknown; a refund read without metadata is unknown until confirmed', async () => {
+    const { fake, provider, ctx, id } = fakeWith();
+    const p = await provider.createPayment(ctx, input());
+    fake.pay(id, p.ref);
+    const made = await provider.createRefund(ctx, refundOf(p.ref, 100n));
+    const stripping: AirwallexTransport = async (req) => {
+      const res = await fake.transport(req);
+      return req.method === 'GET' && new URL(req.url).pathname === '/api/v1/pa/refunds' ? { ...res, body: res.body.replace(/"payment_intent_id":"int_[A-Za-z0-9]+",/g, '') } : res;
+    };
+    const blind = new AirwallexProvider({ transport: stripping, now: () => fake.now() });
+    expect((await providerError(() => blind.createRefund(ctx, refundOf(p.ref, 100n)))).code).toBe('provider_unavailable');
+    fake.refundGetsWithoutMetadata = true;
+    expect((await providerError(() => provider.retrieveRefund(ctx, { ref: made.ref }))).retryable).toBe(true);
+    const confirmed = new AirwallexProvider({ transport: fake.transport, now: () => fake.now(), refundGetReturnsMetadata: true });
+    expect((await confirmed.retrieveRefund(ctx, { ref: made.ref }))?.ourRefundId).toBeUndefined();
+  });
+
+  it('2: cancel_cancels_the_session_first_then_an_intent_opened_in_between', async () => {
+    const { fake, provider, ctx, id } = fakeWith();
+    const p = await provider.createPayment(ctx, input());
+    // The customer submits the card (3-D Secure starts) just before our session cancel reaches Airwallex.
+    let intentId = '';
+    fake.beforeNext((q) => q.method === 'POST' && q.url.includes('/checkout_sessions/') && q.url.endsWith('/cancel'), () => {
+      intentId = fake.pay(id, p.ref, 'REQUIRES_CUSTOMER_ACTION').id;
+    });
+    expect((await provider.cancelPayment(ctx, p.ref, randomUUID())).status).toBe('cancelled');
+    expect(intentId).not.toBe('');
+    expect(fake.account(id).intents.get(intentId)!.status).toBe('CANCELLED');
+    expect(fake.sessionOfRef(id, p.ref).status).toBe('CANCELLED');
+  });
+
+  it('3: an intent read by id without merchant_order_id is unknown, never "not ours", until A25 is confirmed', async () => {
+    const { fake, provider, ctx, id } = fakeWith();
+    const foreign = fake.foreignIntent(id, '12.50');
+    expect((await providerError(() => provider.retrievePayment(ctx, { ref: foreign.id }))).retryable).toBe(true);
+    const confirmed = new AirwallexProvider({ transport: fake.transport, now: () => fake.now(), getReturnsOrderFields: true });
+    expect(await confirmed.retrievePayment(ctx, { ref: foreign.id })).toBeNull();
+  });
+
+  it('5: has_more with no items cannot be finished: unknown, never "none"', async () => {
+    const { fake, ctx } = fakeWith();
+    const empty = new AirwallexProvider({ transport: async (req) => (req.method === 'GET' && new URL(req.url).pathname === '/api/v1/checkout/checkout_sessions' ? { status: 200, body: '{"items":[],"has_more":true}' } : fake.transport(req)) });
+    const i = input();
+    const e = await providerError(() => empty.retrievePayment(ctx, { idempotencyKey: i.idempotencyKey, createdAt: i.createdAt }));
+    expect([e.code, e.retryable]).toEqual(['provider_unavailable', true]);
   });
 });

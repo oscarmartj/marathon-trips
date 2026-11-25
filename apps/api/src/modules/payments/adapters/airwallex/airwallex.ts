@@ -39,6 +39,11 @@ export const MAX_PAGES = 20;
  * confirms it, an item without them is "unknown", never "not ours". Turning it on is a one-line reviewed change.
  */
 export const GET_RETURNS_ORDER_FIELDS = false;
+/**
+ * Code review 9.2, point 1: whether a GET of a refund is known to return its `metadata` object. Until the sandbox run
+ * confirms it, a refund of our intent without one is "unknown" (retried), so a lost refund answer is never posted again.
+ */
+export const REFUND_GET_RETURNS_METADATA = false;
 
 const unavailable = (): ProviderError => new ProviderError('provider_unavailable', true);
 const rejected = (): ProviderError => new ProviderError('provider_rejected', false);
@@ -90,6 +95,8 @@ export interface AirwallexOptions {
   now?: () => Date;
   /** Only tests pass one: GET_RETURNS_ORDER_FIELDS as if the sandbox had confirmed it (plan 20.3). */
   getReturnsOrderFields?: boolean;
+  /** Only tests pass one: REFUND_GET_RETURNS_METADATA as if the sandbox had confirmed it (code review, point 1). */
+  refundGetReturnsMetadata?: boolean;
 }
 
 type Match = 'ours' | 'not_ours' | 'incomplete';
@@ -100,11 +107,13 @@ export class AirwallexProvider implements PaymentProvider {
   private readonly transport: AirwallexTransport;
   private readonly now: () => Date;
   private readonly getReturnsOrderFields: boolean;
+  private readonly refundGetReturnsMetadata: boolean;
 
   constructor(opts: AirwallexOptions = {}) {
     this.transport = opts.transport ?? fetchTransport;
     this.now = opts.now ?? (() => new Date());
     this.getReturnsOrderFields = opts.getReturnsOrderFields ?? GET_RETURNS_ORDER_FIELDS;
+    this.refundGetReturnsMetadata = opts.refundGetReturnsMetadata ?? REFUND_GET_RETURNS_METADATA;
   }
 
   private open(ctx: ProviderContext): Promise<AirwallexApi> {
@@ -125,8 +134,11 @@ export class AirwallexProvider implements PaymentProvider {
         items.push(it);
       }
       if (typeof body.page_after === 'string' && body.page_after.length > 0) cursor = ['page', body.page_after];
-      else if (body.has_more === true && body.items.length > 0) cursor = ['page_num', String(page + 1)];
-      else return items;
+      else if (body.has_more === true) {
+        // More said to exist but none given: the list cannot be finished, so it is unknown (code review 9.2, point 5).
+        if (body.items.length === 0) throw unavailable();
+        cursor = ['page_num', String(page + 1)];
+      } else return items;
     }
     throw unavailable();
   }
@@ -239,7 +251,12 @@ export class AirwallexProvider implements PaymentProvider {
       throw errorFor(a);
     }
     const moid = str(a.body.merchant_order_id);
-    if (moid === undefined || !AIRWALLEX_REF.test(moid)) return null;
+    // No order id at all is unknown, never "not ours", until A25 is confirmed (code review 9.2, point 3).
+    if (moid === undefined) {
+      this.foreignOrUnknown(a.body);
+      return null;
+    }
+    if (!AIRWALLEX_REF.test(moid)) return null;
     const view = intentView(a.body);
     if (!view) throw unavailable();
     return view;
@@ -319,12 +336,14 @@ export class AirwallexProvider implements PaymentProvider {
   async cancelPayment(ctx: ProviderContext, ref: string, _idempotencyKey: string): Promise<ProviderPayment> {
     const api = await this.open(ctx);
     if (!AIRWALLEX_REF.test(ref)) throw notFound();
-    const intent = await this.findIntent(api, ref);
-    if (intent && MONEY_INTENT_STATUSES.includes(intent.status)) return paymentOf(null, intent)!;
-    // An open intent is cancelled every time one is seen, whatever its session says (plan 20.1).
-    if (intent && OPEN_INTENT_STATUSES.includes(intent.status)) await this.cancelObject(api, `/api/v1/pa/payment_intents/${intent.id}/cancel`, { request_id: `mtc-${randomUUID()}`, cancellation_reason: 'Payment attempt ended' });
+    // The session first, then the intent (code review 9.2, point 2): a card submitted between the two steps leaves an
+    // intent that this call still sees and cancels. An open intent is cancelled every time one is seen (plan 20.1).
+    const paid = await this.findIntent(api, ref);
+    if (paid && MONEY_INTENT_STATUSES.includes(paid.status)) return paymentOf(null, paid)!;
     const session = await this.findSession(api, { ref }, parseRef(ref)!.createdAtS);
     if (session?.status === 'ACTIVE') await this.cancelObject(api, `/api/v1/checkout/checkout_sessions/${session.id}/cancel`);
+    const intent = await this.findIntent(api, ref);
+    if (intent && OPEN_INTENT_STATUSES.includes(intent.status)) await this.cancelObject(api, `/api/v1/pa/payment_intents/${intent.id}/cancel`, { request_id: `mtc-${randomUUID()}`, cancellation_reason: 'Payment attempt ended' });
     const after = await this.read(api, ref);
     if (!after) throw notFound();
     // A cancel never answers "still waiting": read again later.
@@ -345,17 +364,33 @@ export class AirwallexProvider implements PaymentProvider {
     return this.intentById(api, paymentRef);
   }
 
-  /** Every refund of an intent, each checked to be of that intent (plan 19.2). */
+  /**
+   * Every refund of an intent, each checked to be of that intent (plan 19.2). An item without `payment_intent_id`, or a
+   * refund of this intent without a `metadata` object (read again with a GET first), is unknown: a lost refund answer
+   * must be recognised by its key, never posted again (code review 9.2, point 1).
+   */
   private async refundsOf(api: AirwallexApi, intentId: string): Promise<RefundView[]> {
     const items = await this.listAll(api, '/api/v1/pa/refunds', [['payment_intent_id', intentId]]);
     const out: RefundView[] = [];
     for (const o of items) {
-      if (str(o.payment_intent_id) !== intentId) continue;
+      const of = str(o.payment_intent_id);
+      if (of === undefined) throw unavailable();
+      if (of !== intentId) continue;
       const r = refundView(o);
       if (!r) throw unavailable();
-      out.push(r);
+      out.push(r.metadataPresent ? r : await this.refundWithMetadata(api, r.ref));
     }
     return out;
+  }
+
+  /** A refund read with its own GET, which must carry a metadata object unless A-refund-metadata is confirmed. */
+  private async refundWithMetadata(api: AirwallexApi, id: string): Promise<RefundView> {
+    const a = await api.request('GET', `/api/v1/pa/refunds/${id}`);
+    if (!a.ok) throw a.status === 404 ? unavailable() : errorFor(a);
+    const r = refundView(a.body);
+    if (!r) throw unavailable();
+    if (!r.metadataPresent && !this.refundGetReturnsMetadata) throw unavailable();
+    return r;
   }
 
   async createRefund(ctx: ProviderContext, input: CreateRefundInput): Promise<ProviderRefund> {
@@ -409,6 +444,8 @@ export class AirwallexProvider implements PaymentProvider {
       }
       const r = refundView(a.body);
       if (!r) throw unavailable();
+      // Without a metadata object we cannot say it is not ours: unknown, so the core never records it as external.
+      if (!r.metadataPresent && !this.refundGetReturnsMetadata) throw unavailable();
       const intent = await this.intentById(api, r.intentId);
       return refundOut(r, intent?.ref ?? null);
     }
