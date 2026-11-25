@@ -71,6 +71,8 @@ jobs:
       # Repository secrets, empty when unset (the suite then fails its credential check before any network call).
       STRIPE_SANDBOX_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_SECRET_KEY }}
       STRIPE_SANDBOX_WEBHOOK_SECRET: ${{ secrets.STRIPE_SANDBOX_WEBHOOK_SECRET }}
+      STRIPE_BNPL_SANDBOX_SECRET_KEY: ${{ secrets.STRIPE_BNPL_SANDBOX_SECRET_KEY }}
+      STRIPE_BNPL_SANDBOX_WEBHOOK_SECRET: ${{ secrets.STRIPE_BNPL_SANDBOX_WEBHOOK_SECRET }}
       PAYPAL_SANDBOX_CLIENT_ID: ${{ secrets.PAYPAL_SANDBOX_CLIENT_ID }}
       PAYPAL_SANDBOX_CLIENT_SECRET: ${{ secrets.PAYPAL_SANDBOX_CLIENT_SECRET }}
       PAYPAL_SANDBOX_WEBHOOK_ID: ${{ secrets.PAYPAL_SANDBOX_WEBHOOK_ID }}
@@ -84,8 +86,14 @@ jobs:
       EWAY_SANDBOX_API_KEY: ${{ secrets.EWAY_SANDBOX_API_KEY }}
       EWAY_SANDBOX_API_PASSWORD: ${{ secrets.EWAY_SANDBOX_API_PASSWORD }}
       EWAY_SANDBOX_PUBLIC_KEY: ${{ secrets.EWAY_SANDBOX_PUBLIC_KEY }}
+      AIRWALLEX_SANDBOX_CLIENT_ID: ${{ secrets.AIRWALLEX_SANDBOX_CLIENT_ID }}
+      AIRWALLEX_SANDBOX_API_KEY: ${{ secrets.AIRWALLEX_SANDBOX_API_KEY }}
+      AIRWALLEX_SANDBOX_WEBHOOK_SECRET: ${{ secrets.AIRWALLEX_SANDBOX_WEBHOOK_SECRET }}
+      AIRWALLEX_SANDBOX_CARD_PAY: ${{ secrets.AIRWALLEX_SANDBOX_CARD_PAY }}
+      AIRWALLEX_SANDBOX_CARD_DECLINE: ${{ secrets.AIRWALLEX_SANDBOX_CARD_DECLINE }}
       # File inputs arrive as base64 secrets and are written outside the repository below.
       B64_PAYPAL_SANDBOX_RECORDED_DELIVERY: ${{ secrets.PAYPAL_SANDBOX_RECORDED_DELIVERY_B64 }}
+      B64_AIRWALLEX_SANDBOX_RECORDED_DELIVERY: ${{ secrets.AIRWALLEX_SANDBOX_RECORDED_DELIVERY_B64 }}
       B64_PIN_TEST_RECORDED_DELIVERY: ${{ secrets.PIN_TEST_RECORDED_DELIVERY_B64 }}
       B64_PIN_TEST_ACS_SCRIPT: ${{ secrets.PIN_TEST_ACS_SCRIPT_B64 }}
       B64_EWAY_SANDBOX_BROWSER_SCRIPT: ${{ secrets.EWAY_SANDBOX_BROWSER_SCRIPT_B64 }}
@@ -102,7 +110,7 @@ jobs:
       - name: Write file inputs from secrets
         run: |
           set -euo pipefail
-          for name in PAYPAL_SANDBOX_RECORDED_DELIVERY PIN_TEST_RECORDED_DELIVERY PIN_TEST_ACS_SCRIPT EWAY_SANDBOX_BROWSER_SCRIPT; do
+          for name in AIRWALLEX_SANDBOX_RECORDED_DELIVERY PAYPAL_SANDBOX_RECORDED_DELIVERY PIN_TEST_RECORDED_DELIVERY PIN_TEST_ACS_SCRIPT EWAY_SANDBOX_BROWSER_SCRIPT; do
             var="B64_$name"
             if [ -n "${!var:-}" ]; then
               printf '%s' "${!var}" | base64 -d > "$RUNNER_TEMP/$name"
@@ -113,4 +121,5 @@ jobs:
         run: pnpm --filter @mt/api test:sandbox
       - name: Summary
         if: always()
-        run: echo "Sandbox contract for \`${{ matrix.adapter }}\`: job status ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Sandbox contract for \`${{ matrix.adapter }}\`: job status ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

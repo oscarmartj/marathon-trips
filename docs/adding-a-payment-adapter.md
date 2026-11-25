@@ -64,9 +64,11 @@ Para que un adaptador entre en la prueba semanal:
 | `stripe` | `STRIPE_SANDBOX_SECRET_KEY`, `STRIPE_SANDBOX_WEBHOOK_SECRET` |
 | `paypal` | `PAYPAL_SANDBOX_CLIENT_ID`, `PAYPAL_SANDBOX_CLIENT_SECRET`, `PAYPAL_SANDBOX_WEBHOOK_ID`, `PAYPAL_SANDBOX_BUYER_EMAIL`, `PAYPAL_SANDBOX_BUYER_PASSWORD`, `PAYPAL_SANDBOX_RECORDED_DELIVERY_B64` |
 | `pin_payments` | `PIN_TEST_SECRET_KEY`, `PIN_TEST_PUBLISHABLE_KEY`, `PIN_TEST_WEBHOOK_KEY`, `PIN_TEST_CARD_PAY`, `PIN_TEST_CARD_DECLINE`, `PIN_TEST_RECORDED_DELIVERY_B64`, `PIN_TEST_ACS_SCRIPT_B64` |
+| `stripe_bnpl` | `STRIPE_BNPL_SANDBOX_SECRET_KEY`, `STRIPE_BNPL_SANDBOX_WEBHOOK_SECRET` |
+| `airwallex` | `AIRWALLEX_SANDBOX_CLIENT_ID`, `AIRWALLEX_SANDBOX_API_KEY`, `AIRWALLEX_SANDBOX_WEBHOOK_SECRET`, `AIRWALLEX_SANDBOX_CARD_PAY`, `AIRWALLEX_SANDBOX_CARD_DECLINE`, `AIRWALLEX_SANDBOX_RECORDED_DELIVERY_B64` |
 | `eway` | `EWAY_SANDBOX_API_KEY`, `EWAY_SANDBOX_API_PASSWORD`, `EWAY_SANDBOX_PUBLIC_KEY`, `EWAY_SANDBOX_BROWSER_SCRIPT_B64` |
 
-Los `*_B64` son los archivos de entrega grabada o de guion de navegador, en base64; el flujo los escribe fuera del repositorio. Un adaptador nuevo con otras variables añade sus secretos al bloque `env` del flujo (`weekly.test.ts` comprueba que cada uno sale de `secrets.*`). Si el sujeto necesita `playwright`, se añade como dependencia de desarrollo en el mismo PR que lo pasa a `verified`.
+Los `*_B64` son los archivos de entrega grabada o de guion de navegador, en base64; el flujo los escribe fuera del repositorio. Un adaptador nuevo con otras variables añade sus secretos al bloque `env` del flujo (`weekly.test.ts` analiza el YAML y comprueba que cada variable que lee un sujeto de sandbox sale de `secrets.*`). Si el sujeto necesita `playwright`, se añade como dependencia de desarrollo en el mismo PR que lo pasa a `verified`.
 
 ## Si la batería no encaja con una pasarela
 
