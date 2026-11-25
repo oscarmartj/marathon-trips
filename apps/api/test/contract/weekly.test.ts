@@ -1,7 +1,8 @@
 // The weekly sandbox contract run (task 9.4): which adapters it covers, and the workflow that runs it. No database.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 import { SimulatorProvider, SimulatorWorld } from '../../src/modules/payments/adapters/simulator/simulator';
 import type { AdapterManifest, PaymentProvider } from '../../src/modules/payments/core/provider';
 import type { SubjectFactory } from './payment-provider.contract';
@@ -51,30 +52,66 @@ describe('weekly sandbox plan (task 9.4)', () => {
   });
 });
 
-describe('weekly workflow file', () => {
-  const text = readFileSync(resolve(__dirname, '../../../../.github/workflows/weekly-sandbox-contract.yml'), 'utf8');
+interface Step { name?: string; run?: string; if?: string; uses?: string }
+interface Job { needs?: string | string[]; if?: string; env?: Record<string, string>; steps?: Step[]; strategy?: { matrix?: Record<string, unknown> }; outputs?: Record<string, string> }
+interface Workflow { on?: Record<string, unknown>; jobs?: Record<string, Job> }
 
-  it('is scheduled and manual only, never on pull requests', () => {
-    expect(text).toMatch(/^\s+schedule:\s*$/m);
-    expect(text).toMatch(/cron: "[^"]+"/);
-    expect(text).toMatch(/^\s+workflow_dispatch:/m);
-    expect(text).not.toMatch(/pull_request|push:/);
+describe('weekly workflow file', () => {
+  const path = resolve(__dirname, '../../../../.github/workflows/weekly-sandbox-contract.yml');
+  const text = readFileSync(path, 'utf8');
+  // Parsed for real: a file GitHub would reject as invalid YAML (9.fix-1) must fail here, not only on the first Sunday.
+  const wf = parse(text, { strict: true, uniqueKeys: true }) as Workflow;
+  const sandbox = wf.jobs?.sandbox;
+  const secretRef = /^\$\{\{ secrets\.(\w+) \}\}$/;
+
+  it('is valid YAML with a plan job and a sandbox job', () => {
+    expect(wf.jobs).toBeDefined();
+    expect(Object.keys(wf.jobs ?? {}).sort()).toEqual(['plan', 'sandbox']);
+    for (const [name, job] of Object.entries(wf.jobs ?? {})) {
+      expect(job.steps?.length, name).toBeGreaterThan(0);
+      for (const step of job.steps ?? []) expect(Boolean(step.run) !== Boolean(step.uses), `${name}: ${step.name}`).toBe(true);
+    }
+  });
+
+  it('is scheduled and manual only, never on pull requests or pushes', () => {
+    expect(Object.keys(wf.on ?? {}).sort()).toEqual(['schedule', 'workflow_dispatch']);
+    const schedule = wf.on?.schedule as { cron: string }[];
+    expect(schedule).toHaveLength(1);
+    expect(schedule[0]?.cron).toMatch(/^\S+ \S+ \S+ \S+ \S+$/);
   });
 
   it('says so when nothing is verified, and skips the sandbox job', () => {
     expect(text).toContain('0 verified adapters, nothing to test');
-    expect(text).toContain("needs.plan.outputs.count != '0'");
+    expect(sandbox?.needs).toBe('plan');
+    expect(sandbox?.if).toBe("needs.plan.outputs.count != '0'");
+    expect(wf.jobs?.plan?.outputs?.keys).toBe('${{ steps.plan.outputs.keys }}');
+    expect(wf.jobs?.plan?.outputs?.count).toBe('${{ steps.plan.outputs.count }}');
   });
 
-  it('takes the adapters from the registry and credentials only from secrets', () => {
-    expect(text).toContain('weekly-sandbox-plan.ts');
-    expect(text).not.toMatch(/matrix:\s*\n\s+adapter:\s*\[/);
-    for (const m of text.matchAll(/^\s+(\w+_(?:SANDBOX|TEST)_\w+):\s*(.*)$/gm)) expect(m[2], m[1]).toMatch(/^\$\{\{ secrets\.\w+ \}\}$/);
+  it('takes the adapters from the registry, as a matrix, and credentials only from secrets', () => {
+    expect(wf.jobs?.plan?.steps?.some((st) => st.run?.includes('weekly-sandbox-plan.ts'))).toBe(true);
+    expect(sandbox?.strategy?.matrix?.adapter).toBe('${{ fromJSON(needs.plan.outputs.keys) }}');
+    expect(sandbox?.env?.SANDBOX_ADAPTER).toBe('${{ matrix.adapter }}');
+    expect(sandbox?.steps?.some((st) => st.run?.includes('test:sandbox'))).toBe(true);
+    for (const [name, value] of Object.entries(sandbox?.env ?? {})) {
+      if (/_(SANDBOX|TEST)_/.test(name)) expect(String(value), name).toMatch(secretRef);
+    }
   });
 
-  it('passes every environment variable the sandbox subjects read as a secret', () => {
-    const names = ['STRIPE_SANDBOX_SECRET_KEY', 'STRIPE_SANDBOX_WEBHOOK_SECRET', 'PAYPAL_SANDBOX_CLIENT_ID', 'PAYPAL_SANDBOX_CLIENT_SECRET', 'PAYPAL_SANDBOX_WEBHOOK_ID',
-      'PIN_TEST_SECRET_KEY', 'PIN_TEST_PUBLISHABLE_KEY', 'PIN_TEST_WEBHOOK_KEY', 'EWAY_SANDBOX_API_KEY', 'EWAY_SANDBOX_API_PASSWORD', 'EWAY_SANDBOX_PUBLIC_KEY'];
-    for (const n of names) expect(text, n).toContain(`${n}: \${{ secrets.${n} }}`);
+  it('passes every environment variable any sandbox subject reads, so a new secret cannot be forgotten', () => {
+    const dir = resolve(__dirname, 'subjects');
+    const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !/(-fake|-certs)\.ts$|^(index|simulator)\.ts$/.test(f));
+    expect(files.length).toBeGreaterThanOrEqual(6);
+    const wanted = new Set<string>();
+    for (const f of files) for (const m of readFileSync(resolve(dir, f), 'utf8').matchAll(/\b[A-Z][A-Z0-9_]*?_(?:SANDBOX|TEST)_[A-Z0-9_]+\b/g)) wanted.add(m[0]);
+    for (const known of ['STRIPE_SANDBOX_SECRET_KEY', 'STRIPE_BNPL_SANDBOX_SECRET_KEY', 'AIRWALLEX_SANDBOX_CLIENT_ID', 'PIN_TEST_SECRET_KEY', 'EWAY_SANDBOX_API_KEY']) expect(wanted, known).toContain(known);
+    const env = sandbox?.env ?? {};
+    for (const name of [...wanted].sort()) {
+      // A file input is a base64 secret written to a file by the "Write file inputs" step, which exports the path as NAME.
+      const direct = secretRef.exec(String(env[name] ?? ''))?.[1];
+      const file = secretRef.exec(String(env[`B64_${name}`] ?? ''))?.[1];
+      expect(direct === name || file === `${name}_B64`, `${name} is not passed from secrets.${name}`).toBe(true);
+      if (file) expect(sandbox?.steps?.find((st) => st.name?.startsWith('Write file inputs'))?.run, name).toContain(name);
+    }
   });
 });
