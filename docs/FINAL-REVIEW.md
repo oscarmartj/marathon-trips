@@ -2,32 +2,36 @@
 
 Todo lo que en modo autónomo se decidió, se dejó sin verificar o necesita tus ojos. Lo actualiza el hilo de cierre de cada fase. Nada de esta lista detuvo el trabajo, pero **nada se abre al público ni cobra dinero real hasta haberla repasado.**
 
-## Antes de aceptar dinero real
+## Orden de importancia (cierre final, 2026-11-26)
 
-- [ ] Leer los informes del revisor de pagos, libro de pagos y motor de precios.
-- [ ] Comprobar a mano tres casos del motor de precios contra sus pruebas.
-- [ ] Hacer un pago de prueba completo con Stripe en sandbox, con claves de prueba propias.
-- [ ] Confirmación por escrito de cada pasarela que se vaya a activar.
-- [ ] Sustituir las páginas legales provisionales.
-- [ ] Validar el GST con tu contable (por componente, 1.1).
-- [ ] Cumplir los 8 hallazgos vinculantes del plan 0.1 al retomar el dinero (`docs/BLOCKED.md`).
-- [ ] Pedir a Airwallex, Stripe (Afterpay, Klarna y Zip), eWAY y Pin la confirmación por escrito sobre viajes prepagados de un sole trader con ABN (fase 9).
-- [ ] Crear los sandbox de eWAY, Airwallex, Stripe pay later (segunda cuenta de Stripe), Stripe, PayPal y Pin y sus secretos de repositorio (`docs/BLOCKED.md`).
+Estado: fases 0 a 9 en `main`, incluida `9.fix-1` (#89). **Ninguna pasarela es `verified`**: eWAY, Airwallex, Stripe pay later (Afterpay, Klarna, Zip), Stripe, PayPal y Pin son `experimental` contra falsos, y todo lo de eWAY, Airwallex, Stripe BNPL, Afterpay, Klarna y Zip está SIN VERIFICAR contra documentación o sandbox real. Orden: lo que bloquea salir a producción primero.
 
-## Prioridad al cerrar la fase 9 (2026-11-26): catálogo ampliado de pasarelas
+### 1. Bloquea salir a producción
 
-Lo nuevo de 9.1 a 9.4, por importancia. Todo contra falsos: eWAY, Airwallex y Stripe pay later son `experimental`, **ninguna pasarela es `verified`** y todo lo de eWAY, Airwallex, Stripe pay later, Afterpay, Klarna y Zip está **SIN VERIFICAR** (el proxy de los agentes bloqueó sus documentaciones; se leyó con una herramienta que resume o no se leyó). Detalle en `docs/done/9.close.md` y en la sección "Fase 9" más abajo.
+- [ ] **Cuentas y claves de sandbox** (sin ellas ningún adaptador pasa de `experimental`): Stripe, PayPal, Pin, eWAY (cuenta de partner), Airwallex (autoservicio) y Stripe pay later (segunda cuenta de Stripe, A9); luego `test:sandbox` de cada una y sus secretos de repositorio para la prueba semanal (tabla en `docs/adding-a-payment-adapter.md`; variables en `docs/BLOCKED.md`). Pago de prueba completo con Stripe en sandbox.
+- [ ] **Peticiones por escrito a proveedores** antes de activar nada: Airwallex (viajes es actividad restringida); Stripe y Afterpay (Afterpay prohíbe "Pre-orders" y el MCC 5962; comisiones del 4,99 % al 11 % sin poder repercutirlas; reembolsos a 120 y 180 días); eWAY (viajes, SAQ, recibos); Pin; Stripe y PayPal (viajes prepagados, sole trader con ABN).
+- [ ] **Preguntas al contable:** GST (principal o agente, caja o devengo, Div 99, tax invoices en otra moneda, ajustes), cuenta fiduciaria y normas estatales, y el cambio D7 de 6.2 en "dinero a apartar". `gstRegistered: true` da error hasta validarlo.
+- [ ] **Permisos solo owner** por asignar en el panel de roles (lista completa en `docs/BLOCKED.md`; la fase 9 no añade permisos).
+- [ ] **Decisiones de copy y producto:** sustituir las páginas legales provisionales y publicar `terms` (sin ella no se inicia ningún pago); `copy.test.ts` y "cancelled"; avisos de servicio (`serviceMessageAck`); S-13, S-14 y S-24; `ENABLED_LOCALES` para `es-ES`.
+- [ ] **Servidor:** seguir `docs/deploy/guide.md` en un entorno de pruebas, S-04 (IP real tras Caddy), copia externa con `rclone`, AWS, dominio y SMTP; repetir `verify-restore.sh`.
+- [ ] **Repositorio público:** revisar el historial por datos sensibles y decidir si vuelve a privado.
+- [ ] Leer los informes del revisor de pagos, libro y precios; comprobar a mano tres casos del motor de precios; cumplir los 8 hallazgos vinculantes del plan 0.1 (`docs/BLOCKED.md`).
 
-1. **La prueba semanal (9.4) no funciona todavía:** `.github/workflows/weekly-sandbox-contract.yml` tiene YAML inválido (línea 116) y GitHub registra 18 ejecuciones en rojo, sin trabajos, desde el PR #85; no correrá el domingo. Además faltan los secretos y la tabla de Airwallex y `stripe_bnpl`. Tarea `9.fix-1` pedida al coordinador (`docs/BLOCKED.md`). No hay daño: con 0 `verified` no hay nada que probar.
-2. **Ninguna pasarela puede cobrar en real, y las tres nuevas dependen de que consigas cuentas:** sandbox y `test:sandbox` de eWAY (cuenta de partner), Airwallex (autoservicio) y Stripe pay later (una segunda cuenta de Stripe, A9), más los de Stripe, PayPal y Pin. Los secretos para la prueba semanal están en la tabla de `docs/adding-a-payment-adapter.md` (y, tras `9.fix-1`, también los dos que faltan). Detalle y variables en `docs/BLOCKED.md`.
-3. **Peticiones escritas a proveedores antes de activar nada:** Airwallex (viajes es actividad restringida: aprobación escrita); Stripe y Afterpay (Afterpay prohíbe "Pre-orders" y el MCC 5962 de viajes; comisiones del 4,99 % al 11 % sin poder repercutirlas; ventanas de reembolso de 120 y 180 días); eWAY (viajes, SAQ y recibos); Pin (ya registrado). Sin esa respuesta, el catálogo ofrece pasarelas que quizá no acepten tu negocio.
-4. **eWAY no puede ser `verified` hoy** (`gatewayEvents: 'none'`: sin eventos ni conciliación ni disputas) y P5 no se cumple: un reembolso o contracargo hecho en MYeWAY no llega a la app hasta **9.1-F2**; reembolsar solo desde el panel. El 3-D Secure de eWAY muestra "no se pudo mostrar" hasta el sandbox (no se carga el script de `Cerberus`).
-5. **Stripe pay later (9.3):** la app no puede registrar un reembolso por transferencia de un pago de pasarela (**9.3-F7**): la tarea nueva `payments:refund_failed:<id>` manda a reembolsar por otra vía y no hay donde dejarlo anotado. Capacidades de pago aplazado en `testConnection` sin hacer (**9.3-F8**). La clave de idempotencia por ejecución de `cancelPayment` no está demostrada hasta el sandbox (A15).
-6. **Salvedad de "las pasarelas activas no cambian":** el comportamiento de Stripe tarjeta, PayPal, Pin y el simulador no cambia (sus pruebas y baterías pasan sin editarlas y el hash de sus manifiestos es el mismo), pero la fase sí tocó el núcleo: 9.1 amplió el núcleo de sesiones de tarjeta (flujo `before_charge`, formas de referencia por flujo, migración 0041, `gatewayEvents`) y la batería compartida (se reescribieron 4 aserciones de cabeceras de firma para ramificar por capacidad); 9.3 añadió `amountRange` opcional al enrutado y la cobertura, una tarea al fallar un reembolso de la app después de aceptarse (`refunds.service.ts`, `app-refunds.service.ts`: afecta a todas las pasarelas) y un texto nuevo de la tarea de pago desconocido (`webhooks.service.ts`). Leer esos diffs antes de dinero real.
-7. **Proceso:** rondas de revisión por encima del tope de 3 por tu instrucción permanente en 9.1 (plan 1 ronda, código 4), 9.2 (plan 2 rondas, código con ronda 1 aplicada) y 9.3 (plan con §19 aplicada, código con ronda 1 y revisión de la corrección), además de 4.4, 4.6 y 6.4. **9.3 se fusionó con su última corrección (una condición en `refunds.service.ts`: la tarea solo se cierra si el reembolso es `succeeded`) revisada por el coordinador leyendo el diff, sin otro pase del revisor Opus.** 9.4 no lleva revisor (riesgo bajo).
-8. **Observaciones de bajo riesgo de los revisores:** Airwallex puede devolver `metadata: {}` en listas de reembolsos (probar con `REFUND_GET_RETURNS_METADATA`); un reembolso hecho en el panel de Airwallex sin metadata queda como tarea manual; la carrera conocida `flow.test.ts` "drive against expiry" (falló una vez en 9.1 y en 9.3; pasa al repetir); `backup.test.ts` necesita superusuario en los hilos.
-9. **Seguimientos sin tarea dueña:** 9.1-F1 GoCardless (PayTo y BECS), 9.1-F2 liquidaciones de eWAY; 9.2-F1 a F6 (Westpac PayWay, Airwallex.js, vuelta a `planned`, firmas sin marca de tiempo para Adyen, Checkout.com, Square y GoCardless, Apple Pay y Google Pay, disputas y comisiones; BPOINT no admite clientes nuevos y NAB Gateway se descartó); 9.3-F1 a F8 (PayPal Pay in 4, BPAY, Alipay y WeChat Pay, cuenta única de Stripe, Afterpay, Klarna o Zip directos, plazos de reembolso, F7 y F8 de arriba).
-10. **Sigue abierto de antes** (listas de las fases 4, 6 y 8 de abajo): contable y GST, permisos solo de owner (la fase 9 no añade permisos nuevos), página `terms`, repositorio público, S-04, S-13 y S-14, decisión de `copy.test.ts`.
+### 2. Leer antes de dinero real (fase 9)
+
+1. **Criterio 4 de la fase 9 ("adaptadores existentes sin cambios") queda PARCIAL.** El comportamiento de Stripe tarjeta, PayPal, Pin y el simulador no cambia (sus pruebas y baterías pasan sin editarlas), pero el núcleo cambió en 13 archivos de `apps/api/src/modules/payments/` (+564 −48): 9.1 amplió el núcleo de sesiones de tarjeta (flujo `before_charge`, formas de referencia por flujo, `gatewayEvents`, migración 0041) y reescribió 4 aserciones de la batería compartida; 9.3 añadió `amountRange` al enrutado, un texto nuevo de pago desconocido y, sobre todo, una **tarea de personal ante fallo de reembolso (`payments:refund_failed:<id>`) que afecta a todas las pasarelas** (`refunds.service.ts`, `app-refunds.service.ts`). Leer esos diffs.
+2. **Criterio de 9.4 (prueba semanal): cumplido solo tras `9.fix-1`.** Antes el flujo tenía YAML inválido (18 ejecuciones rojas desde #85). Ahora parsea, y el `workflow_dispatch` manual terminó en verde (run 45639435770: job `plan` correcto, `sandbox` omitido por 0 adaptadores `verified`). No ha probado nada real.
+3. **eWAY no puede ser `verified` hoy** (`gatewayEvents: 'none'`; P5 no se cumple hasta 9.1-F2): reembolsar solo desde el panel. Su 3-D Secure muestra "no se pudo mostrar" hasta el sandbox.
+4. **Stripe pay later:** sin ruta para registrar un reembolso por transferencia de un pago de pasarela (9.3-F7); capacidades de pago aplazado en `testConnection` sin hacer (9.3-F8); la idempotencia por ejecución de `cancelPayment` no está demostrada hasta el sandbox (A15).
+5. **Proceso:** rondas de revisión por encima del tope de 3 por tu instrucción permanente (4.4, 4.6, 6.4, 9.1, 9.2, 9.3). **La fusión final de 9.3 se hizo sin segunda pasada del revisor Opus:** su última corrección (una condición en `refunds.service.ts`) la revisó el coordinador leyendo el diff. 9.4 y las tareas de cierre no llevan revisor (riesgo bajo).
+6. **Observaciones de bajo riesgo:** `metadata: {}` en listas de reembolsos de Airwallex (`REFUND_GET_RETURNS_METADATA`); reembolsos hechos en el panel de Airwallex sin metadata quedan como tarea manual; carrera conocida de `flow.test.ts` "drive against expiry"; `backup.test.ts` pide superusuario.
+7. **Seguimientos sin tarea dueña:** 9.1-F1 y F2; 9.2-F1 a F6; 9.3-F1 a F8 (detalle en `docs/BLOCKED.md`).
+
+### 3. Antes de aceptar dinero real (lista completa)
+
+- [ ] Sustituir las páginas legales provisionales; validar el GST con tu contable; confirmación por escrito de cada pasarela que se vaya a activar (puntos de arriba).
+- [ ] Mirar los recorridos manuales, las decisiones tomadas sin ti y lo construido sin verificar, más abajo.
+
 
 ## Prioridad al cerrar la fase 6 (2026-11-20)
 
@@ -118,7 +122,7 @@ Lista completa, con motivo, en `docs/decisions.md` (filas del 2026-11-12) y, con
 - Fase 0: Docker no existe en el entorno de los hilos, así que `compose-smoke` solo se ha visto pasar en CI (servicios sanos); el contenido de los datos demo dentro del compose se comprueba en 0.fix-2. Envío real del enlace mágico a Mailpit (solo emisor falso y servidor SMTP falso en proceso). Adaptador S3 de archivos no construido. Migraciones 0002 a 0006 escritas sin motor de Prisma local; `prisma migrate diff` de CI las valida.
 - 8.6 y 8.7: `docker compose` de producción, Caddy, la imagen de copias, `rclone` y la subida real; los pasos de la guía no se han seguido en un servidor.
 - Accesibilidad: contraste y foco comprobados en cifras y marcado; las e2e de Playwright usan roles y etiquetas, pero **nada se ha probado con lector de pantalla** (0.3, 0.5, 0.6).
-- Fase 9: eWAY, Airwallex, Stripe pay later, Afterpay, Klarna y Zip, enteros (A1 a A14 de eWAY, A1 a A25 de Airwallex, A1 a A16 de pay later); el flujo semanal de 9.4 nunca se ha ejecutado.
+- Fase 9: eWAY, Airwallex, Stripe BNPL, Afterpay, Klarna y Zip, enteros (A1 a A14 de eWAY, A1 a A25 de Airwallex, A1 a A16 de pay later); el flujo semanal de 9.4 solo se ejecutó en vacío (sandbox omitido).
 - Fase 1: lector de pantalla, teclado completo, contraste, foco y 320 px de las páginas públicas y del panel nuevo, solo comprobados en marcado, etiquetas y roles (1.2, 1.3). Rich Results Test de Google y depurador de Open Graph sin ejecutar (1.4: sin salida a esos servicios; solo curl del JSON-LD, las etiquetas y la imagen 1200x630). La migración 0006 se escribió sin motor de Prisma; la validó CI (`migrate diff`).
 
 ## Riesgos aceptados y pendientes (fase 0)
@@ -248,14 +252,14 @@ Sección «Revisión de Oscar» de `docs/phases/phase-8.md`: leer el informe de 
 - **8.5 (seguridad):** 24 hallazgos, 3 altos corregidos; S-04 solo se ve en el servidor; S-13 y S-14 abiertos. Necesitó 5 rondas de revisión (más de las 3 habituales, por instrucción de Oscar). Migración 0031.
 - **7.fix-1 y 7.fix-2:** informes y automatizaciones corregidos tras la revisión de 7.4; migración 0030. Ver puntos 7, 8, 13, 14 y 19 de la lista de arriba.
 
-### Fase 9 (cerrada con `9.fix-1` pendiente, `docs/done/9.close.md`; 9.1 a 9.4)
+### Fase 9 (cerrada, `docs/done/9.close.md` y `docs/done/9.fix-1.md`; 9.1 a 9.4)
 
-Sección «Revisión de Oscar» de `docs/phases/phase-9.md`: pedir el sandbox de cada proveedor que lo exija y no activar ninguna pasarela en real sin confirmación escrita. Hechas 9.1 eWAY (#84), 9.2 Airwallex (#86), 9.3 Stripe pay later (#87) y 9.4 prueba semanal (#85). Criterios: 1 y 2 cumplen con prueba, 3 cumple, 4 cumple con salvedades de núcleo y la prueba semanal de 9.4 no corre hasta `9.fix-1`.
+Sección «Revisión de Oscar» de `docs/phases/phase-9.md`: pedir el sandbox de cada proveedor que lo exija y no activar ninguna pasarela en real sin confirmación escrita. Hechas 9.1 eWAY (#84), 9.2 Airwallex (#86), 9.3 Stripe pay later (#87) y 9.4 prueba semanal (#85). Criterios: 1 y 2 cumplen con prueba, 3 cumple, 4 PARCIAL por cambios en el núcleo (13 archivos) y el de 9.4 cumplido solo tras `9.fix-1` (#89).
 
 - **9.1 eWAY:** `gatewayEvents: 'none'` (sin webhooks), 3-D Secure antes del cargo, página `/pay/secure-fields/[ref]`, migración 0041. Sin verificar: A1 a A14, códigos de respuesta, `Cerberus` y la CSP. D1 condicional (viajes, sole trader).
 - **9.2 Airwallex:** Checkout Session con `merchant_order_id` como referencia; importes decimales exactos; sin migración ni cambios del núcleo. Sin verificar: A1, A2, A8, A19, A20, A25 y `REFUND_GET_RETURNS_METADATA`. Descartes: Westpac PayWay (9.2-F1), BPOINT, Adyen, Checkout.com, Square, NAB.
 - **9.3 Stripe pay later:** `stripe_bnpl` con su propia cuenta de Stripe, AU, AUD, A$1 a A$5.000, nace apagado; núcleo tocado mínimamente (ver punto 6 de la prioridad). Sin verificar: A1 a A16.
-- **9.4:** flujo semanal con YAML inválido (punto 1 de la prioridad); `weekly.test.ts` solo mira el texto; secretos de Airwallex y `stripe_bnpl` ausentes del flujo.
+- **9.4:** el flujo semanal tenía YAML inválido; corregido en `9.fix-1` (#89): `weekly.test.ts` ahora lo parsea y el flujo incluye los secretos de Airwallex y `stripe_bnpl`. Ejecución manual verde (run 45639435770), sin adaptadores `verified` que probar.
 - **Sin verificar:** `prisma migrate diff` de 0041 (solo CI), e2e (CI); CI de `main` en `3a0597e` seguía en curso al redactar esto (el de `7be4588` pasó).
 
 ### Lecciones de proceso (fases 5 a 9)
@@ -263,4 +267,4 @@ Sección «Revisión de Oscar» de `docs/phases/phase-9.md`: pedir el sandbox de
 - Cada verificador y revisor debe usar su propia base nueva y nunca `scripts/db-init.sh`. Más de una vez se ejecutó el SQL de roles sin la línea `\connect`, de modo que los `REVOKE`/`GRANT` sobre `marathon_trips` corrieron en la base de mantenimiento (idempotente; no se tocaron datos).
 - Playwright reutiliza servidores existentes fuera de CI: varias ejecuciones e2e locales de distintos hilos se enganchan a los servidores de otros y fallan sin motivo. Manda la e2e de CI.
 - `ubuntu-latest` pasó a 26.04 y su `pg_restore` rechaza `transaction_timeout`: `ci.yml` queda en `ubuntu-24.04` (PR #48).
-- Una prueba que solo lee el texto de un flujo de Actions no detecta un YAML inválido: el flujo de 9.4 llevaba rojo en cada push desde su PR y nadie lo vio porque CI no ejecuta ese archivo. Los cierres de fase deben mirar `gh run list` de todos los flujos, no solo de `CI`.
+- Una prueba que solo lee el texto de un flujo de Actions no detecta un YAML inválido: `weekly.test.ts` solo leía texto y dejó pasar el YAML inválido de #85; el flujo llevó rojo en cada push y nadie lo vio porque CI no ejecuta ese archivo. Corregido con parseo real en `9.fix-1`. Los cierres de fase deben mirar `gh run list` de todos los flujos, no solo de `CI`.

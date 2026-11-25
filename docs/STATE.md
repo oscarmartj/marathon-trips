@@ -6,12 +6,11 @@ En modo autónomo (`docs/autonomous.md`) lo actualiza solo el hilo de cierre de 
 
 ## Ahora
 
-Actualizado tras 9.close (2026-11-26). Migraciones en `main`: 0001 a 0041 (la 0042 sigue libre).
+Cierre final (2026-11-26). Migraciones en `main`: 0001 a 0041 (la 0042 sigue libre).
 
-- **Fases 0 a 9 hechas; 9.close cierra la 9 con `9.fix-1` pendiente.** eWAY (9.1), Airwallex (9.2) y Stripe pay later (9.3) son `experimental` contra falsos, con la batería de contrato en verde; ninguna pasarela es `verified` y todo lo de ellas está SIN VERIFICAR (el proxy bloqueó sus documentaciones). Sin modo real, claves reales ni cuentas externas.
-- **Siguiente (coordinador): `9.fix-1`** (bajo, Sonnet). `weekly-sandbox-contract.yml` (9.4) tiene YAML inválido en la línea 116: ni corre por cron ni por `workflow_dispatch` y GitHub registra un fallo en cada push. Hay que corregirlo, hacer que `weekly.test.ts` analice el YAML y añadir los secretos de Airwallex y `stripe_bnpl`.
-- **Seguimientos:** 9.1-F1 y F2, 9.2-F1 a F6, 9.3-F1 a F8, y los de fases anteriores (reembolso de cortesía, reembolsos externos, `admin.*` fuera del JavaScript público).
-- **Siguiente paso de Oscar:** `docs/FINAL-REVIEW.md` (prioridad de la fase 9 arriba) y `docs/BLOCKED.md`: sandbox de eWAY, Airwallex, Stripe pay later (segunda cuenta de Stripe) y de las anteriores, y las peticiones escritas a proveedores. Nada se abre al público ni cobra antes.
+- **Proyecto completo hasta la fase 9, incluida `9.fix-1` (#89); no hay siguiente tarea automática.** Ninguna pasarela es `verified`: eWAY, Airwallex y Stripe pay later son `experimental` contra falsos y todo lo de ellas (y de Afterpay, Klarna y Zip) está SIN VERIFICAR. Sin modo real, claves reales ni cuentas externas.
+- **Espera a Oscar (por orden):** cuentas y claves de sandbox y sus secretos de repositorio; peticiones escritas a proveedores; preguntas al contable (GST, cuenta fiduciaria); permisos solo owner; decisiones de copy; despliegue. Orden y detalle en `docs/FINAL-REVIEW.md` y `docs/BLOCKED.md`.
+- **Criterio 4 de la fase 9 PARCIAL** (núcleo tocado en 13 archivos, incluida la tarea ante fallo de reembolso para todas las pasarelas); la prueba semanal (9.4) cumple solo tras `9.fix-1`. Seguimientos abiertos: 9.1-F1/F2, 9.2-F1 a F6, 9.3-F1 a F8.
 
 ## Pendiente de Oscar
 
@@ -19,7 +18,7 @@ Actualizado tras 9.close (2026-11-26). Migraciones en `main`: 0001 a 0041 (la 00
 
 ## Hecho
 
-Fases 0 a 9 completas (9 con `9.fix-1` pendiente); más 1.fix-1, 7.fix-1, 7.fix-2, 7.fix-3, 7.fix-4, 7.fix-5 y el arreglo de CI: ver `docs/done/`.
+Fases 0 a 9 completas (con `9.fix-1`); más 1.fix-1, 7.fix-1, 7.fix-2, 7.fix-3, 7.fix-4, 7.fix-5 y el arreglo de CI: ver `docs/done/`.
 
 ## Sin verificar
 
